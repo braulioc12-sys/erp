@@ -6,7 +6,6 @@
   <div class="page-actions">
     <a href="{{ url_for('mantenimiento.by_vehicle') }}" class="btn btn-secondary">Historial y costos por unidad</a>
     <a href="{{ url_for('mantenimiento.jobs_list') }}" class="btn btn-secondary">Trabajos y tiempos</a>
-    <a href="{{ url_for('neumaticos.list_view') }}" class="btn btn-secondary">Neumáticos</a>
     {% if can(current_user.role, 'catalogos', 'edit') %}
     <a href="{{ url_for('catalogos.list_view', categoria='maintenance_type') }}" class="btn btn-secondary">Editar conceptos</a>
     {% endif %}

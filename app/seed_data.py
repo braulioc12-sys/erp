@@ -89,17 +89,18 @@ def seed_demo_data(log=print):
     log("Catálogos (tipos de gasto, conceptos de mantenimiento, trabajos, ítems de inspección)...")
     _seed_catalogs()
 
-    log("Rutas frecuentes con viáticos predeterminados...")
+    log("Rutas frecuentes con viáticos y comisión de conductor predeterminados...")
+    # (origen, destino, viáticos, comisión del conductor)
     routes = [
-        ("Lima", "Trujillo", 350.0),
-        ("Arequipa", "Lima", 400.0),
-        ("Trujillo", "Piura", 250.0),
-        ("Lima", "Ica", 200.0),
+        ("Lima", "Trujillo", 350.0, 80.0),
+        ("Arequipa", "Lima", 400.0, 90.0),
+        ("Trujillo", "Piura", 250.0, 60.0),
+        ("Lima", "Ica", 200.0, 50.0),
     ]
-    for origin, destination, amount in routes:
+    for origin, destination, amount, commission in routes:
         execute(
-            "INSERT OR IGNORE INTO routes (origin, destination, default_expense_amount) VALUES (?, ?, ?)",
-            (origin, destination, amount),
+            "INSERT OR IGNORE INTO routes (origin, destination, default_expense_amount, default_commission_amount) VALUES (?, ?, ?, ?)",
+            (origin, destination, amount, commission),
         )
 
     if query_one("SELECT COUNT(*) n FROM clients")["n"] > 0:
@@ -173,21 +174,25 @@ def seed_demo_data(log=print):
     ]
 
     today = datetime.now()
+    # (cliente, unidad, conductor, origen, destino, carga, peso, día relativo, estado, tarifa, comisión conductor)
     trips = [
-        (client_ids[0], vehicle_ids[0], driver_ids[0], "Lima", "Trujillo", "Electrodomésticos", 8000, -5, "ENTREGADO", 2500),
-        (client_ids[1], vehicle_ids[1], driver_ids[1], "Arequipa", "Lima", "Textiles", 5000, -2, "ENTREGADO", 1800),
-        (client_ids[2], vehicle_ids[0], driver_ids[2], "Trujillo", "Piura", "Productos agrícolas", 12000, 1, "EN_CURSO", 2200),
-        (client_ids[0], vehicle_ids[1], driver_ids[0], "Lima", "Ica", "Materiales de construcción", 9000, 3, "PENDIENTE", 1500),
+        (client_ids[0], vehicle_ids[0], driver_ids[0], "Lima", "Trujillo", "Electrodomésticos", 8000, -5, "ENTREGADO", 2500, 80.0),
+        (client_ids[1], vehicle_ids[1], driver_ids[1], "Arequipa", "Lima", "Textiles", 5000, -2, "ENTREGADO", 1800, 90.0),
+        (client_ids[2], vehicle_ids[0], driver_ids[2], "Trujillo", "Piura", "Productos agrícolas", 12000, 1, "EN_CURSO", 2200, 60.0),
+        (client_ids[0], vehicle_ids[1], driver_ids[0], "Lima", "Ica", "Materiales de construcción", 9000, 3, "PENDIENTE", 1500, 50.0),
+        # Segundo viaje del mismo conductor por la misma ruta, para que el
+        # reporte mensual de comisiones muestre más de un viaje agrupado.
+        (client_ids[1], vehicle_ids[0], driver_ids[0], "Lima", "Trujillo", "Repuestos", 6000, -10, "ENTREGADO", 2400, 80.0),
     ]
-    for i, (cid, vid, did, origin, dest, cargo, weight, day_offset, status, rate) in enumerate(trips, start=1):
+    for i, (cid, vid, did, origin, dest, cargo, weight, day_offset, status, rate, commission) in enumerate(trips, start=1):
         scheduled = (today + timedelta(days=min(day_offset, 0))).strftime("%Y-%m-%d")
         delivered = scheduled if status == "ENTREGADO" else None
         code = f"V-{i:04d}"
         execute(
             """INSERT INTO trips (code, client_id, vehicle_id, driver_id, origin, destination,
-               cargo_description, cargo_weight_kg, scheduled_date, delivered_date, status, rate)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (code, cid, vid, did, origin, dest, cargo, weight, scheduled, delivered, status, rate),
+               cargo_description, cargo_weight_kg, scheduled_date, delivered_date, status, rate, driver_commission)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (code, cid, vid, did, origin, dest, cargo, weight, scheduled, delivered, status, rate, commission),
         )
 
     execute(

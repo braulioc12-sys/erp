@@ -1,8 +1,9 @@
-from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+from flask import Blueprint, Response, abort, flash, redirect, render_template, request, url_for
 
 from app.auth import permission_required, validate_csrf
 from app.db import execute, query_all, query_one
 from app.helpers import next_code, parse_date, parse_float, today_str
+from app.routes.rutas import find_route
 
 bp = Blueprint("viajes", __name__, url_prefix="/viajes")
 
@@ -39,12 +40,33 @@ def list_view():
     return render_template("viajes/list.html", trips=trips, status=status, q=q)
 
 
+def _routes_for_suggestions():
+    """Rutas activas con su comisión predeterminada, para sugerir el monto
+    en el formulario de viajes según el origen/destino escrito. Se convierte
+    a dicts porque sqlite3.Row no es serializable a JSON directamente."""
+    rows = query_all(
+        "SELECT origin, destination, default_commission_amount FROM routes WHERE active = 1"
+    )
+    return [dict(r) for r in rows]
+
+
+def _resolve_commission(form, origin, destination):
+    """Si el usuario dejó vacío el campo de comisión, se usa el monto
+    predeterminado de la ruta (origen-destino) que coincida, si existe."""
+    raw = (form.get("driver_commission") or "").strip()
+    if raw:
+        return parse_float(raw, 0)
+    route = find_route(origin, destination)
+    return route["default_commission_amount"] if route else 0
+
+
 @bp.route("/nuevo", methods=["GET", "POST"])
 @permission_required("viajes", "edit")
 def new():
     clients = query_all("SELECT * FROM clients WHERE active = 1 ORDER BY name")
     vehicles = query_all("SELECT * FROM vehicles WHERE status = 'ACTIVO' ORDER BY plate")
     drivers = query_all("SELECT * FROM drivers WHERE status = 'ACTIVO' ORDER BY name")
+    routes_for_js = _routes_for_suggestions()
 
     if request.method == "POST":
         if not validate_csrf():
@@ -66,16 +88,17 @@ def new():
                 flash(e, "error")
             return render_template(
                 "viajes/form.html", trip=request.form, mode="new",
-                clients=clients, vehicles=vehicles, drivers=drivers,
+                clients=clients, vehicles=vehicles, drivers=drivers, routes_for_js=routes_for_js,
             )
 
         code = next_code("V", "trips")
         vehicle_id = request.form.get("vehicle_id") or None
         driver_id = request.form.get("driver_id") or None
+        driver_commission = _resolve_commission(request.form, origin, destination)
         trip_id = execute(
             """INSERT INTO trips (code, client_id, vehicle_id, driver_id, origin, destination,
-               cargo_description, cargo_weight_kg, scheduled_date, rate, notes, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               cargo_description, cargo_weight_kg, scheduled_date, rate, driver_commission, notes, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 code,
                 client_id,
@@ -87,6 +110,7 @@ def new():
                 parse_float(request.form.get("cargo_weight_kg"), None),
                 scheduled_date,
                 parse_float(request.form.get("rate")),
+                driver_commission,
                 request.form.get("notes", "").strip(),
                 None,
             ),
@@ -96,7 +120,7 @@ def new():
 
     return render_template(
         "viajes/form.html", trip=None, mode="new",
-        clients=clients, vehicles=vehicles, drivers=drivers, today=today_str(),
+        clients=clients, vehicles=vehicles, drivers=drivers, routes_for_js=routes_for_js, today=today_str(),
     )
 
 
@@ -109,25 +133,30 @@ def edit(trip_id):
     clients = query_all("SELECT * FROM clients WHERE active = 1 ORDER BY name")
     vehicles = query_all("SELECT * FROM vehicles WHERE status = 'ACTIVO' OR id = ? ORDER BY plate", (trip["vehicle_id"],))
     drivers = query_all("SELECT * FROM drivers WHERE status = 'ACTIVO' OR id = ? ORDER BY name", (trip["driver_id"],))
+    routes_for_js = _routes_for_suggestions()
 
     if request.method == "POST":
         if not validate_csrf():
             abort(400)
         scheduled_date = parse_date(request.form.get("scheduled_date")) or trip["scheduled_date"]
+        origin = request.form.get("origin", "").strip()
+        destination = request.form.get("destination", "").strip()
+        driver_commission = _resolve_commission(request.form, origin, destination)
         execute(
             """UPDATE trips SET client_id=?, vehicle_id=?, driver_id=?, origin=?, destination=?,
-               cargo_description=?, cargo_weight_kg=?, scheduled_date=?, rate=?, notes=?
+               cargo_description=?, cargo_weight_kg=?, scheduled_date=?, rate=?, driver_commission=?, notes=?
                WHERE id=?""",
             (
                 request.form.get("client_id"),
                 request.form.get("vehicle_id") or None,
                 request.form.get("driver_id") or None,
-                request.form.get("origin", "").strip(),
-                request.form.get("destination", "").strip(),
+                origin,
+                destination,
                 request.form.get("cargo_description", "").strip(),
                 parse_float(request.form.get("cargo_weight_kg"), None),
                 scheduled_date,
                 parse_float(request.form.get("rate")),
+                driver_commission,
                 request.form.get("notes", "").strip(),
                 trip_id,
             ),
@@ -137,7 +166,7 @@ def edit(trip_id):
 
     return render_template(
         "viajes/form.html", trip=trip, mode="edit", trip_id=trip_id,
-        clients=clients, vehicles=vehicles, drivers=drivers,
+        clients=clients, vehicles=vehicles, drivers=drivers, routes_for_js=routes_for_js,
     )
 
 
@@ -186,3 +215,59 @@ def change_status(trip_id):
 
     flash(f"Viaje marcado como {new_status.replace('_', ' ').title()}.", "success")
     return redirect(url_for("viajes.detail", trip_id=trip_id))
+
+
+def _commissions_by_driver(month):
+    """Agrupa, para un mes (YYYY-MM), cuántos viajes hizo cada conductor a
+    cada ruta y cuál fue su comisión total. Excluye viajes cancelados."""
+    rows = query_all(
+        """SELECT d.id as driver_id, d.name as driver_name, t.origin, t.destination,
+                  COUNT(*) as trip_count, SUM(t.driver_commission) as route_commission
+           FROM trips t
+           JOIN drivers d ON d.id = t.driver_id
+           WHERE strftime('%Y-%m', t.scheduled_date) = ? AND t.status != 'CANCELADO'
+           GROUP BY d.id, t.origin, t.destination
+           ORDER BY d.name, t.origin, t.destination""",
+        (month,),
+    )
+    by_driver = {}
+    for r in rows:
+        entry = by_driver.setdefault(
+            r["driver_id"],
+            {"driver_name": r["driver_name"], "routes": [], "trip_count": 0, "total_commission": 0.0},
+        )
+        entry["routes"].append(r)
+        entry["trip_count"] += r["trip_count"]
+        entry["total_commission"] += r["route_commission"] or 0.0
+    return list(by_driver.values())
+
+
+@bp.route("/comisiones")
+@permission_required("viajes", "view")
+def commissions_report():
+    month = request.args.get("month") or today_str()[:7]
+    drivers = _commissions_by_driver(month)
+    grand_total = sum(d["total_commission"] for d in drivers)
+    grand_trips = sum(d["trip_count"] for d in drivers)
+    return render_template(
+        "viajes/commissions.html", month=month, drivers=drivers,
+        grand_total=grand_total, grand_trips=grand_trips,
+    )
+
+
+@bp.route("/comisiones/exportar")
+@permission_required("viajes", "view")
+def commissions_export():
+    from flask import current_app
+
+    from app.reports import build_commissions_workbook
+
+    month = request.args.get("month") or today_str()[:7]
+    drivers = _commissions_by_driver(month)
+    buffer = build_commissions_workbook(drivers, company_name=current_app.config["COMPANY_NAME"], month=month)
+    filename = f"comisiones_{month}.xlsx"
+    return Response(
+        buffer.getvalue(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )

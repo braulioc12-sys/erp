@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% block title %}Comisiones de conductores{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Comisiones de conductores por mes</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('viajes.commissions_export', month=month) }}" class="btn btn-secondary">Exportar a Excel</a>
+    <a href="{{ url_for('viajes.list_view') }}" class="btn btn-secondary">← Volver a Viajes</a>
+  </div>
+</div>
+
+<form class="filters" method="get">
+  <label>Mes
+    <input type="month" name="month" value="{{ month }}" onchange="this.form.submit()">
+  </label>
+</form>
+
+<p class="muted">Viajes considerados: los que no están cancelados, según su fecha programada. Total del mes: <strong>{{ grand_trips }}</strong> viaje(s), comisión total <strong>{{ grand_total|money }}</strong>.</p>
+
+{% for d in drivers %}
+<div class="panel">
+  <h2>{{ d.driver_name }} <span class="muted" style="font-weight:400;font-size:0.9rem;">— {{ d.trip_count }} viaje(s), {{ d.total_commission|money }} de comisión</span></h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Ruta</th><th class="text-right">Viajes</th><th class="text-right">Comisión</th></tr></thead>
+      <tbody>
+        {% for r in d.routes %}
+        <tr>
+          <td>{{ r.origin }} → {{ r.destination }}</td>
+          <td class="text-right">{{ r.trip_count }}</td>
+          <td class="text-right">{{ r.route_commission|money }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="panel"><p class="mt-0 muted">No hay viajes con conductor asignado en el mes seleccionado.</p></div>
+{% endfor %}
+{% endblock %}

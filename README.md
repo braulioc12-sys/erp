@@ -16,13 +16,14 @@ El logo de Harraso Transport / BRMS está en `app/static/img/` (`logo-lockup.png
 ## Módulos incluidos
 
 - **Panel:** indicadores clave (viajes activos, ingresos del mes, facturas por cobrar, unidades en mantenimiento) y alertas de licencias/mantenimientos próximos a vencer.
-- **Viajes / Órdenes de servicio:** registro de viajes con cliente, unidad, conductor, ruta, carga y tarifa; flujo de estados Pendiente → En curso → Entregado (o Cancelado).
+- **Viajes / Órdenes de servicio:** registro de viajes con cliente, unidad, conductor, ruta, carga, tarifa y **comisión del conductor**; flujo de estados Pendiente → En curso → Entregado (o Cancelado). Incluye un **reporte mensual de comisiones** por conductor y ruta — ver la sección dedicada más abajo.
 - **Clientes:** datos de contacto y facturación.
-- **Flota:** unidades (placa, capacidad, tipo — camión, tracto o carreta —, estado), con vencimiento de **SOAT** y **Revisión Técnica** (alertas en el Panel). Incluye **Neumáticos** (control de vida útil y posición) — ver la sección dedicada más abajo.
+- **Flota:** unidades (placa, capacidad, tipo — camión, tracto o carreta —, estado), con vencimiento de **SOAT** y **Revisión Técnica** (alertas en el Panel).
 - **Conductores:** datos personales, vencimiento de brevete, y control de vencimientos de **examen médico ocupacional** y de los requisitos para operar con **Backus** (examen de manejo, capacitación, y DDS) — todos con alerta en el Panel.
 - **Gastos:** combustible, peajes, viáticos, mantenimiento u otros, asociados a un viaje y/o unidad. Filtrable por tipo y rango de fechas, con exportación a Excel (`.xlsx`) agrupada por tipo, con subtotales y total general. Se puede adjuntar el comprobante (foto o PDF) a cada gasto, definir **presupuestos mensuales** por unidad o tipo (con alerta en el Panel al acercarse o superarse), y gestionar **anticipos de viáticos** por viaje con su liquidación — ver la sección "Gastos, presupuestos y viáticos" más abajo.
-- **Rutas:** catálogo de rutas frecuentes con un monto de viáticos predeterminado, usado para sugerir el anticipo de gastos de cada viaje.
+- **Rutas:** catálogo de rutas frecuentes con un monto de viáticos predeterminado (usado para sugerir el anticipo de gastos de cada viaje) y un monto de **comisión del conductor** predeterminado (usado para sugerir la comisión al registrar un viaje por esa ruta).
 - **Mantenimiento:** historial de mantenimientos por unidad, costo, kilometraje registrado y próxima fecha/kilometraje. Los conceptos (tipos de mantenimiento) se administran desde Catálogos. Si indicas el kilometraje al registrar un mantenimiento, actualiza automáticamente el kilometraje actual de la unidad. Incluye un catálogo de **trabajos con tiempo estimado** (ej. cambio de aceite = 60 min) que se seleccionan al registrar un mantenimiento, y una vista de **historial y costos totales por unidad**.
+- **Neumáticos:** módulo independiente para controlar la vida útil y posición de cada llanta de cada unidad, con un diagrama distinto según el tipo de unidad — ver la sección dedicada más abajo.
 - **Inspecciones:** checklist de inspección de una unidad (llantas, frenos, luces, etc.) antes de salir o al llegar de un viaje; los ítems del checklist se administran desde Catálogos.
 - **Facturación:** genera facturas por cliente a partir de viajes entregados y aún no facturados; controla estado (pendiente, pagada, vencida, anulada); puede enviarse electrónicamente a SUNAT — ver la sección dedicada más abajo.
 - **Guías de Remisión:** genera la guía de remisión electrónica ("modalidad Transportista") de un viaje, con los datos de traslado, vehículo y conductor; puede enviarse a SUNAT igual que las facturas.
@@ -46,7 +47,8 @@ El panel avisa (30 días antes de vencer, o si ya venció) sobre: vencimiento de
 | Conductores | Ver/Crear/Editar | Solo ver |
 | Gastos (incl. presupuestos y viáticos) | Ver/Crear/Editar | Ver/Crear/Editar |
 | Rutas | Ver/Crear/Editar | Solo ver |
-| Mantenimiento (incl. trabajos, costos por unidad y Neumáticos) | Ver/Crear/Editar | Solo ver |
+| Mantenimiento (incl. trabajos y costos por unidad) | Ver/Crear/Editar | Solo ver |
+| Neumáticos | Ver/Crear/Editar | Solo ver |
 | Inspecciones | Ver/Crear/Editar | Ver/Crear/Editar |
 | Facturación | Ver/Crear/Editar/Enviar a SUNAT | Sin acceso |
 | Guías de Remisión | Ver/Crear/Editar/Enviar a SUNAT | Ver/Crear/Editar/Enviar a SUNAT |
@@ -62,9 +64,15 @@ Desde **Mantenimiento → Trabajos y tiempos** se administra un catálogo de tra
 
 **Mantenimiento → Historial y costos por unidad** muestra, por cada unidad, el número de mantenimientos, el costo total acumulado y la fecha del último, con un enlace para ver el historial completo de esa unidad.
 
+## Viajes: comisión del conductor y reporte mensual
+
+Cada viaje tiene, además de la tarifa, un campo de **comisión del conductor**. Al registrar o editar un viaje, si el campo se deja vacío, el sistema sugiere automáticamente el monto configurado para esa ruta (origen-destino exactos) en **Rutas** — si escribes el origen/destino de una ruta ya configurada, verás la sugerencia aparecer debajo del campo; si la dejas en blanco al guardar, se usa ese monto. El campo siempre se puede editar manualmente para un viaje puntual.
+
+**Viajes → Comisiones por mes** muestra, para el mes seleccionado, cuántos viajes hizo cada conductor, a qué ruta, y el total de comisión correspondiente (agrupado por conductor y luego por ruta, con subtotal por conductor y total general). Los viajes cancelados no se cuentan. Se puede exportar el mismo reporte a Excel (`.xlsx`) con el botón "Exportar a Excel".
+
 ## Neumáticos: vida útil y posición por unidad
 
-Desde **Mantenimiento → Neumáticos** (o el botón "Neumáticos" en cada fila de Flota) se controla cada llanta de cada unidad, identificada por su posición en un diagrama según el tipo de unidad (**Flota → editar unidad → "Tipo de unidad"**):
+Desde el módulo **Neumáticos** (o el botón "Neumáticos" en cada fila de Flota) se controla cada llanta de cada unidad, identificada por su posición en un diagrama según el tipo de unidad (**Flota → editar unidad → "Tipo de unidad"**):
 
 - **Tracto camión:** eje de dirección (2 llantas) + 2 ejes de tracción dobles (4 llantas cada uno) = 10 posiciones.
 - **Carreta / semirremolque:** 3 ejes dobles (4 llantas cada uno) = 12 posiciones.

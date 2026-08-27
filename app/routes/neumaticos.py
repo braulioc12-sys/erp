@@ -87,7 +87,7 @@ def tire_alerts():
 
 
 @bp.route("")
-@permission_required("mantenimiento", "view")
+@permission_required("neumaticos", "view")
 def list_view():
     vehicles = query_all("SELECT * FROM vehicles ORDER BY plate")
     summary = []
@@ -117,7 +117,7 @@ def list_view():
 
 
 @bp.route("/unidad/<int:vehicle_id>")
-@permission_required("mantenimiento", "view")
+@permission_required("neumaticos", "view")
 def diagram(vehicle_id):
     vehicle = _get_vehicle_or_404(vehicle_id)
     positions = get_positions(vehicle["vehicle_type"])
@@ -168,7 +168,7 @@ def diagram(vehicle_id):
 
 
 @bp.route("/unidad/<int:vehicle_id>/posicion/<position_code>/nueva", methods=["GET", "POST"])
-@permission_required("mantenimiento", "edit")
+@permission_required("neumaticos", "edit")
 def new_tire(vehicle_id, position_code):
     vehicle = _get_vehicle_or_404(vehicle_id)
     valid_codes = {p["code"] for p in get_positions(vehicle["vehicle_type"])}
@@ -210,7 +210,7 @@ def new_tire(vehicle_id, position_code):
 
 
 @bp.route("/llanta/<int:tire_id>")
-@permission_required("mantenimiento", "view")
+@permission_required("neumaticos", "view")
 def detail(tire_id):
     tire = query_one("SELECT * FROM tires WHERE id = ?", (tire_id,))
     if tire is None:
@@ -239,7 +239,7 @@ def detail(tire_id):
 
 
 @bp.route("/llanta/<int:tire_id>/reemplazar", methods=["GET", "POST"])
-@permission_required("mantenimiento", "edit")
+@permission_required("neumaticos", "edit")
 def replace_tire(tire_id):
     old_tire = query_one("SELECT * FROM tires WHERE id = ?", (tire_id,))
     if old_tire is None:
@@ -288,7 +288,7 @@ def replace_tire(tire_id):
 
 
 @bp.route("/llanta/<int:tire_id>/retirar", methods=["POST"])
-@permission_required("mantenimiento", "edit")
+@permission_required("neumaticos", "edit")
 def retire_tire(tire_id):
     if not validate_csrf():
         abort(400)

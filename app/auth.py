@@ -20,6 +20,7 @@ PERMISSIONS = {
         "viajes": {"view", "edit"},
         "gastos": {"view", "edit"},
         "mantenimiento": {"view"},
+        "neumaticos": {"view"},
         "facturacion": set(),
         "guias": {"view", "edit"},
         "inspecciones": {"view", "edit"},

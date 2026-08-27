@@ -83,6 +83,10 @@ CREATE TABLE IF NOT EXISTS trips (
     delivered_date TEXT,
     status TEXT NOT NULL DEFAULT 'PENDIENTE' CHECK (status IN ('PENDIENTE', 'EN_CURSO', 'ENTREGADO', 'CANCELADO')),
     rate REAL NOT NULL DEFAULT 0,
+    -- Comisión que le corresponde al conductor por este viaje. Se sugiere
+    -- automáticamente según el monto configurado para la ruta (origen-destino)
+    -- en el catálogo de Rutas, pero se puede editar por viaje.
+    driver_commission REAL NOT NULL DEFAULT 0,
     notes TEXT,
     invoiced INTEGER NOT NULL DEFAULT 0,
     created_by INTEGER REFERENCES users(id),
@@ -217,12 +221,14 @@ CREATE TABLE IF NOT EXISTS expense_budgets (
 );
 
 -- Rutas frecuentes con un monto de viáticos predeterminado, para agilizar
--- el anticipo de gastos de viaje al conductor.
+-- el anticipo de gastos de viaje al conductor. También define el monto de
+-- comisión estándar por viaje en esa ruta (igual para cualquier conductor).
 CREATE TABLE IF NOT EXISTS routes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     origin TEXT NOT NULL,
     destination TEXT NOT NULL,
     default_expense_amount REAL NOT NULL DEFAULT 0,
+    default_commission_amount REAL NOT NULL DEFAULT 0,
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(origin, destination)

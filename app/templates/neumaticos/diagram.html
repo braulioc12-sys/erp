@@ -77,7 +77,7 @@
           <td colspan="4" class="muted">Posición vacía</td>
           <td></td>
           <td>
-            {% if can(current_user.role, 'mantenimiento', 'edit') %}
+            {% if can(current_user.role, 'neumaticos', 'edit') %}
             <a href="{{ url_for('neumaticos.new_tire', vehicle_id=vehicle.id, position_code=row.position.code) }}" class="btn btn-primary btn-sm">+ Agregar</a>
             {% endif %}
           </td>

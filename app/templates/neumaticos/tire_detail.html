@@ -30,7 +30,7 @@
 {% if tire.notes %}<p><strong>Notas:</strong> {{ tire.notes }}</p>{% endif %}
 {% if tire.removal_reason %}<p><strong>Motivo del retiro:</strong> {{ tire.removal_reason }}</p>{% endif %}
 
-{% if tire.status == 'ACTIVO' and can(current_user.role, 'mantenimiento', 'edit') %}
+{% if tire.status == 'ACTIVO' and can(current_user.role, 'neumaticos', 'edit') %}
 <div class="btn-group" style="margin-bottom:20px;">
   <a href="{{ url_for('neumaticos.replace_tire', tire_id=tire.id) }}" class="btn btn-primary">Reemplazar</a>
   <form method="post" action="{{ url_for('neumaticos.retire_tire', tire_id=tire.id) }}" onsubmit="return confirm('¿Retirar esta llanta sin registrar una nueva en su lugar?');">

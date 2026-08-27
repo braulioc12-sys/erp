@@ -31,6 +31,7 @@
   <div class="detail-item"><div class="label">Fecha programada</div><div class="value">{{ trip.scheduled_date }}</div></div>
   <div class="detail-item"><div class="label">Fecha entrega</div><div class="value">{{ trip.delivered_date or '—' }}</div></div>
   <div class="detail-item"><div class="label">Tarifa</div><div class="value">{{ trip.rate|money }}</div></div>
+  <div class="detail-item"><div class="label">Comisión del conductor</div><div class="value">{{ trip.driver_commission|money }}</div></div>
   <div class="detail-item"><div class="label">Facturado</div><div class="value">{{ 'Sí' if trip.invoiced else 'No' }}</div></div>
 </div>
 

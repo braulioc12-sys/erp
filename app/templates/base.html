@@ -31,6 +31,7 @@
       <a href="{{ url_for('conductores.list_view') }}" class="{{ 'active' if request.blueprint == 'conductores' }}">Conductores</a>
       <a href="{{ url_for('gastos.list_view') }}" class="{{ 'active' if request.blueprint in ('gastos', 'viaticos') }}">Gastos</a>
       <a href="{{ url_for('mantenimiento.list_view') }}" class="{{ 'active' if request.blueprint == 'mantenimiento' }}">Mantenimiento</a>
+      <a href="{{ url_for('neumaticos.list_view') }}" class="{{ 'active' if request.blueprint == 'neumaticos' }}">Neumáticos</a>
       {% if can(current_user.role, 'inspecciones', 'view') %}
       <a href="{{ url_for('inspecciones.list_view') }}" class="{{ 'active' if request.blueprint == 'inspecciones' }}">Inspecciones</a>
       {% endif %}

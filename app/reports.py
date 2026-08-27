@@ -146,3 +146,108 @@ def build_expenses_workbook(expenses, company_name, filter_description, known_ty
     wb.save(buffer)
     buffer.seek(0)
     return buffer
+
+
+COMMISSION_COLUMN_WIDTHS = [40, 14, 18]  # Ruta, Viajes, Comisión
+COMMISSION_COLUMNS = ["Ruta", "Viajes", "Comisión"]
+
+
+def build_commissions_workbook(drivers, company_name, month):
+    """Construye un workbook con el reporte mensual de comisiones de
+    conductores, agrupado por conductor con subtotal y total general.
+    `drivers` es una lista de dicts: {driver_name, routes: [fila con
+    origin, destination, trip_count, route_commission], trip_count,
+    total_commission}."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Comisiones"
+
+    last_col_letter = get_column_letter(len(COMMISSION_COLUMNS))
+
+    ws.merge_cells(f"A1:{last_col_letter}1")
+    ws["A1"] = f"{company_name} — Comisiones de conductores"
+    ws["A1"].font = Font(bold=True, size=14, color=COLOR_PRIMARY)
+
+    ws.merge_cells(f"A2:{last_col_letter}2")
+    generated = datetime.now().strftime("%d/%m/%Y %H:%M")
+    ws["A2"] = f"Generado el {generated}  ·  Mes: {month}"
+    ws["A2"].font = Font(italic=True, size=10, color=COLOR_GRAY)
+
+    header_row = 4
+    for idx, title in enumerate(COMMISSION_COLUMNS, start=1):
+        cell = ws.cell(row=header_row, column=idx, value=title)
+        cell.font = Font(bold=True, color=COLOR_HEADER_TEXT)
+        cell.fill = PatternFill("solid", fgColor=COLOR_PRIMARY)
+        cell.alignment = Alignment(horizontal="right" if title != "Ruta" else "left", vertical="center")
+        cell.border = _thin_border("all")
+
+    ws.freeze_panes = f"A{header_row + 1}"
+
+    row = header_row + 1
+    grand_total = 0.0
+    grand_trips = 0
+
+    for d in sorted(drivers, key=lambda x: x["driver_name"]):
+        ws.merge_cells(f"A{row}:{last_col_letter}{row}")
+        group_cell = ws.cell(row=row, column=1, value=d["driver_name"])
+        group_cell.font = Font(bold=True, color=COLOR_PRIMARY)
+        group_cell.fill = PatternFill("solid", fgColor=COLOR_PRIMARY_SOFT)
+        row += 1
+
+        for r in d["routes"]:
+            ws.cell(row=row, column=1, value=f"{r['origin']} → {r['destination']}")
+            trips_cell = ws.cell(row=row, column=2, value=int(r["trip_count"]))
+            trips_cell.alignment = Alignment(horizontal="right")
+            amount_cell = ws.cell(row=row, column=3, value=float(r["route_commission"] or 0))
+            amount_cell.number_format = CURRENCY_FORMAT
+            amount_cell.alignment = Alignment(horizontal="right")
+            for col in range(1, len(COMMISSION_COLUMNS) + 1):
+                ws.cell(row=row, column=col).border = _thin_border("bottom")
+            row += 1
+
+        ws.merge_cells(f"A{row}:A{row}")
+        subtotal_label = ws.cell(row=row, column=1, value=f"Subtotal {d['driver_name']}")
+        subtotal_label.font = Font(bold=True)
+        subtotal_label.alignment = Alignment(horizontal="right")
+        subtotal_trips = ws.cell(row=row, column=2, value=int(d["trip_count"]))
+        subtotal_trips.font = Font(bold=True)
+        subtotal_trips.alignment = Alignment(horizontal="right")
+        subtotal_cell = ws.cell(row=row, column=3, value=float(d["total_commission"]))
+        subtotal_cell.number_format = CURRENCY_FORMAT
+        subtotal_cell.font = Font(bold=True)
+        subtotal_cell.border = Border(top=Side(style="thin", color="98A2B3"))
+        subtotal_label.border = Border(top=Side(style="thin", color="98A2B3"))
+        subtotal_trips.border = Border(top=Side(style="thin", color="98A2B3"))
+        grand_total += d["total_commission"]
+        grand_trips += d["trip_count"]
+        row += 2
+
+    row += 1
+    total_label = ws.cell(row=row, column=1, value="TOTAL GENERAL")
+    total_label.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
+    total_label.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
+    total_label.alignment = Alignment(horizontal="right", vertical="center")
+
+    total_trips_cell = ws.cell(row=row, column=2, value=grand_trips)
+    total_trips_cell.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
+    total_trips_cell.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
+    total_trips_cell.alignment = Alignment(horizontal="right", vertical="center")
+
+    total_cell = ws.cell(row=row, column=3, value=grand_total)
+    total_cell.number_format = CURRENCY_FORMAT
+    total_cell.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
+    total_cell.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
+    total_cell.alignment = Alignment(horizontal="right", vertical="center")
+
+    if not drivers:
+        ws.cell(row=header_row + 1, column=1, value="No hay viajes con conductor asignado para el mes seleccionado.").font = Font(italic=True, color=COLOR_GRAY)
+
+    for idx, width in enumerate(COMMISSION_COLUMN_WIDTHS, start=1):
+        ws.column_dimensions[get_column_letter(idx)].width = width
+
+    ws.sheet_view.showGridLines = False
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer

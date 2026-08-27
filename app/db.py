@@ -42,6 +42,8 @@ COLUMN_MIGRATIONS = [
     ("drivers", "backus_training_expiry", "TEXT"),
     ("drivers", "dds_date", "TEXT"),
     ("drivers", "dds_expiry", "TEXT"),
+    ("trips", "driver_commission", "REAL NOT NULL DEFAULT 0"),
+    ("routes", "default_commission_amount", "REAL NOT NULL DEFAULT 0"),
 ]
 
 

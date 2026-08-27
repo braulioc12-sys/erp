@@ -31,6 +31,7 @@ def add():
     origin = request.form.get("origin", "").strip()
     destination = request.form.get("destination", "").strip()
     amount = parse_float(request.form.get("default_expense_amount"), 0)
+    commission = parse_float(request.form.get("default_commission_amount"), 0)
     if not origin or not destination:
         flash("Indica origen y destino.", "error")
         return redirect(url_for("rutas.list_view"))
@@ -38,14 +39,14 @@ def add():
     existing = query_one("SELECT id FROM routes WHERE origin = ? AND destination = ?", (origin, destination))
     if existing:
         execute(
-            "UPDATE routes SET default_expense_amount = ?, active = 1 WHERE id = ?",
-            (amount, existing["id"]),
+            "UPDATE routes SET default_expense_amount = ?, default_commission_amount = ?, active = 1 WHERE id = ?",
+            (amount, commission, existing["id"]),
         )
         flash("Ruta actualizada.", "success")
     else:
         execute(
-            "INSERT INTO routes (origin, destination, default_expense_amount) VALUES (?, ?, ?)",
-            (origin, destination, amount),
+            "INSERT INTO routes (origin, destination, default_expense_amount, default_commission_amount) VALUES (?, ?, ?, ?)",
+            (origin, destination, amount, commission),
         )
         flash("Ruta agregada.", "success")
     return redirect(url_for("rutas.list_view"))
