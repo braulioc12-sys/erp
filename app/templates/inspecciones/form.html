@@ -20,10 +20,10 @@
 
   <div class="form-row">
     <label>Unidad *
-      <select name="vehicle_id" required {{ 'disabled' if trip and trip.vehicle_id }}>
+      <select name="vehicle_id" required onchange="if (this.value) window.location = '{{ url_for('inspecciones.new') }}?vehicle_id=' + this.value;" {{ 'disabled' if trip and trip.vehicle_id }}>
         <option value="">-- Selecciona una unidad --</option>
         {% for v in vehicles %}
-        <option value="{{ v.id }}" {{ 'selected' if trip and trip.vehicle_id == v.id }}>{{ v.plate }}</option>
+        <option value="{{ v.id }}" {{ 'selected' if (trip and trip.vehicle_id == v.id) or (selected_vehicle_id and (selected_vehicle_id|string) == (v.id|string)) }}>{{ v.plate }}{% if v.vehicle_type in ('TRACTO', 'CARRETA') %} ({{ v.vehicle_type|title }} — usa el Check List de {{ v.vehicle_type|title }}){% endif %}</option>
         {% endfor %}
       </select>
       {% if trip and trip.vehicle_id %}<input type="hidden" name="vehicle_id" value="{{ trip.vehicle_id }}">{% endif %}

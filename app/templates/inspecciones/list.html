@@ -13,10 +13,11 @@
 
 <div class="table-wrap">
   <table>
-    <thead><tr><th>Fecha</th><th>Tipo</th><th>Unidad</th><th>Viaje</th><th>Conductor</th><th>Fallas</th></tr></thead>
+    <thead><tr><th>Código</th><th>Fecha</th><th>Tipo</th><th>Unidad</th><th>Viaje</th><th>Conductor</th><th>Fallas</th></tr></thead>
     <tbody>
       {% for i in inspections %}
       <tr onclick="window.location='{{ url_for('inspecciones.detail', inspection_id=i.id) }}'" style="cursor:pointer;">
+        <td>{{ i.checklist_code or '—' }}</td>
         <td>{{ i.inspection_date }}</td>
         <td>{{ 'Antes de salir' if i.type == 'PRE' else 'Al llegar' }}</td>
         <td>{{ i.vehicle_plate }}</td>
@@ -25,7 +26,7 @@
         <td>{% if i.n_fails %}<span class="badge badge-error">{{ i.n_fails }} falla(s)</span>{% else %}<span class="badge badge-activo">OK</span>{% endif %}</td>
       </tr>
       {% else %}
-      <tr><td colspan="6" class="table-empty">No hay inspecciones registradas.</td></tr>
+      <tr><td colspan="7" class="table-empty">No hay inspecciones registradas.</td></tr>
       {% endfor %}
     </tbody>
   </table>

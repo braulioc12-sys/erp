@@ -262,6 +262,90 @@ def seed_demo_data(log=print):
             (vid, code, brand, install_date, km_install, life_km),
         )
 
+    log("Check List de Tracto y de Carreta de ejemplo (ABC-123 / TRL-321)...")
+    from app.detailed_checklists import SPARE_TIRE_ITEM, TIRE_SECTION_KEY, sections_for
+    from app.tire_positions import get_positions
+
+    checklist_inspection_id = execute(
+        """INSERT INTO inspections (vehicle_id, driver_id, type, inspection_date, notes,
+           checklist_code, location, odometer_km)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            tracto_id,
+            driver_ids[0],
+            "PRE",
+            (today - timedelta(days=1)).strftime("%Y-%m-%d"),
+            "Checklist de ejemplo — todo en orden salvo el foco delantero izquierdo.",
+            "CL-0001",
+            "Pucallpa",
+            118500,
+        ),
+    )
+    for section in sections_for("TRACTO"):
+        for idx, item_name in enumerate(section["checklist_items"]):
+            # Un solo ítem de ejemplo con falla, para ver la alerta en la lista.
+            is_falla = section["key"] == "REVISION_GENERAL" and idx == 0
+            status = "FALLA" if is_falla else "OK"
+            observation = "Foco quemado, se repuso en el mismo día." if is_falla else ""
+            execute(
+                """INSERT INTO inspection_items (inspection_id, item_name, status, observation, section, extra_value)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (checklist_inspection_id, item_name, status, observation, section["key"], None),
+            )
+    tracto_positions = get_positions("TRACTO")
+    for i, p in enumerate(tracto_positions):
+        execute(
+            """INSERT INTO inspection_items (inspection_id, item_name, status, observation, section, extra_value)
+               VALUES (?, ?, 'NA', ?, ?, ?)""",
+            (checklist_inspection_id, p["label"], "", TIRE_SECTION_KEY, f"LL-{i + 1:03d}"),
+        )
+    execute(
+        """INSERT INTO inspection_items (inspection_id, item_name, status, observation, section, extra_value)
+           VALUES (?, ?, 'NA', ?, ?, ?)""",
+        (checklist_inspection_id, SPARE_TIRE_ITEM, "", TIRE_SECTION_KEY, f"LL-{len(tracto_positions) + 1:03d}"),
+    )
+
+    carreta_checklist_id = execute(
+        """INSERT INTO inspections (vehicle_id, driver_id, type, inspection_date, notes,
+           checklist_code, location, odometer_km)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            carreta_id,
+            driver_ids[1] if len(driver_ids) > 1 else driver_ids[0],
+            "PRE",
+            (today - timedelta(days=2)).strftime("%Y-%m-%d"),
+            "Checklist de ejemplo de carreta — muelles a revisar en el próximo mantenimiento.",
+            "CL-0002",
+            "Tarapoto",
+            None,
+        ),
+    )
+    for section in sections_for("CARRETA"):
+        for idx, item_name in enumerate(section["checklist_items"]):
+            # Un ítem de ejemplo con falla, para ver la alerta en la lista.
+            is_falla = idx == 0
+            status = "FALLA" if is_falla else "OK"
+            observation = "Muelle con desgaste visible, agendar revisión." if is_falla else ""
+            execute(
+                """INSERT INTO inspection_items (inspection_id, item_name, status, observation, section, extra_value)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (carreta_checklist_id, item_name, status, observation, section["key"], None),
+            )
+    for i, p in enumerate(get_positions("CARRETA")):
+        # Las dos primeras posiciones muestran la presión de ejemplo, tal
+        # como se anotaría en el formato físico de carreta.
+        observation = "Presión: 100 psi." if i < 2 else ""
+        execute(
+            """INSERT INTO inspection_items (inspection_id, item_name, status, observation, section, extra_value)
+               VALUES (?, ?, 'NA', ?, ?, ?)""",
+            (carreta_checklist_id, p["label"], observation, TIRE_SECTION_KEY, f"LL-{i + 21:03d}"),
+        )
+    execute(
+        """INSERT INTO inspection_items (inspection_id, item_name, status, observation, section, extra_value)
+           VALUES (?, ?, 'NA', ?, ?, ?)""",
+        (carreta_checklist_id, SPARE_TIRE_ITEM, "", TIRE_SECTION_KEY, "LL-033"),
+    )
+
     log("Listo. Inicia sesión con:")
     log("  admin@erp.local / admin1234  (Administrador)")
     log("  operador@erp.local / operador1234  (Operador)")

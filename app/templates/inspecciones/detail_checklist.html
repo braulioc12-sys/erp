@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+{% block title %}{{ checklist_label }} — {{ inspection.checklist_code }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ checklist_label }} — {{ inspection.checklist_code }} <span class="muted" style="font-weight:400;font-size:0.9rem;">({{ inspection.vehicle_plate }})</span></h1>
+  <div class="page-actions">
+    <a href="{{ url_for('inspecciones.print_view', inspection_id=inspection.id) }}" class="btn btn-secondary" target="_blank">🖨️ Imprimir / Descargar PDF</a>
+  </div>
+</div>
+
+<div class="detail-grid">
+  <div class="detail-item"><div class="label">Momento</div><div class="value">{{ 'Antes de salir' if inspection.type == 'PRE' else 'Al llegar' }}</div></div>
+  <div class="detail-item"><div class="label">Fecha</div><div class="value">{{ inspection.inspection_date }}</div></div>
+  <div class="detail-item"><div class="label">Lugar</div><div class="value">{{ inspection.location or '—' }}</div></div>
+  {% if has_odometer %}
+  <div class="detail-item"><div class="label">Kilometraje</div><div class="value">{{ '{:,.0f} km'.format(inspection.odometer_km) if inspection.odometer_km is not none else '—' }}</div></div>
+  {% endif %}
+  <div class="detail-item"><div class="label">Operador</div><div class="value">{{ inspection.driver_name or '—' }}</div></div>
+  <div class="detail-item"><div class="label">Viaje</div><div class="value">{% if inspection.trip_code %}<a href="{{ url_for('viajes.detail', trip_id=inspection.trip_id) }}">{{ inspection.trip_code }}</a>{% else %}—{% endif %}</div></div>
+</div>
+
+{% for s in sections %}
+<div class="panel">
+  <h2>{{ s.meta.title }}</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Ítem</th><th>Estado</th>
+          {% if s.meta.extra_field %}<th>{{ s.meta.extra_field[1] }}</th>{% endif %}
+          <th>Observación</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in s.rows %}
+        <tr>
+          <td>{{ row.item_name }}</td>
+          <td>
+            {% if row.status == 'OK' %}<span class="badge badge-activo">{{ s.meta.status_labels[0] }}</span>
+            {% else %}<span class="badge badge-error">{{ s.meta.status_labels[1] or 'Falta' }}</span>{% endif %}
+          </td>
+          {% if s.meta.extra_field %}<td>{{ row.extra_value or '—' }}</td>{% endif %}
+          <td class="wrap">{{ row.observation or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endfor %}
+
+<div class="panel">
+  <h2>{{ tire_section_title }}</h2>
+  <p class="muted mt-0">{{ tire_section_note }}</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Posición</th><th>Código de llanta</th><th>Observación</th></tr></thead>
+      <tbody>
+        {% for row in tire_rows %}
+        <tr>
+          <td>{{ row.item_name }}</td>
+          <td>{{ row.extra_value or '—' }}</td>
+          <td class="wrap">{{ row.observation or '—' }}</td>
+        </tr>
+        {% endfor %}
+        {% if spare_tire %}
+        <tr>
+          <td>{{ spare_tire.item_name }}</td>
+          <td>{{ spare_tire.extra_value or '—' }}</td>
+          <td class="wrap">{{ spare_tire.observation or '—' }}</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if inspection.notes %}
+<div class="panel"><h2>Observaciones generales</h2><p class="mt-0">{{ inspection.notes }}</p></div>
+{% endif %}
+{% endblock %}

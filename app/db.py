@@ -44,6 +44,11 @@ COLUMN_MIGRATIONS = [
     ("drivers", "dds_expiry", "TEXT"),
     ("trips", "driver_commission", "REAL NOT NULL DEFAULT 0"),
     ("routes", "default_commission_amount", "REAL NOT NULL DEFAULT 0"),
+    ("inspections", "checklist_code", "TEXT"),
+    ("inspections", "location", "TEXT"),
+    ("inspections", "odometer_km", "REAL"),
+    ("inspection_items", "section", "TEXT"),
+    ("inspection_items", "extra_value", "TEXT"),
 ]
 
 

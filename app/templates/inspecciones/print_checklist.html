@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ checklist_label }} {{ inspection.checklist_code }} — {{ inspection.vehicle_plate }}</title>
+  <style>
+    :root {
+      --primary: #1d4ed8;
+      --text: #1c2430;
+      --text-muted: #667085;
+      --border: #d0d5dd;
+      --soft: #e8edfc;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text); font-size: 12px; line-height: 1.4;
+      max-width: 900px; margin: 0 auto; padding: 24px 28px;
+    }
+
+    .print-toolbar { text-align: right; margin-bottom: 16px; }
+    .print-toolbar button {
+      background: var(--primary); color: #fff; border: none; border-radius: 8px;
+      padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer;
+    }
+    .print-toolbar button:hover { background: #1737a6; }
+    .print-toolbar .hint { display: block; margin-top: 6px; font-size: 12px; color: var(--text-muted); }
+
+    .doc-header {
+      display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 3px solid var(--primary); padding-bottom: 12px; margin-bottom: 14px;
+    }
+    .doc-header img { max-height: 50px; display: block; }
+    .doc-header .title { text-align: right; }
+    .doc-header .title h1 { margin: 0; font-size: 17px; color: var(--primary); }
+    .doc-header .title .sub { color: var(--text-muted); font-size: 11px; margin-top: 2px; }
+    .doc-header .code { text-align: right; font-size: 11px; }
+    .doc-header .code b { color: var(--primary); }
+
+    .meta-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 20px;
+      margin-bottom: 14px; border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px;
+    }
+    .meta-item .label { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); }
+    .meta-item .value { font-size: 12.5px; font-weight: 600; }
+
+    h2 { font-size: 12.5px; color: var(--primary); background: var(--soft); padding: 5px 8px; margin: 14px 0 6px 0; border-radius: 4px; }
+    .section-note { font-size: 10.5px; color: var(--text-muted); margin: -4px 0 6px 0; }
+
+    table { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
+    th, td { border: 1px solid var(--border); padding: 4px 7px; text-align: left; font-size: 10.5px; }
+    th { background: #f3f5f8; color: var(--text); font-weight: 600; }
+    tr:nth-child(even) td { background: #fafbfc; }
+
+    .status-ok { color: #0f9d58; font-weight: 600; }
+    .status-falla { color: #c0392b; font-weight: 600; }
+
+    .notes-box { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin: 12px 0 20px 0; font-size: 11px; }
+
+    .signatures { display: grid; grid-template-columns: repeat(2, 1fr); gap: 40px; margin-top: 40px; }
+    .signature-line { border-top: 1px solid var(--text); padding-top: 6px; text-align: center; font-size: 11px; color: var(--text-muted); }
+
+    .doc-footer { margin-top: 22px; font-size: 9.5px; color: var(--text-muted); text-align: center; border-top: 1px solid var(--border); padding-top: 8px; }
+
+    @media print {
+      .print-toolbar { display: none; }
+      body { padding: 0; max-width: none; font-size: 10.5px; }
+      h2 { break-after: avoid; }
+      table { break-inside: avoid; }
+      @page { margin: 12mm 10mm; }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-toolbar">
+    <button onclick="window.print()">🖨️ Imprimir / Guardar como PDF</button>
+    <span class="hint">En el diálogo de impresión, elige "Guardar como PDF" como destino/impresora.</span>
+  </div>
+
+  <div class="doc-header">
+    <img src="{{ url_for('static', filename='img/logo-lockup.png') }}" alt="{{ company_name }}">
+    <div class="title">
+      <h1>{{ checklist_label }}</h1>
+      <div class="sub">{{ company_name }} · Generado el {{ generated_at }}</div>
+    </div>
+  </div>
+
+  <div class="meta-grid">
+    <div class="meta-item"><div class="label">Código</div><div class="value">{{ inspection.checklist_code }}</div></div>
+    <div class="meta-item"><div class="label">Fecha</div><div class="value">{{ inspection.inspection_date }}</div></div>
+    <div class="meta-item"><div class="label">Lugar</div><div class="value">{{ inspection.location or '—' }}</div></div>
+    <div class="meta-item"><div class="label">{{ vehicle_field_label }}</div><div class="value">{{ inspection.vehicle_plate }}</div></div>
+    {% if has_odometer %}
+    <div class="meta-item"><div class="label">Kilometraje</div><div class="value">{{ '{:,.0f} km'.format(inspection.odometer_km) if inspection.odometer_km is not none else '—' }}</div></div>
+    {% endif %}
+    <div class="meta-item"><div class="label">Operador</div><div class="value">{{ inspection.driver_name or '—' }}</div></div>
+  </div>
+
+  {% for s in sections %}
+  <h2>{{ s.meta.title }}</h2>
+  {% if s.meta.extra_field and s.meta.extra_field[0] == 'sopleteado' %}<div class="section-note">Especificar falta de esparrago, tuerca y chapeta (sapo) en la observación cuando corresponda.</div>{% endif %}
+  <table>
+    <thead>
+      <tr>
+        <th style="width:34%;">Ítem</th><th style="width:14%;">Estado</th>
+        {% if s.meta.extra_field %}<th style="width:14%;">{{ s.meta.extra_field[1] }}</th>{% endif %}
+        <th>Observación</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in s.rows %}
+      <tr>
+        <td>{{ row.item_name }}</td>
+        <td>
+          {% if row.status == 'OK' %}<span class="status-ok">{{ s.meta.status_labels[0] }}</span>
+          {% else %}<span class="status-falla">{{ s.meta.status_labels[1] or 'Falta' }}</span>{% endif %}
+        </td>
+        {% if s.meta.extra_field %}<td>{{ row.extra_value or '—' }}</td>{% endif %}
+        <td>{{ row.observation or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endfor %}
+
+  <h2>{{ tire_section_title }}</h2>
+  <div class="section-note">{{ tire_section_note }}</div>
+  <table>
+    <thead><tr><th style="width:40%;">Posición</th><th style="width:25%;">Código de llanta</th><th>Observación</th></tr></thead>
+    <tbody>
+      {% for row in tire_rows %}
+      <tr>
+        <td>{{ row.item_name }}</td>
+        <td>{{ row.extra_value or '—' }}</td>
+        <td>{{ row.observation or '—' }}</td>
+      </tr>
+      {% endfor %}
+      {% if spare_tire %}
+      <tr>
+        <td>{{ spare_tire.item_name }}</td>
+        <td>{{ spare_tire.extra_value or '—' }}</td>
+        <td>{{ spare_tire.observation or '—' }}</td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+
+  {% if inspection.notes %}
+  <h2>Observaciones generales</h2>
+  <div class="notes-box">{{ inspection.notes }}</div>
+  {% endif %}
+
+  <div class="signatures">
+    <div class="signature-line">Operador</div>
+    <div class="signature-line">Mantenimiento</div>
+  </div>
+
+  <div class="doc-footer">{{ company_name }} — Check List {{ inspection.checklist_code }} generado automáticamente por el sistema el {{ generated_at }}</div>
+</body>
+</html>

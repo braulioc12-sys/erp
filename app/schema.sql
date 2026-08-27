@@ -196,6 +196,14 @@ CREATE TABLE IF NOT EXISTS inspections (
     type TEXT NOT NULL CHECK (type IN ('PRE', 'POST')),
     inspection_date TEXT NOT NULL,
     notes TEXT,
+    -- Campos de los checklists físicos detallados de Harraso (tracto y
+    -- carreta): solo se llenan cuando la inspección se hace con uno de
+    -- esos checklists detallados (ver app/detailed_checklists.py). NULL
+    -- para el checklist genérico. odometer_km queda NULL también para
+    -- carretas, que no tienen odómetro propio.
+    checklist_code TEXT,
+    location TEXT,
+    odometer_km REAL,
     created_by INTEGER REFERENCES users(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -205,7 +213,13 @@ CREATE TABLE IF NOT EXISTS inspection_items (
     inspection_id INTEGER NOT NULL REFERENCES inspections(id),
     item_name TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('OK', 'FALLA', 'NA')),
-    observation TEXT
+    observation TEXT,
+    -- Solo para los checklists detallados (tracto/carreta): la sección a
+    -- la que pertenece el ítem (ver app/detailed_checklists.py) y un
+    -- valor extra puntual (cantidad de recarga, "sopleteado" sí/no, o el
+    -- código de llanta según posición). NULL en el checklist genérico.
+    section TEXT,
+    extra_value TEXT
 );
 
 -- Presupuesto mensual de gastos por unidad o por tipo de gasto, para
