@@ -18,7 +18,8 @@ El logo de Harraso Transport / BRMS está en `app/static/img/` (`logo-lockup.png
 - **Panel:** indicadores clave (viajes activos, ingresos del mes, facturas por cobrar, unidades en mantenimiento) y alertas de licencias/mantenimientos próximos a vencer.
 - **Viajes / Órdenes de servicio:** registro de viajes con cliente, unidad, conductor, ruta, carga y tarifa; flujo de estados Pendiente → En curso → Entregado (o Cancelado).
 - **Clientes:** datos de contacto y facturación.
-- **Flota y Conductores:** unidades (placa, capacidad, estado) y conductores (licencia, vencimiento, estado).
+- **Flota:** unidades (placa, capacidad, tipo — camión, tracto o carreta —, estado), con vencimiento de **SOAT** y **Revisión Técnica** (alertas en el Panel). Incluye **Neumáticos** (control de vida útil y posición) — ver la sección dedicada más abajo.
+- **Conductores:** datos personales, vencimiento de brevete, y control de vencimientos de **examen médico ocupacional** y de los requisitos para operar con **Backus** (examen de manejo, capacitación, y DDS) — todos con alerta en el Panel.
 - **Gastos:** combustible, peajes, viáticos, mantenimiento u otros, asociados a un viaje y/o unidad. Filtrable por tipo y rango de fechas, con exportación a Excel (`.xlsx`) agrupada por tipo, con subtotales y total general. Se puede adjuntar el comprobante (foto o PDF) a cada gasto, definir **presupuestos mensuales** por unidad o tipo (con alerta en el Panel al acercarse o superarse), y gestionar **anticipos de viáticos** por viaje con su liquidación — ver la sección "Gastos, presupuestos y viáticos" más abajo.
 - **Rutas:** catálogo de rutas frecuentes con un monto de viáticos predeterminado, usado para sugerir el anticipo de gastos de cada viaje.
 - **Mantenimiento:** historial de mantenimientos por unidad, costo, kilometraje registrado y próxima fecha/kilometraje. Los conceptos (tipos de mantenimiento) se administran desde Catálogos. Si indicas el kilometraje al registrar un mantenimiento, actualiza automáticamente el kilometraje actual de la unidad. Incluye un catálogo de **trabajos con tiempo estimado** (ej. cambio de aceite = 60 min) que se seleccionan al registrar un mantenimiento, y una vista de **historial y costos totales por unidad**.
@@ -32,7 +33,7 @@ El logo de Harraso Transport / BRMS está en `app/static/img/` (`logo-lockup.png
 
 ### Alertas del panel
 
-Además de licencias y mantenimientos por vencer (fecha), el panel avisa cuando una unidad se acerca (o ya superó) su próximo mantenimiento **por kilometraje**, comparando el kilometraje actual de la unidad contra el kilometraje programado del mantenimiento. El umbral de aviso son 1000 km (ajustable en `KM_ALERT_THRESHOLD`, en `app/routes/mantenimiento.py`). El kilometraje actual de una unidad se actualiza de tres formas: editándolo manualmente en Flota, indicándolo al registrar un mantenimiento, o automáticamente vía la sincronización con Frotcom (si está configurada).
+El panel avisa (30 días antes de vencer, o si ya venció) sobre: vencimiento de **brevete**, **examen médico ocupacional** y los requisitos de **Backus** (examen de manejo, capacitación, DDS) de cada conductor; vencimiento de **SOAT** y **Revisión Técnica** de cada unidad; mantenimientos programados por fecha; y presupuestos de gastos cercanos o superados. Además, avisa cuando una unidad se acerca (o ya superó) su próximo mantenimiento **por kilometraje**, comparando el kilometraje actual de la unidad contra el kilometraje programado del mantenimiento — el umbral son 1000 km (ajustable en `KM_ALERT_THRESHOLD`, en `app/routes/mantenimiento.py`) — y cuando una llanta llega al 90% o más de su vida útil estimada (ver la sección de Neumáticos). El kilometraje actual de una unidad se actualiza de tres formas: editándolo manualmente en Flota, indicándolo al registrar un mantenimiento, o automáticamente vía la sincronización con Frotcom (si está configurada).
 
 ### Permisos por rol
 
@@ -41,10 +42,11 @@ Además de licencias y mantenimientos por vencer (fecha), el panel avisa cuando 
 | Panel | Ver | Ver |
 | Viajes | Ver/Crear/Editar | Ver/Crear/Editar |
 | Clientes | Ver/Crear/Editar | Ver/Crear/Editar |
-| Flota y Conductores | Ver/Crear/Editar | Solo ver |
+| Flota | Ver/Crear/Editar | Solo ver |
+| Conductores | Ver/Crear/Editar | Solo ver |
 | Gastos (incl. presupuestos y viáticos) | Ver/Crear/Editar | Ver/Crear/Editar |
 | Rutas | Ver/Crear/Editar | Solo ver |
-| Mantenimiento (incl. trabajos y costos por unidad) | Ver/Crear/Editar | Solo ver |
+| Mantenimiento (incl. trabajos, costos por unidad y Neumáticos) | Ver/Crear/Editar | Solo ver |
 | Inspecciones | Ver/Crear/Editar | Ver/Crear/Editar |
 | Facturación | Ver/Crear/Editar/Enviar a SUNAT | Sin acceso |
 | Guías de Remisión | Ver/Crear/Editar/Enviar a SUNAT | Ver/Crear/Editar/Enviar a SUNAT |
@@ -60,6 +62,20 @@ Desde **Mantenimiento → Trabajos y tiempos** se administra un catálogo de tra
 
 **Mantenimiento → Historial y costos por unidad** muestra, por cada unidad, el número de mantenimientos, el costo total acumulado y la fecha del último, con un enlace para ver el historial completo de esa unidad.
 
+## Neumáticos: vida útil y posición por unidad
+
+Desde **Mantenimiento → Neumáticos** (o el botón "Neumáticos" en cada fila de Flota) se controla cada llanta de cada unidad, identificada por su posición en un diagrama según el tipo de unidad (**Flota → editar unidad → "Tipo de unidad"**):
+
+- **Tracto camión:** eje de dirección (2 llantas) + 2 ejes de tracción dobles (4 llantas cada uno) = 10 posiciones.
+- **Carreta / semirremolque:** 3 ejes dobles (4 llantas cada uno) = 12 posiciones.
+- **Camión (unidad simple):** eje de dirección (2 llantas) + eje trasero doble (4 llantas) = 6 posiciones.
+
+Si tu configuración de ejes es distinta, se ajustan fácilmente en `app/tire_positions.py` (todo centralizado ahí).
+
+Al hacer clic en una posición vacía del diagrama (o en su fila de la tabla) se registra una llanta nueva: marca, fecha de instalación, kilometraje de la unidad en ese momento, y vida útil estimada en km (por defecto 80,000, ajustable por llanta según la marca/modelo). **El kilometraje acumulado no se guarda como un número aparte — se calcula solo**, comparando el kilometraje actual de la unidad (que ya se actualiza al registrar un mantenimiento, editar la unidad en Flota, o sincronizar GPS) contra el kilometraje que tenía al instalarse esa llanta. Así el acumulado de cada llanta siempre está al día sin ningún paso adicional.
+
+Cada llanta activa muestra un indicador de color según su % de vida útil consumida (verde por debajo de 80%, ámbar de 80% a 99%, rojo en 100% o más — con alerta en el Panel a partir de 90%). Desde el detalle de una llanta puedes **"Reemplazar"** (retira la actual y registra la nueva en un solo paso, conservando el historial) o **"Retirar sin reemplazar"** (deja la posición vacía). El historial completo de llantas retiradas por unidad queda disponible en la misma página del diagrama.
+
 ## Inspecciones de unidades
 
 Desde el detalle de un viaje (o desde el menú **Inspecciones**) se puede registrar un checklist de inspección de la unidad — "antes de salir" o "al llegar" — con un ítem por fila (llantas, frenos, luces, niveles, extintor, etc.), marcando cada uno como OK, Falla o N/A, y una observación opcional. Los ítems del checklist se administran desde **Catálogos → Ítems de inspección** (solo Administrador), igual que los conceptos de mantenimiento o los tipos de gasto.
@@ -67,6 +83,7 @@ Desde el detalle de un viaje (o desde el menú **Inspecciones**) se puede regist
 ## Gastos: presupuestos y viáticos
 
 - **Comprobantes:** al registrar un gasto puedes adjuntar una foto o un PDF del recibo/boleta, de dos formas: el campo "tomar foto ahora" abre la cámara directamente en el celular (usa el atributo estándar HTML `capture="environment"` — funciona en Chrome/Android y en Safari/iOS al agregar el sistema a la pantalla de inicio como PWA); el campo "o subir un archivo" abre el selector normal de galería/archivos, para elegir una foto ya tomada o un PDF. Solo se llena uno de los dos. El archivo se guarda en el servidor y aparece como enlace "Ver" en la lista de gastos. *Aviso:* en hosting gratuito con disco efímero (ver la sección de Render más abajo) estos archivos se pierden al reiniciar/redesplegar, igual que la base de datos SQLite — el mismo `AUTO_SEED_DEMO` no los recupera. Para un uso serio en producción, sube a un plan con disco persistente (ver esa sección).
+- **Compresión automática de fotos:** toda foto de comprobante se redimensiona (máximo 1600px en el lado más largo) y se recodifica como JPEG con calidad optimizada antes de guardarse (`app/routes/gastos.py`, función `_compress_receipt_image`, usa Pillow). Una foto de celular sin comprimir suele pesar 3–8 MB; después de este proceso normalmente queda entre 50 KB y 300 KB, sin que se note pérdida de legibilidad del comprobante. Esto ahorra muchísimo espacio en disco (importante en planes gratuitos con disco limitado) y hace que "Ver" cargue más rápido en el celular. Los PDF no se comprimen, se guardan tal cual. Si una foto viene en un formato que no se puede abrir (poco común, algunos HEIC de iPhone sin convertir), se guarda el original sin comprimir para no perder el comprobante.
 - **Presupuestos** (Gastos → Presupuestos): define un tope mensual de gasto por unidad o por tipo de gasto (ej. "Combustible: S/ 2000/mes"). Cuando el gasto acumulado del mes llega al 90% del presupuesto o lo supera, aparece una alerta en el Panel.
 - **Rutas y viáticos** (menú Rutas): define, por cada ruta frecuente (origen → destino), un monto estándar de viáticos. Desde el detalle de un viaje puedes "Confirmar anticipo de viáticos" — el sistema sugiere el monto de la ruta si existe una configurada, y confirma que el conductor recibió ese dinero. Más adelante, desde el mismo anticipo, el botón "Liquidar" compara el monto entregado contra la suma de los gastos reales registrados para ese viaje y muestra el saldo a favor o el exceso.
 
@@ -74,14 +91,13 @@ Desde el detalle de un viaje (o desde el menú **Inspecciones**) se puede regist
 
 El sistema incluye la integración lista para conectarse a Frotcom y mostrar la última ubicación conocida de cada unidad (Menú → Ubicación GPS, solo Administrador). Para activarla:
 
-1. Solicita a Frotcom (contacta a tu ejecutivo de cuenta o a su soporte) acceso a su **"API V2"** — te darán una URL base y credenciales (usuario/contraseña o token).
-2. Define estas variables de entorno con esos datos: `FROTCOM_BASE_URL`, `FROTCOM_USERNAME`, `FROTCOM_PASSWORD`.
-3. En cada unidad (Flota → editar unidad), completa el campo **"ID en el proveedor de GPS"** con el identificador exacto que usa Frotcom para esa unidad (puede ser su ID interno o la placa, según cómo esté configurada tu cuenta).
+1. **Pide las credenciales a tu Frotcom Certified Partner** (el distribuidor/instalador local que te vendió el sistema de rastreo) — **no** es el mismo usuario/contraseña con el que entras a la web de Frotcom. Según la documentación oficial de Frotcom ([Authentication in Frotcom API](https://frotcominternational.zendesk.com/hc/en-gb/articles/360001005854-Authentication-in-Frotcom-API), [How to get API V2 credentials](https://frotcominternational.zendesk.com/hc/en-gb/articles/209450709-How-to-get-API-V2-credentials)), pídeles textualmente: **"credenciales de acceso a la API V2 de Frotcom para una integración de terceros ('thirdparty')"**. Te van a dar un usuario y contraseña específicos para eso.
+2. Define estas variables de entorno con esos datos: `FROTCOM_USERNAME`, `FROTCOM_PASSWORD` (deja `FROTCOM_BASE_URL` vacío — el sistema ya usa por defecto la URL pública real de la API, `https://v2api.frotcom.com`; solo la necesitas si tu partner te da una URL distinta).
+3. En cada unidad (Flota → editar unidad), completa el campo **"ID en el proveedor de GPS"** con el identificador exacto que usa Frotcom para esa unidad (puede ser su ID interno o la placa, según cómo esté configurada tu cuenta — confírmalo con tu partner o revisando la respuesta de la API una vez conectada).
 4. Entra a **Ubicación GPS** y haz clic en "Sincronizar con Frotcom".
 
-**Aviso importante:** el cliente de Frotcom (`app/integrations/frotcom.py`) implementa el patrón más común para este tipo de APIs (login → token → consulta de posiciones), pero Frotcom entrega la documentación exacta de sus endpoints dentro de tu propia cuenta (es autodocumentada y puede variar por plan/región). **Esta integración no pudo probarse contra la API real** porque no se contó con credenciales de Frotcom durante el desarrollo. Cuando tengas tus credenciales, revisa la referencia de tu cuenta y ajusta en ese archivo (están marcados con comentarios "AJUSTAR"):
-- El endpoint y formato exacto de login.
-- El endpoint que devuelve las posiciones/odómetro y los nombres de sus campos.
+**Aviso importante:** el cliente de Frotcom (`app/integrations/frotcom.py`) ya implementa el flujo de autenticación real y confirmado contra la documentación pública de Frotcom (login en `POST /v2/authorize` con `provider: "thirdparty"`, y el token se manda como parámetro `api_key` en cada llamada siguiente — no como header). Lo único que **no se pudo confirmar sin credenciales reales** es el endpoint exacto y los nombres de campo para la posición/odómetro de cada vehículo, porque esa parte de la documentación de Frotcom es autodocumentada dentro de la cuenta real (su "Reference guide") y puede variar por plan/región. El cliente usa `/v2/vehicles` como mejor estimación (aparece como ejemplo en la propia documentación oficial de autenticación). Cuando tengas tus credenciales:
+- Entra a Frotcom Web → Help Center → sección "Frotcom API V2" → artículo "Reference guide", y confirma el endpoint y los campos exactos de la respuesta de posiciones si difieren de `/v2/vehicles` (está marcado con comentarios "AJUSTAR" en el código).
 
 El resto del sistema funciona con total normalidad sin esta integración — simplemente no habrá datos de ubicación hasta confirmarla.
 
@@ -104,7 +120,7 @@ Ten en cuenta también que, según cambios normativos recientes, los negocios qu
    - `COMPANY_RUC` y `COMPANY_ADDRESS`: el RUC y la dirección fiscal de tu propia empresa (el emisor de los comprobantes).
    - `INVOICE_SERIES` y `WAYBILL_SERIES`: las series que hayas dado de alta para facturas y guías (por defecto `F001` y `T001`).
 3. Registra el RUC de cada cliente (Clientes → editar) — es obligatorio para emitir una factura electrónica.
-4. Para conductores, registra también su **DNI** (Flota → Conductores → editar) — se necesita para las guías de remisión.
+4. Para conductores, registra también su **DNI** (Conductores → editar) — se necesita para las guías de remisión.
 5. Emite una factura de prueba (Facturación → detalle de una factura → "Enviar a SUNAT") o una guía (Viajes → viaje en curso/entregado → "Generar guía de remisión" → "Enviar a SUNAT") y revisa la respuesta.
 
 ### Aviso importante — léelo antes de emitir comprobantes reales
@@ -171,12 +187,37 @@ Necesitas un repositorio en GitHub porque Render despliega desde ahí.
    git remote add origin https://github.com/TU-USUARIO/TU-REPO.git
    git push -u origin main
    ```
+   Cuando te pida usuario y contraseña: GitHub ya no acepta tu contraseña normal de la cuenta para `git push` por HTTPS. Como contraseña, usa un **Personal Access Token** (Settings de GitHub → Developer settings → Personal access tokens → Generate new token, con permiso `repo`) — como usuario, tu usuario normal de GitHub. Si usas GitHub Desktop o el CLI `gh`, ellos manejan esto automáticamente sin que tengas que crear el token a mano.
+
+### Alternativa: usar Bitbucket en vez de GitHub
+
+Render también se conecta directo a Bitbucket, así que si tu equipo ya usa Bitbucket no hace falta pasar por GitHub.
+
+1. Crea un repositorio nuevo y vacío en Bitbucket ([bitbucket.org](https://bitbucket.org) → **Create repository**).
+2. Bitbucket ya no acepta tu contraseña normal ni "app passwords" para `git push` (los app passwords dejaron de funcionar el 9 de junio de 2026) — ahora necesitas un **API token**:
+   - Ve a tu perfil de Atlassian → **Settings** → **Security** → **Create and manage API tokens** → **Create API token with scopes**.
+   - Dale un nombre, una fecha de expiración, elige la app **Bitbucket** y márcale permisos de **Repositories: Read and Write**.
+   - Copia el token — solo se muestra una vez.
+3. En tu terminal, dentro de la carpeta `erp-transporte`:
+   ```bash
+   git init
+   git add .
+   git commit -m "ERP de transporte inicial"
+   git branch -M main
+   git remote add origin https://bitbucket.org/TU-WORKSPACE/TU-REPO.git
+   git push -u origin main
+   ```
+   Cuando te pida usuario y contraseña: como usuario pon `x-bitbucket-api-token-auth` (así, literal) y como contraseña pega el **API token** que copiaste — no tu usuario ni tu contraseña normales de Atlassian, esos ya no funcionan para `git push`. Si prefieres no escribirlo cada vez, pon el token directo en la URL del remoto:
+   ```bash
+   git remote set-url origin https://x-bitbucket-api-token-auth:TU_TOKEN@bitbucket.org/TU-WORKSPACE/TU-REPO.git
+   ```
+4. En Render, al crear el Web Service (siguiente paso), elige **Connect Bitbucket** en vez de GitHub, autoriza el acceso, y selecciona tu repositorio de la lista.
 
 ### 2. Crea el Web Service en Render
 
-1. Entra a [render.com](https://render.com) y crea una cuenta (puedes usar tu cuenta de GitHub para registrarte, así Render ya queda conectado).
+1. Entra a [render.com](https://render.com) y crea una cuenta (puedes usar tu cuenta de GitHub o de Bitbucket para registrarte, así Render ya queda conectado).
 2. Click en **New +** → **Web Service**.
-3. Conecta el repositorio que acabas de subir.
+3. Conecta el repositorio que acabas de subir (a GitHub o a Bitbucket, según el que hayas usado).
 4. Configura:
    - **Name:** `erp-transporte` (o el nombre que prefieras; será parte de la URL pública).
    - **Runtime:** Python 3

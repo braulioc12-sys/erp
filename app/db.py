@@ -22,6 +22,36 @@ def close_db(e=None):
         db.close()
 
 
+# Columnas agregadas a tablas ya existentes en versiones posteriores del
+# sistema. `CREATE TABLE IF NOT EXISTS` (usado en schema.sql) no modifica
+# una tabla que ya existe, así que en una base de datos que viene de una
+# versión anterior (por ejemplo, con disco persistente en producción) esa
+# columna nueva no aparecería sola. Esta lista la agrega si falta, sin
+# tocar nada más. En hosting con disco efímero (ver README) esto no hace
+# falta porque la base se recrea entera en cada despliegue, pero se deja
+# aquí para cuando se use un disco persistente con datos reales.
+COLUMN_MIGRATIONS = [
+    ("vehicles", "vehicle_type", "TEXT NOT NULL DEFAULT 'CAMION'"),
+    ("vehicles", "soat_expiry", "TEXT"),
+    ("vehicles", "technical_review_expiry", "TEXT"),
+    ("drivers", "medical_exam_date", "TEXT"),
+    ("drivers", "medical_exam_expiry", "TEXT"),
+    ("drivers", "backus_driving_exam_date", "TEXT"),
+    ("drivers", "backus_driving_exam_expiry", "TEXT"),
+    ("drivers", "backus_training_date", "TEXT"),
+    ("drivers", "backus_training_expiry", "TEXT"),
+    ("drivers", "dds_date", "TEXT"),
+    ("drivers", "dds_expiry", "TEXT"),
+]
+
+
+def _apply_column_migrations(conn):
+    for table, column, ddl in COLUMN_MIGRATIONS:
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+
 def init_db(app):
     """Crea las tablas si no existen, usando app/schema.sql."""
     db_path = Path(app.config["DATABASE_PATH"])
@@ -30,6 +60,7 @@ def init_db(app):
     schema_path = Path(__file__).parent / "schema.sql"
     with open(schema_path, "r", encoding="utf-8") as f:
         conn.executescript(f.read())
+    _apply_column_migrations(conn)
     conn.commit()
     conn.close()
 

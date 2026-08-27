@@ -29,6 +29,16 @@ CREATE TABLE IF NOT EXISTS vehicles (
     model TEXT,
     capacity_kg REAL,
     status TEXT NOT NULL DEFAULT 'ACTIVO' CHECK (status IN ('ACTIVO', 'MANTENIMIENTO', 'INACTIVO')),
+    -- Tipo de unidad: determina el diagrama de posiciones de neumáticos que
+    -- se usa para ella (ver app/tire_positions.py). CAMION = unidad simple
+    -- (chasis con carrocería propia, sin remolque separado); TRACTO =
+    -- cabezal tractor (jala una carreta); CARRETA = semirremolque/carreta.
+    vehicle_type TEXT NOT NULL DEFAULT 'CAMION' CHECK (vehicle_type IN ('CAMION', 'TRACTO', 'CARRETA')),
+    -- Documentos obligatorios de la unidad (Perú): SOAT (seguro obligatorio)
+    -- y Revisión Técnica vehicular. Solo se guarda su fecha de vencimiento;
+    -- aparecen como alerta en el Panel cuando están por vencer.
+    soat_expiry TEXT,
+    technical_review_expiry TEXT,
     notes TEXT,
     current_km REAL,
     current_km_updated_at TEXT,
@@ -42,6 +52,18 @@ CREATE TABLE IF NOT EXISTS drivers (
     document_number TEXT,
     license_number TEXT,
     license_expiry TEXT,
+    -- Fecha del último examen médico ocupacional y cuándo vence.
+    medical_exam_date TEXT,
+    medical_exam_expiry TEXT,
+    -- Requisitos específicos para operar con Backus: examen de manejo,
+    -- capacitación, y DDS (Diálogo Diario de Seguridad). Se guarda la
+    -- fecha del último realizado y cuándo vence cada uno.
+    backus_driving_exam_date TEXT,
+    backus_driving_exam_expiry TEXT,
+    backus_training_date TEXT,
+    backus_training_expiry TEXT,
+    dds_date TEXT,
+    dds_expiry TEXT,
     phone TEXT,
     status TEXT NOT NULL DEFAULT 'ACTIVO' CHECK (status IN ('ACTIVO', 'INACTIVO')),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -124,6 +146,40 @@ CREATE TABLE IF NOT EXISTS maintenance_record_jobs (
     estimated_minutes INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (maintenance_record_id, job_name)
 );
+
+-- Neumáticos: una fila por cada llanta que ha pasado por una posición de
+-- una unidad (tracto, carreta o camión). No se guarda un "kilometraje
+-- acumulado" como número aparte: se calcula en el momento comparando el
+-- kilometraje actual de la unidad (vehicles.current_km, que ya se actualiza
+-- solo con el movimiento del vehículo vía Mantenimiento/Flota/GPS) contra
+-- km_at_install. Así el acumulado siempre queda al día automáticamente.
+-- Cuando se reemplaza una llanta, la fila vieja pasa a status='RETIRADO'
+-- (con fecha/km de retiro) y se crea una fila nueva para esa posición —
+-- esto conserva el historial completo de cada posición en el tiempo.
+CREATE TABLE IF NOT EXISTS tires (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vehicle_id INTEGER NOT NULL REFERENCES vehicles(id),
+    -- Código de posición según el diagrama de app/tire_positions.py, ej.
+    -- "EJE1_IZQ", "EJE2_IZQ_EXT".
+    position_code TEXT NOT NULL,
+    brand TEXT,
+    install_date TEXT NOT NULL,
+    km_at_install REAL NOT NULL DEFAULT 0,
+    -- Vida útil estimada en km para esta llanta (varía por marca/modelo);
+    -- se usa para calcular el % de desgaste y las alertas.
+    expected_life_km REAL NOT NULL DEFAULT 80000,
+    status TEXT NOT NULL DEFAULT 'ACTIVO' CHECK (status IN ('ACTIVO', 'RETIRADO')),
+    removed_date TEXT,
+    removed_km REAL,
+    removal_reason TEXT,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_tires_vehicle ON tires(vehicle_id);
+-- Garantiza que no haya dos llantas "ACTIVO" a la vez en la misma posición
+-- de la misma unidad (índice único parcial).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tires_active_position
+    ON tires(vehicle_id, position_code) WHERE status = 'ACTIVO';
 
 -- Inspecciones de unidades (checklist antes/después de un viaje: llantas,
 -- frenos, luces, etc.). Los ítems del checklist se administran desde

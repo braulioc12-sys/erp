@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Neumáticos{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Neumáticos por unidad</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('mantenimiento.list_view') }}" class="btn btn-secondary">← Volver a Mantenimiento</a>
+  </div>
+</div>
+<p class="muted mt-0">Elige una unidad para ver su diagrama de posiciones y controlar la vida útil de cada llanta.</p>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Placa</th><th>Marca / Modelo</th><th>Tipo</th><th class="text-right">Llantas instaladas</th><th>Estado</th><th></th></tr></thead>
+    <tbody>
+      {% for s in summary %}
+      <tr>
+        <td>{{ s.vehicle.plate }}</td>
+        <td>{{ s.vehicle.brand or '' }} {{ s.vehicle.model or '' }}</td>
+        <td>{{ s.type_label }}</td>
+        <td class="text-right">{{ s.installed }} / {{ s.total_positions }}</td>
+        <td><span class="badge {{ s.worst_badge }}">
+          {% if s.worst_badge == 'badge-vencida' %}Reemplazar
+          {% elif s.worst_badge == 'badge-mantenimiento' %}Por vencer
+          {% else %}OK{% endif %}
+        </span></td>
+        <td><a href="{{ url_for('neumaticos.diagram', vehicle_id=s.vehicle.id) }}" class="btn btn-secondary btn-sm">Ver diagrama</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="table-empty">No hay unidades registradas.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

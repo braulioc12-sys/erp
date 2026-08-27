@@ -20,14 +20,35 @@
       <input type="text" name="model" value="{{ vehicle.model if vehicle else '' }}">
     </label>
   </div>
-  <label>Estado
-    <select name="status">
-      {% set current = vehicle.status if vehicle else 'ACTIVO' %}
-      <option value="ACTIVO" {{ 'selected' if current == 'ACTIVO' }}>Activo</option>
-      <option value="MANTENIMIENTO" {{ 'selected' if current == 'MANTENIMIENTO' }}>En mantenimiento</option>
-      <option value="INACTIVO" {{ 'selected' if current == 'INACTIVO' }}>Inactivo</option>
-    </select>
-  </label>
+  <div class="form-row">
+    <label>Estado
+      <select name="status">
+        {% set current = vehicle.status if vehicle else 'ACTIVO' %}
+        <option value="ACTIVO" {{ 'selected' if current == 'ACTIVO' }}>Activo</option>
+        <option value="MANTENIMIENTO" {{ 'selected' if current == 'MANTENIMIENTO' }}>En mantenimiento</option>
+        <option value="INACTIVO" {{ 'selected' if current == 'INACTIVO' }}>Inactivo</option>
+      </select>
+    </label>
+    <label>Tipo de unidad
+      <select name="vehicle_type">
+        {% set current_type = vehicle.vehicle_type if vehicle and vehicle.vehicle_type else 'CAMION' %}
+        <option value="CAMION" {{ 'selected' if current_type == 'CAMION' }}>Camión (unidad simple)</option>
+        <option value="TRACTO" {{ 'selected' if current_type == 'TRACTO' }}>Tracto camión (cabezal)</option>
+        <option value="CARRETA" {{ 'selected' if current_type == 'CARRETA' }}>Carreta / semirremolque</option>
+      </select>
+    </label>
+  </div>
+  <p class="muted" style="margin-top:-8px;">El tipo de unidad determina el diagrama de posiciones que se usa en Mantenimiento → Neumáticos.</p>
+
+  <div class="section-title">Documentos obligatorios</div>
+  <div class="form-row">
+    <label>Vencimiento de SOAT
+      <input type="date" name="soat_expiry" value="{{ vehicle.soat_expiry if vehicle else '' }}">
+    </label>
+    <label>Vencimiento de Revisión Técnica
+      <input type="date" name="technical_review_expiry" value="{{ vehicle.technical_review_expiry if vehicle else '' }}">
+    </label>
+  </div>
 
   <div class="form-row">
     <label>Kilometraje actual
@@ -46,7 +67,7 @@
   </label>
   <div class="btn-group">
     <button type="submit" class="btn btn-primary">Guardar</button>
-    <a href="{{ url_for('flota.list_view', tab='vehiculos') }}" class="btn btn-secondary">Cancelar</a>
+    <a href="{{ url_for('flota.list_view') }}" class="btn btn-secondary">Cancelar</a>
   </div>
 </form>
 {% endblock %}

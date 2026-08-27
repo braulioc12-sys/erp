@@ -138,6 +138,17 @@ textarea { resize: vertical; min-height: 70px; }
 .alert-list { display: flex; flex-direction: column; gap: 8px; }
 .alert-item { padding: 10px 14px; border-radius: 8px; background: var(--warning-soft); color: var(--warning); font-size: 0.88rem; display: flex; justify-content: space-between; gap: 10px; }
 
+/* Diagrama de neumáticos */
+.tire-body { fill: var(--surface); stroke: var(--border); stroke-width: 2; }
+.tire-axle { stroke: var(--border); stroke-width: 4; }
+.tire-diagram-label { font-size: 9px; fill: var(--text-muted); }
+.tire-diagram-plus { font-size: 14px; fill: var(--text-muted); pointer-events: none; }
+.tire-rect { stroke-width: 1.5; cursor: pointer; }
+.tire-rect.tire-ok { fill: var(--success-soft); stroke: var(--success); }
+.tire-rect.tire-warn { fill: var(--warning-soft); stroke: var(--warning); }
+.tire-rect.tire-danger { fill: var(--danger-soft); stroke: var(--danger); }
+.tire-rect.tire-empty { fill: #fff; stroke: var(--border); stroke-dasharray: 3 2; }
+
 @media (max-width: 800px) {
   .app-shell { flex-direction: column; }
   .sidebar { width: 100%; flex-direction: row; overflow-x: auto; }

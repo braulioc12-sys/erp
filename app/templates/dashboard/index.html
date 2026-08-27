@@ -30,12 +30,15 @@
   </div>
 </div>
 
-{% if license_alerts or maintenance_alerts or km_alerts or budget_alerts %}
+{% if driver_document_alerts or vehicle_document_alerts or maintenance_alerts or km_alerts or budget_alerts or tire_alerts %}
 <div class="panel">
   <h2>Alertas próximas</h2>
   <div class="alert-list">
-    {% for a in license_alerts %}
-    <div class="alert-item"><span>Licencia de <strong>{{ a.name }}</strong> vence</span><span>{{ a.license_expiry }}</span></div>
+    {% for a in driver_document_alerts %}
+    <div class="alert-item"><span>{{ a.document }} de <strong>{{ a.name }}</strong> {{ 'ya venció' if a.overdue else 'vence' }}</span><span>{{ a.expiry }}</span></div>
+    {% endfor %}
+    {% for a in vehicle_document_alerts %}
+    <div class="alert-item"><span>{{ a.document }} de la unidad <strong>{{ a.plate }}</strong> {{ 'ya venció' if a.overdue else 'vence' }}</span><span>{{ a.expiry }}</span></div>
     {% endfor %}
     {% for a in maintenance_alerts %}
     <div class="alert-item"><span>Mantenimiento programado — unidad <strong>{{ a.plate }}</strong></span><span>{{ a.next_due_date }}</span></div>
@@ -50,6 +53,12 @@
     <div class="alert-item">
       <span>{{ a.label }} {{ 'superó' if a.over else 'se acerca a' }} su presupuesto mensual de gastos</span>
       <span>{{ a.spent|money }} / {{ a.budget|money }} ({{ (a.ratio * 100)|round|int }}%)</span>
+    </div>
+    {% endfor %}
+    {% for a in tire_alerts %}
+    <div class="alert-item">
+      <span>Neumático en <strong>{{ a.position_label }}</strong> de la unidad <strong>{{ a.plate }}</strong> {{ 'ya superó' if a.overdue else 'se acerca a' }} su vida útil</span>
+      <span>{{ '{:,.0f}'.format(a.accumulated_km) }} / {{ '{:,.0f}'.format(a.expected_life_km) }} km ({{ a.percent }}%)</span>
     </div>
     {% endfor %}
   </div>

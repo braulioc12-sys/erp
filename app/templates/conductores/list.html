@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Conductores{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Conductores</h1>
+  <div class="page-actions">
+    {% if can(current_user.role, 'conductores', 'edit') %}
+    <a href="{{ url_for('conductores.new_driver') }}" class="btn btn-primary">+ Nuevo conductor</a>
+    {% endif %}
+  </div>
+</div>
+<p class="muted mt-0">El vencimiento de brevete, examen médico ocupacional y los requisitos de Backus (examen de manejo, capacitación y DDS) se registran en el detalle de cada conductor.</p>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Nombre</th><th>DNI</th><th>N° Licencia</th><th>Vence brevete</th><th>Teléfono</th><th>Estado</th><th>Documentos</th><th></th></tr></thead>
+    <tbody>
+      {% for d in drivers %}
+      <tr>
+        <td>{{ d.name }}</td>
+        <td>{{ d.document_number or '—' }}</td>
+        <td>{{ d.license_number or '—' }}</td>
+        <td>{{ d.license_expiry or '—' }}</td>
+        <td>{{ d.phone or '—' }}</td>
+        <td>{{ m.badge(d.status) }}</td>
+        <td>
+          {% if d.id in expiring_ids %}
+          <span class="badge badge-mantenimiento">Por vencer</span>
+          {% else %}
+          <span class="badge badge-activo">OK</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if can(current_user.role, 'conductores', 'edit') %}
+          <div class="btn-group">
+            <a class="btn btn-secondary btn-sm" href="{{ url_for('conductores.edit_driver', driver_id=d.id) }}">Editar</a>
+            <form method="post" action="{{ url_for('conductores.delete_driver', driver_id=d.id) }}" onsubmit="return confirm('¿Eliminar este conductor?');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-danger btn-sm" type="submit">Eliminar</button>
+            </form>
+          </div>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="table-empty">No hay conductores registrados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

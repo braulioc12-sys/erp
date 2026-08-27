@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Llanta — {{ vehicle.plate }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Llanta — {{ vehicle.plate }}</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('neumaticos.diagram', vehicle_id=vehicle.id) }}" class="btn btn-secondary">← Volver al diagrama</a>
+  </div>
+</div>
+
+<div class="detail-grid">
+  <div class="detail-item"><div class="label">Posición</div><div class="value">{{ position_label }}</div></div>
+  <div class="detail-item"><div class="label">Marca</div><div class="value">{{ tire.brand or 'Sin marca' }}</div></div>
+  <div class="detail-item"><div class="label">Estado</div><div class="value">{{ m.badge(tire.status) }}</div></div>
+  <div class="detail-item"><div class="label">Fecha de instalación</div><div class="value">{{ tire.install_date }}</div></div>
+  <div class="detail-item"><div class="label">Km de la unidad al instalar</div><div class="value">{{ '{:,.0f}'.format(tire.km_at_install) }} km</div></div>
+  <div class="detail-item"><div class="label">Vida útil estimada</div><div class="value">{{ '{:,.0f}'.format(tire.expected_life_km) }} km</div></div>
+  {% if tire.status == 'ACTIVO' %}
+  <div class="detail-item"><div class="label">Km actual de la unidad</div><div class="value">{{ '{:,.0f} km'.format(vehicle.current_km) if vehicle.current_km is not none else 'Sin registrar' }}</div></div>
+  <div class="detail-item"><div class="label">Kilometraje acumulado en esta llanta</div><div class="value">{{ '{:,.0f} km'.format(accumulated_km) if accumulated_km is not none else '—' }}</div></div>
+  <div class="detail-item"><div class="label">% de vida útil consumida</div><div class="value">{% if percent is not none %}<span class="badge {{ badge_class }}">{{ percent }}%</span>{% else %}Sin km de unidad registrado{% endif %}</div></div>
+  {% else %}
+  <div class="detail-item"><div class="label">Fecha de retiro</div><div class="value">{{ tire.removed_date or '—' }}</div></div>
+  <div class="detail-item"><div class="label">Km al retirar</div><div class="value">{{ '{:,.0f}'.format(tire.removed_km) if tire.removed_km is not none else '—' }} km</div></div>
+  <div class="detail-item"><div class="label">Km recorridos en esta llanta</div><div class="value">{{ '{:,.0f}'.format(tire.removed_km - tire.km_at_install) if tire.removed_km is not none else '—' }} km</div></div>
+  {% endif %}
+</div>
+
+{% if tire.notes %}<p><strong>Notas:</strong> {{ tire.notes }}</p>{% endif %}
+{% if tire.removal_reason %}<p><strong>Motivo del retiro:</strong> {{ tire.removal_reason }}</p>{% endif %}
+
+{% if tire.status == 'ACTIVO' and can(current_user.role, 'mantenimiento', 'edit') %}
+<div class="btn-group" style="margin-bottom:20px;">
+  <a href="{{ url_for('neumaticos.replace_tire', tire_id=tire.id) }}" class="btn btn-primary">Reemplazar</a>
+  <form method="post" action="{{ url_for('neumaticos.retire_tire', tire_id=tire.id) }}" onsubmit="return confirm('¿Retirar esta llanta sin registrar una nueva en su lugar?');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-danger">Retirar sin reemplazar</button>
+  </form>
+</div>
+{% endif %}
+
+{% if history %}
+<div class="panel">
+  <h2>Historial anterior en esta posición</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Marca</th><th>Instalación</th><th>Retiro</th><th class="text-right">Km recorridos</th><th>Estado</th></tr></thead>
+      <tbody>
+        {% for h in history %}
+        <tr>
+          <td>{{ h.brand or '—' }}</td>
+          <td>{{ h.install_date }}</td>
+          <td>{{ h.removed_date or '—' }}</td>
+          <td class="text-right">{{ '{:,.0f}'.format(h.removed_km - h.km_at_install) if h.removed_km is not none else '—' }}</td>
+          <td>{{ m.badge(h.status) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

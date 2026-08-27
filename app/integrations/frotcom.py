@@ -1,24 +1,42 @@
 """Cliente para la API de Frotcom (GPS / rastreo de flota).
 
 IMPORTANTE — léeme antes de usar en producción:
-Frotcom entrega acceso a su "API V2" bajo pedido (contacta a su soporte
-para solicitar credenciales: usuario/contraseña o token de API). Su
-referencia de endpoints es autodocumentada dentro de tu propia cuenta de
-Frotcom, por lo que los nombres exactos de rutas y campos pueden variar
-según tu plan/región. Este cliente implementa el patrón más común para
-APIs REST de este tipo (login → token → consulta de posiciones), pero
-**no ha podido probarse contra la API real** porque esta instalación no
-cuenta con credenciales de Frotcom. Antes de usarlo en serio:
+Según la documentación pública de Frotcom (Help Center, "Authentication in
+Frotcom API" y "How to get API V2 credentials", consultadas en agosto de
+2026 — https://frotcominternational.zendesk.com/hc/en-gb/sections/202320689-Frotcom-API-V2):
 
-1. Pide a Frotcom (o a tu contacto comercial) acceso a "Frotcom API V2".
-2. Con las credenciales en mano, entra a su Help Center / referencia
-   autodocumentada y confirma:
-   - La URL base de tu cuenta (suele ser específica por región/cliente).
-   - El endpoint y método exacto de autenticación (login).
-   - El endpoint que devuelve la posición/odómetro de cada vehículo y los
-     nombres exactos de los campos de la respuesta.
-3. Ajusta las constantes y el parseo de la respuesta en este archivo según
-   lo que confirmes en el paso 2 (están marcadas con "# AJUSTAR").
+- Las credenciales de "Frotcom API V2" **no las da el soporte general de
+  Frotcom directamente**: hay que pedirlas a tu **Frotcom Certified
+  Partner** (el distribuidor/instalador local que te vendió el sistema).
+  Diles literalmente que necesitas "credenciales de acceso a la API V2 de
+  Frotcom para una integración de terceros" (usuario y contraseña de tipo
+  "thirdparty", distintos del usuario con el que entras a la web de
+  Frotcom).
+- La URL base pública de la API V2 es `https://v2api.frotcom.com`.
+- Autenticación: `POST /v2/authorize` con JSON
+  `{"provider": "thirdparty", "username": ..., "password": ...}`. La
+  respuesta trae un token.
+- Ese token se manda como **parámetro de query `api_key`** en cada
+  llamada siguiente (NO como header `Authorization: Bearer ...`), por
+  ejemplo `GET /v2/vehicles?api_key=<token>`. El token expira si no se usa
+  por más de 20 minutos (hay que volver a autenticar).
+
+Lo que **no** se pudo confirmar sin credenciales reales es el endpoint y
+los nombres de campo exactos para la posición/odómetro de cada vehículo
+(la doc pública de Frotcom es "autodocumentada" dentro de la cuenta real,
+vía su "Reference guide"). Este cliente ya implementa el login real
+confirmado arriba, y usa `/v2/vehicles` como mejor estimación para el
+endpoint de posiciones (aparece como ejemplo en la doc oficial de
+autenticación). Antes de usarlo en serio:
+
+1. Pide a tu Frotcom Certified Partner las credenciales de API V2 (ver
+   arriba).
+2. Con las credenciales en mano, entra a Frotcom Web → busca en su Help
+   Center la sección "Frotcom API V2" → artículo "Reference guide", y
+   confirma el endpoint exacto de posiciones/odómetro y los nombres de
+   los campos de esa respuesta si difieren de `/v2/vehicles`.
+3. Ajusta el endpoint y el parseo de la respuesta en `get_vehicle_positions`
+   según lo que confirmes (está marcado con "# AJUSTAR").
 
 Mientras tanto, el resto del ERP funciona perfectamente sin esto —
 simplemente no habrá datos de ubicación hasta que esta integración quede
@@ -27,6 +45,7 @@ confirmada contra tu cuenta real.
 from datetime import datetime, timezone
 
 import urllib.error
+import urllib.parse
 import urllib.request
 import json
 
@@ -38,20 +57,25 @@ class FrotcomError(Exception):
 
 class FrotcomClient:
     def __init__(self, base_url, username, password, timeout=15):
-        self.base_url = (base_url or "").rstrip("/")
+        # Si no se define FROTCOM_BASE_URL, se usa la URL pública real de
+        # la API V2 de Frotcom confirmada en su documentación oficial.
+        self.base_url = (base_url or "https://v2api.frotcom.com").rstrip("/")
         self.username = username
         self.password = password
         self.timeout = timeout
         self._token = None
 
     def is_configured(self):
-        return bool(self.base_url and self.username and self.password)
+        return bool(self.username and self.password)
 
     def _request(self, method, path, token=None, payload=None):
         url = f"{self.base_url}{path}"
-        headers = {"Content-Type": "application/json"}
         if token:
-            headers["Authorization"] = f"Bearer {token}"
+            # Frotcom API V2 espera el token como parámetro de query
+            # "api_key" en cada llamada (no como header Authorization).
+            sep = "&" if "?" in url else "?"
+            url = f"{url}{sep}api_key={urllib.parse.quote(token)}"
+        headers = {"Content-Type": "application/json"}
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
@@ -68,15 +92,14 @@ class FrotcomClient:
     def authenticate(self):
         if not self.is_configured():
             raise FrotcomError(
-                "Frotcom no está configurado. Define FROTCOM_BASE_URL, FROTCOM_USERNAME y "
-                "FROTCOM_PASSWORD en las variables de entorno (ver README)."
+                "Frotcom no está configurado. Define FROTCOM_USERNAME y FROTCOM_PASSWORD "
+                "(las credenciales de tipo 'thirdparty' que te da tu Frotcom Certified "
+                "Partner) en las variables de entorno (ver README)."
             )
-        # AJUSTAR: confirma el endpoint y el nombre de los campos de login
-        # contra la referencia de tu cuenta ("Authentication in Frotcom API").
         result = self._request(
             "POST",
-            "/api/v2/login",
-            payload={"username": self.username, "password": self.password},
+            "/v2/authorize",
+            payload={"provider": "thirdparty", "username": self.username, "password": self.password},
         )
         token = result.get("token") or result.get("access_token")
         if not token:
@@ -89,10 +112,11 @@ class FrotcomClient:
         [{external_id, latitude, longitude, speed_kmh, heading, odometer_km, recorded_at}, ...]
         """
         token = self._token or self.authenticate()
-        # AJUSTAR: confirma el endpoint real (por ejemplo podría ser
-        # "/api/v2/vehicles/positions" o similar) y el nombre de los campos
-        # de la respuesta (PVT = position/velocity/time) contra tu referencia.
-        result = self._request("GET", "/api/v2/vehicles/positions", token=token)
+        # AJUSTAR: "/v2/vehicles" es la mejor estimación confirmada (aparece
+        # como ejemplo en la doc oficial de autenticación de Frotcom), pero
+        # el nombre exacto del endpoint de posición/odómetro y sus campos
+        # hay que confirmarlos contra el "Reference guide" de tu cuenta real.
+        result = self._request("GET", "/v2/vehicles", token=token)
         raw_items = result.get("vehicles") or result.get("data") or result if isinstance(result, list) else []
 
         positions = []

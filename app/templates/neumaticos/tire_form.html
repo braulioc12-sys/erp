@@ -1,0 +1,74 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Reemplazar llanta' if mode == 'replace' else 'Agregar llanta' }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ 'Reemplazar llanta' if mode == 'replace' else 'Agregar llanta' }} — {{ vehicle.plate }}</h1>
+</div>
+<p class="muted mt-0">Posición: <strong>{{ position_label }}</strong></p>
+
+<form class="form panel" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  {% if mode == 'replace' %}
+  <div class="section-title">Llanta que se retira</div>
+  <p class="muted" style="margin-top:-8px;">{{ tire.brand or 'Sin marca' }} — instalada el {{ tire.install_date }} con {{ '{:,.0f}'.format(tire.km_at_install) }} km.</p>
+  <div class="form-row">
+    <label>Fecha de retiro
+      <input type="date" name="removed_date" value="{{ today }}" required>
+    </label>
+    <label>Kilometraje de la unidad al retirar
+      <input type="number" step="1" name="removed_km" value="{{ vehicle.current_km|round(0)|int if vehicle.current_km is not none else '' }}" required>
+    </label>
+  </div>
+  <label>Motivo del retiro (opcional)
+    <input type="text" name="removal_reason" placeholder="Ej. desgaste, pinchazo irreparable, corte en el flanco">
+  </label>
+
+  <div class="section-title">Llanta nueva</div>
+  <div class="form-row">
+    <label>Marca
+      <input type="text" name="new_brand" placeholder="Ej. Michelin, Bridgestone, Goodyear">
+    </label>
+    <label>Fecha de instalación
+      <input type="date" name="new_install_date" value="{{ today }}" required>
+    </label>
+  </div>
+  <div class="form-row">
+    <label>Kilometraje de la unidad al instalar
+      <input type="number" step="1" name="new_km_at_install" value="{{ vehicle.current_km|round(0)|int if vehicle.current_km is not none else '' }}" required>
+    </label>
+    <label>Vida útil estimada (km)
+      <input type="number" step="1" name="new_expected_life_km" value="{{ default_expected_life_km }}" required>
+    </label>
+  </div>
+  <label>Notas (opcional)
+    <textarea name="new_notes"></textarea>
+  </label>
+  {% else %}
+  <div class="form-row">
+    <label>Marca
+      <input type="text" name="brand" placeholder="Ej. Michelin, Bridgestone, Goodyear">
+    </label>
+    <label>Fecha de instalación
+      <input type="date" name="install_date" value="{{ today }}" required>
+    </label>
+  </div>
+  <div class="form-row">
+    <label>Kilometraje de la unidad al instalar
+      <input type="number" step="1" name="km_at_install" value="{{ vehicle.current_km|round(0)|int if vehicle.current_km is not none else '' }}" required>
+    </label>
+    <label>Vida útil estimada (km)
+      <input type="number" step="1" name="expected_life_km" value="{{ default_expected_life_km }}" required>
+    </label>
+  </div>
+  <label>Notas (opcional)
+    <textarea name="notes"></textarea>
+  </label>
+  {% endif %}
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Guardar</button>
+    <a href="{{ url_for('neumaticos.diagram', vehicle_id=vehicle.id) }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+{% endblock %}

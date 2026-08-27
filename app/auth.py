@@ -16,6 +16,7 @@ PERMISSIONS = {
         "dashboard": {"view"},
         "clientes": {"view", "edit"},
         "flota": {"view"},
+        "conductores": {"view"},
         "viajes": {"view", "edit"},
         "gastos": {"view", "edit"},
         "mantenimiento": {"view"},

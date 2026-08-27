@@ -117,28 +117,56 @@ def seed_demo_data(log=print):
         for c in clients
     ]
 
-    # (placa, marca, modelo, capacidad_kg, estado, kilometraje_actual)
+    def _d(days):
+        return (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
+
+    # (placa, marca, modelo, capacidad_kg, estado, tipo_unidad, kilometraje_actual,
+    #  vencimiento_soat, vencimiento_revision_tecnica)
     vehicles = [
-        ("ABC-123", "Volvo", "FH 460", 28000, "ACTIVO", 118500),
-        ("XYZ-789", "Scania", "R450", 25000, "ACTIVO", 76200),
-        ("DEF-456", "Mercedes-Benz", "Actros", 30000, "MANTENIMIENTO", 142300),
+        # SOAT por vencer pronto, para ver la alerta funcionando en la demo.
+        ("ABC-123", "Volvo", "FH 460", 28000, "ACTIVO", "TRACTO", 118500, _d(15), _d(200)),
+        # Revisión técnica ya vencida, para ver esa alerta también.
+        ("XYZ-789", "Scania", "R450", 25000, "ACTIVO", "TRACTO", 76200, _d(200), _d(-5)),
+        ("DEF-456", "Mercedes-Benz", "Actros", 30000, "MANTENIMIENTO", "TRACTO", 142300, _d(180), _d(180)),
+        # Carreta (semirremolque) de ejemplo, para mostrar el diagrama de
+        # neumáticos de 3 ejes en la demo.
+        ("TRL-321", "Randon", "Semirremolque 3 ejes", 32000, "ACTIVO", "CARRETA", 95000, _d(10), _d(200)),
     ]
     vehicle_ids = [
         execute(
-            "INSERT INTO vehicles (plate, brand, model, capacity_kg, status, current_km, current_km_updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (*v, datetime.now().strftime("%Y-%m-%d")),
+            """INSERT INTO vehicles (plate, brand, model, capacity_kg, status, vehicle_type, current_km,
+               current_km_updated_at, soat_expiry, technical_review_expiry)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (*v[:7], datetime.now().strftime("%Y-%m-%d"), v[7], v[8]),
         )
         for v in vehicles
     ]
 
+    # (nombre, dni, n_licencia, vence_brevete, telefono,
+    #  fecha_examen_medico, vence_examen_medico,
+    #  fecha_examen_manejo_backus, vence_examen_manejo_backus,
+    #  fecha_capacitacion_backus, vence_capacitacion_backus,
+    #  fecha_dds, vence_dds)
     drivers = [
-        ("Carlos Ramírez", "45678912", "Q12345678", (datetime.now() + timedelta(days=200)).strftime("%Y-%m-%d"), "987654321"),
-        ("Luis Fernández", "41234567", "Q87654321", (datetime.now() + timedelta(days=20)).strftime("%Y-%m-%d"), "987123456"),
-        ("Jorge Quispe", "47891234", "Q11223344", (datetime.now() + timedelta(days=400)).strftime("%Y-%m-%d"), "912345678"),
+        # Examen médico y DDS por vencer pronto, para ver ambas alertas en la demo.
+        ("Carlos Ramírez", "45678912", "Q12345678", _d(200), "987654321",
+         _d(-350), _d(10), _d(-100), _d(260), _d(-60), _d(300), _d(-335), _d(25)),
+        # Brevete por vencer pronto (ya existía en la demo) y examen de
+        # manejo Backus ya vencido, para ver ambas alertas.
+        ("Luis Fernández", "41234567", "Q87654321", _d(20), "987123456",
+         _d(-300), _d(60), _d(-370), _d(-5), _d(-30), _d(330), _d(-10), _d(350)),
+        # Todo al día.
+        ("Jorge Quispe", "47891234", "Q11223344", _d(400), "912345678",
+         _d(-30), _d(330), _d(-60), _d(300), _d(-15), _d(345), _d(-5), _d(355)),
     ]
     driver_ids = [
         execute(
-            "INSERT INTO drivers (name, document_number, license_number, license_expiry, phone) VALUES (?, ?, ?, ?, ?)",
+            """INSERT INTO drivers (name, document_number, license_number, license_expiry, phone,
+               medical_exam_date, medical_exam_expiry,
+               backus_driving_exam_date, backus_driving_exam_expiry,
+               backus_training_date, backus_training_expiry,
+               dds_date, dds_expiry)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             d,
         )
         for d in drivers
@@ -191,6 +219,44 @@ def seed_demo_data(log=print):
             119000,
         ),
     )
+    # Neumáticos de ejemplo: unidad ABC-123 (tracto, 10 posiciones) con casi
+    # todas sus llantas registradas y con distintos niveles de desgaste
+    # (para ver las tres alertas de color en la demo), y la carreta TRL-321
+    # con solo dos ejes cargados, dejando el tercero vacío a propósito para
+    # mostrar el flujo de "+ Agregar" en una posición libre.
+    tracto_id = vehicle_ids[0]  # ABC-123, current_km = 118500
+    carreta_id = vehicle_ids[3]  # TRL-321, current_km = 95000
+    install_date = (today - timedelta(days=200)).strftime("%Y-%m-%d")
+    tire_seed = [
+        # (vehicle_id, position_code, brand, km_at_install, expected_life_km) -> ~11% de vida útil (OK)
+        (tracto_id, "EJE1_IZQ", "Michelin", 110000, 80000),
+        (tracto_id, "EJE1_DER", "Michelin", 110000, 80000),
+        # ~98% de vida útil (a reemplazar)
+        (tracto_id, "EJE2_IZQ_EXT", "Bridgestone", 40000, 80000),
+        (tracto_id, "EJE2_IZQ_INT", "Bridgestone", 40000, 80000),
+        (tracto_id, "EJE2_DER_INT", "Bridgestone", 40000, 80000),
+        (tracto_id, "EJE2_DER_EXT", "Bridgestone", 40000, 80000),
+        # ~67% de vida útil (por vencer)
+        (tracto_id, "EJE3_IZQ_EXT", "Goodyear", 65000, 80000),
+        (tracto_id, "EJE3_IZQ_INT", "Goodyear", 65000, 80000),
+        # eje 3 derecho se deja sin registrar a propósito (posición vacía en la demo)
+        # Carreta: eje 1 casi nuevo, eje 2 por vencer, eje 3 vacío.
+        (carreta_id, "EJE1_IZQ_EXT", "Michelin", 90000, 80000),
+        (carreta_id, "EJE1_IZQ_INT", "Michelin", 90000, 80000),
+        (carreta_id, "EJE1_DER_INT", "Michelin", 90000, 80000),
+        (carreta_id, "EJE1_DER_EXT", "Michelin", 90000, 80000),
+        (carreta_id, "EJE2_IZQ_EXT", "Bridgestone", 30000, 80000),
+        (carreta_id, "EJE2_IZQ_INT", "Bridgestone", 30000, 80000),
+        (carreta_id, "EJE2_DER_INT", "Bridgestone", 30000, 80000),
+        (carreta_id, "EJE2_DER_EXT", "Bridgestone", 30000, 80000),
+    ]
+    for vid, code, brand, km_install, life_km in tire_seed:
+        execute(
+            """INSERT INTO tires (vehicle_id, position_code, brand, install_date, km_at_install, expected_life_km)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (vid, code, brand, install_date, km_install, life_km),
+        )
+
     log("Listo. Inicia sesión con:")
     log("  admin@erp.local / admin1234  (Administrador)")
     log("  operador@erp.local / operador1234  (Operador)")

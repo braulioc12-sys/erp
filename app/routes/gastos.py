@@ -1,7 +1,9 @@
+import io
 import os
 import uuid
 
 from flask import Blueprint, Response, abort, current_app, flash, redirect, render_template, request, send_from_directory, url_for
+from PIL import Image, ImageOps
 
 from app.auth import permission_required, validate_csrf
 from app.db import execute, query_all, query_one
@@ -12,6 +14,14 @@ from app.routes.catalogos import get_catalog
 bp = Blueprint("gastos", __name__, url_prefix="/gastos")
 
 ALLOWED_RECEIPT_EXTENSIONS = {".png", ".jpg", ".jpeg", ".pdf", ".webp", ".heic", ".heif"}
+
+# Las fotos de comprobantes se re-comprimen antes de guardarlas: se reducen
+# a este tamaño máximo (lado más largo, en píxeles) y se recodifican como
+# JPEG con esta calidad. 1600px y calidad 72 dejan el texto del comprobante
+# perfectamente legible y bajan el peso del archivo entre 80% y 95% frente
+# a una foto de celular sin comprimir (que suele pesar 3-8 MB).
+RECEIPT_MAX_DIMENSION = 1600
+RECEIPT_JPEG_QUALITY = 72
 
 # Si el navegador no manda una extensión reconocible en el nombre del
 # archivo (pasa a veces con fotos tomadas directo desde la cámara del
@@ -44,11 +54,35 @@ def _first_uploaded_file():
     return None
 
 
+def _compress_receipt_image(raw_bytes, dest_path):
+    """Redimensiona y recomprime una foto de comprobante como JPEG, para que
+    ocupe el menor espacio posible en disco (importante porque el disco
+    gratuito de Render es limitado). Devuelve True si logró comprimirla y
+    guardarla; False si el archivo no se pudo abrir como imagen (por
+    ejemplo, un formato no soportado como algunos HEIC de iPhone), en cuyo
+    caso el llamador debe guardar el archivo original sin tocar."""
+    try:
+        with Image.open(io.BytesIO(raw_bytes)) as img:
+            # Corrige la rotación: los celulares guardan la orientación real
+            # en metadatos EXIF en vez de rotar los píxeles.
+            img = ImageOps.exif_transpose(img)
+            if img.mode not in ("RGB", "L"):
+                img = img.convert("RGB")
+            img.thumbnail((RECEIPT_MAX_DIMENSION, RECEIPT_MAX_DIMENSION), Image.LANCZOS)
+            img.save(dest_path, format="JPEG", quality=RECEIPT_JPEG_QUALITY, optimize=True)
+        return True
+    except Exception:
+        return False
+
+
 def _save_receipt(file_storage):
     """Guarda el comprobante adjunto (foto o PDF) y devuelve el nombre de
-    archivo guardado, o None si no se envió nada válido. Nota: en hosting
-    gratuito con disco efímero (ver README, sección Render) estos archivos
-    se pierden al reiniciar/redesplegar, igual que la base de datos SQLite."""
+    archivo guardado, o None si no se envió nada válido. Las fotos se
+    redimensionan y recomprimen como JPEG para ocupar el menor espacio
+    posible (ver _compress_receipt_image); los PDF se guardan tal cual.
+    Nota: en hosting gratuito con disco efímero (ver README, sección
+    Render) estos archivos se pierden al reiniciar/redesplegar, igual que
+    la base de datos SQLite."""
     if not file_storage or not file_storage.filename:
         return None
     ext = os.path.splitext(file_storage.filename)[1].lower()
@@ -56,8 +90,29 @@ def _save_receipt(file_storage):
         ext = MIME_TO_EXTENSION.get((file_storage.mimetype or "").lower())
     if not ext:
         return None
+
+    raw_bytes = file_storage.read()
+    if not raw_bytes:
+        return None
+
+    if ext == ".pdf":
+        filename = f"{uuid.uuid4().hex}.pdf"
+        with open(os.path.join(_receipts_dir(), filename), "wb") as f:
+            f.write(raw_bytes)
+        return filename
+
+    # Es una foto: intentamos comprimirla. Siempre se guarda como .jpg
+    # porque para fotos, JPEG comprime mucho mejor que PNG/WEBP/HEIC.
+    filename = f"{uuid.uuid4().hex}.jpg"
+    dest_path = os.path.join(_receipts_dir(), filename)
+    if _compress_receipt_image(raw_bytes, dest_path):
+        return filename
+
+    # Si no se pudo abrir como imagen (formato raro o archivo corrupto),
+    # guardamos el original sin comprimir para no perder el comprobante.
     filename = f"{uuid.uuid4().hex}{ext}"
-    file_storage.save(os.path.join(_receipts_dir(), filename))
+    with open(os.path.join(_receipts_dir(), filename), "wb") as f:
+        f.write(raw_bytes)
     return filename
 
 

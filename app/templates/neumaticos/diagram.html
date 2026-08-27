@@ -1,0 +1,114 @@
+{% extends 'base.html' %}
+{% block title %}Neumáticos — {{ vehicle.plate }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Neumáticos — {{ vehicle.plate }} <span class="muted" style="font-weight:400;font-size:0.9rem;">({{ type_label }})</span></h1>
+  <div class="page-actions">
+    <a href="{{ url_for('neumaticos.list_view') }}" class="btn btn-secondary">← Volver a Neumáticos</a>
+  </div>
+</div>
+
+<div class="detail-grid">
+  <div class="detail-item"><div class="label">Kilometraje actual de la unidad</div><div class="value">{{ '{:,.0f} km'.format(vehicle.current_km) if vehicle.current_km is not none else 'Sin registrar' }}</div></div>
+  <div class="detail-item"><div class="label">Última actualización de km</div><div class="value">{{ vehicle.current_km_updated_at or '—' }}</div></div>
+</div>
+
+<div class="panel">
+  <h2>Diagrama de posiciones</h2>
+  <p class="muted" style="margin-top:-8px;">Haz clic en una posición para ver el detalle de esa llanta, o para agregar una nueva si está vacía.</p>
+  <div style="display:flex; justify-content:center; padding:10px 0;">
+    <svg viewBox="0 0 200 {{ diagram_height }}" width="220" style="max-width:100%;">
+      <rect x="70" y="20" width="60" height="{{ diagram_height - 40 }}" rx="8" class="tire-body" />
+      {% for y in axle_ys %}
+      <line x1="18" y1="{{ y + 17 }}" x2="182" y2="{{ y + 17 }}" class="tire-axle" />
+      {% endfor %}
+      {% if vehicle_type == 'TRACTO' %}
+      <rect x="75" y="2" width="50" height="26" rx="6" class="tire-body" />
+      <text x="100" y="19" text-anchor="middle" class="tire-diagram-label">Cabina</text>
+      {% elif vehicle_type == 'CARRETA' %}
+      <circle cx="100" cy="12" r="6" class="tire-body" />
+      <text x="100" y="34" text-anchor="middle" class="tire-diagram-label">Enganche</text>
+      {% endif %}
+      {% for row in rows %}
+        {% set p = row.position %}
+        {% if row.tire %}
+        <a href="{{ url_for('neumaticos.detail', tire_id=row.tire.id) }}">
+          <rect x="{{ p.x }}" y="{{ p.y }}" width="20" height="34" rx="4" class="tire-rect {{ row.status_class }}"></rect>
+          <title>{{ p.label }} — {{ row.tire.brand or 'Sin marca' }}{% if row.percent is not none %} ({{ row.percent }}% de vida útil){% endif %}</title>
+        </a>
+        {% else %}
+        <a href="{{ url_for('neumaticos.new_tire', vehicle_id=vehicle.id, position_code=p.code) }}">
+          <rect x="{{ p.x }}" y="{{ p.y }}" width="20" height="34" rx="4" class="tire-rect tire-empty"></rect>
+          <text x="{{ p.x + 10 }}" y="{{ p.y + 21 }}" text-anchor="middle" class="tire-diagram-plus">+</text>
+          <title>{{ p.label }} — vacío, clic para agregar</title>
+        </a>
+        {% endif %}
+      {% endfor %}
+    </svg>
+  </div>
+  <div class="tag-list" style="justify-content:center; margin-top:6px;">
+    <span class="badge badge-activo">OK</span>
+    <span class="badge badge-mantenimiento">Por vencer (≥80%)</span>
+    <span class="badge badge-vencida">Reemplazar (≥100%)</span>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Llantas instaladas</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Posición</th><th>Marca</th><th>Fecha instalación</th><th class="text-right">Km instalación</th><th class="text-right">Km acumulado</th><th>Vida útil</th><th></th></tr></thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.position.label }}</td>
+          {% if row.tire %}
+          <td>{{ row.tire.brand or '—' }}</td>
+          <td>{{ row.tire.install_date }}</td>
+          <td class="text-right">{{ '{:,.0f}'.format(row.tire.km_at_install) }}</td>
+          <td class="text-right">{{ '{:,.0f}'.format(row.accumulated_km) if row.accumulated_km is not none else '—' }}</td>
+          <td>
+            {% if row.percent is not none %}
+            <span class="badge {{ row.badge_class }}">{{ row.percent }}%</span>
+            {% else %}<span class="muted">Sin km de unidad</span>{% endif %}
+          </td>
+          <td><a href="{{ url_for('neumaticos.detail', tire_id=row.tire.id) }}" class="btn btn-secondary btn-sm">Ver detalle</a></td>
+          {% else %}
+          <td colspan="4" class="muted">Posición vacía</td>
+          <td></td>
+          <td>
+            {% if can(current_user.role, 'mantenimiento', 'edit') %}
+            <a href="{{ url_for('neumaticos.new_tire', vehicle_id=vehicle.id, position_code=row.position.code) }}" class="btn btn-primary btn-sm">+ Agregar</a>
+            {% endif %}
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if retired_rows %}
+<div class="panel">
+  <h2>Historial de llantas retiradas</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Posición</th><th>Marca</th><th>Instalación</th><th>Retiro</th><th class="text-right">Km recorridos</th><th>Motivo</th></tr></thead>
+      <tbody>
+        {% for r in retired_rows %}
+        <tr>
+          <td>{{ r.position_label }}</td>
+          <td>{{ r.tire.brand or '—' }}</td>
+          <td>{{ r.tire.install_date }}</td>
+          <td>{{ r.tire.removed_date or '—' }}</td>
+          <td class="text-right">{{ '{:,.0f}'.format(r.tire.removed_km - r.tire.km_at_install) if r.tire.removed_km is not none else '—' }}</td>
+          <td class="wrap">{{ r.tire.removal_reason or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
