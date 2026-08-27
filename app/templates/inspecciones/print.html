@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Inspección {{ inspection.vehicle_plate }} — {{ inspection.inspection_date }}</title>
+  <style>
+    :root {
+      --primary: #1d4ed8;
+      --text: #1c2430;
+      --text-muted: #667085;
+      --border: #d0d5dd;
+      --soft: #e8edfc;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text); font-size: 13px; line-height: 1.5;
+      max-width: 820px; margin: 0 auto; padding: 28px 32px;
+    }
+
+    .print-toolbar { text-align: right; margin-bottom: 18px; }
+    .print-toolbar button {
+      background: var(--primary); color: #fff; border: none; border-radius: 8px;
+      padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer;
+    }
+    .print-toolbar button:hover { background: #1737a6; }
+    .print-toolbar .hint { display: block; margin-top: 6px; font-size: 12px; color: var(--text-muted); }
+
+    .doc-header {
+      display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 3px solid var(--primary); padding-bottom: 14px; margin-bottom: 18px;
+    }
+    .doc-header img { max-height: 56px; display: block; }
+    .doc-header .title { text-align: right; }
+    .doc-header .title h1 { margin: 0; font-size: 19px; color: var(--primary); }
+    .doc-header .title .sub { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+
+    .meta-grid {
+      display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 24px;
+      margin-bottom: 20px;
+    }
+    .meta-item .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); }
+    .meta-item .value { font-size: 14px; font-weight: 600; }
+
+    h2 { font-size: 15px; color: var(--primary); margin: 0 0 10px 0; }
+
+    table { width: 100%; border-collapse: collapse; margin-bottom: 22px; }
+    th, td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; font-size: 12.5px; }
+    th { background: var(--soft); color: var(--primary); font-weight: 600; }
+    tr:nth-child(even) td { background: #fafbfc; }
+
+    .status-ok { color: #0f9d58; font-weight: 600; }
+    .status-falla { color: #c0392b; font-weight: 600; }
+    .status-na { color: var(--text-muted); }
+
+    .notes-box { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin-bottom: 26px; font-size: 12.5px; }
+
+    .signatures { display: grid; grid-template-columns: repeat(2, 1fr); gap: 40px; margin-top: 50px; }
+    .signature-line { border-top: 1px solid var(--text); padding-top: 6px; text-align: center; font-size: 12px; color: var(--text-muted); }
+
+    .doc-footer { margin-top: 30px; font-size: 10.5px; color: var(--text-muted); text-align: center; border-top: 1px solid var(--border); padding-top: 10px; }
+
+    @media print {
+      .print-toolbar { display: none; }
+      body { padding: 0; max-width: none; }
+      @page { margin: 16mm 14mm; }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-toolbar">
+    <button onclick="window.print()">🖨️ Imprimir / Guardar como PDF</button>
+    <span class="hint">En el diálogo de impresión, elige "Guardar como PDF" como destino/impresora.</span>
+  </div>
+
+  <div class="doc-header">
+    <img src="{{ url_for('static', filename='img/logo-lockup.png') }}" alt="{{ company_name }}">
+    <div class="title">
+      <h1>Reporte de Inspección de Unidad</h1>
+      <div class="sub">{{ company_name }} · Generado el {{ generated_at }}</div>
+    </div>
+  </div>
+
+  <div class="meta-grid">
+    <div class="meta-item"><div class="label">Unidad</div><div class="value">{{ inspection.vehicle_plate }}{% if inspection.vehicle_brand or inspection.vehicle_model %} ({{ inspection.vehicle_brand or '' }} {{ inspection.vehicle_model or '' }}){% endif %}</div></div>
+    <div class="meta-item"><div class="label">Momento</div><div class="value">{{ 'Antes de salir' if inspection.type == 'PRE' else 'Al llegar' }}</div></div>
+    <div class="meta-item"><div class="label">Fecha</div><div class="value">{{ inspection.inspection_date }}</div></div>
+    <div class="meta-item"><div class="label">Viaje</div><div class="value">{{ inspection.trip_code or '—' }}</div></div>
+    <div class="meta-item"><div class="label">Conductor</div><div class="value">{{ inspection.driver_name or '—' }}</div></div>
+  </div>
+
+  <h2>Checklist</h2>
+  <table>
+    <thead><tr><th>Ítem</th><th>Estado</th><th>Observación</th></tr></thead>
+    <tbody>
+      {% for it in items %}
+      <tr>
+        <td>{{ it.item_name }}</td>
+        <td>
+          {% if it.status == 'OK' %}<span class="status-ok">OK</span>
+          {% elif it.status == 'FALLA' %}<span class="status-falla">Falla</span>
+          {% else %}<span class="status-na">N/A</span>{% endif %}
+        </td>
+        <td>{{ it.observation or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if inspection.notes %}
+  <h2>Observaciones generales</h2>
+  <div class="notes-box">{{ inspection.notes }}</div>
+  {% endif %}
+
+  <div class="signatures">
+    <div class="signature-line">Firma del conductor</div>
+    <div class="signature-line">Firma del responsable / supervisor</div>
+  </div>
+
+  <div class="doc-footer">{{ company_name }} — Reporte generado automáticamente por el sistema el {{ generated_at }}</div>
+</body>
+</html>

@@ -24,7 +24,7 @@ El logo de Harraso Transport / BRMS está en `app/static/img/` (`logo-lockup.png
 - **Rutas:** catálogo de rutas frecuentes con un monto de viáticos predeterminado (usado para sugerir el anticipo de gastos de cada viaje) y un monto de **comisión del conductor** predeterminado (usado para sugerir la comisión al registrar un viaje por esa ruta).
 - **Mantenimiento:** historial de mantenimientos por unidad, costo, kilometraje registrado y próxima fecha/kilometraje. Los conceptos (tipos de mantenimiento) se administran desde Catálogos. Si indicas el kilometraje al registrar un mantenimiento, actualiza automáticamente el kilometraje actual de la unidad. Incluye un catálogo de **trabajos con tiempo estimado** (ej. cambio de aceite = 60 min) que se seleccionan al registrar un mantenimiento, y una vista de **historial y costos totales por unidad**.
 - **Neumáticos:** módulo independiente para controlar la vida útil y posición de cada llanta de cada unidad, con un diagrama distinto según el tipo de unidad — ver la sección dedicada más abajo.
-- **Inspecciones:** checklist de inspección de una unidad (llantas, frenos, luces, etc.) antes de salir o al llegar de un viaje; los ítems del checklist se administran desde Catálogos.
+- **Inspecciones:** checklist de inspección de una unidad (llantas, frenos, luces, etc.) antes de salir o al llegar de un viaje; los ítems del checklist se administran desde Catálogos. Cada inspección se puede **imprimir o descargar como PDF** con el logo de la empresa en el encabezado.
 - **Facturación:** genera facturas por cliente a partir de viajes entregados y aún no facturados; controla estado (pendiente, pagada, vencida, anulada); puede enviarse electrónicamente a SUNAT — ver la sección dedicada más abajo.
 - **Guías de Remisión:** genera la guía de remisión electrónica ("modalidad Transportista") de un viaje, con los datos de traslado, vehículo y conductor; puede enviarse a SUNAT igual que las facturas.
 - **Usuarios:** solo el Administrador puede crear usuarios y asignar el rol Administrador u Operador.
@@ -87,6 +87,8 @@ Cada llanta activa muestra un indicador de color según su % de vida útil consu
 ## Inspecciones de unidades
 
 Desde el detalle de un viaje (o desde el menú **Inspecciones**) se puede registrar un checklist de inspección de la unidad — "antes de salir" o "al llegar" — con un ítem por fila (llantas, frenos, luces, niveles, extintor, etc.), marcando cada uno como OK, Falla o N/A, y una observación opcional. Los ítems del checklist se administran desde **Catálogos → Ítems de inspección** (solo Administrador), igual que los conceptos de mantenimiento o los tipos de gasto.
+
+**Imprimir / descargar como PDF:** en el detalle de cualquier inspección, el botón "🖨️ Imprimir / Descargar PDF" abre una vista de impresión aparte, con el logo de la empresa en el encabezado, los datos de la unidad/conductor/fecha, el checklist completo y espacios de firma. Desde ahí se usa el diálogo de impresión del propio navegador (Ctrl+P / el botón de la página) eligiendo "Guardar como PDF" como destino — no requiere ninguna librería adicional en el servidor ni descargas, funciona igual en celular y en computadora.
 
 ## Gastos: presupuestos y viáticos
 

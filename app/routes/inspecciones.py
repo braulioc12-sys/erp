@@ -102,3 +102,32 @@ def detail(inspection_id):
         abort(404)
     items = query_all("SELECT * FROM inspection_items WHERE inspection_id = ?", (inspection_id,))
     return render_template("inspecciones/detail.html", inspection=inspection, items=items)
+
+
+@bp.route("/<int:inspection_id>/imprimir")
+@permission_required("inspecciones", "view")
+def print_view(inspection_id):
+    """Vista de impresión de una inspección: página independiente (sin menú
+    lateral) con el logo de la empresa en el encabezado, pensada para
+    imprimirse o guardarse como PDF desde el propio diálogo de impresión
+    del navegador (Ctrl+P → Guardar como PDF), sin depender de ninguna
+    librería de generación de PDF en el servidor."""
+    inspection = query_one(
+        """SELECT i.*, v.plate as vehicle_plate, v.brand as vehicle_brand, v.model as vehicle_model,
+                  t.code as trip_code, d.name as driver_name
+           FROM inspections i
+           JOIN vehicles v ON v.id = i.vehicle_id
+           LEFT JOIN trips t ON t.id = i.trip_id
+           LEFT JOIN drivers d ON d.id = i.driver_id
+           WHERE i.id = ?""",
+        (inspection_id,),
+    )
+    if inspection is None:
+        abort(404)
+    items = query_all("SELECT * FROM inspection_items WHERE inspection_id = ?", (inspection_id,))
+    from datetime import datetime
+
+    return render_template(
+        "inspecciones/print.html", inspection=inspection, items=items,
+        generated_at=datetime.now().strftime("%d/%m/%Y %H:%M"),
+    )
