@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Viáticos{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Anticipos de viáticos</h1>
+</div>
+<p class="muted mt-0">El anticipo se confirma desde el detalle de un viaje. Para liquidarlo, entra al anticipo y compara el monto entregado contra los gastos registrados del viaje.</p>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Viaje</th><th>Ruta</th><th class="text-right">Entregado</th><th class="text-right">Gastado</th><th>Estado</th></tr></thead>
+    <tbody>
+      {% for a in advances %}
+      <tr onclick="window.location='{{ url_for('viaticos.detail', advance_id=a.id) }}'" style="cursor:pointer;">
+        <td><a href="{{ url_for('viaticos.detail', advance_id=a.id) }}">{{ a.trip_code }}</a></td>
+        <td>{{ a.origin }} → {{ a.destination }}</td>
+        <td class="text-right">{{ a.amount_given|money }}</td>
+        <td class="text-right">{{ a.spent|money }}</td>
+        <td>{{ m.badge(a.status) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="table-empty">No hay anticipos de viáticos registrados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

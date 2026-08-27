@@ -1,0 +1,31 @@
+import os
+from pathlib import Path
+
+BASE_DIR = Path(__file__).parent
+
+
+class Config:
+    SECRET_KEY = os.environ.get("SECRET_KEY", "cambia-esta-clave-en-produccion")
+    DATABASE_PATH = os.environ.get(
+        "DATABASE_PATH", str(BASE_DIR / "instance" / "erp.db")
+    )
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = "Lax"
+    # En producción detrás de HTTPS, activa esto en tu entorno:
+    SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "0") == "1"
+    COMPANY_NAME = os.environ.get("COMPANY_NAME", "Harraso Transport")
+
+    # Integración con Frotcom (GPS). Ver README, sección "Integración con
+    # Frotcom (GPS)" para cómo obtener estas credenciales.
+    FROTCOM_BASE_URL = os.environ.get("FROTCOM_BASE_URL", "")
+    FROTCOM_USERNAME = os.environ.get("FROTCOM_USERNAME", "")
+    FROTCOM_PASSWORD = os.environ.get("FROTCOM_PASSWORD", "")
+
+    # Facturación electrónica SUNAT vía un OSE (NubeFacT, Efact, etc.). Ver
+    # README, sección "Facturación electrónica (SUNAT)".
+    OSE_RUTA = os.environ.get("OSE_RUTA", "")
+    OSE_TOKEN = os.environ.get("OSE_TOKEN", "")
+    COMPANY_RUC = os.environ.get("COMPANY_RUC", "")
+    COMPANY_ADDRESS = os.environ.get("COMPANY_ADDRESS", "")
+    INVOICE_SERIES = os.environ.get("INVOICE_SERIES", "F001")
+    WAYBILL_SERIES = os.environ.get("WAYBILL_SERIES", "T001")

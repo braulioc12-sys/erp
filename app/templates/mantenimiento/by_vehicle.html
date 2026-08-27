@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+{% block title %}Historial y costos por unidad{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Historial y costos de mantenimiento por unidad</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('mantenimiento.list_view') }}" class="btn btn-secondary">← Volver a Mantenimiento</a>
+  </div>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Unidad</th><th class="text-right"># Mantenimientos</th><th class="text-right">Costo total</th><th>Último mantenimiento</th><th></th></tr></thead>
+    <tbody>
+      {% for s in summary %}
+      <tr>
+        <td>{{ s.plate }}</td>
+        <td class="text-right">{{ s.n_records }}</td>
+        <td class="text-right">{{ s.total_cost|money }}</td>
+        <td>{{ s.last_date or '—' }}</td>
+        <td><a href="{{ url_for('mantenimiento.list_view', vehicle_id=s.id) }}" class="btn btn-secondary btn-sm">Ver historial</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="table-empty">No hay unidades registradas.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

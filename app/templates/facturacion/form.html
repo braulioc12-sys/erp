@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+{% block title %}Generar factura{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Generar factura</h1></div>
+
+<div class="panel">
+  <form method="get" class="filters">
+    <label>Cliente
+      <select name="client_id" onchange="this.form.submit()">
+        <option value="">-- Selecciona un cliente --</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}" {{ 'selected' if selected_client == c.id }}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </form>
+</div>
+
+{% if selected_client %}
+<form class="panel" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="client_id" value="{{ selected_client }}">
+
+  <h2>Viajes entregados pendientes de facturar</h2>
+  {% if pending_trips %}
+  <div class="table-wrap" style="margin-bottom:16px;">
+    <table>
+      <thead><tr><th></th><th>Código</th><th>Fecha entrega</th><th>Ruta</th><th class="text-right">Tarifa</th></tr></thead>
+      <tbody>
+        {% for t in pending_trips %}
+        <tr>
+          <td><input type="checkbox" name="trip_ids" value="{{ t.id }}" checked style="width:auto;"></td>
+          <td>{{ t.code }}</td>
+          <td>{{ t.delivered_date }}</td>
+          <td>{{ t.origin }} → {{ t.destination }}</td>
+          <td class="text-right">{{ t.rate|money }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="form-row">
+    <label>Fecha de emisión
+      <input type="date" name="issue_date" value="{{ today }}">
+    </label>
+    <label>Fecha de vencimiento
+      <input type="date" name="due_date">
+    </label>
+  </div>
+  <label>Notas
+    <textarea name="notes"></textarea>
+  </label>
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Generar factura</button>
+    <a href="{{ url_for('facturacion.list_view') }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+  {% else %}
+  <p class="muted">Este cliente no tiene viajes entregados pendientes de facturar.</p>
+  {% endif %}
+</form>
+{% endif %}
+{% endblock %}

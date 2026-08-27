@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% block title %}Inspecciones{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Inspecciones de unidades</h1>
+  <div class="page-actions">
+    {% if can(current_user.role, 'inspecciones', 'edit') %}
+    <a href="{{ url_for('inspecciones.new') }}" class="btn btn-primary">+ Nueva inspección</a>
+    {% endif %}
+  </div>
+</div>
+<p class="muted mt-0">Los ítems del checklist se administran desde <a href="{{ url_for('catalogos.list_view', categoria='inspection_item') }}">Catálogos</a> (solo Administrador).</p>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Fecha</th><th>Tipo</th><th>Unidad</th><th>Viaje</th><th>Conductor</th><th>Fallas</th></tr></thead>
+    <tbody>
+      {% for i in inspections %}
+      <tr onclick="window.location='{{ url_for('inspecciones.detail', inspection_id=i.id) }}'" style="cursor:pointer;">
+        <td>{{ i.inspection_date }}</td>
+        <td>{{ 'Antes de salir' if i.type == 'PRE' else 'Al llegar' }}</td>
+        <td>{{ i.vehicle_plate }}</td>
+        <td>{% if i.trip_code %}<a href="{{ url_for('viajes.detail', trip_id=i.trip_id) }}">{{ i.trip_code }}</a>{% else %}—{% endif %}</td>
+        <td>{{ i.driver_name or '—' }}</td>
+        <td>{% if i.n_fails %}<span class="badge badge-error">{{ i.n_fails }} falla(s)</span>{% else %}<span class="badge badge-activo">OK</span>{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="table-empty">No hay inspecciones registradas.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

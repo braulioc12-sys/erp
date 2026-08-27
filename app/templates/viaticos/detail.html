@@ -1,0 +1,60 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Anticipo — Viaje {{ advance.trip_code }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Anticipo de viáticos — Viaje {{ advance.trip_code }} {{ m.badge(advance.status) }}</h1>
+  <div class="page-actions">
+    {% if advance.status == 'PENDIENTE' and can(current_user.role, 'gastos', 'edit') %}
+    <form method="post" action="{{ url_for('viaticos.liquidate', advance_id=advance.id) }}" onsubmit="return confirm('¿Liquidar este anticipo con los gastos registrados hasta ahora?');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-primary">Liquidar</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="detail-grid">
+  <div class="detail-item"><div class="label">Ruta</div><div class="value">{{ advance.origin }} → {{ advance.destination }}</div></div>
+  <div class="detail-item"><div class="label">Entregado</div><div class="value">{{ advance.amount_given|money }}</div></div>
+  <div class="detail-item"><div class="label">Fecha de entrega</div><div class="value">{{ advance.given_date }}</div></div>
+  <div class="detail-item"><div class="label">Gastado hasta ahora</div><div class="value">{{ spent|money }}</div></div>
+  <div class="detail-item">
+    <div class="label">{{ 'Saldo a favor' if difference >= 0 else 'Exceso sobre lo entregado' }}</div>
+    <div class="value" style="color:{{ 'var(--success)' if difference >= 0 else 'var(--danger)' }};">{{ (difference if difference >= 0 else -difference)|money }}</div>
+  </div>
+</div>
+
+{% if advance.status == 'LIQUIDADO' %}
+<div class="panel">
+  <h2>Liquidación</h2>
+  <p class="mt-0">Liquidado el {{ advance.liquidated_at }} con un total de gastos de {{ advance.liquidated_expenses_total|money }}.</p>
+</div>
+{% endif %}
+
+{% if advance.notes %}
+<div class="panel"><h2>Notas</h2><p class="mt-0">{{ advance.notes }}</p></div>
+{% endif %}
+
+<div class="panel">
+  <h2>Gastos registrados para este viaje</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Fecha</th><th>Tipo</th><th>Descripción</th><th class="text-right">Monto</th></tr></thead>
+      <tbody>
+        {% for e in expenses %}
+        <tr>
+          <td>{{ e.expense_date }}</td>
+          <td>{{ e.type|pretty }}</td>
+          <td class="wrap">{{ e.description or '—' }}</td>
+          <td class="text-right">{{ e.amount|money }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="table-empty">Aún no se han registrado gastos para este viaje.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p style="margin-top:12px;"><a href="{{ url_for('gastos.new', trip_id=advance.trip_id) }}" class="btn btn-secondary btn-sm">+ Registrar gasto para este viaje</a></p>
+</div>
+{% endblock %}

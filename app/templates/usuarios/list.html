@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+{% block title %}Usuarios{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Usuarios</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('usuarios.new') }}" class="btn btn-primary">+ Nuevo usuario</a>
+  </div>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th><th></th></tr></thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td>{{ u.name }}</td>
+        <td>{{ u.email }}</td>
+        <td>{{ u.role }}</td>
+        <td><span class="badge {{ 'badge-activo' if u.active else 'badge-inactivo' }}">{{ 'Activo' if u.active else 'Inactivo' }}</span></td>
+        <td><a class="btn btn-secondary btn-sm" href="{{ url_for('usuarios.edit', user_id=u.id) }}">Editar</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="table-empty">No hay usuarios registrados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

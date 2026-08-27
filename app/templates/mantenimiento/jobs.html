@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+{% block title %}Trabajos de mantenimiento{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Trabajos de mantenimiento y tiempos estimados</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('mantenimiento.list_view') }}" class="btn btn-secondary">← Volver a Mantenimiento</a>
+  </div>
+</div>
+<p class="muted mt-0">Estos trabajos aparecen como casillas al registrar un mantenimiento, para calcular el tiempo estimado de mano de obra. Agrega uno nuevo si no encuentras el que buscas.</p>
+
+<div class="panel" style="max-width:560px;">
+  {% if can(current_user.role, 'mantenimiento', 'edit') %}
+  <form method="post" action="{{ url_for('mantenimiento.jobs_add') }}" class="filters" style="margin-bottom:18px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label style="flex:2;">Nombre del trabajo
+      <input type="text" name="name" placeholder="Ej. Cambio de correa de distribución" required>
+    </label>
+    <label style="flex:1;">Tiempo estimado (min)
+      <input type="number" step="1" min="0" name="estimated_minutes" placeholder="Ej. 90" required>
+    </label>
+    <button type="submit" class="btn btn-primary">+ Agregar trabajo</button>
+  </form>
+  {% endif %}
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Trabajo</th><th>Tiempo estimado</th><th>Estado</th><th></th></tr></thead>
+      <tbody>
+        {% for j in jobs %}
+        <tr>
+          <td>{{ j.name }}</td>
+          <td>{{ j.estimated_minutes }} min</td>
+          <td><span class="badge {{ 'badge-activo' if j.active else 'badge-inactivo' }}">{{ 'Activo' if j.active else 'Inactivo' }}</span></td>
+          <td>
+            {% if can(current_user.role, 'mantenimiento', 'edit') %}
+            <form method="post" action="{{ url_for('mantenimiento.jobs_toggle', job_id=j.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-secondary btn-sm" type="submit">{{ 'Desactivar' if j.active else 'Reactivar' }}</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="table-empty">No hay trabajos registrados todavía.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted" style="margin-top:12px; margin-bottom:0;">Desactivar un trabajo lo quita de los formularios nuevos, pero no afecta los registros históricos que ya lo usan.</p>
+</div>
+{% endblock %}

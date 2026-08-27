@@ -1,0 +1,77 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Factura {{ invoice.number }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Factura {{ invoice.number }} {{ m.badge(invoice.status) }}</h1>
+  <div class="page-actions">
+    {% if invoice.status == 'PENDIENTE' %}
+    <form method="post" action="{{ url_for('facturacion.change_status', invoice_id=invoice.id) }}" style="display:inline;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="status" value="PAGADA">
+      <button type="submit" class="btn btn-primary">Marcar como pagada</button>
+    </form>
+    <form method="post" action="{{ url_for('facturacion.change_status', invoice_id=invoice.id) }}" style="display:inline;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="status" value="VENCIDA">
+      <button type="submit" class="btn btn-secondary">Marcar como vencida</button>
+    </form>
+    <form method="post" action="{{ url_for('facturacion.change_status', invoice_id=invoice.id) }}" style="display:inline;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="status" value="ANULADA">
+      <button type="submit" class="btn btn-danger">Anular</button>
+    </form>
+    {% endif %}
+    <form method="post" action="{{ url_for('facturacion.send_sunat', invoice_id=invoice.id) }}" style="display:inline;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-primary">📤 Enviar a SUNAT</button>
+    </form>
+  </div>
+</div>
+
+<div class="detail-grid">
+  <div class="detail-item"><div class="label">Cliente</div><div class="value">{{ invoice.client_name }}</div></div>
+  <div class="detail-item"><div class="label">RUC</div><div class="value">{{ invoice.client_ruc or '—' }}</div></div>
+  <div class="detail-item"><div class="label">Serie / número SUNAT</div><div class="value">{{ invoice.series }}-{{ '%06d'|format(invoice.series_number) }}</div></div>
+  <div class="detail-item"><div class="label">Fecha de emisión</div><div class="value">{{ invoice.issue_date }}</div></div>
+  <div class="detail-item"><div class="label">Vencimiento</div><div class="value">{{ invoice.due_date or '—' }}</div></div>
+  <div class="detail-item"><div class="label">Total</div><div class="value">{{ invoice.amount|money }}</div></div>
+</div>
+
+<div class="panel">
+  <h2>Estado ante SUNAT {{ m.badge(invoice.sunat_status) }}</h2>
+  {% if invoice.sunat_message %}<p class="mt-0 muted">{{ invoice.sunat_message }}</p>{% endif %}
+  {% if invoice.sunat_sent_at %}<p class="mt-0 muted">Último envío: {{ invoice.sunat_sent_at }}</p>{% endif %}
+  {% if invoice.sunat_pdf_url or invoice.sunat_xml_url or invoice.sunat_cdr_url %}
+  <p class="mt-0">
+    {% if invoice.sunat_pdf_url %}<a href="{{ invoice.sunat_pdf_url }}" target="_blank" rel="noopener">PDF</a>{% endif %}
+    {% if invoice.sunat_xml_url %}· <a href="{{ invoice.sunat_xml_url }}" target="_blank" rel="noopener">XML</a>{% endif %}
+    {% if invoice.sunat_cdr_url %}· <a href="{{ invoice.sunat_cdr_url }}" target="_blank" rel="noopener">CDR</a>{% endif %}
+  </p>
+  {% endif %}
+  {% if invoice.sunat_status == 'NO_ENVIADA' %}
+  <p class="mt-0 muted">Aún no se ha enviado a SUNAT. Revisa que la facturación electrónica esté configurada (ver README, sección "Facturación electrónica (SUNAT)") antes de enviar.</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>Viajes incluidos</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Viaje</th><th>Descripción</th><th class="text-right">Monto</th></tr></thead>
+      <tbody>
+        {% for it in items %}
+        <tr>
+          <td><a href="{{ url_for('viajes.detail', trip_id=it.trip_id) }}">{{ it.trip_code }}</a></td>
+          <td class="wrap">{{ it.description }}</td>
+          <td class="text-right">{{ it.amount|money }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% if invoice.notes %}
+<div class="panel"><h2>Notas</h2><p class="mt-0">{{ invoice.notes }}</p></div>
+{% endif %}
+{% endblock %}

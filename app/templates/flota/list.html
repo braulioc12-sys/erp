@@ -1,0 +1,84 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Flota y Conductores{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Flota y Conductores</h1>
+  <div class="page-actions">
+    {% if can(current_user.role, 'flota', 'edit') %}
+      {% if tab == 'conductores' %}
+      <a href="{{ url_for('flota.new_driver') }}" class="btn btn-primary">+ Nuevo conductor</a>
+      {% else %}
+      <a href="{{ url_for('flota.new_vehicle') }}" class="btn btn-primary">+ Nueva unidad</a>
+      {% endif %}
+    {% endif %}
+  </div>
+</div>
+
+<div class="btn-group" style="margin-bottom:16px;">
+  <a class="btn {{ 'btn-primary' if tab != 'conductores' else 'btn-secondary' }}" href="{{ url_for('flota.list_view', tab='vehiculos') }}">Vehículos ({{ vehicles|length }})</a>
+  <a class="btn {{ 'btn-primary' if tab == 'conductores' else 'btn-secondary' }}" href="{{ url_for('flota.list_view', tab='conductores') }}">Conductores ({{ drivers|length }})</a>
+</div>
+
+{% if tab == 'conductores' %}
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Nombre</th><th>Licencia</th><th>Vence</th><th>Teléfono</th><th>Estado</th><th></th></tr></thead>
+    <tbody>
+      {% for d in drivers %}
+      <tr>
+        <td>{{ d.name }}</td>
+        <td>{{ d.license_number or '—' }}</td>
+        <td>{{ d.license_expiry or '—' }}</td>
+        <td>{{ d.phone or '—' }}</td>
+        <td>{{ m.badge(d.status) }}</td>
+        <td>
+          {% if can(current_user.role, 'flota', 'edit') %}
+          <div class="btn-group">
+            <a class="btn btn-secondary btn-sm" href="{{ url_for('flota.edit_driver', driver_id=d.id) }}">Editar</a>
+            <form method="post" action="{{ url_for('flota.delete_driver', driver_id=d.id) }}" onsubmit="return confirm('¿Eliminar este conductor?');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-danger btn-sm" type="submit">Eliminar</button>
+            </form>
+          </div>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="table-empty">No hay conductores registrados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Placa</th><th>Marca / Modelo</th><th>Capacidad (kg)</th><th>Estado</th><th>Notas</th><th></th></tr></thead>
+    <tbody>
+      {% for v in vehicles %}
+      <tr>
+        <td>{{ v.plate }}</td>
+        <td>{{ v.brand or '' }} {{ v.model or '' }}</td>
+        <td>{{ v.capacity_kg or '—' }}</td>
+        <td>{{ m.badge(v.status) }}</td>
+        <td class="wrap">{{ v.notes or '—' }}</td>
+        <td>
+          {% if can(current_user.role, 'flota', 'edit') %}
+          <div class="btn-group">
+            <a class="btn btn-secondary btn-sm" href="{{ url_for('flota.edit_vehicle', vehicle_id=v.id) }}">Editar</a>
+            <form method="post" action="{{ url_for('flota.delete_vehicle', vehicle_id=v.id) }}" onsubmit="return confirm('¿Eliminar esta unidad?');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-danger btn-sm" type="submit">Eliminar</button>
+            </form>
+          </div>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="table-empty">No hay unidades registradas.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

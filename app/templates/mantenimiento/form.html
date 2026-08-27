@@ -1,0 +1,91 @@
+{% extends 'base.html' %}
+{% block title %}Registrar mantenimiento{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Registrar mantenimiento</h1></div>
+<form class="form panel" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <div class="form-row">
+    <label>Unidad *
+      <select name="vehicle_id" required>
+        <option value="">-- Selecciona una unidad --</option>
+        {% for v in vehicles %}
+        <option value="{{ v.id }}" {{ 'selected' if record and (record.vehicle_id|string) == (v.id|string) }}>{{ v.plate }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Concepto *
+      <select name="type" required>
+        <option value="">-- Selecciona un concepto --</option>
+        {% for c in concepts %}
+        <option value="{{ c.name }}" {{ 'selected' if record and record.type == c.name }}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+  <p class="muted" style="margin-top:-8px;">¿Falta un concepto? Agrégalo desde <a href="{{ url_for('catalogos.list_view', categoria='maintenance_type') }}">Catálogos</a>.</p>
+
+  <div class="form-row">
+    <label>Fecha *
+      <input type="date" name="maintenance_date" value="{{ record.maintenance_date if record else today }}" required>
+    </label>
+    <label>Costo (S/)
+      <input type="number" step="0.01" name="cost" value="{{ record.cost if record else '0' }}">
+    </label>
+  </div>
+
+  <label>Kilometraje de la unidad en este momento (opcional)
+    <input type="number" step="1" name="odometer_km" value="{{ record.odometer_km if record else '' }}" placeholder="Ej. 118500">
+  </label>
+  <p class="muted" style="margin-top:-8px;">Si lo indicas, actualiza automáticamente el kilometraje actual de la unidad (usado para las alertas de mantenimiento próximo).</p>
+
+  <label>Trabajos realizados (opcional, para estimar el tiempo de mano de obra)</label>
+  <div class="panel" style="background:var(--bg-soft, #f8f9fb); margin-top:-8px;">
+    {% for j in job_types %}
+    <label style="flex-direction:row; align-items:center; gap:8px; margin-bottom:4px;">
+      <input type="checkbox" name="job_type_ids" value="{{ j.id }}" class="job-check" data-minutes="{{ j.estimated_minutes }}" style="width:auto;">
+      {{ j.name }} <span class="muted">({{ j.estimated_minutes }} min)</span>
+    </label>
+    {% else %}
+    <p class="muted mt-0">Todavía no hay trabajos registrados.</p>
+    {% endfor %}
+    <p class="mt-0">Tiempo estimado total: <strong id="job-minutes-total">0</strong> min · <a href="{{ url_for('mantenimiento.jobs_list') }}" target="_blank">Registrar un trabajo nuevo</a></p>
+  </div>
+  <script>
+    (function () {
+      var checks = document.querySelectorAll('.job-check');
+      var total = document.getElementById('job-minutes-total');
+      function update() {
+        var sum = 0;
+        checks.forEach(function (c) { if (c.checked) sum += parseInt(c.dataset.minutes || '0', 10); });
+        total.textContent = sum;
+      }
+      checks.forEach(function (c) { c.addEventListener('change', update); });
+      update();
+    })();
+  </script>
+
+  <div class="form-row">
+    <label>Próximo mantenimiento (fecha)
+      <input type="date" name="next_due_date" value="{{ record.next_due_date if record else '' }}">
+    </label>
+    <label>Próximo mantenimiento (km)
+      <input type="number" step="1" name="next_due_km" value="{{ record.next_due_km if record else '' }}">
+    </label>
+  </div>
+
+  <label>Descripción
+    <textarea name="description">{{ record.description if record else '' }}</textarea>
+  </label>
+
+  <label style="flex-direction: row; align-items: center; gap: 8px;">
+    <input type="checkbox" name="mark_in_maintenance" value="1" style="width:auto;">
+    Marcar la unidad como "En mantenimiento" ahora
+  </label>
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Guardar</button>
+    <a href="{{ url_for('mantenimiento.list_view') }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+{% endblock %}

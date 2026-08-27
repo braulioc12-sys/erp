@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+{% block title %}Rutas y viáticos{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Rutas frecuentes y viáticos predeterminados</h1>
+</div>
+<p class="muted mt-0">Define aquí el monto estándar de viáticos para cada ruta. Al confirmar el anticipo de gastos de un viaje (desde el detalle del viaje), se sugiere automáticamente el monto de la ruta que coincida.</p>
+
+<div class="panel" style="max-width:640px;">
+  {% if can(current_user.role, 'rutas', 'edit') %}
+  <form method="post" action="{{ url_for('rutas.add') }}" class="filters" style="margin-bottom:18px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Origen
+      <input type="text" name="origin" placeholder="Ej. Lima" required>
+    </label>
+    <label>Destino
+      <input type="text" name="destination" placeholder="Ej. Trujillo" required>
+    </label>
+    <label>Viáticos (S/)
+      <input type="number" step="0.01" name="default_expense_amount" placeholder="Ej. 350" required>
+    </label>
+    <button type="submit" class="btn btn-primary">+ Guardar ruta</button>
+  </form>
+  {% endif %}
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Origen</th><th>Destino</th><th class="text-right">Viáticos</th><th>Estado</th><th></th></tr></thead>
+      <tbody>
+        {% for r in routes %}
+        <tr>
+          <td>{{ r.origin }}</td>
+          <td>{{ r.destination }}</td>
+          <td class="text-right">{{ r.default_expense_amount|money }}</td>
+          <td><span class="badge {{ 'badge-activo' if r.active else 'badge-inactivo' }}">{{ 'Activa' if r.active else 'Inactiva' }}</span></td>
+          <td>
+            {% if can(current_user.role, 'rutas', 'edit') %}
+            <form method="post" action="{{ url_for('rutas.toggle', route_id=r.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-secondary btn-sm" type="submit">{{ 'Desactivar' if r.active else 'Reactivar' }}</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="table-empty">No hay rutas registradas.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

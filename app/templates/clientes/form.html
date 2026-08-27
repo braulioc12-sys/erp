@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Editar cliente' if mode == 'edit' else 'Nuevo cliente' }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ 'Editar cliente' if mode == 'edit' else 'Nuevo cliente' }}</h1>
+</div>
+<form class="form panel" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label>Nombre / Razón social *
+    <input type="text" name="name" value="{{ client.name if client else '' }}" required>
+  </label>
+  <div class="form-row">
+    <label>RUC / DNI
+      <input type="text" name="ruc" value="{{ client.ruc if client else '' }}">
+    </label>
+    <label>Teléfono
+      <input type="text" name="phone" value="{{ client.phone if client else '' }}">
+    </label>
+  </div>
+  <label>Correo
+    <input type="email" name="email" value="{{ client.email if client else '' }}">
+  </label>
+  <label>Dirección
+    <textarea name="address">{{ client.address if client else '' }}</textarea>
+  </label>
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Guardar</button>
+    <a href="{{ url_for('clientes.list_view') }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+{% endblock %}

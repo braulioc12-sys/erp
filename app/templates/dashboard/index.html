@@ -1,0 +1,84 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Panel{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Panel general</h1>
+  <div class="muted">{{ today }}</div>
+</div>
+
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-label">Viajes activos</div>
+    <div class="stat-value">{{ active_trips }}</div>
+    <div class="stat-sub">Pendientes + en curso</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Ingresos del mes</div>
+    <div class="stat-value">{{ revenue_month|money }}</div>
+    <div class="stat-sub">Viajes entregados este mes</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Por cobrar</div>
+    <div class="stat-value">{{ pending_invoices.total|money }}</div>
+    <div class="stat-sub">{{ pending_invoices.n }} factura(s) pendiente(s)</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Vehículos en mantenimiento</div>
+    <div class="stat-value">{{ vehicles_maintenance }}</div>
+    <div class="stat-sub">de {{ total_vehicles }} unidades</div>
+  </div>
+</div>
+
+{% if license_alerts or maintenance_alerts or km_alerts or budget_alerts %}
+<div class="panel">
+  <h2>Alertas próximas</h2>
+  <div class="alert-list">
+    {% for a in license_alerts %}
+    <div class="alert-item"><span>Licencia de <strong>{{ a.name }}</strong> vence</span><span>{{ a.license_expiry }}</span></div>
+    {% endfor %}
+    {% for a in maintenance_alerts %}
+    <div class="alert-item"><span>Mantenimiento programado — unidad <strong>{{ a.plate }}</strong></span><span>{{ a.next_due_date }}</span></div>
+    {% endfor %}
+    {% for a in km_alerts %}
+    <div class="alert-item">
+      <span>Unidad <strong>{{ a.plate }}</strong> {{ 'ya superó' if a.overdue else 'se acerca a' }} su próximo mantenimiento por kilometraje</span>
+      <span>{{ '{:,.0f}'.format(a.current_km) }} / {{ '{:,.0f}'.format(a.next_due_km) }} km{% if not a.overdue %} (faltan {{ '{:,.0f}'.format(a.remaining_km) }} km){% endif %}</span>
+    </div>
+    {% endfor %}
+    {% for a in budget_alerts %}
+    <div class="alert-item">
+      <span>{{ a.label }} {{ 'superó' if a.over else 'se acerca a' }} su presupuesto mensual de gastos</span>
+      <span>{{ a.spent|money }} / {{ a.budget|money }} ({{ (a.ratio * 100)|round|int }}%)</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2>Últimos viajes</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Código</th><th>Cliente</th><th>Ruta</th><th>Unidad</th><th>Conductor</th><th>Estado</th><th>Tarifa</th></tr>
+      </thead>
+      <tbody>
+        {% for t in recent_trips %}
+        <tr>
+          <td><a href="{{ url_for('viajes.detail', trip_id=t.id) }}">{{ t.code }}</a></td>
+          <td>{{ t.client_name }}</td>
+          <td>{{ t.origin }} → {{ t.destination }}</td>
+          <td>{{ t.vehicle_plate or '—' }}</td>
+          <td>{{ t.driver_name or '—' }}</td>
+          <td>{{ m.badge(t.status) }}</td>
+          <td>{{ t.rate|money }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="table-empty">Aún no hay viajes registrados.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

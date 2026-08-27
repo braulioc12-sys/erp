@@ -1,0 +1,55 @@
+{% extends 'base.html' %}
+{% block title %}Mantenimiento{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Mantenimiento de flota{% if filtered_vehicle %} — {{ filtered_vehicle.plate }}{% endif %}</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('mantenimiento.by_vehicle') }}" class="btn btn-secondary">Historial y costos por unidad</a>
+    <a href="{{ url_for('mantenimiento.jobs_list') }}" class="btn btn-secondary">Trabajos y tiempos</a>
+    {% if can(current_user.role, 'catalogos', 'edit') %}
+    <a href="{{ url_for('catalogos.list_view', categoria='maintenance_type') }}" class="btn btn-secondary">Editar conceptos</a>
+    {% endif %}
+    {% if can(current_user.role, 'mantenimiento', 'edit') %}
+    <a href="{{ url_for('mantenimiento.new') }}" class="btn btn-primary">+ Registrar mantenimiento</a>
+    {% endif %}
+  </div>
+</div>
+{% if filtered_vehicle %}
+<p class="mt-0"><a href="{{ url_for('mantenimiento.list_view') }}">← Ver todas las unidades</a></p>
+{% endif %}
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Fecha</th><th>Unidad</th><th>Concepto</th><th>Trabajos</th><th>Costo</th><th>Odómetro</th><th>Próximo</th><th>Descripción</th><th></th></tr></thead>
+    <tbody>
+      {% for r in records %}
+      <tr>
+        <td>{{ r.maintenance_date }}</td>
+        <td>{{ r.vehicle_plate }}</td>
+        <td>{{ r.type }}</td>
+        <td class="wrap">
+          {% if jobs_by_record.get(r.id) %}
+            {{ jobs_by_record[r.id]|join(', ') }}
+            {% if r.estimated_minutes %}<br><span class="muted">{{ r.estimated_minutes }} min est.</span>{% endif %}
+          {% else %}—{% endif %}
+        </td>
+        <td>{{ r.cost|money }}</td>
+        <td>{{ '{:,.0f} km'.format(r.odometer_km) if r.odometer_km is not none else '—' }}</td>
+        <td>{{ r.next_due_date or '—' }}{% if r.next_due_km %} / {{ '{:,.0f}'.format(r.next_due_km) }} km{% endif %}</td>
+        <td class="wrap">{{ r.description or '—' }}</td>
+        <td>
+          {% if can(current_user.role, 'mantenimiento', 'edit') %}
+          <form method="post" action="{{ url_for('mantenimiento.delete', record_id=r.id) }}" onsubmit="return confirm('¿Eliminar este registro?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-danger btn-sm" type="submit">Eliminar</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="9" class="table-empty">No hay registros de mantenimiento.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

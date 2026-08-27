@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+{% block title %}Integración con Frotcom{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Ubicación de la flota (Frotcom)</h1>
+  <div class="page-actions">
+    <form method="post" action="{{ url_for('integraciones.sync_frotcom') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-primary">🔄 Sincronizar con Frotcom</button>
+    </form>
+  </div>
+</div>
+
+{% if not configured %}
+<div class="panel" style="border-color:#f0c36d;">
+  <h2>Frotcom todavía no está configurado</h2>
+  <p>Para activar esto, define estas variables de entorno con los datos que te dé el soporte de Frotcom al pedirles acceso a su "API V2":</p>
+  <p class="mt-0"><code>FROTCOM_BASE_URL</code>, <code>FROTCOM_USERNAME</code>, <code>FROTCOM_PASSWORD</code></p>
+  <p class="mt-0 muted">Ver la sección "Integración con Frotcom (GPS)" del README para más detalle — incluye una nota importante sobre qué revisar antes de usarlo en serio.</p>
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2>Mapeo unidad ↔ Frotcom</h2>
+  <p class="muted mt-0">Cada unidad necesita su "ID en el proveedor de GPS" (tal como aparece en Frotcom) para poder cruzar los datos. Se edita desde Flota → editar unidad.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Unidad</th><th>ID en Frotcom</th><th>Última posición</th><th>Velocidad</th><th>Última actualización</th><th>Km actual</th></tr></thead>
+      <tbody>
+        {% for v in vehicles %}
+        <tr>
+          <td>{{ v.plate }}</td>
+          <td>{{ v.gps_external_id or '— (falta configurar)' }}</td>
+          <td>{% if v.latitude and v.longitude %}{{ '%.5f'|format(v.latitude) }}, {{ '%.5f'|format(v.longitude) }}{% else %}—{% endif %}</td>
+          <td>{{ (v.speed_kmh ~ ' km/h') if v.speed_kmh is not none else '—' }}</td>
+          <td>{{ v.location_updated_at or '—' }}</td>
+          <td>{{ '{:,.0f} km'.format(v.current_km) if v.current_km is not none else '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="table-empty">No hay unidades registradas.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
