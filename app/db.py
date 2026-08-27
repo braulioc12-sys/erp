@@ -49,6 +49,16 @@ COLUMN_MIGRATIONS = [
     ("inspections", "odometer_km", "REAL"),
     ("inspection_items", "section", "TEXT"),
     ("inspection_items", "extra_value", "TEXT"),
+    ("expenses", "concept_id", "INTEGER REFERENCES expense_concepts(id)"),
+    ("expenses", "document_number", "TEXT"),
+    ("expenses", "due_date", "TEXT"),
+    ("expenses", "provider_ruc", "TEXT"),
+    ("expenses", "provider_name", "TEXT"),
+    ("expenses", "currency", "TEXT NOT NULL DEFAULT 'S'"),
+    ("expenses", "exchange_rate", "REAL"),
+    ("expenses", "expense_advance_id", "INTEGER REFERENCES expense_advances(id)"),
+    ("expense_advances", "office", "TEXT"),
+    ("expense_advances", "voucher_number", "INTEGER"),
 ]
 
 

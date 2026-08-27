@@ -4,6 +4,7 @@ Usa el mismo permiso que Gastos (módulo "gastos"): quien puede gestionar
 gastos, puede gestionar anticipos y liquidaciones."""
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 
+from app.accounting import office_choices
 from app.auth import permission_required, validate_csrf
 from app.db import execute, query_all, query_one
 from app.helpers import parse_date, parse_float, today_str
@@ -79,7 +80,23 @@ def detail(advance_id):
     )
     spent = sum(e["amount"] for e in expenses)
     difference = advance["amount_given"] - spent
-    return render_template("viaticos/detail.html", advance=advance, expenses=expenses, spent=spent, difference=difference)
+    offices = office_choices()
+    return render_template(
+        "viaticos/detail.html", advance=advance, expenses=expenses, spent=spent, difference=difference,
+        offices=offices, office_labels={code: info["label"] for code, info in offices},
+    )
+
+
+def _next_voucher_number(office, month):
+    """Correlativo de liquidación para esa oficina, reiniciando cada mes
+    (pedido explícito de Braulio: "el Num.Voucher... se reinicia cada mes
+    y empieza en 01")."""
+    row = query_one(
+        """SELECT COALESCE(MAX(voucher_number), 0) m FROM expense_advances
+           WHERE office = ? AND strftime('%Y-%m', liquidated_at) = ?""",
+        (office, month),
+    )
+    return (row["m"] or 0) + 1
 
 
 @bp.route("/<int:advance_id>/liquidar", methods=["POST"])
@@ -90,13 +107,30 @@ def liquidate(advance_id):
     advance = query_one("SELECT * FROM expense_advances WHERE id = ?", (advance_id,))
     if advance is None:
         abort(404)
+
+    office = request.form.get("office")
+    if office not in dict(office_choices()):
+        flash("Selecciona la oficina donde se hace la liquidación.", "error")
+        return redirect(url_for("viaticos.detail", advance_id=advance_id))
+
     spent = query_one(
         "SELECT COALESCE(SUM(amount), 0) total FROM expenses WHERE trip_id = ?", (advance["trip_id"],)
     )["total"]
+    month = today_str()[:7]
+    voucher_number = _next_voucher_number(office, month)
+
     execute(
         """UPDATE expense_advances SET status = 'LIQUIDADO', liquidated_at = datetime('now'),
-           liquidated_expenses_total = ? WHERE id = ?""",
-        (spent, advance_id),
+           liquidated_expenses_total = ?, office = ?, voucher_number = ? WHERE id = ?""",
+        (spent, office, voucher_number, advance_id),
+    )
+    # Deja fijados a esta liquidación todos los gastos del viaje que aún no
+    # estuvieran vinculados a ninguna otra — así el export de liquidación
+    # contable (Gastos → Liquidación) sabe exactamente qué gastos entraron
+    # en esta ronda, aunque se agreguen más gastos al viaje después.
+    execute(
+        "UPDATE expenses SET expense_advance_id = ? WHERE trip_id = ? AND expense_advance_id IS NULL",
+        (advance_id, advance["trip_id"]),
     )
     flash("Anticipo liquidado.", "success")
     return redirect(url_for("viaticos.detail", advance_id=advance_id))

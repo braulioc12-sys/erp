@@ -104,6 +104,23 @@ CREATE TABLE IF NOT EXISTS expenses (
     -- Nombre del archivo del comprobante adjunto (foto o PDF), guardado en
     -- instance/receipts/. NULL si no se adjuntó nada.
     receipt_filename TEXT,
+    -- Campos contables para el export de liquidación (ver
+    -- app/accounting.py y la sección "Gastos: liquidación contable
+    -- exportable" del README). concept_id determina la cuenta contable y
+    -- el tipo de comprobante/documento; los demás son datos propios del
+    -- comprobante de este gasto en particular. Todos NULL/con valor por
+    -- defecto para no romper gastos ya registrados antes de este cambio.
+    concept_id INTEGER REFERENCES expense_concepts(id),
+    document_number TEXT,
+    due_date TEXT,
+    provider_ruc TEXT,
+    provider_name TEXT,
+    currency TEXT NOT NULL DEFAULT 'S',
+    exchange_rate REAL,
+    -- A qué anticipo de viáticos quedó vinculado este gasto al momento de
+    -- liquidarlo (ver app/routes/viaticos.py `liquidate()`). NULL si el
+    -- gasto no forma parte de ninguna liquidación (todavía, o nunca).
+    expense_advance_id INTEGER REFERENCES expense_advances(id),
     created_by INTEGER REFERENCES users(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -260,9 +277,46 @@ CREATE TABLE IF NOT EXISTS expense_advances (
     status TEXT NOT NULL DEFAULT 'PENDIENTE' CHECK (status IN ('PENDIENTE', 'LIQUIDADO')),
     liquidated_at TEXT,
     liquidated_expenses_total REAL,
+    -- Oficina donde se hace la liquidación (ver app/accounting.py
+    -- OFFICES) y correlativo de liquidación de ese anticipo dentro de esa
+    -- oficina y ese mes (reinicia en 1 cada mes — ver `_next_voucher_number`
+    -- en app/routes/viaticos.py). Ambos se asignan recién al liquidar, no
+    -- al crear el anticipo.
+    office TEXT,
+    voucher_number INTEGER,
     notes TEXT,
     created_by INTEGER REFERENCES users(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Conceptos de gasto para el export contable de liquidación: cada uno
+-- amarra un nombre visible (glosa) a su cuenta contable, tipo de
+-- comprobante y código de documento SUNAT, según la plantilla real de
+-- liquidación de Harraso (ver app/accounting.py). Los conceptos con
+-- document_type_code = 'PL' (vale / por liquidar) son de uso interno del
+-- sistema, uno por oficina — no aparecen en el desplegable del formulario
+-- de gastos; se usan solo para generar la fila "Haber" del anticipo al
+-- exportar la liquidación.
+CREATE TABLE IF NOT EXISTS expense_concepts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    account_code TEXT NOT NULL,
+    voucher_type_label TEXT NOT NULL,
+    document_type_code TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Caché del tipo de cambio SUNAT por fecha (ver
+-- app/integrations/sunat_exchange_rate.py), para no consultar el servicio
+-- externo más de una vez por día y para que el dato quede disponible
+-- aunque el servicio esté caído más adelante.
+CREATE TABLE IF NOT EXISTS sunat_exchange_rates (
+    rate_date TEXT PRIMARY KEY,
+    buy_rate REAL,
+    sell_rate REAL,
+    fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- Catálogos editables por el administrador (conceptos de mantenimiento,

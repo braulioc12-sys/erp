@@ -5,10 +5,19 @@ import uuid
 from flask import Blueprint, Response, abort, current_app, flash, redirect, render_template, request, send_from_directory, url_for
 from PIL import Image, ImageOps
 
+from app.accounting import (
+    DEFAULT_CURRENCY,
+    DOCUMENT_TYPES,
+    VALE_DOCUMENT_TYPE,
+    office_choices,
+    office_info,
+    voucher_label,
+)
 from app.auth import permission_required, validate_csrf
 from app.db import execute, query_all, query_one
 from app.helpers import parse_date, parse_float, pretty_label, today_str
-from app.reports import build_expenses_workbook
+from app.integrations.sunat_exchange_rate import get_rate_for_date
+from app.reports import build_expenses_workbook, build_liquidacion_workbook
 from app.routes.catalogos import get_catalog
 
 bp = Blueprint("gastos", __name__, url_prefix="/gastos")
@@ -221,13 +230,56 @@ def export_excel():
     )
 
 
+def _expense_concepts(only_active=True, exclude_vale=False):
+    """Conceptos de gasto para el export de liquidación contable (ver
+    app/accounting.py). `exclude_vale=True` quita los conceptos de tipo
+    "PL" (vale/por liquidar, uno por oficina) — esos son de uso interno
+    del sistema y no deben aparecer en el desplegable del formulario de
+    gastos, solo se usan para armar la fila "Haber" al exportar."""
+    sql = "SELECT * FROM expense_concepts WHERE 1=1"
+    params = []
+    if only_active:
+        sql += " AND active = 1"
+    if exclude_vale:
+        sql += " AND document_type_code != ?"
+        params.append(VALE_DOCUMENT_TYPE)
+    sql += " ORDER BY sort_order, name"
+    return query_all(sql, params)
+
+
+def _fetch_exchange_rate(date_str):
+    """Intenta obtener el tipo de cambio SUNAT para una fecha; nunca
+    lanza — si falla, devuelve None y el campo queda para completar a
+    mano (ver app/integrations/sunat_exchange_rate.py)."""
+    try:
+        rate = get_rate_for_date(
+            date_str,
+            base_url=current_app.config.get("DECOLECTA_BASE_URL") or None,
+            token=current_app.config.get("DECOLECTA_TOKEN") or None,
+        )
+    except Exception:
+        return None
+    return rate["sell_rate"] if rate else None
+
+
+def _expense_form_context(expense=None, preselected_trip=None):
+    concepts = _expense_concepts(exclude_vale=True)
+    return {
+        "trips": query_all("SELECT id, code FROM trips WHERE status != 'CANCELADO' ORDER BY scheduled_date DESC"),
+        "vehicles": query_all("SELECT id, plate FROM vehicles ORDER BY plate"),
+        "types": [c["name"] for c in get_catalog("expense_type")],
+        "concepts": concepts,
+        "concepts_json": [dict(c) for c in concepts],
+        "expense": expense,
+        "preselected_trip": preselected_trip,
+        "today": today_str(),
+    }
+
+
 @bp.route("/nuevo", methods=["GET", "POST"])
 @permission_required("gastos", "edit")
 def new():
-    trips = query_all("SELECT id, code FROM trips WHERE status != 'CANCELADO' ORDER BY scheduled_date DESC")
-    vehicles = query_all("SELECT id, plate FROM vehicles ORDER BY plate")
-    types = [c["name"] for c in get_catalog("expense_type")]
-    preselected_trip = request.args.get("trip_id", type=int)
+    ctx = _expense_form_context(preselected_trip=request.args.get("trip_id", type=int))
 
     if request.method == "POST":
         if not validate_csrf():
@@ -237,9 +289,10 @@ def new():
         expense_type = request.form.get("type")
         trip_id = request.form.get("trip_id") or None
         vehicle_id = request.form.get("vehicle_id") or None
+        concept_id = request.form.get("concept_id") or None
 
         errors = []
-        if expense_type not in types:
+        if expense_type not in ctx["types"]:
             errors.append("Selecciona un tipo de gasto válido.")
         if amount <= 0:
             errors.append("El monto debe ser mayor a cero.")
@@ -249,26 +302,112 @@ def new():
         if errors:
             for e in errors:
                 flash(e, "error")
-            return render_template(
-                "gastos/form.html", expense=request.form, trips=trips, vehicles=vehicles, types=types,
-            )
+            return render_template("gastos/form.html", **{**ctx, "expense": request.form})
 
         receipt_filename = _save_receipt(_first_uploaded_file())
 
+        # El tipo de cambio se completa solo con el de SUNAT del día del
+        # comprobante (Braulio: "el de sunat del dia de emision"), salvo
+        # que el usuario haya escrito uno manualmente (por ejemplo porque
+        # el servicio no respondió) — ver plantilla del formulario.
+        manual_rate = request.form.get("exchange_rate", "").strip()
+        exchange_rate = parse_float(manual_rate, None) if manual_rate else _fetch_exchange_rate(expense_date)
+        if exchange_rate is None and not manual_rate:
+            flash(
+                "No se pudo obtener el tipo de cambio SUNAT automáticamente para esa fecha — "
+                "puedes completarlo a mano si lo necesitas para la liquidación.",
+                "info",
+            )
+
         execute(
-            """INSERT INTO expenses (trip_id, vehicle_id, type, amount, expense_date, description, receipt_filename, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (trip_id, vehicle_id, expense_type, amount, expense_date, request.form.get("description", "").strip(), receipt_filename, None),
+            """INSERT INTO expenses (trip_id, vehicle_id, type, amount, expense_date, description,
+               receipt_filename, concept_id, document_number, due_date, provider_ruc, provider_name,
+               currency, exchange_rate, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                trip_id, vehicle_id, expense_type, amount, expense_date,
+                request.form.get("description", "").strip(), receipt_filename, concept_id,
+                request.form.get("document_number", "").strip() or None,
+                expense_date,  # Fec.Ven = misma fecha de emisión (pedido explícito de Braulio)
+                request.form.get("provider_ruc", "").strip() or None,
+                request.form.get("provider_name", "").strip() or None,
+                request.form.get("currency", DEFAULT_CURRENCY) or DEFAULT_CURRENCY,
+                exchange_rate, None,
+            ),
         )
         flash("Gasto registrado.", "success")
         if trip_id:
             return redirect(url_for("viajes.detail", trip_id=trip_id))
         return redirect(url_for("gastos.list_view"))
 
-    return render_template(
-        "gastos/form.html", expense=None, trips=trips, vehicles=vehicles, types=types,
-        preselected_trip=preselected_trip, today=today_str(),
-    )
+    return render_template("gastos/form.html", **ctx)
+
+
+@bp.route("/<int:expense_id>/editar", methods=["GET", "POST"])
+@permission_required("gastos", "edit")
+def edit(expense_id):
+    expense = query_one("SELECT * FROM expenses WHERE id = ?", (expense_id,))
+    if expense is None:
+        abort(404)
+    ctx = _expense_form_context(expense=expense)
+
+    if request.method == "POST":
+        if not validate_csrf():
+            abort(400)
+        amount = parse_float(request.form.get("amount"))
+        expense_date = parse_date(request.form.get("expense_date")) or today_str()
+        expense_type = request.form.get("type")
+        trip_id = request.form.get("trip_id") or None
+        vehicle_id = request.form.get("vehicle_id") or None
+        concept_id = request.form.get("concept_id") or None
+
+        errors = []
+        if expense_type not in ctx["types"]:
+            errors.append("Selecciona un tipo de gasto válido.")
+        if amount <= 0:
+            errors.append("El monto debe ser mayor a cero.")
+        if not trip_id and not vehicle_id:
+            errors.append("Asocia el gasto a un viaje o a una unidad.")
+
+        if errors:
+            for e in errors:
+                flash(e, "error")
+            merged = dict(request.form)
+            merged["id"] = expense_id
+            return render_template("gastos/form.html", **{**ctx, "expense": merged})
+
+        new_receipt = _save_receipt(_first_uploaded_file())
+        receipt_filename = new_receipt or expense["receipt_filename"]
+
+        manual_rate = request.form.get("exchange_rate", "").strip()
+        if manual_rate:
+            exchange_rate = parse_float(manual_rate, None)
+        elif expense_date != expense["expense_date"] or expense["exchange_rate"] is None:
+            exchange_rate = _fetch_exchange_rate(expense_date)
+        else:
+            exchange_rate = expense["exchange_rate"]
+
+        execute(
+            """UPDATE expenses SET trip_id = ?, vehicle_id = ?, type = ?, amount = ?, expense_date = ?,
+               description = ?, receipt_filename = ?, concept_id = ?, document_number = ?, due_date = ?,
+               provider_ruc = ?, provider_name = ?, currency = ?, exchange_rate = ? WHERE id = ?""",
+            (
+                trip_id, vehicle_id, expense_type, amount, expense_date,
+                request.form.get("description", "").strip(), receipt_filename, concept_id,
+                request.form.get("document_number", "").strip() or None,
+                expense_date,
+                request.form.get("provider_ruc", "").strip() or None,
+                request.form.get("provider_name", "").strip() or None,
+                request.form.get("currency", DEFAULT_CURRENCY) or DEFAULT_CURRENCY,
+                exchange_rate, expense_id,
+            ),
+        )
+        flash("Gasto actualizado.", "success")
+        if trip_id:
+            return redirect(url_for("viajes.detail", trip_id=trip_id))
+        return redirect(url_for("gastos.list_view"))
+
+    return render_template("gastos/form.html", **ctx)
 
 
 @bp.route("/<int:expense_id>/eliminar", methods=["POST"])
@@ -345,3 +484,147 @@ def budgets_toggle(budget_id):
     execute("UPDATE expense_budgets SET active = ? WHERE id = ?", (0 if budget["active"] else 1, budget_id))
     flash("Actualizado." if budget["active"] else "Reactivado.", "success")
     return redirect(url_for("gastos.budgets_list"))
+
+
+# --- Conceptos de gasto (cuenta contable / tipo de comprobante para el
+# export de liquidación) — administrado solo por Administrador, igual que
+# Catálogos, porque define códigos contables. ---
+
+@bp.route("/conceptos")
+@permission_required("catalogos", "edit")
+def concepts_list():
+    concepts = query_all("SELECT * FROM expense_concepts ORDER BY sort_order, name")
+    return render_template(
+        "gastos/conceptos.html", concepts=concepts, document_types=DOCUMENT_TYPES, offices=office_choices(),
+    )
+
+
+@bp.route("/conceptos/agregar", methods=["POST"])
+@permission_required("catalogos", "edit")
+def concepts_add():
+    if not validate_csrf():
+        abort(400)
+    name = request.form.get("name", "").strip().upper()
+    account_code = request.form.get("account_code", "").strip()
+    voucher_type_label = request.form.get("voucher_type_label", "").strip()
+    document_type_code = request.form.get("document_type_code", "").strip()
+
+    if not name or not account_code or not voucher_type_label or not document_type_code:
+        flash("Completa nombre, cuenta contable, tipo de comprobante y tipo de documento.", "error")
+        return redirect(url_for("gastos.concepts_list"))
+
+    max_order = query_one("SELECT COALESCE(MAX(sort_order), -1) m FROM expense_concepts")["m"]
+    execute(
+        """INSERT INTO expense_concepts (name, account_code, voucher_type_label, document_type_code, sort_order)
+           VALUES (?, ?, ?, ?, ?)""",
+        (name, account_code, voucher_type_label, document_type_code, max_order + 1),
+    )
+    flash(f'Concepto "{name}" agregado.', "success")
+    return redirect(url_for("gastos.concepts_list"))
+
+
+@bp.route("/conceptos/<int:concept_id>/alternar", methods=["POST"])
+@permission_required("catalogos", "edit")
+def concepts_toggle(concept_id):
+    if not validate_csrf():
+        abort(400)
+    concept = query_one("SELECT * FROM expense_concepts WHERE id = ?", (concept_id,))
+    if concept is None:
+        abort(404)
+    execute("UPDATE expense_concepts SET active = ? WHERE id = ?", (0 if concept["active"] else 1, concept_id))
+    flash("Actualizado." if concept["active"] else "Reactivado.", "success")
+    return redirect(url_for("gastos.concepts_list"))
+
+
+# --- Liquidación contable exportable: junta cada anticipo de viáticos ya
+# liquidado con los gastos documentados que se le vincularon, en el
+# formato EXACTO de la "hoja resumen" de la plantilla real de Harraso
+# (ver app/accounting.py). Pensado para pegarse directo en su sistema
+# contable — por eso es un export aparte del reporte general de Gastos. ---
+
+def _liquidacion_rows(month, office_filter):
+    """Arma las filas Haber (vale) + Debe (gastos documentados) de cada
+    anticipo liquidado en el mes/oficina pedidos, en el formato de columnas
+    que espera build_liquidacion_workbook."""
+    sql = """SELECT a.*, t.code as trip_code, d.name as driver_name, d.document_number as driver_dni
+             FROM expense_advances a
+             JOIN trips t ON t.id = a.trip_id
+             LEFT JOIN drivers d ON d.id = t.driver_id
+             WHERE a.status = 'LIQUIDADO' AND strftime('%Y-%m', a.liquidated_at) = ?"""
+    params = [month]
+    if office_filter:
+        sql += " AND a.office = ?"
+        params.append(office_filter)
+    sql += " ORDER BY a.office, a.voucher_number"
+    advances = query_all(sql, params)
+
+    rows = []
+    for a in advances:
+        info = office_info(a["office"]) or {}
+        origen = info.get("origen_code", "")
+        num_voucher = voucher_label(a["voucher_number"])
+        fecha_liq = (a["liquidated_at"] or "")[:10]
+        tipo_cambio_vale = _fetch_exchange_rate(a["given_date"])
+
+        rows.append({
+            "origen": origen, "num_voucher": num_voucher, "fecha_liquidacion": fecha_liq,
+            "cuenta": info.get("cuenta_vale", ""), "monto_debe": None, "monto_haber": a["amount_given"],
+            "moneda": DEFAULT_CURRENCY, "tipo_cambio": tipo_cambio_vale, "doc": VALE_DOCUMENT_TYPE,
+            "num_doc": f"AV-{a['id']}", "fec_doc": a["given_date"], "fec_ven": a["given_date"],
+            "ruc_dni": a["driver_dni"], "glosa": "DOCUMENTO POR LIQUIDAR",
+            "ruc_dni2": a["driver_dni"], "razon_social": a["driver_name"],
+        })
+
+        expenses = query_all(
+            """SELECT e.*, c.name as concept_name, c.account_code, c.document_type_code
+               FROM expenses e LEFT JOIN expense_concepts c ON c.id = e.concept_id
+               WHERE e.expense_advance_id = ? ORDER BY e.expense_date""",
+            (a["id"],),
+        )
+        for e in expenses:
+            rows.append({
+                "origen": origen, "num_voucher": num_voucher, "fecha_liquidacion": fecha_liq,
+                "cuenta": e["account_code"] or "", "monto_debe": e["amount"], "monto_haber": None,
+                "moneda": e["currency"] or DEFAULT_CURRENCY, "tipo_cambio": e["exchange_rate"],
+                "doc": e["document_type_code"] or "", "num_doc": e["document_number"],
+                "fec_doc": e["expense_date"], "fec_ven": e["due_date"] or e["expense_date"],
+                "ruc_dni": e["provider_ruc"], "glosa": e["concept_name"] or pretty_label(e["type"]),
+                "ruc_dni2": e["provider_ruc"], "razon_social": e["provider_name"],
+            })
+    return rows, advances
+
+
+@bp.route("/liquidacion")
+@permission_required("gastos", "view")
+def liquidacion_view():
+    month = request.args.get("month") or today_str()[:7]
+    office = request.args.get("office", "")
+    rows, advances = _liquidacion_rows(month, office)
+    total_debe = sum(r["monto_debe"] or 0 for r in rows)
+    total_haber = sum(r["monto_haber"] or 0 for r in rows)
+    return render_template(
+        "gastos/liquidacion.html", rows=rows, advances=advances, month=month, office=office,
+        offices=office_choices(), total_debe=total_debe, total_haber=total_haber,
+    )
+
+
+@bp.route("/liquidacion/exportar")
+@permission_required("gastos", "view")
+def liquidacion_export():
+    month = request.args.get("month") or today_str()[:7]
+    office = request.args.get("office", "")
+    rows, _ = _liquidacion_rows(month, office)
+
+    parts = [f"Mes: {month}"]
+    parts.append(f"Oficina: {office_info(office)['label']}" if office else "Todas las oficinas")
+    filter_description = "  ·  ".join(parts)
+
+    buffer = build_liquidacion_workbook(
+        rows, company_name=current_app.config["COMPANY_NAME"], filter_description=filter_description,
+    )
+    filename = f"liquidacion_{month}.xlsx"
+    return Response(
+        buffer.getvalue(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

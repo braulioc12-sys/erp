@@ -251,3 +251,120 @@ def build_commissions_workbook(drivers, company_name, month):
     wb.save(buffer)
     buffer.seek(0)
     return buffer
+
+
+# Anchos aproximados para las 16 columnas de RESUMEN_COLUMNS (ver
+# app/accounting.py): Origen, Num.Voucher, Fecha Liq., Cuenta, Monto Debe,
+# Monto Haber, Moneda, T.Cambio, Doc, Num.Doc, Fec.Doc, Fec.Ven, RUC/DNI,
+# Glosa, RUC/DNI, R. Social.
+LIQUIDACION_COLUMN_WIDTHS = [9, 12, 16, 10, 13, 13, 10, 10, 7, 16, 12, 12, 14, 34, 14, 34]
+
+
+def build_liquidacion_workbook(rows, company_name, filter_description):
+    """Construye el workbook de "liquidación contable" en el formato EXACTO
+    de la hoja resumen de la plantilla real de Harraso: una sola tabla
+    plana con estas 16 columnas (mismos nombres, mismo orden — ver
+    RESUMEN_COLUMNS en app/accounting.py), sin agrupar por conductor ni por
+    tipo, tal como la usan para pegarla directo en su sistema contable.
+
+    `rows` es una lista de dicts ya armados por
+    app/routes/gastos.py::_liquidacion_rows(), con una fila "Haber" por
+    cada anticipo liquidado y una fila "Debe" por cada gasto documentado
+    vinculado a ese anticipo. Claves esperadas por fila: origen,
+    num_voucher, fecha_liquidacion, cuenta, monto_debe, monto_haber,
+    moneda, tipo_cambio, doc, num_doc, fec_doc, fec_ven, ruc_dni, glosa,
+    ruc_dni2, razon_social (cualquiera puede venir None/vacío)."""
+    from app.accounting import RESUMEN_COLUMNS
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "hoja resumen"
+
+    n_cols = len(RESUMEN_COLUMNS)
+    last_col_letter = get_column_letter(n_cols)
+
+    ws.merge_cells(f"A1:{last_col_letter}1")
+    ws["A1"] = f"{company_name} — Liquidación contable"
+    ws["A1"].font = Font(bold=True, size=14, color=COLOR_PRIMARY)
+
+    ws.merge_cells(f"A2:{last_col_letter}2")
+    generated = datetime.now().strftime("%d/%m/%Y %H:%M")
+    ws["A2"] = f"Generado el {generated}  ·  {filter_description}"
+    ws["A2"].font = Font(italic=True, size=10, color=COLOR_GRAY)
+
+    header_row = 4
+    for idx, title in enumerate(RESUMEN_COLUMNS, start=1):
+        cell = ws.cell(row=header_row, column=idx, value=title)
+        cell.font = Font(bold=True, color=COLOR_HEADER_TEXT)
+        cell.fill = PatternFill("solid", fgColor=COLOR_PRIMARY)
+        cell.alignment = Alignment(vertical="center")
+        cell.border = _thin_border("all")
+
+    ws.freeze_panes = f"A{header_row + 1}"
+
+    money_cols = {5, 6}  # Monto Debe, Monto Haber
+    rate_col = 8  # T.Cambio
+
+    row = header_row + 1
+    total_debe = 0.0
+    total_haber = 0.0
+    for r in rows:
+        values = [
+            r.get("origen") or "",
+            r.get("num_voucher") or "",
+            r.get("fecha_liquidacion") or "",
+            r.get("cuenta") or "",
+            r.get("monto_debe"),
+            r.get("monto_haber"),
+            r.get("moneda") or "",
+            r.get("tipo_cambio"),
+            r.get("doc") or "",
+            r.get("num_doc") or "",
+            r.get("fec_doc") or "",
+            r.get("fec_ven") or "",
+            r.get("ruc_dni") or "",
+            r.get("glosa") or "",
+            r.get("ruc_dni2") or "",
+            r.get("razon_social") or "",
+        ]
+        for col, value in enumerate(values, start=1):
+            cell = ws.cell(row=row, column=col, value=value)
+            if col in money_cols and value is not None:
+                cell.number_format = CURRENCY_FORMAT
+            elif col == rate_col and value is not None:
+                cell.number_format = "0.000"
+            cell.border = _thin_border("bottom")
+        total_debe += float(r.get("monto_debe") or 0)
+        total_haber += float(r.get("monto_haber") or 0)
+        row += 1
+
+    row += 1
+    total_label = ws.cell(row=row, column=1, value="TOTALES")
+    total_label.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
+    total_label.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
+    ws.merge_cells(f"A{row}:D{row}")
+    total_label.alignment = Alignment(horizontal="right", vertical="center")
+
+    total_debe_cell = ws.cell(row=row, column=5, value=total_debe)
+    total_debe_cell.number_format = CURRENCY_FORMAT
+    total_haber_cell = ws.cell(row=row, column=6, value=total_haber)
+    total_haber_cell.number_format = CURRENCY_FORMAT
+    for c in (total_debe_cell, total_haber_cell):
+        c.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
+        c.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
+        c.alignment = Alignment(horizontal="right", vertical="center")
+    for col in range(7, n_cols + 1):
+        ws.cell(row=row, column=col).fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
+
+    if not rows:
+        ws.cell(row=header_row + 1, column=1, value="No hay liquidaciones para los filtros seleccionados.").font = Font(italic=True, color=COLOR_GRAY)
+
+    for idx, width in enumerate(LIQUIDACION_COLUMN_WIDTHS, start=1):
+        ws.column_dimensions[get_column_letter(idx)].width = width
+
+    ws.sheet_view.showGridLines = False
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer

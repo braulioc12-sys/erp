@@ -1,0 +1,78 @@
+{% extends 'base.html' %}
+{% block title %}Liquidación contable{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Liquidación contable</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('gastos.liquidacion_export', month=month, office=office) }}" class="btn btn-primary">⬇ Exportar a Excel</a>
+    <a href="{{ url_for('gastos.list_view') }}" class="btn btn-secondary">← Volver a Gastos</a>
+  </div>
+</div>
+<p class="muted mt-0">Junta cada anticipo de viáticos ya liquidado con sus gastos documentados, en el mismo formato de la "hoja resumen" de la plantilla de liquidación de Harraso — listo para pegar directo en su sistema contable. Solo entran aquí los anticipos que ya se liquidaron desde <a href="{{ url_for('viaticos.list_view') }}">Viáticos</a>.</p>
+
+<form class="filters" method="get">
+  <label>Mes
+    <input type="month" name="month" value="{{ month }}">
+  </label>
+  <label>Oficina
+    <select name="office">
+      <option value="">Todas</option>
+      {% for code, info in offices %}
+      <option value="{{ code }}" {{ 'selected' if office == code }}>{{ info.label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button class="btn btn-secondary" type="submit">Filtrar</button>
+  <div class="muted" style="margin-left:auto;">Debe: <strong>{{ total_debe|money }}</strong> · Haber: <strong>{{ total_haber|money }}</strong></div>
+</form>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Origen</th><th>Voucher</th><th>Cuenta</th><th class="text-right">Debe</th><th class="text-right">Haber</th>
+        <th>Doc</th><th>N° Doc</th><th>Fec. Doc</th><th>RUC/DNI</th><th>Glosa</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr {{ 'style="background:var(--soft,#f3f5f8);"' if r.doc == 'PL' }}>
+        <td>{{ r.origen }}</td>
+        <td>{{ r.num_voucher }}</td>
+        <td>{{ r.cuenta }}</td>
+        <td class="text-right">{{ r.monto_debe|money if r.monto_debe is not none else '—' }}</td>
+        <td class="text-right">{{ r.monto_haber|money if r.monto_haber is not none else '—' }}</td>
+        <td>{{ r.doc }}</td>
+        <td>{{ r.num_doc or '—' }}</td>
+        <td>{{ r.fec_doc or '—' }}</td>
+        <td>{{ r.ruc_dni or '—' }}</td>
+        <td class="wrap">{{ r.glosa or '—' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="10" class="table-empty">No hay liquidaciones para los filtros seleccionados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if advances %}
+<div class="panel" style="margin-top:16px;">
+  <h2>Anticipos incluidos</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Voucher</th><th>Viaje</th><th>Conductor</th><th class="text-right">Entregado</th></tr></thead>
+      <tbody>
+        {% for a in advances %}
+        <tr>
+          <td>{{ '%02d'|format(a.voucher_number) if a.voucher_number else '—' }}</td>
+          <td><a href="{{ url_for('viaticos.detail', advance_id=a.id) }}">{{ a.trip_code }}</a></td>
+          <td>{{ a.driver_name or '—' }}</td>
+          <td class="text-right">{{ a.amount_given|money }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

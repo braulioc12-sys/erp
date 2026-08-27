@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
-{% block title %}Registrar gasto{% endblock %}
+{% block title %}{{ 'Editar gasto' if expense and expense.id else 'Registrar gasto' }}{% endblock %}
 {% block content %}
-<div class="page-header"><h1>Registrar gasto</h1></div>
+<div class="page-header"><h1>{{ 'Editar gasto' if expense and expense.id else 'Registrar gasto' }}</h1></div>
 <form class="form panel" method="post" enctype="multipart/form-data">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
@@ -45,6 +45,49 @@
     <textarea name="description">{{ expense.description if expense else '' }}</textarea>
   </label>
 
+  <h2 style="margin-top:20px;">Datos contables (para la liquidación)</h2>
+  <p class="muted" style="margin-top:-8px;">Al elegir un concepto se completan solas la cuenta contable y el tipo de comprobante — así se arma el export de <a href="{{ url_for('gastos.liquidacion_view') }}" target="_blank">Liquidación contable</a>. Si el concepto que necesitas no está en la lista, un Administrador puede agregarlo desde <a href="{{ url_for('gastos.concepts_list') }}" target="_blank">Gastos → Conceptos</a>.</p>
+
+  <div class="form-row">
+    <label>Concepto
+      <select name="concept_id" id="concept_id" onchange="onConceptChange()">
+        <option value="">-- Sin concepto --</option>
+        {% for c in concepts %}
+        <option value="{{ c.id }}" {{ 'selected' if expense and (expense.concept_id|string) == (c.id|string) }}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Cuenta / comprobante
+      <input type="text" id="concept_info" value="" readonly placeholder="Se completa al elegir un concepto" style="background:var(--bg-soft, #f3f5f8);">
+    </label>
+  </div>
+
+  <div class="form-row">
+    <label>N° de documento
+      <input type="text" name="document_number" value="{{ expense.document_number if expense else '' }}" placeholder="Ej. F001-1234">
+    </label>
+    <label>Moneda
+      <select name="currency">
+        <option value="S" {{ 'selected' if not expense or (expense.currency or 'S') == 'S' }}>Soles (S)</option>
+        <option value="D" {{ 'selected' if expense and expense.currency == 'D' }}>Dólares (D)</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="form-row">
+    <label>RUC / DNI del proveedor
+      <input type="text" name="provider_ruc" value="{{ expense.provider_ruc if expense else '' }}">
+    </label>
+    <label>Razón social / Nombre del proveedor
+      <input type="text" name="provider_name" value="{{ expense.provider_name if expense else '' }}">
+    </label>
+  </div>
+
+  <label>Tipo de cambio (opcional)
+    <input type="number" step="0.001" name="exchange_rate" value="{{ expense.exchange_rate if expense and expense.exchange_rate else '' }}" placeholder="Se completa solo con el de SUNAT del día del comprobante">
+  </label>
+  <p class="muted" style="margin-top:-8px;">Déjalo vacío para que el sistema use el tipo de cambio SUNAT de la fecha del gasto. Solo complétalo a mano si el servicio no respondió o quieres forzar un valor distinto. La fecha de vencimiento se registra igual a la fecha de emisión.</p>
+
   <label>Comprobante — tomar foto ahora (opcional)
     <input type="file" name="receipt" accept="image/*" capture="environment">
   </label>
@@ -53,10 +96,31 @@
   <label>Comprobante — o subir un archivo (foto o PDF, opcional)
     <input type="file" name="receipt" accept=".png,.jpg,.jpeg,.pdf,.webp">
   </label>
+  {% if expense and expense.receipt_filename %}
+  <p class="muted" style="margin-top:-8px;">Ya tiene un comprobante adjunto — sube uno nuevo solo si quieres reemplazarlo.</p>
+  {% endif %}
 
   <div class="btn-group">
     <button type="submit" class="btn btn-primary">Guardar</button>
     <a href="{{ url_for('gastos.list_view') }}" class="btn btn-secondary">Cancelar</a>
   </div>
 </form>
+
+<script>
+  var CONCEPTS = {{ (concepts_json or []) | tojson }};
+  function onConceptChange() {
+    var select = document.getElementById('concept_id');
+    var info = document.getElementById('concept_info');
+    var id = select.value;
+    if (!id) { info.value = ''; return; }
+    for (var i = 0; i < CONCEPTS.length; i++) {
+      if (String(CONCEPTS[i].id) === String(id)) {
+        info.value = 'Cuenta ' + CONCEPTS[i].account_code + ' · ' + CONCEPTS[i].voucher_type_label;
+        return;
+      }
+    }
+    info.value = '';
+  }
+  document.addEventListener('DOMContentLoaded', onConceptChange);
+</script>
 {% endblock %}

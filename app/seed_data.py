@@ -48,6 +48,36 @@ DEFAULT_CATALOGS = {
     ],
 }
 
+# Conceptos de gasto para el export de liquidación contable (ver
+# app/accounting.py), tomados tal cual de la hoja "Conceptos" de la
+# plantilla real de liquidación de Harraso: (nombre/glosa, cuenta
+# contable, tipo de comprobante, código de documento SUNAT). Los tres
+# conceptos "DOCUMENTO POR LIQUIDAR" son el vale/anticipo de cada oficina
+# (Doc "PL") — no aparecen en el formulario de gastos, son de referencia;
+# el que sí se usa al liquidar un anticipo es app.accounting.OFFICES.
+DEFAULT_EXPENSE_CONCEPTS = [
+    ("HOSPEDAJE", "6313", "boleta", "03"),
+    ("MANTENIMIENTO VEHICULO", "63433", "boleta", "03"),
+    ("DOCUMENTO POR LIQUIDAR", "14132", "vales pucallpa", "PL"),
+    ("PEAJE", "42121", "factura", "01"),
+    ("RECIBOS POR HONORARIO", "4241", "recibos por honorario", "02"),
+    ("CONSUMO ALIMENTOS", "6314", "boleta", "03"),
+    ("DOCUMENTO POR LIQUIDAR", "14131", "vales lima", "PL"),
+    ("AFLOJATODO", "42121", "factura", "01"),
+    ("ARREGLO CARGA", "42121", "factura", "01"),
+    ("LAVADO", "42121", "factura", "01"),
+    ("CONSUMO", "42121", "factura", "01"),
+    ("SILICONA", "42121", "factura", "01"),
+    ("ENGRASE", "42121", "factura", "01"),
+    ("COCHERA", "42121", "factura", "01"),
+    ("HIDROLINA", "63433", "boleta", "03"),
+    # AJUSTAR: cuenta 14133 y "vales tarapoto" no venían en la hoja
+    # Conceptos original (solo Lima/Pucallpa) — se agregó siguiendo el
+    # mismo patrón, para que Tarapoto también tenga su vale. Confirmar con
+    # Braulio si la cuenta real es otra.
+    ("DOCUMENTO POR LIQUIDAR", "14133", "vales tarapoto", "PL"),
+]
+
 # Trabajos de mantenimiento con tiempo estimado (minutos), por defecto.
 DEFAULT_JOB_TYPES = [
     ("Cambio de aceite", 60),
@@ -76,6 +106,18 @@ def _seed_catalogs():
     db.commit()
 
 
+def _seed_expense_concepts():
+    existing = query_one("SELECT COUNT(*) n FROM expense_concepts")["n"]
+    if existing > 0:
+        return
+    for order, (name, account_code, voucher_type_label, doc_code) in enumerate(DEFAULT_EXPENSE_CONCEPTS):
+        execute(
+            """INSERT INTO expense_concepts (name, account_code, voucher_type_label, document_type_code, sort_order)
+               VALUES (?, ?, ?, ?, ?)""",
+            (name, account_code, voucher_type_label, doc_code, order),
+        )
+
+
 def seed_demo_data(log=print):
     """Crea usuarios, catálogos y datos de ejemplo si todavía no existen. Es
     seguro llamarla varias veces: no duplica nada. Debe llamarse dentro de un
@@ -88,6 +130,9 @@ def seed_demo_data(log=print):
 
     log("Catálogos (tipos de gasto, conceptos de mantenimiento, trabajos, ítems de inspección)...")
     _seed_catalogs()
+
+    log("Conceptos de gasto para la liquidación contable...")
+    _seed_expense_concepts()
 
     log("Rutas frecuentes con viáticos y comisión de conductor predeterminados...")
     # (origen, destino, viáticos, comisión del conductor)
@@ -345,6 +390,37 @@ def seed_demo_data(log=print):
            VALUES (?, ?, 'NA', ?, ?, ?)""",
         (carreta_checklist_id, SPARE_TIRE_ITEM, "", TIRE_SECTION_KEY, "LL-033"),
     )
+
+    log("Anticipo de viáticos liquidado de ejemplo, con su liquidación contable...")
+    demo_trip = query_one("SELECT id, driver_id FROM trips WHERE code = 'V-0001'")
+    if demo_trip:
+        given_date = (today - timedelta(days=6)).strftime("%Y-%m-%d")
+        liquidated_date = (today - timedelta(days=5)).strftime("%Y-%m-%d")
+        advance_id = execute(
+            """INSERT INTO expense_advances (trip_id, amount_given, given_date, status, liquidated_at,
+               liquidated_expenses_total, office, voucher_number)
+               VALUES (?, ?, ?, 'LIQUIDADO', ?, ?, ?, ?)""",
+            (demo_trip["id"], 300.0, given_date, f"{liquidated_date} 09:00:00", 178.0, "PUCALLPA", 1),
+        )
+        peaje = query_one("SELECT id FROM expense_concepts WHERE name = 'PEAJE'")
+        consumo = query_one("SELECT id FROM expense_concepts WHERE name = 'CONSUMO ALIMENTOS'")
+        demo_expenses = [
+            # (concepto, tipo catálogo, monto, doc, ruc, proveedor, glosa/descripción)
+            (peaje, "PEAJE", 52.0, "FH02-599324", "20511004251", "CONCESIONARIA IIRSA NORTE S.A.", "Peaje ruta Lima-Trujillo"),
+            (consumo, "VIATICOS", 126.0, "0001-004202", "10414823080", "TOLENTINO SIMON REINA", "Consumo en ruta"),
+        ]
+        for concept, catalog_type, amount, doc_number, ruc, provider, description in demo_expenses:
+            execute(
+                """INSERT INTO expenses (trip_id, type, amount, expense_date, description, concept_id,
+                   document_number, due_date, provider_ruc, provider_name, currency, exchange_rate,
+                   expense_advance_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'S', ?, ?)""",
+                (
+                    demo_trip["id"], catalog_type, amount, given_date, description,
+                    concept["id"] if concept else None, doc_number, given_date, ruc, provider,
+                    3.750, advance_id,
+                ),
+            )
 
     log("Listo. Inicia sesión con:")
     log("  admin@erp.local / admin1234  (Administrador)")

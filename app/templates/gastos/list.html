@@ -5,9 +5,15 @@
   <h1>Gastos</h1>
   <div class="page-actions">
     <a href="{{ url_for('gastos.export_excel', type=type_filter, from_date=from_date, to_date=to_date) }}" class="btn btn-secondary">⬇ Exportar a Excel</a>
+    <a href="{{ url_for('gastos.liquidacion_view') }}" class="btn btn-secondary">Liquidación contable</a>
     {% if can(current_user.role, 'gastos', 'edit') %}
     <a href="{{ url_for('gastos.budgets_list') }}" class="btn btn-secondary">Presupuestos</a>
     <a href="{{ url_for('viaticos.list_view') }}" class="btn btn-secondary">Viáticos</a>
+    {% endif %}
+    {% if can(current_user.role, 'catalogos', 'edit') %}
+    <a href="{{ url_for('gastos.concepts_list') }}" class="btn btn-secondary">Conceptos</a>
+    {% endif %}
+    {% if can(current_user.role, 'gastos', 'edit') %}
     <a href="{{ url_for('gastos.new') }}" class="btn btn-primary">+ Registrar gasto</a>
     {% endif %}
   </div>
@@ -47,10 +53,13 @@
         <td class="text-right">{{ e.amount|money }}</td>
         <td>
           {% if can(current_user.role, 'gastos', 'edit') %}
-          <form method="post" action="{{ url_for('gastos.delete', expense_id=e.id) }}" onsubmit="return confirm('¿Eliminar este gasto?');">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button class="btn btn-danger btn-sm" type="submit">Eliminar</button>
-          </form>
+          <div style="display:flex; gap:6px;">
+            <a href="{{ url_for('gastos.edit', expense_id=e.id) }}" class="btn btn-secondary btn-sm">Editar</a>
+            <form method="post" action="{{ url_for('gastos.delete', expense_id=e.id) }}" onsubmit="return confirm('¿Eliminar este gasto?');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-danger btn-sm" type="submit">Eliminar</button>
+            </form>
+          </div>
           {% endif %}
         </td>
       </tr>

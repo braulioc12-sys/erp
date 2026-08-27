@@ -29,3 +29,9 @@ class Config:
     COMPANY_ADDRESS = os.environ.get("COMPANY_ADDRESS", "")
     INVOICE_SERIES = os.environ.get("INVOICE_SERIES", "F001")
     WAYBILL_SERIES = os.environ.get("WAYBILL_SERIES", "T001")
+
+    # Tipo de cambio SUNAT para el export de liquidación de Gastos. Ver
+    # README, sección "Gastos: liquidación contable exportable", y
+    # app/integrations/sunat_exchange_rate.py.
+    DECOLECTA_BASE_URL = os.environ.get("DECOLECTA_BASE_URL", "")
+    DECOLECTA_TOKEN = os.environ.get("DECOLECTA_TOKEN", "")
