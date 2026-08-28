@@ -35,6 +35,12 @@ def vehicle_document_alerts():
     return alerts
 
 
+def _vehicle_owners():
+    return query_all(
+        "SELECT * FROM catalog_items WHERE category = 'vehicle_owner' AND active = 1 ORDER BY sort_order, name"
+    )
+
+
 @bp.route("")
 @permission_required("flota", "view")
 def list_view():
@@ -53,15 +59,15 @@ def new_vehicle():
         plate = request.form.get("plate", "").strip().upper()
         if not plate:
             flash("La placa es obligatoria.", "error")
-            return render_template("flota/vehicle_form.html", vehicle=request.form, mode="new")
+            return render_template("flota/vehicle_form.html", vehicle=request.form, mode="new", owners=_vehicle_owners())
         existing = query_one("SELECT id FROM vehicles WHERE plate = ?", (plate,))
         if existing:
             flash("Ya existe una unidad con esa placa.", "error")
-            return render_template("flota/vehicle_form.html", vehicle=request.form, mode="new")
+            return render_template("flota/vehicle_form.html", vehicle=request.form, mode="new", owners=_vehicle_owners())
         execute(
             """INSERT INTO vehicles (plate, brand, model, capacity_kg, status, vehicle_type, notes,
-               soat_expiry, technical_review_expiry, current_km, current_km_updated_at, gps_external_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               soat_expiry, technical_review_expiry, current_km, current_km_updated_at, gps_external_id, owner)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 plate,
                 request.form.get("brand", "").strip(),
@@ -75,11 +81,12 @@ def new_vehicle():
                 parse_float(request.form.get("current_km"), None),
                 today_str() if request.form.get("current_km") else None,
                 request.form.get("gps_external_id", "").strip() or None,
+                request.form.get("owner", "").strip() or None,
             ),
         )
         flash("Unidad registrada.", "success")
         return redirect(url_for("flota.list_view"))
-    return render_template("flota/vehicle_form.html", vehicle=None, mode="new")
+    return render_template("flota/vehicle_form.html", vehicle=None, mode="new", owners=_vehicle_owners())
 
 
 @bp.route("/<int:vehicle_id>/editar", methods=["GET", "POST"])
@@ -96,7 +103,7 @@ def edit_vehicle(vehicle_id):
         execute(
             """UPDATE vehicles SET plate=?, brand=?, model=?, capacity_kg=?, status=?, vehicle_type=?, notes=?,
                soat_expiry=?, technical_review_expiry=?,
-               current_km=?, current_km_updated_at=?, gps_external_id=?
+               current_km=?, current_km_updated_at=?, gps_external_id=?, owner=?
                WHERE id=?""",
             (
                 request.form.get("plate", "").strip().upper(),
@@ -111,12 +118,15 @@ def edit_vehicle(vehicle_id):
                 new_km,
                 today_str() if km_changed else vehicle["current_km_updated_at"],
                 request.form.get("gps_external_id", "").strip() or None,
+                request.form.get("owner", "").strip() or None,
                 vehicle_id,
             ),
         )
         flash("Unidad actualizada.", "success")
         return redirect(url_for("flota.list_view"))
-    return render_template("flota/vehicle_form.html", vehicle=vehicle, mode="edit", vehicle_id=vehicle_id)
+    return render_template(
+        "flota/vehicle_form.html", vehicle=vehicle, mode="edit", vehicle_id=vehicle_id, owners=_vehicle_owners()
+    )
 
 
 @bp.route("/<int:vehicle_id>/eliminar", methods=["POST"])

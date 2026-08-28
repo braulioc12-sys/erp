@@ -43,6 +43,11 @@ CREATE TABLE IF NOT EXISTS vehicles (
     current_km REAL,
     current_km_updated_at TEXT,
     gps_external_id TEXT,
+    -- Propietario de la unidad (texto libre, tomado del catálogo
+    -- "vehicle_owner" en Catálogos — ver app/routes/catalogos.py). Copia el
+    -- nombre elegido, no un id, mismo patrón que otros campos que ya usan
+    -- catálogo en vez de texto libre en este proyecto.
+    owner TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -185,7 +190,10 @@ CREATE TABLE IF NOT EXISTS mechanics (
 -- detalle) y determina el costo de mano de obra sugerido para ese trabajo;
 -- es independiente de `mechanic_id`/`mechanic_name` (quién específicamente
 -- lo hace), aunque normalmente coinciden con el tipo registrado para esa
--- persona en el catálogo de Mecánicos.
+-- persona en el catálogo de Mecánicos. `mechanic_count` (pedido de
+-- Braulio, 28 ago — 3ª ronda) es cuántos mecánicos de ese tipo hacen falta
+-- para el trabajo — el costo sugerido de ese trabajo es
+-- minutos × costo_por_minuto_del_tipo × mechanic_count.
 CREATE TABLE IF NOT EXISTS maintenance_record_jobs (
     maintenance_record_id INTEGER NOT NULL REFERENCES maintenance_records(id),
     job_type_id INTEGER REFERENCES maintenance_job_types(id),
@@ -193,11 +201,44 @@ CREATE TABLE IF NOT EXISTS maintenance_record_jobs (
     estimated_minutes INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'PENDIENTE',
     mechanic_type TEXT,
+    mechanic_count INTEGER NOT NULL DEFAULT 1,
     mechanic_id INTEGER REFERENCES mechanics(id),
     mechanic_name TEXT,
     completed_at TEXT,
     PRIMARY KEY (maintenance_record_id, job_name)
 );
+
+-- Catálogo de materiales de taller, con su costo unitario de referencia
+-- (S/), para poder incluir el costo de materiales en una orden de
+-- mantenimiento además del costo de mano de obra (pedido de Braulio, 28
+-- ago — 3ª ronda). Se administra desde Mantenimiento → Materiales, mismo
+-- patrón que Trabajos y Mecánicos.
+CREATE TABLE IF NOT EXISTS maintenance_materials (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    unit_cost REAL NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Materiales usados en cada orden de mantenimiento (además de los
+-- trabajos). Se guarda una copia del nombre y costo unitario al momento de
+-- agregarlo (mismo motivo que job_name/estimated_minutes en
+-- maintenance_record_jobs: que el historial no cambie si luego se edita
+-- ese material en el catálogo). Usa un id propio (a diferencia de
+-- maintenance_record_jobs) porque no hay razón para impedir agregar el
+-- mismo material más de una vez a la misma orden.
+CREATE TABLE IF NOT EXISTS maintenance_record_materials (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    maintenance_record_id INTEGER NOT NULL REFERENCES maintenance_records(id),
+    material_id INTEGER REFERENCES maintenance_materials(id),
+    material_name TEXT NOT NULL,
+    unit_cost REAL NOT NULL DEFAULT 0,
+    quantity REAL NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_maintenance_record_materials_record ON maintenance_record_materials(maintenance_record_id);
 
 -- Neumáticos: una fila por cada llanta que ha pasado por una posición de
 -- una unidad (tracto, carreta o camión). No se guarda un "kilometraje

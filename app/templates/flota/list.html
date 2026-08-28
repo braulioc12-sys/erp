@@ -13,7 +13,7 @@
 
 <div class="table-wrap">
   <table>
-    <thead><tr><th>Placa</th><th>Marca / Modelo</th><th>Tipo</th><th>Capacidad (kg)</th><th>Estado</th><th>SOAT vence</th><th>Rev. técnica vence</th><th></th></tr></thead>
+    <thead><tr><th>Placa</th><th>Marca / Modelo</th><th>Tipo</th><th>Propietario</th><th>Capacidad (kg)</th><th>Estado</th><th>SOAT vence</th><th>Rev. técnica vence</th><th></th></tr></thead>
     <tbody>
       {% for v in vehicles %}
       <tr>
@@ -24,6 +24,7 @@
           {% elif v.vehicle_type == 'CARRETA' %}Carreta
           {% else %}Camión{% endif %}
         </td>
+        <td>{{ v.owner or '—' }}</td>
         <td>{{ v.capacity_kg or '—' }}</td>
         <td>{{ m.badge(v.status) }}</td>
         <td>{{ v.soat_expiry or '—' }}</td>
@@ -42,7 +43,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="8" class="table-empty">No hay unidades registradas.</td></tr>
+      <tr><td colspan="9" class="table-empty">No hay unidades registradas.</td></tr>
       {% endfor %}
     </tbody>
   </table>

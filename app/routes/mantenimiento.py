@@ -37,6 +37,55 @@ ORDER_STATUS_LABELS = {
 }
 
 
+def _mechanic_type_from_form(job_id):
+    mechanic_type = request.form.get(f"mechanic_type_{job_id}", "").strip()
+    return mechanic_type if mechanic_type in MECHANIC_TYPES else "Otros"
+
+
+def _mechanic_count_from_form(job_id):
+    count = parse_float(request.form.get(f"mechanic_count_{job_id}"), 1) or 1
+    return max(1, int(count))
+
+
+def _insert_selected_jobs(db, record_id, selected_jobs):
+    """Inserta filas nuevas en maintenance_record_jobs para los trabajos
+    marcados, leyendo el tipo y la cantidad de mecánicos de cada uno desde
+    el formulario (campos mechanic_type_<id> / mechanic_count_<id>).
+    INSERT OR IGNORE por si alguno ya estaba en la orden (evita un error de
+    llave primaria duplicada, ej. dos envíos del mismo formulario). Devuelve
+    la suma de minutos estimados efectivamente agregados."""
+    total_minutes = 0
+    for j in selected_jobs:
+        mechanic_type = _mechanic_type_from_form(j["id"])
+        mechanic_count = _mechanic_count_from_form(j["id"])
+        cur = db.execute(
+            """INSERT OR IGNORE INTO maintenance_record_jobs
+               (maintenance_record_id, job_type_id, job_name, estimated_minutes, mechanic_type, mechanic_count)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (record_id, j["id"], j["name"], j["estimated_minutes"], mechanic_type, mechanic_count),
+        )
+        if cur.rowcount:
+            total_minutes += j["estimated_minutes"]
+    return total_minutes
+
+
+def _insert_selected_materials(db, record_id, selected_materials):
+    """Inserta filas nuevas en maintenance_record_materials para los
+    materiales marcados, leyendo la cantidad de cada uno desde el
+    formulario (campo material_qty_<id>). Ignora los que quedaron con
+    cantidad 0 o vacía."""
+    for m in selected_materials:
+        qty = parse_float(request.form.get(f"material_qty_{m['id']}"), 0) or 0
+        if qty <= 0:
+            continue
+        db.execute(
+            """INSERT INTO maintenance_record_materials
+               (maintenance_record_id, material_id, material_name, unit_cost, quantity)
+               VALUES (?, ?, ?, ?, ?)""",
+            (record_id, m["id"], m["name"], m["unit_cost"], qty),
+        )
+
+
 @bp.route("")
 @permission_required("mantenimiento", "view")
 def list_view():
@@ -78,6 +127,7 @@ def list_view():
 def new():
     vehicles = query_all("SELECT id, plate, current_km FROM vehicles ORDER BY plate")
     job_types = get_catalog_jobs()
+    materials = get_catalog_materials()
     labor_costs = {t: get_setting(labor_cost_setting_key(t), "0") for t in MECHANIC_TYPES}
 
     if request.method == "POST":
@@ -87,6 +137,7 @@ def new():
         maintenance_date = parse_date(request.form.get("maintenance_date")) or today_str()
         odometer_km = parse_float(request.form.get("odometer_km"), None)
         job_ids = [int(j) for j in request.form.getlist("job_type_ids")]
+        material_ids = [int(m) for m in request.form.getlist("material_ids")]
 
         errors = []
         if not vehicle_id:
@@ -97,10 +148,12 @@ def new():
                 flash(e, "error")
             return render_template(
                 "mantenimiento/form.html", record=request.form, vehicles=vehicles,
-                job_types=job_types, labor_costs=labor_costs, mechanic_types=MECHANIC_TYPES,
+                job_types=job_types, materials=materials, labor_costs=labor_costs,
+                mechanic_types=MECHANIC_TYPES,
             )
 
         selected_jobs = [j for j in job_types if j["id"] in job_ids]
+        selected_materials = [m for m in materials if m["id"] in material_ids]
         estimated_minutes = sum(j["estimated_minutes"] for j in selected_jobs) or None
         # Ya no se pide un "Concepto" aparte (retirado el 28 ago — los
         # trabajos marcados son los que clasifican la orden). `type` sigue
@@ -126,18 +179,10 @@ def new():
             ),
         )
 
-        if selected_jobs:
+        if selected_jobs or selected_materials:
             db = get_db()
-            for j in selected_jobs:
-                mechanic_type = request.form.get(f"mechanic_type_{j['id']}", "").strip()
-                if mechanic_type not in MECHANIC_TYPES:
-                    mechanic_type = "Otros"
-                db.execute(
-                    """INSERT INTO maintenance_record_jobs
-                       (maintenance_record_id, job_type_id, job_name, estimated_minutes, mechanic_type)
-                       VALUES (?, ?, ?, ?, ?)""",
-                    (record_id, j["id"], j["name"], j["estimated_minutes"], mechanic_type),
-                )
+            _insert_selected_jobs(db, record_id, selected_jobs)
+            _insert_selected_materials(db, record_id, selected_materials)
             db.commit()
 
         # Si se indicó el kilometraje al momento del mantenimiento, lo usamos
@@ -157,7 +202,8 @@ def new():
 
     return render_template(
         "mantenimiento/form.html", record=None, vehicles=vehicles,
-        job_types=job_types, labor_costs=labor_costs, mechanic_types=MECHANIC_TYPES, today=today_str(),
+        job_types=job_types, materials=materials, labor_costs=labor_costs,
+        mechanic_types=MECHANIC_TYPES, today=today_str(),
     )
 
 
@@ -167,6 +213,7 @@ def delete(record_id):
     if not validate_csrf():
         abort(400)
     execute("DELETE FROM maintenance_record_jobs WHERE maintenance_record_id = ?", (record_id,))
+    execute("DELETE FROM maintenance_record_materials WHERE maintenance_record_id = ?", (record_id,))
     execute("DELETE FROM maintenance_records WHERE id = ?", (record_id,))
     flash("Registro de mantenimiento eliminado.", "success")
     return redirect(url_for("mantenimiento.list_view"))
@@ -188,12 +235,85 @@ def detail(record_id):
         "SELECT * FROM maintenance_record_jobs WHERE maintenance_record_id = ? ORDER BY job_name",
         (record_id,),
     )
-    mechanics = get_catalog_mechanics()
-    return render_template(
-        "mantenimiento/detail.html", record=record, jobs=jobs, mechanics=mechanics,
-        order_status=_order_status(jobs), order_status_labels=ORDER_STATUS_LABELS,
-        mechanic_types=MECHANIC_TYPES,
+    materials = query_all(
+        "SELECT * FROM maintenance_record_materials WHERE maintenance_record_id = ? ORDER BY id",
+        (record_id,),
     )
+    mechanics = get_catalog_mechanics()
+    used_job_names = {j["job_name"] for j in jobs}
+    available_job_types = [j for j in get_catalog_jobs() if j["name"] not in used_job_names]
+    available_materials = get_catalog_materials()
+    labor_costs = {t: get_setting(labor_cost_setting_key(t), "0") for t in MECHANIC_TYPES}
+    materials_total = sum((mtl["unit_cost"] or 0) * (mtl["quantity"] or 0) for mtl in materials)
+    return render_template(
+        "mantenimiento/detail.html", record=record, jobs=jobs, materials=materials, mechanics=mechanics,
+        order_status=_order_status(jobs), order_status_labels=ORDER_STATUS_LABELS,
+        mechanic_types=MECHANIC_TYPES, available_job_types=available_job_types,
+        available_materials=available_materials, labor_costs=labor_costs, materials_total=materials_total,
+    )
+
+
+@bp.route("/<int:record_id>/agregar", methods=["POST"])
+@permission_required("mantenimiento", "edit")
+def add_more(record_id):
+    """Agrega trabajos y/o materiales adicionales a una orden ya creada —
+    para lo que se descubre sobre la marcha durante el mantenimiento
+    (pedido de Braulio, 28 ago — 4ª ronda). Suma el costo indicado y los
+    minutos de los trabajos nuevos al total ya guardado de la orden (no
+    reemplaza lo que ya había)."""
+    if not validate_csrf():
+        abort(400)
+    record = query_one("SELECT * FROM maintenance_records WHERE id = ?", (record_id,))
+    if record is None:
+        abort(404)
+
+    job_types = get_catalog_jobs()
+    job_ids = [int(j) for j in request.form.getlist("job_type_ids")]
+    selected_jobs = [j for j in job_types if j["id"] in job_ids]
+
+    materials_catalog = get_catalog_materials()
+    material_ids = [int(m) for m in request.form.getlist("material_ids")]
+    selected_materials = [m for m in materials_catalog if m["id"] in material_ids]
+
+    if not selected_jobs and not selected_materials:
+        flash("Selecciona al menos un trabajo o material para agregar.", "error")
+        return redirect(url_for("mantenimiento.detail", record_id=record_id))
+
+    db = get_db()
+    added_minutes = _insert_selected_jobs(db, record_id, selected_jobs)
+    _insert_selected_materials(db, record_id, selected_materials)
+
+    added_cost = parse_float(request.form.get("added_cost"), 0) or 0
+    db.execute(
+        "UPDATE maintenance_records SET cost = ?, estimated_minutes = ? WHERE id = ?",
+        ((record["cost"] or 0) + added_cost, (record["estimated_minutes"] or 0) + added_minutes, record_id),
+    )
+    db.commit()
+    flash("Se agregaron trabajos/materiales a la orden.", "success")
+    return redirect(url_for("mantenimiento.detail", record_id=record_id))
+
+
+@bp.route("/<int:record_id>/trabajos/cantidad-mecanicos", methods=["POST"])
+@permission_required("mantenimiento", "edit")
+def job_set_mechanic_count(record_id):
+    if not validate_csrf():
+        abort(400)
+    job_name = request.form.get("job_name", "")
+    count = parse_float(request.form.get("mechanic_count"), 1) or 1
+    count = max(1, int(count))
+    job = query_one(
+        "SELECT * FROM maintenance_record_jobs WHERE maintenance_record_id = ? AND job_name = ?",
+        (record_id, job_name),
+    )
+    if job is None:
+        abort(404)
+    execute(
+        """UPDATE maintenance_record_jobs SET mechanic_count = ?
+           WHERE maintenance_record_id = ? AND job_name = ?""",
+        (count, record_id, job_name),
+    )
+    flash(f'Cantidad de mecánicos de "{job_name}" actualizada a {count}.', "success")
+    return redirect(url_for("mantenimiento.detail", record_id=record_id))
 
 
 @bp.route("/<int:record_id>/trabajos/estado", methods=["POST"])
@@ -449,6 +569,70 @@ def mechanics_toggle(mechanic_id):
     execute("UPDATE mechanics SET active = ? WHERE id = ?", (0 if mechanic["active"] else 1, mechanic_id))
     flash("Actualizado." if mechanic["active"] else "Reactivado.", "success")
     return redirect(url_for("mantenimiento.mechanics_list"))
+
+
+# --- Materiales (catálogo con costo unitario, para el costo de materiales de una orden) ---
+
+def get_catalog_materials(only_active=True):
+    sql = "SELECT * FROM maintenance_materials WHERE 1=1"
+    if only_active:
+        sql += " AND active = 1"
+    sql += " ORDER BY sort_order, name"
+    return query_all(sql)
+
+
+@bp.route("/materiales")
+@permission_required("mantenimiento", "view")
+def materials_list():
+    materials = query_all("SELECT * FROM maintenance_materials ORDER BY sort_order, name")
+    return render_template("mantenimiento/materials.html", materials=materials)
+
+
+@bp.route("/materiales/agregar", methods=["POST"])
+@permission_required("mantenimiento", "edit")
+def materials_add():
+    if not validate_csrf():
+        abort(400)
+    name = request.form.get("name", "").strip()
+    unit_cost = parse_float(request.form.get("unit_cost"), 0)
+    if not name:
+        flash("Escribe el nombre del material.", "error")
+        return redirect(url_for("mantenimiento.materials_list"))
+
+    existing = query_one("SELECT id, active FROM maintenance_materials WHERE name = ?", (name,))
+    if existing:
+        if existing["active"]:
+            flash("Ese material ya existe.", "error")
+        else:
+            execute(
+                "UPDATE maintenance_materials SET active = 1, unit_cost = ? WHERE id = ?",
+                (unit_cost, existing["id"]),
+            )
+            flash(f'"{name}" reactivado.', "success")
+    else:
+        max_order = query_one("SELECT COALESCE(MAX(sort_order), -1) m FROM maintenance_materials")["m"]
+        execute(
+            "INSERT INTO maintenance_materials (name, unit_cost, sort_order) VALUES (?, ?, ?)",
+            (name, unit_cost, max_order + 1),
+        )
+        flash(f'"{name}" agregado.', "success")
+    return redirect(url_for("mantenimiento.materials_list"))
+
+
+@bp.route("/materiales/<int:material_id>/alternar", methods=["POST"])
+@permission_required("mantenimiento", "edit")
+def materials_toggle(material_id):
+    if not validate_csrf():
+        abort(400)
+    material = query_one("SELECT * FROM maintenance_materials WHERE id = ?", (material_id,))
+    if material is None:
+        abort(404)
+    execute(
+        "UPDATE maintenance_materials SET active = ? WHERE id = ?",
+        (0 if material["active"] else 1, material_id),
+    )
+    flash("Actualizado." if material["active"] else "Reactivado.", "success")
+    return redirect(url_for("mantenimiento.materials_list"))
 
 
 # --- Historial y costos por unidad ---

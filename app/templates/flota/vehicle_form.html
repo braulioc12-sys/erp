@@ -40,6 +40,20 @@
   </div>
   <p class="muted" style="margin-top:-8px;">El tipo de unidad determina el diagrama de posiciones que se usa en Mantenimiento → Neumáticos.</p>
 
+  <label>Propietario
+    <select name="owner">
+      <option value="">-- Sin especificar --</option>
+      {% set current_owner = vehicle.owner if vehicle else '' %}
+      {% if current_owner and current_owner not in owners|map(attribute='name')|list %}
+      <option value="{{ current_owner }}" selected>{{ current_owner }} (no está en el catálogo)</option>
+      {% endif %}
+      {% for o in owners %}
+      <option value="{{ o.name }}" {{ 'selected' if current_owner == o.name }}>{{ o.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <p class="muted" style="margin-top:-8px;">Los propietarios disponibles se administran en <a href="{{ url_for('catalogos.list_view', categoria='vehicle_owner') }}" target="_blank">Catálogos → Propietarios de unidades</a>.</p>
+
   <div class="section-title">Documentos obligatorios</div>
   <div class="form-row">
     <label>Vencimiento de SOAT

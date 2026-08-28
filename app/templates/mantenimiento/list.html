@@ -8,6 +8,7 @@
     <a href="{{ url_for('mantenimiento.by_vehicle') }}" class="btn btn-secondary">Historial y costos por unidad</a>
     <a href="{{ url_for('mantenimiento.jobs_list') }}" class="btn btn-secondary">Trabajos y tiempos</a>
     <a href="{{ url_for('mantenimiento.mechanics_list') }}" class="btn btn-secondary">Mecánicos</a>
+    <a href="{{ url_for('mantenimiento.materials_list') }}" class="btn btn-secondary">Materiales</a>
     {% if can(current_user.role, 'mantenimiento', 'edit') %}
     <a href="{{ url_for('mantenimiento.new') }}" class="btn btn-primary">+ Registrar mantenimiento</a>
     {% endif %}

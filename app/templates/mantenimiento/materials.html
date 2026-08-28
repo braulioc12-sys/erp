@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+{% block title %}Materiales{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Materiales</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('mantenimiento.list_view') }}" class="btn btn-secondary">← Volver a Mantenimiento</a>
+  </div>
+</div>
+<p class="muted mt-0">Estos materiales aparecen para agregar a una orden de mantenimiento (al crearla o después, desde su detalle), con el costo unitario que se usa para calcular el costo de materiales de la orden.</p>
+
+<div class="panel" style="max-width:560px;">
+  {% if can(current_user.role, 'mantenimiento', 'edit') %}
+  <form method="post" action="{{ url_for('mantenimiento.materials_add') }}" class="filters" style="margin-bottom:18px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label style="flex:1;">Nombre del material
+      <input type="text" name="name" placeholder="Ej. Filtro de aceite" required>
+    </label>
+    <label>Costo unitario (S/)
+      <input type="number" step="0.01" min="0" name="unit_cost" value="0" required style="max-width:110px;">
+    </label>
+    <button type="submit" class="btn btn-primary">+ Agregar material</button>
+  </form>
+  {% endif %}
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Material</th><th>Costo unitario</th><th>Estado</th><th></th></tr></thead>
+      <tbody>
+        {% for mtl in materials %}
+        <tr>
+          <td>{{ mtl.name }}</td>
+          <td>{{ mtl.unit_cost|money }}</td>
+          <td><span class="badge {{ 'badge-activo' if mtl.active else 'badge-inactivo' }}">{{ 'Activo' if mtl.active else 'Inactivo' }}</span></td>
+          <td>
+            {% if can(current_user.role, 'mantenimiento', 'edit') %}
+            <form method="post" action="{{ url_for('mantenimiento.materials_toggle', material_id=mtl.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-secondary btn-sm" type="submit">{{ 'Desactivar' if mtl.active else 'Reactivar' }}</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="table-empty">No hay materiales registrados todavía.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted" style="margin-top:12px; margin-bottom:0;">Desactivar un material lo quita de los formularios nuevos, pero no afecta las órdenes que ya lo usaron — cada orden guarda su propia copia del nombre y costo unitario al momento de agregarlo.</p>
+</div>
+{% endblock %}

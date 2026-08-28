@@ -44,6 +44,14 @@ DEFAULT_CATALOGS = {
         "Espejos y limpiaparabrisas",
         "Documentos del vehículo (SOAT, tarjeta de propiedad)",
     ],
+    # Propietarios de las unidades de la flota (pedido de Braulio, 28 ago):
+    # lista de ejemplo — AJUSTAR con los propietarios reales de Harraso
+    # (empresa propia, socios, unidades de terceros afiliadas, etc.) desde
+    # Catálogos → Propietarios de unidades.
+    "vehicle_owner": [
+        "Harraso Transport",
+        "Tercero afiliado",
+    ],
 }
 
 # Conceptos de gasto para el export de liquidación contable (ver
@@ -146,6 +154,21 @@ DEFAULT_LABOR_COST_PER_MINUTE = {
     "Otros": "2.50",
 }
 
+# Materiales de taller, con costo unitario de referencia (S/) — catálogo
+# nuevo (pedido de Braulio, 28 ago — 3ª ronda): cada orden de
+# mantenimiento puede incluir materiales usados además de los trabajos,
+# para que el costo total de la orden sume mano de obra + materiales.
+# Valores de ejemplo, no del taller real — AJUSTAR: Braulio debe cargar su
+# propio inventario de materiales con los costos reales.
+DEFAULT_MATERIALS = [
+    ("Filtro de aceite", 35.00),
+    ("Aceite de motor (galón)", 68.00),
+    ("Pastillas de freno (juego)", 180.00),
+    ("Filtro de aire", 45.00),
+    ("Grasa industrial (kg)", 22.00),
+    ("Filtro de combustible", 40.00),
+]
+
 
 def _seed_catalogs():
     db = get_db()
@@ -169,6 +192,11 @@ def _seed_catalogs():
         db.execute(
             "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)",
             (labor_cost_setting_key(mechanic_type), cost),
+        )
+    for order, (name, unit_cost) in enumerate(DEFAULT_MATERIALS):
+        db.execute(
+            "INSERT OR IGNORE INTO maintenance_materials (name, unit_cost, sort_order) VALUES (?, ?, ?)",
+            (name, unit_cost, order),
         )
     db.commit()
 
@@ -234,23 +262,23 @@ def seed_demo_data(log=print):
         return (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d")
 
     # (placa, marca, modelo, capacidad_kg, estado, tipo_unidad, kilometraje_actual,
-    #  vencimiento_soat, vencimiento_revision_tecnica)
+    #  vencimiento_soat, vencimiento_revision_tecnica, propietario)
     vehicles = [
         # SOAT por vencer pronto, para ver la alerta funcionando en la demo.
-        ("ABC-123", "Volvo", "FH 460", 28000, "ACTIVO", "TRACTO", 118500, _d(15), _d(200)),
+        ("ABC-123", "Volvo", "FH 460", 28000, "ACTIVO", "TRACTO", 118500, _d(15), _d(200), "Harraso Transport"),
         # Revisión técnica ya vencida, para ver esa alerta también.
-        ("XYZ-789", "Scania", "R450", 25000, "ACTIVO", "TRACTO", 76200, _d(200), _d(-5)),
-        ("DEF-456", "Mercedes-Benz", "Actros", 30000, "MANTENIMIENTO", "TRACTO", 142300, _d(180), _d(180)),
+        ("XYZ-789", "Scania", "R450", 25000, "ACTIVO", "TRACTO", 76200, _d(200), _d(-5), "Harraso Transport"),
+        ("DEF-456", "Mercedes-Benz", "Actros", 30000, "MANTENIMIENTO", "TRACTO", 142300, _d(180), _d(180), "Tercero afiliado"),
         # Carreta (semirremolque) de ejemplo, para mostrar el diagrama de
         # neumáticos de 3 ejes en la demo.
-        ("TRL-321", "Randon", "Semirremolque 3 ejes", 32000, "ACTIVO", "CARRETA", 95000, _d(10), _d(200)),
+        ("TRL-321", "Randon", "Semirremolque 3 ejes", 32000, "ACTIVO", "CARRETA", 95000, _d(10), _d(200), "Harraso Transport"),
     ]
     vehicle_ids = [
         execute(
             """INSERT INTO vehicles (plate, brand, model, capacity_kg, status, vehicle_type, current_km,
-               current_km_updated_at, soat_expiry, technical_review_expiry)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (*v[:7], datetime.now().strftime("%Y-%m-%d"), v[7], v[8]),
+               current_km_updated_at, soat_expiry, technical_review_expiry, owner)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (*v[:7], datetime.now().strftime("%Y-%m-%d"), v[7], v[8], v[9]),
         )
         for v in vehicles
     ]
@@ -377,6 +405,23 @@ def seed_demo_data(log=print):
             "Practicante", mechanic_ids.get("Carlos Torres"), "Carlos Torres", f"{oil_date} 11:00",
         ),
     )
+    # Materiales de ejemplo en la orden de frenos, para que la demo muestre
+    # de una vez el costo de materiales dentro de una orden.
+    material_ids = {row["name"]: row["id"] for row in query_all("SELECT id, name FROM maintenance_materials")}
+    if material_ids.get("Pastillas de freno (juego)"):
+        execute(
+            """INSERT INTO maintenance_record_materials
+               (maintenance_record_id, material_id, material_name, unit_cost, quantity)
+               VALUES (?, ?, ?, ?, ?)""",
+            (brakes_record_id, material_ids["Pastillas de freno (juego)"], "Pastillas de freno (juego)", 180.00, 1),
+        )
+    if material_ids.get("Aceite de motor (galón)"):
+        execute(
+            """INSERT INTO maintenance_record_materials
+               (maintenance_record_id, material_id, material_name, unit_cost, quantity)
+               VALUES (?, ?, ?, ?, ?)""",
+            (oil_record_id, material_ids["Aceite de motor (galón)"], "Aceite de motor (galón)", 68.00, 2),
+        )
     # Neumáticos de ejemplo: unidad ABC-123 (tracto, 10 posiciones) con casi
     # todas sus llantas registradas y con distintos niveles de desgaste
     # (para ver las tres alertas de color en la demo), y la carreta TRL-321

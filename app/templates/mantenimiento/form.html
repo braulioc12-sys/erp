@@ -24,7 +24,7 @@
       <input type="number" step="0.01" name="cost" id="cost-input" value="{{ record.cost if record else '0' }}">
     </label>
   </div>
-  <p class="muted" style="margin-top:-8px;">Se calcula solo según los trabajos que marques abajo y el tipo de mecánico que elijas para cada uno (cada tipo tiene su propio costo por minuto, configurable en Catálogos) — puedes ajustarlo a mano si hace falta sumar repuestos u otros gastos.</p>
+  <p class="muted" style="margin-top:-8px;">Se calcula solo según los trabajos y materiales que marques abajo (trabajos: tipo y cantidad de mecánicos × su costo por minuto; materiales: cantidad × su costo unitario, configurables en Catálogos y en Mantenimiento → Materiales) — puedes ajustarlo a mano si hace falta.</p>
 
   <label>Kilometraje de la unidad en este momento (opcional)
     <input type="number" step="1" name="odometer_km" value="{{ record.odometer_km if record else '' }}" placeholder="Ej. 118500">
@@ -42,21 +42,43 @@
         <option value="{{ t }}">{{ t }}</option>
         {% endfor %}
       </select>
+      <input type="number" name="mechanic_count_{{ j.id }}" class="job-mechanic-count" data-job-id="{{ j.id }}" min="1" step="1" value="1" style="width:64px;" title="Cantidad de mecánicos">
     </label>
     {% else %}
     <p class="muted mt-0">Todavía no hay trabajos registrados.</p>
     {% endfor %}
     <p class="mt-0">Tiempo estimado total: <strong id="job-minutes-total">0</strong> min · <a href="{{ url_for('mantenimiento.jobs_list') }}" target="_blank">Registrar un trabajo nuevo</a></p>
   </div>
+
+  <label>Materiales usados (opcional)</label>
+  <div class="panel" style="background:var(--bg-soft, #f8f9fb); margin-top:-8px;">
+    {% for mtl in materials %}
+    <label style="flex-direction:row; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
+      <input type="checkbox" name="material_ids" value="{{ mtl.id }}" class="material-check" data-unit-cost="{{ mtl.unit_cost }}" data-material-id="{{ mtl.id }}" style="width:auto;">
+      {{ mtl.name }} <span class="muted">({{ mtl.unit_cost|money }} c/u)</span>
+      <input type="number" name="material_qty_{{ mtl.id }}" class="material-qty" data-material-id="{{ mtl.id }}" min="0" step="0.01" value="1" style="width:80px; margin-left:auto;" title="Cantidad">
+    </label>
+    {% else %}
+    <p class="muted mt-0">Todavía no hay materiales registrados.</p>
+    {% endfor %}
+    <p class="mt-0"><a href="{{ url_for('mantenimiento.materials_list') }}" target="_blank">Registrar un material nuevo</a></p>
+  </div>
   <script>
     (function () {
       var checks = document.querySelectorAll('.job-check');
+      var matChecks = document.querySelectorAll('.material-check');
       var total = document.getElementById('job-minutes-total');
       var costInput = document.getElementById('cost-input');
       var laborCosts = {{ labor_costs|tojson }};
       var lastSuggestedCost = null;
       function typeSelectFor(jobId) {
         return document.querySelector('.job-mechanic-type[data-job-id="' + jobId + '"]');
+      }
+      function countInputFor(jobId) {
+        return document.querySelector('.job-mechanic-count[data-job-id="' + jobId + '"]');
+      }
+      function qtyInputFor(matId) {
+        return document.querySelector('.material-qty[data-material-id="' + matId + '"]');
       }
       function update() {
         var sum = 0;
@@ -67,7 +89,16 @@
           sum += minutes;
           var sel = typeSelectFor(c.dataset.jobId);
           var rate = parseFloat((sel && laborCosts[sel.value]) || '0');
-          suggested += minutes * rate;
+          var countInput = countInputFor(c.dataset.jobId);
+          var count = parseInt((countInput && countInput.value) || '1', 10) || 1;
+          suggested += minutes * rate * count;
+        });
+        matChecks.forEach(function (c) {
+          if (!c.checked) return;
+          var unitCost = parseFloat(c.dataset.unitCost || '0');
+          var qtyInput = qtyInputFor(c.dataset.materialId);
+          var qty = parseFloat((qtyInput && qtyInput.value) || '0') || 0;
+          suggested += unitCost * qty;
         });
         total.textContent = sum;
         suggested = Math.round(suggested * 100) / 100;
@@ -82,6 +113,9 @@
       }
       checks.forEach(function (c) { c.addEventListener('change', update); });
       document.querySelectorAll('.job-mechanic-type').forEach(function (s) { s.addEventListener('change', update); });
+      document.querySelectorAll('.job-mechanic-count').forEach(function (s) { s.addEventListener('input', update); });
+      matChecks.forEach(function (c) { c.addEventListener('change', update); });
+      document.querySelectorAll('.material-qty').forEach(function (s) { s.addEventListener('input', update); });
       update();
     })();
   </script>

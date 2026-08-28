@@ -65,6 +65,8 @@ COLUMN_MIGRATIONS = [
     ("maintenance_record_jobs", "completed_at", "TEXT"),
     ("maintenance_record_jobs", "mechanic_type", "TEXT"),
     ("mechanics", "mechanic_type", "TEXT NOT NULL DEFAULT 'Otros'"),
+    ("maintenance_record_jobs", "mechanic_count", "INTEGER NOT NULL DEFAULT 1"),
+    ("vehicles", "owner", "TEXT"),
 ]
 
 

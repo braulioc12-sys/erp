@@ -14,7 +14,8 @@
     <div><span class="muted">Unidad</span><br>{{ record.vehicle_plate }}</div>
     <div><span class="muted">Fecha</span><br>{{ record.maintenance_date }}</div>
     <div><span class="muted">Estado de la orden</span><br>{{ m.badge(order_status) }}</div>
-    <div><span class="muted">Costo</span><br>{{ record.cost|money }}</div>
+    <div><span class="muted">Costo total</span><br>{{ record.cost|money }}</div>
+    <div><span class="muted">Costo de materiales (incluido en el total)</span><br>{{ materials_total|money }}</div>
     <div><span class="muted">Odómetro</span><br>{{ '{:,.0f} km'.format(record.odometer_km) if record.odometer_km is not none else '—' }}</div>
     <div><span class="muted">Próximo mantenimiento</span><br>{{ record.next_due_date or '—' }}{% if record.next_due_km %} / {{ '{:,.0f}'.format(record.next_due_km) }} km{% endif %}</div>
     <div><span class="muted">Tiempo estimado total</span><br>{{ (record.estimated_minutes ~ ' min') if record.estimated_minutes else '—' }}</div>
@@ -31,7 +32,7 @@
   {% else %}
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Trabajo</th><th>Tiempo estimado</th><th>Estado</th><th>Tipo de mecánico</th><th>Mecánico asignado</th>{% if can(current_user.role, 'mantenimiento', 'edit') %}<th></th>{% endif %}</tr></thead>
+      <thead><tr><th>Trabajo</th><th>Tiempo estimado</th><th>Estado</th><th>Tipo de mecánico</th><th>Cantidad</th><th>Mecánico asignado</th>{% if can(current_user.role, 'mantenimiento', 'edit') %}<th></th>{% endif %}</tr></thead>
       <tbody>
         {% for j in jobs %}
         <tr>
@@ -55,6 +56,17 @@
             </form>
             {% else %}
             {{ j.mechanic_type or '—' }}
+            {% endif %}
+          </td>
+          <td>
+            {% if can(current_user.role, 'mantenimiento', 'edit') %}
+            <form method="post" action="{{ url_for('mantenimiento.job_set_mechanic_count', record_id=record.id) }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="job_name" value="{{ j.job_name }}">
+              <input type="number" name="mechanic_count" min="1" step="1" value="{{ j.mechanic_count }}" style="width:60px;" onchange="this.form.submit()">
+            </form>
+            {% else %}
+            {{ j.mechanic_count }}
             {% endif %}
           </td>
           <td>{{ j.mechanic_name or '—' }}</td>
@@ -90,4 +102,121 @@
   {% endif %}
   {% endif %}
 </div>
+
+<div class="panel">
+  <h2>Materiales de esta orden</h2>
+  {% if not materials %}
+  <p class="muted">Todavía no se agregaron materiales a esta orden.</p>
+  {% else %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Material</th><th>Cantidad</th><th>Costo unitario</th><th>Subtotal</th></tr></thead>
+      <tbody>
+        {% for mtl in materials %}
+        <tr>
+          <td>{{ mtl.material_name }}</td>
+          <td>{{ mtl.quantity }}</td>
+          <td>{{ mtl.unit_cost|money }}</td>
+          <td>{{ (mtl.unit_cost * mtl.quantity)|money }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="mt-0" style="margin-top:10px;"><strong>Total de materiales: {{ materials_total|money }}</strong></p>
+  {% endif %}
+</div>
+
+{% if can(current_user.role, 'mantenimiento', 'edit') and (available_job_types or available_materials) %}
+<div class="panel">
+  <h2>+ Agregar trabajos o materiales a esta orden</h2>
+  <p class="muted mt-0">Para lo que aparece sobre la marcha durante el mantenimiento — se suma al costo y al tiempo estimado total de la orden, sin quitar lo que ya había.</p>
+  <form method="post" action="{{ url_for('mantenimiento.add_more', record_id=record.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% if available_job_types %}
+    <label>Trabajos</label>
+    <div class="panel" style="background:var(--bg-soft, #f8f9fb); margin-top:-8px;">
+      {% for j in available_job_types %}
+      <label style="flex-direction:row; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
+        <input type="checkbox" name="job_type_ids" value="{{ j.id }}" class="add-job-check" data-minutes="{{ j.estimated_minutes }}" data-job-id="{{ j.id }}" style="width:auto;">
+        {{ j.name }} <span class="muted">({{ j.estimated_minutes }} min)</span>
+        <select name="mechanic_type_{{ j.id }}" class="add-job-mechanic-type" data-job-id="{{ j.id }}" style="margin-left:auto;">
+          {% for t in mechanic_types %}
+          <option value="{{ t }}">{{ t }}</option>
+          {% endfor %}
+        </select>
+        <input type="number" name="mechanic_count_{{ j.id }}" class="add-job-mechanic-count" data-job-id="{{ j.id }}" min="1" step="1" value="1" style="width:64px;" title="Cantidad de mecánicos">
+      </label>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if available_materials %}
+    <label>Materiales</label>
+    <div class="panel" style="background:var(--bg-soft, #f8f9fb); margin-top:-8px;">
+      {% for mtl in available_materials %}
+      <label style="flex-direction:row; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
+        <input type="checkbox" name="material_ids" value="{{ mtl.id }}" class="add-material-check" data-unit-cost="{{ mtl.unit_cost }}" data-material-id="{{ mtl.id }}" style="width:auto;">
+        {{ mtl.name }} <span class="muted">({{ mtl.unit_cost|money }} c/u)</span>
+        <input type="number" name="material_qty_{{ mtl.id }}" class="add-material-qty" data-material-id="{{ mtl.id }}" min="0" step="0.01" value="1" style="width:80px; margin-left:auto;" title="Cantidad">
+      </label>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <label>Costo a agregar (S/)
+      <input type="number" step="0.01" name="added_cost" id="added-cost-input" value="0">
+    </label>
+    <p class="muted" style="margin-top:-8px;">Se calcula solo según lo que marques arriba — puedes ajustarlo a mano.</p>
+    <button type="submit" class="btn btn-primary">+ Agregar a la orden</button>
+  </form>
+</div>
+<script>
+  (function () {
+    var checks = document.querySelectorAll('.add-job-check');
+    var matChecks = document.querySelectorAll('.add-material-check');
+    var costInput = document.getElementById('added-cost-input');
+    var laborCosts = {{ labor_costs|tojson }};
+    var lastSuggestedCost = 0;
+    function typeSelectFor(jobId) {
+      return document.querySelector('.add-job-mechanic-type[data-job-id="' + jobId + '"]');
+    }
+    function countInputFor(jobId) {
+      return document.querySelector('.add-job-mechanic-count[data-job-id="' + jobId + '"]');
+    }
+    function qtyInputFor(matId) {
+      return document.querySelector('.add-material-qty[data-material-id="' + matId + '"]');
+    }
+    function update() {
+      var suggested = 0;
+      checks.forEach(function (c) {
+        if (!c.checked) return;
+        var minutes = parseInt(c.dataset.minutes || '0', 10);
+        var sel = typeSelectFor(c.dataset.jobId);
+        var rate = parseFloat((sel && laborCosts[sel.value]) || '0');
+        var countInput = countInputFor(c.dataset.jobId);
+        var count = parseInt((countInput && countInput.value) || '1', 10) || 1;
+        suggested += minutes * rate * count;
+      });
+      matChecks.forEach(function (c) {
+        if (!c.checked) return;
+        var unitCost = parseFloat(c.dataset.unitCost || '0');
+        var qtyInput = qtyInputFor(c.dataset.materialId);
+        var qty = parseFloat((qtyInput && qtyInput.value) || '0') || 0;
+        suggested += unitCost * qty;
+      });
+      suggested = Math.round(suggested * 100) / 100;
+      var current = parseFloat(costInput.value || '0');
+      if (!costInput.value || current === lastSuggestedCost) {
+        costInput.value = suggested;
+        lastSuggestedCost = suggested;
+      }
+    }
+    checks.forEach(function (c) { c.addEventListener('change', update); });
+    document.querySelectorAll('.add-job-mechanic-type').forEach(function (s) { s.addEventListener('change', update); });
+    document.querySelectorAll('.add-job-mechanic-count').forEach(function (s) { s.addEventListener('input', update); });
+    matChecks.forEach(function (c) { c.addEventListener('change', update); });
+    document.querySelectorAll('.add-material-qty').forEach(function (s) { s.addEventListener('input', update); });
+    update();
+  })();
+</script>
+{% endif %}
 {% endblock %}
