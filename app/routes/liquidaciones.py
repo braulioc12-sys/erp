@@ -348,18 +348,37 @@ def _fetch_exchange_rate(date_str):
 
 def _expense_form_context(expense=None, preselected_trip=None):
     concepts = _expense_concepts(exclude_vale=True)
+    # El viaje ya trae su propia unidad asignada (trips.vehicle_id, elegida
+    # al crear el viaje) — se manda al formulario para que la Unidad se
+    # auto-complete sola en vez de volver a preguntarla (pedido de Braulio,
+    # 28 ago: "si el viaje ya tiene unidad, ¿para qué la vuelve a pedir?").
+    trips = query_all(
+        "SELECT id, code, vehicle_id FROM trips WHERE status != 'CANCELADO' ORDER BY scheduled_date DESC"
+    )
     preselected_trip_code = None
+    preselected_vehicle_id = None
+    preselected_vehicle_plate = None
     if preselected_trip:
-        t = query_one("SELECT code FROM trips WHERE id = ?", (preselected_trip,))
-        preselected_trip_code = t["code"] if t else None
+        t = query_one(
+            "SELECT t.code, t.vehicle_id, v.plate FROM trips t LEFT JOIN vehicles v ON v.id = t.vehicle_id "
+            "WHERE t.id = ?",
+            (preselected_trip,),
+        )
+        if t:
+            preselected_trip_code = t["code"]
+            preselected_vehicle_id = t["vehicle_id"]
+            preselected_vehicle_plate = t["plate"]
     return {
-        "trips": query_all("SELECT id, code FROM trips WHERE status != 'CANCELADO' ORDER BY scheduled_date DESC"),
+        "trips": trips,
+        "trips_json": [dict(t) for t in trips],
         "vehicles": query_all("SELECT id, plate FROM vehicles ORDER BY plate"),
         "concepts": concepts,
         "concepts_json": [dict(c) for c in concepts],
         "expense": expense,
         "preselected_trip": preselected_trip,
         "preselected_trip_code": preselected_trip_code,
+        "preselected_vehicle_id": preselected_vehicle_id,
+        "preselected_vehicle_plate": preselected_vehicle_plate,
         "today": today_str(),
     }
 

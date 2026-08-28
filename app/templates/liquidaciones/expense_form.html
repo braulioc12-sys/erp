@@ -23,7 +23,7 @@
       <p class="muted" style="margin:4px 0 0;">Este gasto se registra directo en la liquidación de este viaje.</p>
       {% else %}
       <label>Viaje relacionado
-        <select name="trip_id">
+        <select name="trip_id" id="trip_id" onchange="onTripChange()">
           <option value="">-- Ninguno --</option>
           {% for t in trips %}
           <option value="{{ t.id }}" {{ 'selected' if expense and (expense.trip_id|string) == (t.id|string) }}>{{ t.code }}</option>
@@ -32,14 +32,26 @@
       </label>
       {% endif %}
     </div>
-    <label>Unidad relacionada
-      <select name="vehicle_id">
-        <option value="">-- Ninguna --</option>
-        {% for v in vehicles %}
-        <option value="{{ v.id }}" {{ 'selected' if expense and (expense.vehicle_id|string) == (v.id|string) }}>{{ v.plate }}</option>
-        {% endfor %}
-      </select>
-    </label>
+    <div>
+      {% if preselected_trip and preselected_vehicle_plate %}
+      <span style="display:block; font-weight:600; margin-bottom:4px;">Unidad</span>
+      <input type="text" value="{{ preselected_vehicle_plate }}" readonly style="background:var(--bg-soft, #f3f5f8); width:100%;">
+      <input type="hidden" name="vehicle_id" value="{{ preselected_vehicle_id }}">
+      <p class="muted" style="margin:4px 0 0;">Es la unidad ya asignada a este viaje.</p>
+      {% else %}
+      <label>Unidad relacionada
+        <select name="vehicle_id" id="vehicle_id">
+          <option value="">-- Ninguna --</option>
+          {% for v in vehicles %}
+          <option value="{{ v.id }}" {{ 'selected' if expense and (expense.vehicle_id|string) == (v.id|string) }}>{{ v.plate }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% if not preselected_trip %}
+      <p class="muted" style="margin:4px 0 0;">Se completa sola si el viaje elegido ya tiene una unidad asignada — cámbiala aquí solo si este gasto en particular fue con otra unidad.</p>
+      {% endif %}
+      {% endif %}
+    </div>
   </div>
 
   <label>Fecha *
@@ -127,5 +139,29 @@
     info.value = '';
   }
   document.addEventListener('DOMContentLoaded', onConceptChange);
+
+  // La Unidad se completa sola con la que ya tiene asignada el viaje
+  // elegido (trips.vehicle_id) — no tiene sentido volver a preguntarla si
+  // ya se sabe (pedido de Braulio, 28 ago).
+  var TRIPS = {{ (trips_json or []) | tojson }};
+  function onTripChange() {
+    var tripSelect = document.getElementById('trip_id');
+    var vehicleSelect = document.getElementById('vehicle_id');
+    if (!tripSelect || !vehicleSelect) { return; }
+    var tripId = tripSelect.value;
+    if (!tripId) { return; }
+    for (var i = 0; i < TRIPS.length; i++) {
+      if (String(TRIPS[i].id) === String(tripId) && TRIPS[i].vehicle_id) {
+        vehicleSelect.value = String(TRIPS[i].vehicle_id);
+        return;
+      }
+    }
+  }
+  document.addEventListener('DOMContentLoaded', function () {
+    var vehicleSelect = document.getElementById('vehicle_id');
+    // Solo auto-completa si todavía no hay una unidad elegida (al editar un
+    // gasto ya guardado, respeta lo que tenga guardado).
+    if (vehicleSelect && !vehicleSelect.value) { onTripChange(); }
+  });
 </script>
 {% endblock %}
