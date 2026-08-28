@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+{% block title %}Mecánicos{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Mecánicos</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('mantenimiento.list_view') }}" class="btn btn-secondary">← Volver a Mantenimiento</a>
+  </div>
+</div>
+<p class="muted mt-0">Estos mecánicos aparecen en el desplegable de cada trabajo dentro de una orden de mantenimiento, para marcar quién lo está haciendo.</p>
+
+<div class="panel" style="max-width:480px;">
+  {% if can(current_user.role, 'mantenimiento', 'edit') %}
+  <form method="post" action="{{ url_for('mantenimiento.mechanics_add') }}" class="filters" style="margin-bottom:18px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label style="flex:1;">Nombre del mecánico
+      <input type="text" name="name" placeholder="Ej. Juan Pérez" required>
+    </label>
+    <button type="submit" class="btn btn-primary">+ Agregar mecánico</button>
+  </form>
+  {% endif %}
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Mecánico</th><th>Estado</th><th></th></tr></thead>
+      <tbody>
+        {% for mech in mechanics %}
+        <tr>
+          <td>{{ mech.name }}</td>
+          <td><span class="badge {{ 'badge-activo' if mech.active else 'badge-inactivo' }}">{{ 'Activo' if mech.active else 'Inactivo' }}</span></td>
+          <td>
+            {% if can(current_user.role, 'mantenimiento', 'edit') %}
+            <form method="post" action="{{ url_for('mantenimiento.mechanics_toggle', mechanic_id=mech.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-secondary btn-sm" type="submit">{{ 'Desactivar' if mech.active else 'Reactivar' }}</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3" class="table-empty">No hay mecánicos registrados todavía.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted" style="margin-top:12px; margin-bottom:0;">Desactivar un mecánico lo quita del desplegable de asignación, pero no afecta los trabajos que ya se le asignaron antes.</p>
+</div>
+{% endblock %}

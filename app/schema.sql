@@ -156,15 +156,35 @@ CREATE TABLE IF NOT EXISTS maintenance_job_types (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Catálogo de mecánicos del taller, para poder asignar quién está
+-- trabajando cada trabajo dentro de una orden de mantenimiento. Se
+-- administra desde Mantenimiento → Mecánicos, mismo patrón que el
+-- catálogo de Trabajos (nombre + activo/inactivo).
+CREATE TABLE IF NOT EXISTS mechanics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    active INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Qué trabajos (de maintenance_job_types) se realizaron en cada registro de
 -- mantenimiento. Se guarda una copia del nombre y minutos estimados al
 -- momento de seleccionarlos, para que el historial no cambie si luego se
--- edita el catálogo de trabajos.
+-- edita el catálogo de trabajos. `status` permite marcar cada trabajo como
+-- PENDIENTE o TERMINADO por separado dentro de la misma orden, y
+-- `mechanic_id`/`mechanic_name` quién lo está trabajando (se guarda también
+-- el nombre aparte, mismo motivo que job_name: que el historial no cambie
+-- si luego se edita o desactiva ese mecánico en el catálogo).
 CREATE TABLE IF NOT EXISTS maintenance_record_jobs (
     maintenance_record_id INTEGER NOT NULL REFERENCES maintenance_records(id),
     job_type_id INTEGER REFERENCES maintenance_job_types(id),
     job_name TEXT NOT NULL,
     estimated_minutes INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'PENDIENTE',
+    mechanic_id INTEGER REFERENCES mechanics(id),
+    mechanic_name TEXT,
+    completed_at TEXT,
     PRIMARY KEY (maintenance_record_id, job_name)
 );
 

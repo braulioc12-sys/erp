@@ -59,6 +59,10 @@ COLUMN_MIGRATIONS = [
     ("expenses", "expense_advance_id", "INTEGER REFERENCES expense_advances(id)"),
     ("expense_advances", "office", "TEXT"),
     ("expense_advances", "voucher_number", "INTEGER"),
+    ("maintenance_record_jobs", "status", "TEXT NOT NULL DEFAULT 'PENDIENTE'"),
+    ("maintenance_record_jobs", "mechanic_id", "INTEGER REFERENCES mechanics(id)"),
+    ("maintenance_record_jobs", "mechanic_name", "TEXT"),
+    ("maintenance_record_jobs", "completed_at", "TEXT"),
 ]
 
 

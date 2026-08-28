@@ -23,6 +23,16 @@
   </form>
   {% endif %}
 
+  {% if can(current_user.role, 'mantenimiento', 'edit') %}
+  <form method="post" action="{{ url_for('mantenimiento.jobs_replace_catalog') }}"
+        onsubmit="return confirm('Esto va a borrar los {{ jobs|length }} trabajos actuales y cargar el catálogo actualizado ({{ default_job_types|length }} trabajos). El historial de mantenimientos ya registrado no se ve afectado. ¿Continuar?');"
+        style="margin-bottom:18px; padding:12px; background:var(--bg-soft,#f3f5f8); border-radius:8px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <p style="margin:0 0 8px 0;">¿Cargaste un catálogo nuevo de trabajos? Este botón borra los actuales y carga los {{ default_job_types|length }} trabajos definidos en el sistema.</p>
+    <button type="submit" class="btn btn-secondary">⟳ Reemplazar catálogo completo</button>
+  </form>
+  {% endif %}
+
   <div class="table-wrap">
     <table>
       <thead><tr><th>Trabajo</th><th>Tiempo estimado</th><th>Estado</th><th></th></tr></thead>

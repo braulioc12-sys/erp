@@ -1,14 +1,41 @@
+from datetime import datetime
+
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 
 from app.auth import permission_required, validate_csrf
 from app.db import execute, get_db, query_all, query_one
 from app.helpers import parse_date, parse_float, today_str
 from app.routes.catalogos import get_catalog
+from app.seed_data import DEFAULT_JOB_TYPES
 
 bp = Blueprint("mantenimiento", __name__, url_prefix="/mantenimiento")
 
 # Umbral de kilómetros para mostrar la alerta de "mantenimiento próximo" en el panel.
 KM_ALERT_THRESHOLD = 1000
+
+
+def _order_status(jobs):
+    """Estado general de una orden de mantenimiento, calculado a partir del
+    estado de cada trabajo (maintenance_record_jobs.status): SIN_TRABAJOS si
+    no se marcó ningún trabajo al crearla, TERMINADA si todos están
+    TERMINADO, PENDIENTE si ninguno lo está, EN_PROCESO en cualquier
+    combinación intermedia."""
+    if not jobs:
+        return "SIN_TRABAJOS"
+    done = sum(1 for j in jobs if j["status"] == "TERMINADO")
+    if done == 0:
+        return "PENDIENTE"
+    if done == len(jobs):
+        return "TERMINADA"
+    return "EN_PROCESO"
+
+
+ORDER_STATUS_LABELS = {
+    "SIN_TRABAJOS": "Sin trabajos",
+    "PENDIENTE": "Pendiente",
+    "EN_PROCESO": "En proceso",
+    "TERMINADA": "Terminada",
+}
 
 
 @bp.route("")
@@ -25,18 +52,24 @@ def list_view():
     records = query_all(sql, params)
 
     jobs_by_record = {}
+    status_by_record = {}
     if records:
         ids = [r["id"] for r in records]
         placeholders = ",".join("?" * len(ids))
         rows = query_all(
             f"SELECT * FROM maintenance_record_jobs WHERE maintenance_record_id IN ({placeholders})", ids
         )
+        jobs_grouped = {}
         for row in rows:
             jobs_by_record.setdefault(row["maintenance_record_id"], []).append(row["job_name"])
+            jobs_grouped.setdefault(row["maintenance_record_id"], []).append(row)
+        for r in records:
+            status_by_record[r["id"]] = _order_status(jobs_grouped.get(r["id"], []))
 
     filtered_vehicle = query_one("SELECT plate FROM vehicles WHERE id = ?", (vehicle_id,)) if vehicle_id else None
     return render_template(
         "mantenimiento/list.html", records=records, jobs_by_record=jobs_by_record,
+        status_by_record=status_by_record, order_status_labels=ORDER_STATUS_LABELS,
         vehicle_id=vehicle_id, filtered_vehicle=filtered_vehicle,
     )
 
@@ -133,6 +166,88 @@ def delete(record_id):
     return redirect(url_for("mantenimiento.list_view"))
 
 
+# --- Detalle de una orden: marcar trabajos terminados/pendientes y asignar mecánico ---
+
+@bp.route("/<int:record_id>")
+@permission_required("mantenimiento", "view")
+def detail(record_id):
+    record = query_one(
+        """SELECT m.*, v.plate as vehicle_plate FROM maintenance_records m
+           JOIN vehicles v ON v.id = m.vehicle_id WHERE m.id = ?""",
+        (record_id,),
+    )
+    if record is None:
+        abort(404)
+    jobs = query_all(
+        "SELECT * FROM maintenance_record_jobs WHERE maintenance_record_id = ? ORDER BY job_name",
+        (record_id,),
+    )
+    mechanics = get_catalog_mechanics()
+    return render_template(
+        "mantenimiento/detail.html", record=record, jobs=jobs, mechanics=mechanics,
+        order_status=_order_status(jobs), order_status_labels=ORDER_STATUS_LABELS,
+    )
+
+
+@bp.route("/<int:record_id>/trabajos/estado", methods=["POST"])
+@permission_required("mantenimiento", "edit")
+def job_set_status(record_id):
+    if not validate_csrf():
+        abort(400)
+    job_name = request.form.get("job_name", "")
+    job = query_one(
+        "SELECT * FROM maintenance_record_jobs WHERE maintenance_record_id = ? AND job_name = ?",
+        (record_id, job_name),
+    )
+    if job is None:
+        abort(404)
+    new_status = "PENDIENTE" if job["status"] == "TERMINADO" else "TERMINADO"
+    completed_at = datetime.now().strftime("%Y-%m-%d %H:%M") if new_status == "TERMINADO" else None
+    execute(
+        """UPDATE maintenance_record_jobs SET status = ?, completed_at = ?
+           WHERE maintenance_record_id = ? AND job_name = ?""",
+        (new_status, completed_at, record_id, job_name),
+    )
+    flash(
+        f'"{job_name}" marcado como {"terminado" if new_status == "TERMINADO" else "pendiente"}.',
+        "success",
+    )
+    return redirect(url_for("mantenimiento.detail", record_id=record_id))
+
+
+@bp.route("/<int:record_id>/trabajos/mecanico", methods=["POST"])
+@permission_required("mantenimiento", "edit")
+def job_assign_mechanic(record_id):
+    if not validate_csrf():
+        abort(400)
+    job_name = request.form.get("job_name", "")
+    mechanic_id = request.form.get("mechanic_id", "").strip()
+    job = query_one(
+        "SELECT * FROM maintenance_record_jobs WHERE maintenance_record_id = ? AND job_name = ?",
+        (record_id, job_name),
+    )
+    if job is None:
+        abort(404)
+    if not mechanic_id:
+        execute(
+            """UPDATE maintenance_record_jobs SET mechanic_id = NULL, mechanic_name = NULL
+               WHERE maintenance_record_id = ? AND job_name = ?""",
+            (record_id, job_name),
+        )
+        flash(f'Se quitó el mecánico asignado a "{job_name}".', "success")
+    else:
+        mechanic = query_one("SELECT * FROM mechanics WHERE id = ?", (mechanic_id,))
+        if mechanic is None:
+            abort(404)
+        execute(
+            """UPDATE maintenance_record_jobs SET mechanic_id = ?, mechanic_name = ?
+               WHERE maintenance_record_id = ? AND job_name = ?""",
+            (mechanic["id"], mechanic["name"], record_id, job_name),
+        )
+        flash(f'"{mechanic["name"]}" asignado a "{job_name}".', "success")
+    return redirect(url_for("mantenimiento.detail", record_id=record_id))
+
+
 # --- Trabajos de mantenimiento (catálogo con tiempo estimado) ---
 
 def get_catalog_jobs(only_active=True):
@@ -147,7 +262,7 @@ def get_catalog_jobs(only_active=True):
 @permission_required("mantenimiento", "view")
 def jobs_list():
     jobs = query_all("SELECT * FROM maintenance_job_types ORDER BY sort_order, name")
-    return render_template("mantenimiento/jobs.html", jobs=jobs)
+    return render_template("mantenimiento/jobs.html", jobs=jobs, default_job_types=DEFAULT_JOB_TYPES)
 
 
 @bp.route("/trabajos/agregar", methods=["POST"])
@@ -181,6 +296,32 @@ def jobs_add():
     return redirect(url_for("mantenimiento.jobs_list"))
 
 
+@bp.route("/trabajos/reemplazar-catalogo", methods=["POST"])
+@permission_required("mantenimiento", "edit")
+def jobs_replace_catalog():
+    """Borra todos los trabajos actuales y carga la lista de DEFAULT_JOB_TYPES
+    (app/seed_data.py) — usado para reemplazar el catálogo completo por uno
+    nuevo (ej. el Excel de actividades de taller que entregó Braulio el 28
+    ago). El historial de mantenimientos ya guarda su propia copia del
+    nombre y los minutos de cada trabajo (maintenance_record_jobs.job_name /
+    estimated_minutes), así que desvincular esas filas del catálogo (job_type_id
+    = NULL) no borra ni cambia nada de lo ya registrado — solo deja de
+    apuntar a una fila del catálogo que ya no existe."""
+    if not validate_csrf():
+        abort(400)
+    db = get_db()
+    db.execute("UPDATE maintenance_record_jobs SET job_type_id = NULL")
+    db.execute("DELETE FROM maintenance_job_types")
+    for order, (name, minutes) in enumerate(DEFAULT_JOB_TYPES):
+        db.execute(
+            "INSERT INTO maintenance_job_types (name, estimated_minutes, sort_order) VALUES (?, ?, ?)",
+            (name, minutes, order),
+        )
+    db.commit()
+    flash(f"Catálogo de trabajos reemplazado: {len(DEFAULT_JOB_TYPES)} trabajos cargados.", "success")
+    return redirect(url_for("mantenimiento.jobs_list"))
+
+
 @bp.route("/trabajos/<int:job_id>/alternar", methods=["POST"])
 @permission_required("mantenimiento", "edit")
 def jobs_toggle(job_id):
@@ -192,6 +333,63 @@ def jobs_toggle(job_id):
     execute("UPDATE maintenance_job_types SET active = ? WHERE id = ?", (0 if job["active"] else 1, job_id))
     flash("Actualizado." if job["active"] else "Reactivado.", "success")
     return redirect(url_for("mantenimiento.jobs_list"))
+
+
+# --- Mecánicos (catálogo para asignar quién trabaja cada trabajo) ---
+
+def get_catalog_mechanics(only_active=True):
+    sql = "SELECT * FROM mechanics WHERE 1=1"
+    if only_active:
+        sql += " AND active = 1"
+    sql += " ORDER BY sort_order, name"
+    return query_all(sql)
+
+
+@bp.route("/mecanicos")
+@permission_required("mantenimiento", "view")
+def mechanics_list():
+    mechanics = query_all("SELECT * FROM mechanics ORDER BY sort_order, name")
+    return render_template("mantenimiento/mechanics.html", mechanics=mechanics)
+
+
+@bp.route("/mecanicos/agregar", methods=["POST"])
+@permission_required("mantenimiento", "edit")
+def mechanics_add():
+    if not validate_csrf():
+        abort(400)
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("Escribe el nombre del mecánico.", "error")
+        return redirect(url_for("mantenimiento.mechanics_list"))
+
+    existing = query_one("SELECT id, active FROM mechanics WHERE name = ?", (name,))
+    if existing:
+        if existing["active"]:
+            flash("Ese mecánico ya existe.", "error")
+        else:
+            execute("UPDATE mechanics SET active = 1 WHERE id = ?", (existing["id"],))
+            flash(f'"{name}" reactivado.', "success")
+    else:
+        max_order = query_one("SELECT COALESCE(MAX(sort_order), -1) m FROM mechanics")["m"]
+        execute(
+            "INSERT INTO mechanics (name, sort_order) VALUES (?, ?)",
+            (name, max_order + 1),
+        )
+        flash(f'"{name}" agregado.', "success")
+    return redirect(url_for("mantenimiento.mechanics_list"))
+
+
+@bp.route("/mecanicos/<int:mechanic_id>/alternar", methods=["POST"])
+@permission_required("mantenimiento", "edit")
+def mechanics_toggle(mechanic_id):
+    if not validate_csrf():
+        abort(400)
+    mechanic = query_one("SELECT * FROM mechanics WHERE id = ?", (mechanic_id,))
+    if mechanic is None:
+        abort(404)
+    execute("UPDATE mechanics SET active = ? WHERE id = ?", (0 if mechanic["active"] else 1, mechanic_id))
+    flash("Actualizado." if mechanic["active"] else "Reactivado.", "success")
+    return redirect(url_for("mantenimiento.mechanics_list"))
 
 
 # --- Historial y costos por unidad ---

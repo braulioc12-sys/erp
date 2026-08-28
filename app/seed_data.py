@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 from werkzeug.security import generate_password_hash
 
-from app.db import execute, get_db, query_one
+from app.db import execute, get_db, query_all, query_one
 
 
 def _upsert_user(name, email, password, role):
@@ -79,15 +79,37 @@ DEFAULT_EXPENSE_CONCEPTS = [
 ]
 
 # Trabajos de mantenimiento con tiempo estimado (minutos), por defecto.
+# Lista entregada por Braulio (28 ago, archivo "ACTIVIDADES TALLER.xlsx")
+# reemplazando el catálogo anterior — mismo orden e ítems del Excel.
 DEFAULT_JOB_TYPES = [
     ("Cambio de aceite", 60),
-    ("Cambio de filtro de aire", 30),
-    ("Cambio de filtro de aceite", 20),
-    ("Revisión y ajuste de frenos", 90),
-    ("Cambio de llantas", 45),
-    ("Alineamiento y balanceo", 60),
-    ("Revisión de sistema eléctrico", 120),
+    ("Cambio de bolsa de tracto", 80),
+    ("Cambio de maxibrake", 50),
+    ("Engrase general", 30),
+    ("Fugas de aire", 120),
+    ("Mantenimiento al sistema de combustible", 160),
+    ("Mantenimiento general de carreta", 1440),
+    ("Cambio de radiador", 720),
+    ("Cambio de bujes de carreta", 1440),
+    ("Cambio de bujes de tracto", 720),
+    ("Cambio de zapatas", 720),
+    ("Mantenimiento de válvula de aire", 120),
+    ("Cambio de bolsa de carreta", 40),
+    ("Reparar tanque de aire", 480),
+    ("Reparación de neumático", 20),
+    ("Regulación de frenos", 60),
+    ("Rotación de neumáticos", 240),
+    ("Reparación de arrancador y alternador", 300),
+    ("Calibración de motor", 120),
+    ("Cambiar retén de bocamasa", 300),
+    ("Cambio de retén de corona", 240),
+    ("Cambio de embrague", 1440),
+    ("Cambio de enfriador de aceite de caja", 120),
 ]
+
+# Mecánicos de ejemplo, para que la demo muestre de una vez la asignación de
+# trabajos a mecánicos dentro de una orden de mantenimiento.
+DEFAULT_MECHANICS = ["Juan Pérez", "Luis Ramírez", "Carlos Torres"]
 
 
 def _seed_catalogs():
@@ -102,6 +124,11 @@ def _seed_catalogs():
         db.execute(
             "INSERT OR IGNORE INTO maintenance_job_types (name, estimated_minutes, sort_order) VALUES (?, ?, ?)",
             (name, minutes, order),
+        )
+    for order, name in enumerate(DEFAULT_MECHANICS):
+        db.execute(
+            "INSERT OR IGNORE INTO mechanics (name, sort_order) VALUES (?, ?)",
+            (name, order),
         )
     db.commit()
 
@@ -240,7 +267,7 @@ def seed_demo_data(log=print):
             (code, cid, vid, did, origin, dest, cargo, weight, scheduled, delivered, status, rate, commission),
         )
 
-    execute(
+    brakes_record_id = execute(
         """INSERT INTO maintenance_records (vehicle_id, type, maintenance_date, cost, description, odometer_km, next_due_date, next_due_km)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         (
@@ -256,7 +283,7 @@ def seed_demo_data(log=print):
     )
     # Unidad ABC-123: próxima a su mantenimiento por kilometraje (para ver
     # la alerta funcionando de una vez en la demo).
-    execute(
+    oil_record_id = execute(
         """INSERT INTO maintenance_records (vehicle_id, type, maintenance_date, cost, description, odometer_km, next_due_km)
            VALUES (?, ?, ?, ?, ?, ?, ?)""",
         (
@@ -267,6 +294,44 @@ def seed_demo_data(log=print):
             "Cambio de aceite y filtros",
             113000,
             119000,
+        ),
+    )
+
+    # Trabajos de ejemplo dentro de esas dos órdenes, para que la demo
+    # muestre de una vez el avance por trabajo y la asignación a mecánicos:
+    # la orden de frenos queda "En proceso" (un trabajo terminado, otro
+    # pendiente) y la de cambio de aceite queda "Terminada" (su único
+    # trabajo, terminado).
+    mechanic_ids = {
+        row["name"]: row["id"] for row in query_all("SELECT id, name FROM mechanics")
+    }
+    job_type_ids = {
+        row["name"]: row["id"] for row in query_all("SELECT id, name FROM maintenance_job_types")
+    }
+    brakes_date = (today - timedelta(days=3)).strftime("%Y-%m-%d")
+    execute(
+        """INSERT INTO maintenance_record_jobs
+           (maintenance_record_id, job_type_id, job_name, estimated_minutes, status, mechanic_id, mechanic_name, completed_at)
+           VALUES (?, ?, ?, ?, 'TERMINADO', ?, ?, ?)""",
+        (
+            brakes_record_id, job_type_ids.get("Regulación de frenos"), "Regulación de frenos", 60,
+            mechanic_ids.get("Juan Pérez"), "Juan Pérez", f"{brakes_date} 09:30",
+        ),
+    )
+    execute(
+        """INSERT INTO maintenance_record_jobs
+           (maintenance_record_id, job_type_id, job_name, estimated_minutes, status, mechanic_id, mechanic_name)
+           VALUES (?, ?, ?, ?, 'PENDIENTE', ?, ?)""",
+        (brakes_record_id, job_type_ids.get("Cambio de zapatas"), "Cambio de zapatas", 720, mechanic_ids.get("Luis Ramírez"), "Luis Ramírez"),
+    )
+    oil_date = (today - timedelta(days=60)).strftime("%Y-%m-%d")
+    execute(
+        """INSERT INTO maintenance_record_jobs
+           (maintenance_record_id, job_type_id, job_name, estimated_minutes, status, mechanic_id, mechanic_name, completed_at)
+           VALUES (?, ?, ?, ?, 'TERMINADO', ?, ?, ?)""",
+        (
+            oil_record_id, job_type_ids.get("Cambio de aceite"), "Cambio de aceite", 60,
+            mechanic_ids.get("Carlos Torres"), "Carlos Torres", f"{oil_date} 11:00",
         ),
     )
     # Neumáticos de ejemplo: unidad ABC-123 (tracto, 10 posiciones) con casi

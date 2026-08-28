@@ -95,6 +95,9 @@ td.wrap, th.wrap { white-space: normal; }
 .badge-aceptado { background: var(--success-soft); color: var(--success); }
 .badge-rechazado, .badge-error { background: var(--danger-soft); color: var(--danger); }
 .badge-no_enviada { background: var(--warning-soft); color: var(--warning); }
+.badge-en_proceso { background: var(--primary-soft); color: var(--primary-dark); }
+.badge-terminada, .badge-terminado { background: var(--success-soft); color: var(--success); }
+.badge-sin_trabajos { background: var(--text-muted-soft, #eee); color: var(--text-muted); }
 
 /* Forms */
 form.form { display: flex; flex-direction: column; gap: 14px; max-width: 640px; }

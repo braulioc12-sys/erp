@@ -1,0 +1,78 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Orden de mantenimiento{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Orden de mantenimiento — {{ record.vehicle_plate }}</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('mantenimiento.list_view') }}" class="btn btn-secondary">← Volver a Mantenimiento</a>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="detail-grid">
+    <div><span class="muted">Unidad</span><br>{{ record.vehicle_plate }}</div>
+    <div><span class="muted">Fecha</span><br>{{ record.maintenance_date }}</div>
+    <div><span class="muted">Concepto</span><br>{{ record.type }}</div>
+    <div><span class="muted">Estado de la orden</span><br>{{ m.badge(order_status) }}</div>
+    <div><span class="muted">Costo</span><br>{{ record.cost|money }}</div>
+    <div><span class="muted">Odómetro</span><br>{{ '{:,.0f} km'.format(record.odometer_km) if record.odometer_km is not none else '—' }}</div>
+    <div><span class="muted">Próximo mantenimiento</span><br>{{ record.next_due_date or '—' }}{% if record.next_due_km %} / {{ '{:,.0f}'.format(record.next_due_km) }} km{% endif %}</div>
+    <div><span class="muted">Tiempo estimado total</span><br>{{ (record.estimated_minutes ~ ' min') if record.estimated_minutes else '—' }}</div>
+  </div>
+  {% if record.description %}
+  <p style="margin-top:14px;"><span class="muted">Descripción</span><br>{{ record.description }}</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>Trabajos de esta orden</h2>
+  {% if not jobs %}
+  <p class="muted">Esta orden no tiene trabajos específicos marcados (se registró solo con el concepto/costo general).</p>
+  {% else %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Trabajo</th><th>Tiempo estimado</th><th>Estado</th><th>Mecánico asignado</th>{% if can(current_user.role, 'mantenimiento', 'edit') %}<th></th>{% endif %}</tr></thead>
+      <tbody>
+        {% for j in jobs %}
+        <tr>
+          <td>{{ j.job_name }}</td>
+          <td>{{ j.estimated_minutes }} min</td>
+          <td>
+            {{ m.badge(j.status) }}
+            {% if j.status == 'TERMINADO' and j.completed_at %}<br><span class="muted" style="font-size:0.8em;">{{ j.completed_at }}</span>{% endif %}
+          </td>
+          <td>{{ j.mechanic_name or '—' }}</td>
+          {% if can(current_user.role, 'mantenimiento', 'edit') %}
+          <td style="white-space:nowrap;">
+            <form method="post" action="{{ url_for('mantenimiento.job_set_status', record_id=record.id) }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="job_name" value="{{ j.job_name }}">
+              <button type="submit" class="btn btn-secondary btn-sm">{{ 'Marcar pendiente' if j.status == 'TERMINADO' else 'Marcar terminado' }}</button>
+            </form>
+            <form method="post" action="{{ url_for('mantenimiento.job_assign_mechanic', record_id=record.id) }}" style="display:inline-flex; gap:4px; align-items:center; margin-left:6px;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="job_name" value="{{ j.job_name }}">
+              <select name="mechanic_id" onchange="this.form.submit()" style="max-width:160px;">
+                <option value="">-- Sin asignar --</option>
+                {% if j.mechanic_id and j.mechanic_id not in mechanics|map(attribute='id')|list %}
+                <option value="{{ j.mechanic_id }}" selected>{{ j.mechanic_name }} (inactivo)</option>
+                {% endif %}
+                {% for mech in mechanics %}
+                <option value="{{ mech.id }}" {{ 'selected' if j.mechanic_id == mech.id }}>{{ mech.name }}</option>
+                {% endfor %}
+              </select>
+            </form>
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if not mechanics %}
+  <p class="muted" style="margin-top:12px;">Todavía no hay mecánicos activos en el catálogo. <a href="{{ url_for('mantenimiento.mechanics_list') }}">Agrega uno en Mecánicos</a> para poder asignarlo aquí.</p>
+  {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

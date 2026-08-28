@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
 {% block title %}Mantenimiento{% endblock %}
 {% block content %}
 <div class="page-header">
@@ -6,6 +7,7 @@
   <div class="page-actions">
     <a href="{{ url_for('mantenimiento.by_vehicle') }}" class="btn btn-secondary">Historial y costos por unidad</a>
     <a href="{{ url_for('mantenimiento.jobs_list') }}" class="btn btn-secondary">Trabajos y tiempos</a>
+    <a href="{{ url_for('mantenimiento.mechanics_list') }}" class="btn btn-secondary">Mecánicos</a>
     {% if can(current_user.role, 'catalogos', 'edit') %}
     <a href="{{ url_for('catalogos.list_view', categoria='maintenance_type') }}" class="btn btn-secondary">Editar conceptos</a>
     {% endif %}
@@ -20,7 +22,7 @@
 
 <div class="table-wrap">
   <table>
-    <thead><tr><th>Fecha</th><th>Unidad</th><th>Concepto</th><th>Trabajos</th><th>Costo</th><th>Odómetro</th><th>Próximo</th><th>Descripción</th><th></th></tr></thead>
+    <thead><tr><th>Fecha</th><th>Unidad</th><th>Concepto</th><th>Trabajos</th><th>Estado</th><th>Costo</th><th>Odómetro</th><th>Próximo</th><th>Descripción</th><th></th></tr></thead>
     <tbody>
       {% for r in records %}
       <tr>
@@ -33,13 +35,15 @@
             {% if r.estimated_minutes %}<br><span class="muted">{{ r.estimated_minutes }} min est.</span>{% endif %}
           {% else %}—{% endif %}
         </td>
+        <td>{{ m.badge(status_by_record[r.id]) }}</td>
         <td>{{ r.cost|money }}</td>
         <td>{{ '{:,.0f} km'.format(r.odometer_km) if r.odometer_km is not none else '—' }}</td>
         <td>{{ r.next_due_date or '—' }}{% if r.next_due_km %} / {{ '{:,.0f}'.format(r.next_due_km) }} km{% endif %}</td>
         <td class="wrap">{{ r.description or '—' }}</td>
-        <td>
+        <td style="white-space:nowrap;">
+          <a href="{{ url_for('mantenimiento.detail', record_id=r.id) }}" class="btn btn-secondary btn-sm">Ver orden</a>
           {% if can(current_user.role, 'mantenimiento', 'edit') %}
-          <form method="post" action="{{ url_for('mantenimiento.delete', record_id=r.id) }}" onsubmit="return confirm('¿Eliminar este registro?');">
+          <form method="post" action="{{ url_for('mantenimiento.delete', record_id=r.id) }}" onsubmit="return confirm('¿Eliminar este registro?');" style="display:inline;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="btn btn-danger btn-sm" type="submit">Eliminar</button>
           </form>
@@ -47,7 +51,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="9" class="table-empty">No hay registros de mantenimiento.</td></tr>
+      <tr><td colspan="10" class="table-empty">No hay registros de mantenimiento.</td></tr>
       {% endfor %}
     </tbody>
   </table>
