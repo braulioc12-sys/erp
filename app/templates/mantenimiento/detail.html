@@ -13,7 +13,6 @@
   <div class="detail-grid">
     <div><span class="muted">Unidad</span><br>{{ record.vehicle_plate }}</div>
     <div><span class="muted">Fecha</span><br>{{ record.maintenance_date }}</div>
-    <div><span class="muted">Concepto</span><br>{{ record.type }}</div>
     <div><span class="muted">Estado de la orden</span><br>{{ m.badge(order_status) }}</div>
     <div><span class="muted">Costo</span><br>{{ record.cost|money }}</div>
     <div><span class="muted">Odómetro</span><br>{{ '{:,.0f} km'.format(record.odometer_km) if record.odometer_km is not none else '—' }}</div>

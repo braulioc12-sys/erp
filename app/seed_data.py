@@ -26,16 +26,14 @@ def _upsert_user(name, email, password, role):
 # Catálogos por defecto. "expense_type" (tipos de gasto) se retiró el 28
 # ago: Braulio pidió que Presupuestos y el formulario de gastos usen solo
 # los Conceptos de gasto (ver DEFAULT_EXPENSE_CONCEPTS abajo), así que ya no
-# hay un catálogo aparte de tipos. "maintenance_type" siempre fue texto
-# libre, así que usa nombres directamente legibles.
+# hay un catálogo aparte de tipos. "maintenance_type" (Conceptos de
+# mantenimiento) ya no se usa en el formulario de Registrar mantenimiento
+# (se retiró el 28 ago — los trabajos marcados abajo son los que clasifican
+# la orden), pero se mantiene administrable en Catálogos por si hace falta
+# para otra cosa más adelante; su lista se completa más abajo con los
+# mismos nombres de DEFAULT_JOB_TYPES, para no mantener dos listas del
+# mismo taller por separado.
 DEFAULT_CATALOGS = {
-    "maintenance_type": [
-        "Cambio de aceite",
-        "Revisión general de frenos",
-        "Cambio de llantas",
-        "Revisión de sistema eléctrico",
-        "Otro",
-    ],
     "inspection_item": [
         "Llantas y aros",
         "Frenos",
@@ -111,6 +109,18 @@ DEFAULT_JOB_TYPES = [
 # trabajos a mecánicos dentro de una orden de mantenimiento.
 DEFAULT_MECHANICS = ["Juan Pérez", "Luis Ramírez", "Carlos Torres"]
 
+# El catálogo "Conceptos de mantenimiento" (Catálogos) pasa a tener los
+# mismos nombres que DEFAULT_JOB_TYPES (pedido de Braulio, 28 ago), en vez
+# de mantener una segunda lista genérica aparte.
+DEFAULT_CATALOGS["maintenance_type"] = [name for name, _minutes in DEFAULT_JOB_TYPES]
+
+# Costo de mano de obra por minuto (S/) que usa Mantenimiento para calcular
+# el costo de una orden a partir de los trabajos marcados (minutos totales
+# × este valor). Valor de arranque — AJUSTAR: Braulio debe confirmar la
+# tarifa real de su taller en Catálogos antes de confiar en el costo
+# calculado.
+DEFAULT_LABOR_COST_PER_MINUTE = "3.00"
+
 
 def _seed_catalogs():
     db = get_db()
@@ -130,6 +140,10 @@ def _seed_catalogs():
             "INSERT OR IGNORE INTO mechanics (name, sort_order) VALUES (?, ?)",
             (name, order),
         )
+    db.execute(
+        "INSERT OR IGNORE INTO app_settings (key, value) VALUES ('maintenance_labor_cost_per_minute', ?)",
+        (DEFAULT_LABOR_COST_PER_MINUTE,),
+    )
     db.commit()
 
 

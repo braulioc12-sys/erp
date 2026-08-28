@@ -106,3 +106,18 @@ def execute(sql, params=()):
     cur = db.execute(sql, params)
     db.commit()
     return cur.lastrowid
+
+
+def get_setting(key, default=None):
+    """Lee un ajuste general (tabla app_settings, clave/valor). Devuelve
+    `default` si todavía no se ha guardado ese ajuste."""
+    row = query_one("SELECT value FROM app_settings WHERE key = ?", (key,))
+    return row["value"] if row is not None else default
+
+
+def set_setting(key, value):
+    execute(
+        "INSERT INTO app_settings (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, str(value)),
+    )

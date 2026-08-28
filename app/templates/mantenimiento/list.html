@@ -8,9 +8,6 @@
     <a href="{{ url_for('mantenimiento.by_vehicle') }}" class="btn btn-secondary">Historial y costos por unidad</a>
     <a href="{{ url_for('mantenimiento.jobs_list') }}" class="btn btn-secondary">Trabajos y tiempos</a>
     <a href="{{ url_for('mantenimiento.mechanics_list') }}" class="btn btn-secondary">Mecánicos</a>
-    {% if can(current_user.role, 'catalogos', 'edit') %}
-    <a href="{{ url_for('catalogos.list_view', categoria='maintenance_type') }}" class="btn btn-secondary">Editar conceptos</a>
-    {% endif %}
     {% if can(current_user.role, 'mantenimiento', 'edit') %}
     <a href="{{ url_for('mantenimiento.new') }}" class="btn btn-primary">+ Registrar mantenimiento</a>
     {% endif %}
@@ -22,13 +19,12 @@
 
 <div class="table-wrap">
   <table>
-    <thead><tr><th>Fecha</th><th>Unidad</th><th>Concepto</th><th>Trabajos</th><th>Estado</th><th>Costo</th><th>Odómetro</th><th>Próximo</th><th>Descripción</th><th></th></tr></thead>
+    <thead><tr><th>Fecha</th><th>Unidad</th><th>Trabajos</th><th>Estado</th><th>Costo</th><th>Odómetro</th><th>Próximo</th><th>Descripción</th><th></th></tr></thead>
     <tbody>
       {% for r in records %}
       <tr>
         <td>{{ r.maintenance_date }}</td>
         <td>{{ r.vehicle_plate }}</td>
-        <td>{{ r.type }}</td>
         <td class="wrap">
           {% if jobs_by_record.get(r.id) %}
             {{ jobs_by_record[r.id]|join(', ') }}
@@ -51,7 +47,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="10" class="table-empty">No hay registros de mantenimiento.</td></tr>
+      <tr><td colspan="9" class="table-empty">No hay registros de mantenimiento.</td></tr>
       {% endfor %}
     </tbody>
   </table>

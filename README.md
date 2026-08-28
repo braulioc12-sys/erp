@@ -60,7 +60,11 @@ Esto se puede ajustar fácilmente editando el diccionario `PERMISSIONS` en `app/
 
 ## Mantenimiento: trabajos con tiempo estimado e historial por unidad
 
-Desde **Mantenimiento → Trabajos y tiempos** se administra un catálogo de trabajos de mantenimiento con su tiempo estimado en minutos (ej. "Cambio de aceite" = 60 min, "Fugas de aire" = 120 min), con un botón para agregar trabajos nuevos que no estén en la lista. Al registrar un mantenimiento, se pueden marcar uno o más trabajos realizados y el sistema suma automáticamente el tiempo estimado total (útil para planificar cuánto tiempo va a estar la unidad en taller). Esto es independiente del "Concepto" de mantenimiento (que sigue viniendo del catálogo en Catálogos) — el concepto clasifica el registro, los trabajos estiman el tiempo.
+Desde **Mantenimiento → Trabajos y tiempos** se administra un catálogo de trabajos de mantenimiento con su tiempo estimado en minutos (ej. "Cambio de aceite" = 60 min, "Fugas de aire" = 120 min), con un botón para agregar trabajos nuevos que no estén en la lista. Al registrar un mantenimiento, se pueden marcar uno o más trabajos realizados y el sistema suma automáticamente el tiempo estimado total (útil para planificar cuánto tiempo va a estar la unidad en taller).
+
+**El formulario ya no pide un "Concepto" aparte** (retirado el 28 ago): los trabajos que marques son los que clasifican la orden — evita elegir prácticamente lo mismo dos veces, mismo criterio que ya se aplicó en Liquidaciones al retirar "Tipo". El catálogo "Conceptos de mantenimiento" (Catálogos) se mantiene administrable por separado (con la misma lista de 23 actividades) por si hace falta para algo más adelante, pero ya no interviene en este formulario.
+
+**El costo se calcula solo, pero se puede ajustar**: al marcar los trabajos, el campo "Costo (S/)" se precarga automáticamente con minutos totales × el costo de mano de obra por minuto (configurable en Catálogos, ver más abajo) — se puede editar a mano después si hace falta sumar repuestos u otros gastos que no sean mano de obra.
 
 El catálogo actual (23 trabajos, cargado el 28 ago a partir del Excel "ACTIVIDADES TALLER" que entregó Braulio) vive como lista por defecto en `app/seed_data.py` (`DEFAULT_JOB_TYPES`). Si más adelante llega otra lista actualizada (otro Excel, otro archivo), lo más simple es reemplazar esa misma constante en el código y volver a desplegar — pero **no hace falta tocar código para reemplazar el catálogo en un sistema que ya está en uso**: el botón **"⟳ Reemplazar catálogo completo"** en Mantenimiento → Trabajos borra todos los trabajos actuales y vuelve a cargar la lista de `DEFAULT_JOB_TYPES` en un solo clic (pide confirmación antes de hacerlo). El historial de mantenimientos ya registrados no se pierde ni cambia: cada registro guarda su propia copia del nombre y los minutos del trabajo al momento de crearse, independiente de si ese trabajo sigue existiendo después en el catálogo.
 
@@ -73,6 +77,10 @@ Cada registro de mantenimiento (una "orden") ahora tiene su propia pantalla de d
 La orden en sí muestra un **estado general calculado automáticamente** (badge "Pendiente" si ningún trabajo está terminado, "En proceso" si hay una mezcla, "Terminada" si todos lo están, "Sin trabajos" si la orden no tiene ningún trabajo marcado) — visible tanto en el detalle como en una columna nueva del listado de Mantenimiento.
 
 Los mecánicos se administran en **Mantenimiento → Mecánicos** (catálogo simple: nombre + activo/inactivo, mismo patrón que Trabajos). Desactivar un mecánico lo quita del desplegable de asignación, pero no borra ni cambia los trabajos que ya se le habían asignado — el nombre queda guardado en el propio trabajo (igual que ya pasaba con el nombre y los minutos del trabajo), así que el historial no se ve afectado.
+
+### Costo de mano de obra por minuto
+
+En **Catálogos** hay un panel "Costo de mano de obra (Mantenimiento)" con un solo valor: el costo por minuto (S/) que se usa para calcular el costo sugerido de una orden (minutos totales de los trabajos marcados × este valor). **Viene con un valor de arranque de S/ 3.00/min — AJUSTAR: confirma la tarifa real de tu taller ahí antes de confiar en los costos calculados.** Solo Administrador puede cambiarlo (mismo permiso que el resto de Catálogos); Operador lo ve pero no lo edita.
 
 **Mantenimiento → Historial y costos por unidad** muestra, por cada unidad, el número de mantenimientos, el costo total acumulado y la fecha del último, con un enlace para ver el historial completo de esa unidad.
 

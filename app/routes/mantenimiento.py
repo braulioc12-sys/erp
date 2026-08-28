@@ -3,9 +3,8 @@ from datetime import datetime
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 
 from app.auth import permission_required, validate_csrf
-from app.db import execute, get_db, query_all, query_one
+from app.db import execute, get_db, get_setting, query_all, query_one
 from app.helpers import parse_date, parse_float, today_str
-from app.routes.catalogos import get_catalog
 from app.seed_data import DEFAULT_JOB_TYPES
 
 bp = Blueprint("mantenimiento", __name__, url_prefix="/mantenimiento")
@@ -78,34 +77,37 @@ def list_view():
 @permission_required("mantenimiento", "edit")
 def new():
     vehicles = query_all("SELECT id, plate, current_km FROM vehicles ORDER BY plate")
-    concepts = get_catalog("maintenance_type")
     job_types = get_catalog_jobs()
+    labor_cost_per_minute = get_setting("maintenance_labor_cost_per_minute", "0")
 
     if request.method == "POST":
         if not validate_csrf():
             abort(400)
         vehicle_id = request.form.get("vehicle_id")
         maintenance_date = parse_date(request.form.get("maintenance_date")) or today_str()
-        record_type = request.form.get("type", "").strip()
         odometer_km = parse_float(request.form.get("odometer_km"), None)
         job_ids = [int(j) for j in request.form.getlist("job_type_ids")]
 
         errors = []
         if not vehicle_id:
             errors.append("Selecciona una unidad.")
-        if not record_type:
-            errors.append("Indica el concepto de mantenimiento.")
 
         if errors:
             for e in errors:
                 flash(e, "error")
             return render_template(
                 "mantenimiento/form.html", record=request.form, vehicles=vehicles,
-                concepts=concepts, job_types=job_types,
+                job_types=job_types, labor_cost_per_minute=labor_cost_per_minute,
             )
 
         selected_jobs = [j for j in job_types if j["id"] in job_ids]
         estimated_minutes = sum(j["estimated_minutes"] for j in selected_jobs) or None
+        # Ya no se pide un "Concepto" aparte (retirado el 28 ago — los
+        # trabajos marcados son los que clasifican la orden). `type` sigue
+        # existiendo en el esquema (columna NOT NULL, usada para mostrar la
+        # orden en el listado), así que se completa solo con los nombres de
+        # los trabajos marcados, o un texto genérico si no se marcó ninguno.
+        record_type = ", ".join(j["name"] for j in selected_jobs) if selected_jobs else "Mantenimiento general"
 
         record_id = execute(
             """INSERT INTO maintenance_records (vehicle_id, type, maintenance_date, cost, description,
@@ -150,8 +152,8 @@ def new():
         return redirect(url_for("mantenimiento.list_view"))
 
     return render_template(
-        "mantenimiento/form.html", record=None, vehicles=vehicles, concepts=concepts,
-        job_types=job_types, today=today_str(),
+        "mantenimiento/form.html", record=None, vehicles=vehicles,
+        job_types=job_types, labor_cost_per_minute=labor_cost_per_minute, today=today_str(),
     )
 
 

@@ -4,7 +4,8 @@ necesita agregar una opción nueva a un desplegable."""
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 
 from app.auth import permission_required, validate_csrf
-from app.db import execute, query_all, query_one
+from app.db import execute, get_setting, query_all, query_one, set_setting
+from app.helpers import parse_float
 
 bp = Blueprint("catalogos", __name__, url_prefix="/configuracion/catalogos")
 
@@ -33,9 +34,25 @@ def list_view():
         "SELECT * FROM catalog_items WHERE category = ? ORDER BY sort_order, name",
         (active_category,),
     )
+    labor_cost_per_minute = get_setting("maintenance_labor_cost_per_minute", "0")
     return render_template(
         "catalogos/list.html", categories=CATEGORIES, active_category=active_category, items=items,
+        labor_cost_per_minute=labor_cost_per_minute,
     )
+
+
+@bp.route("/costo-mano-obra", methods=["POST"])
+@permission_required("catalogos", "edit")
+def update_labor_cost():
+    if not validate_csrf():
+        abort(400)
+    value = parse_float(request.form.get("labor_cost_per_minute"), None)
+    if value is None or value < 0:
+        flash("Indica un costo de mano de obra por minuto válido.", "error")
+        return redirect(url_for("catalogos.list_view"))
+    set_setting("maintenance_labor_cost_per_minute", f"{value:.2f}")
+    flash(f"Costo de mano de obra actualizado: S/ {value:.2f} por minuto.", "success")
+    return redirect(url_for("catalogos.list_view"))
 
 
 @bp.route("/agregar", methods=["POST"])

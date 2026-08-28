@@ -380,6 +380,14 @@ CREATE TABLE IF NOT EXISTS catalog_items (
     UNIQUE(category, name)
 );
 
+-- Ajustes generales de la aplicación, clave/valor (ej. el costo de mano de
+-- obra por minuto que usa Mantenimiento para calcular el costo de una
+-- orden). Se administra desde Catálogos.
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+
 -- Última ubicación conocida de cada unidad (alimentada por la integración
 -- con el proveedor de GPS, ver app/integrations/frotcom.py).
 CREATE TABLE IF NOT EXISTS vehicle_locations (

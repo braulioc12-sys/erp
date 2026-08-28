@@ -14,25 +14,17 @@
         {% endfor %}
       </select>
     </label>
-    <label>Concepto *
-      <select name="type" required>
-        <option value="">-- Selecciona un concepto --</option>
-        {% for c in concepts %}
-        <option value="{{ c.name }}" {{ 'selected' if record and record.type == c.name }}>{{ c.name }}</option>
-        {% endfor %}
-      </select>
-    </label>
-  </div>
-  <p class="muted" style="margin-top:-8px;">¿Falta un concepto? Agrégalo desde <a href="{{ url_for('catalogos.list_view', categoria='maintenance_type') }}">Catálogos</a>.</p>
-
-  <div class="form-row">
     <label>Fecha *
       <input type="date" name="maintenance_date" value="{{ record.maintenance_date if record else today }}" required>
     </label>
+  </div>
+
+  <div class="form-row">
     <label>Costo (S/)
-      <input type="number" step="0.01" name="cost" value="{{ record.cost if record else '0' }}">
+      <input type="number" step="0.01" name="cost" id="cost-input" value="{{ record.cost if record else '0' }}">
     </label>
   </div>
+  <p class="muted" style="margin-top:-8px;">Se calcula solo según los trabajos que marques abajo (S/ {{ labor_cost_per_minute }} por minuto de mano de obra) — puedes ajustarlo a mano si hace falta sumar repuestos u otros gastos.</p>
 
   <label>Kilometraje de la unidad en este momento (opcional)
     <input type="number" step="1" name="odometer_km" value="{{ record.odometer_km if record else '' }}" placeholder="Ej. 118500">
@@ -55,10 +47,22 @@
     (function () {
       var checks = document.querySelectorAll('.job-check');
       var total = document.getElementById('job-minutes-total');
+      var costInput = document.getElementById('cost-input');
+      var laborCostPerMinute = {{ labor_cost_per_minute|tojson }};
+      var lastSuggestedCost = null;
       function update() {
         var sum = 0;
         checks.forEach(function (c) { if (c.checked) sum += parseInt(c.dataset.minutes || '0', 10); });
         total.textContent = sum;
+        var suggested = Math.round(sum * parseFloat(laborCostPerMinute || '0') * 100) / 100;
+        // Solo autocompletar el costo si el campo está vacío, en 0, o
+        // todavía tiene el último valor sugerido (no lo tocó el usuario) —
+        // mismo criterio que la comisión sugerida en Viajes.
+        var current = parseFloat(costInput.value || '0');
+        if (!costInput.value || current === 0 || current === lastSuggestedCost) {
+          costInput.value = suggested;
+          lastSuggestedCost = suggested;
+        }
       }
       checks.forEach(function (c) { c.addEventListener('change', update); });
       update();
