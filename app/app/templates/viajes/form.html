@@ -1,0 +1,111 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Editar viaje' if mode == 'edit' else 'Nuevo viaje' }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>{{ 'Editar viaje' if mode == 'edit' else 'Nuevo viaje' }}</h1></div>
+<form class="form panel" method="post" style="max-width: 760px;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <label>Cliente *
+    <select name="client_id" required>
+      <option value="">-- Selecciona un cliente --</option>
+      {% for c in clients %}
+      <option value="{{ c.id }}" {{ 'selected' if trip and (trip.client_id|string) == (c.id|string) }}>{{ c.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <label>Ruta *
+    <select name="route_id" id="trip-route" required>
+      <option value="">-- Selecciona una ruta --</option>
+      {% if mode == 'edit' and selected_route_id == '__current__' %}
+      <option value="__current__" selected>Ruta actual (no está en el catálogo): {{ trip.origin }} → {{ trip.destination }}</option>
+      {% endif %}
+      {% for r in routes %}
+      <option value="{{ r.id }}" {{ 'selected' if selected_route_id == (r.id|string) }}>{{ r.origin }} → {{ r.destination }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% if not routes %}
+  <p class="flash flash-error">Todavía no hay rutas activas en el catálogo. <a href="{{ url_for('rutas.list_view') }}" target="_blank">Agrega una ruta en Rutas</a> y vuelve a esta pantalla para poder elegirla aquí.</p>
+  {% endif %}
+
+  <div class="form-row">
+    <label>Unidad asignada
+      <select name="vehicle_id">
+        <option value="">-- Sin asignar --</option>
+        {% for v in vehicles %}
+        <option value="{{ v.id }}" {{ 'selected' if trip and (trip.vehicle_id|string) == (v.id|string) }}>{{ v.plate }} ({{ v.brand or '' }} {{ v.model or '' }})</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Conductor asignado
+      <select name="driver_id">
+        <option value="">-- Sin asignar --</option>
+        {% for d in drivers %}
+        <option value="{{ d.id }}" {{ 'selected' if trip and (trip.driver_id|string) == (d.id|string) }}>{{ d.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+
+  <div class="form-row">
+    <label>Descripción de la carga
+      <input type="text" name="cargo_description" value="{{ trip.cargo_description if trip else '' }}">
+    </label>
+    <label>Peso (kg)
+      <input type="number" step="0.01" name="cargo_weight_kg" value="{{ trip.cargo_weight_kg if trip else '' }}">
+    </label>
+  </div>
+
+  <div class="form-row">
+    <label>Fecha programada *
+      <input type="date" name="scheduled_date" value="{{ trip.scheduled_date if trip else today }}" required>
+    </label>
+    <label>Tarifa (S/)
+      <input type="number" step="0.01" name="rate" value="{{ trip.rate if trip else '0' }}">
+    </label>
+  </div>
+
+  <div class="form-row">
+    <label>Comisión del conductor (S/)
+      <input type="number" step="0.01" id="trip-commission" name="driver_commission" value="{{ trip.driver_commission if trip and trip.driver_commission is not none else '' }}" placeholder="Se sugiere según la ruta">
+    </label>
+  </div>
+  <p class="muted" id="commission-hint" style="margin-top:-12px;"></p>
+
+  <label>Notas
+    <textarea name="notes">{{ trip.notes if trip else '' }}</textarea>
+  </label>
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Guardar</button>
+    <a href="{{ url_for('viajes.list_view') }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+
+<script>
+  (function () {
+    var routes = {{ (routes or []) | tojson }};
+    var routeSelect = document.getElementById('trip-route');
+    var commission = document.getElementById('trip-commission');
+    var hint = document.getElementById('commission-hint');
+    var lastSuggested = null;
+
+    function suggest() {
+      var id = routeSelect.value;
+      if (!id || id === '__current__') { hint.textContent = ''; return; }
+      var match = routes.find(function (r) { return String(r.id) === String(id); });
+      if (!match) { hint.textContent = ''; return; }
+      hint.textContent = 'Comisión sugerida según la ruta: S/ ' + Number(match.default_commission_amount).toFixed(2);
+      // Solo autocompletar si el campo está vacío o todavía tiene el último valor sugerido (no lo tocó el usuario).
+      if (!commission.value || Number(commission.value) === lastSuggested) {
+        commission.value = match.default_commission_amount;
+        lastSuggested = match.default_commission_amount;
+      }
+    }
+
+    routeSelect.addEventListener('change', suggest);
+    if (routeSelect.value) { suggest(); }
+  })();
+</script>
+{% endblock %}

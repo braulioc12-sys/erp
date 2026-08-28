@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>No encontrado</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <div class="empty-state">
+    <h1>404</h1>
+    <p>La página que buscas no existe.</p>
+    <a href="{{ url_for('dashboard.index') }}" class="btn btn-primary">Volver al panel</a>
+  </div>
+</body>
+</html>

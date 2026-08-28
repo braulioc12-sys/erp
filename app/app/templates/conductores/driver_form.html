@@ -1,0 +1,77 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Editar conductor' if mode == 'edit' else 'Nuevo conductor' }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>{{ 'Editar conductor' if mode == 'edit' else 'Nuevo conductor' }}</h1></div>
+<form class="form panel" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label>Nombre completo *
+    <input type="text" name="name" value="{{ driver.name if driver else '' }}" required>
+  </label>
+  <div class="form-row">
+    <label>DNI
+      <input type="text" name="document_number" value="{{ driver.document_number if driver else '' }}" placeholder="Se usa al generar guías de remisión">
+    </label>
+    <label>Teléfono
+      <input type="text" name="phone" value="{{ driver.phone if driver else '' }}">
+    </label>
+  </div>
+  <label>Estado
+    <select name="status">
+      {% set current = driver.status if driver else 'ACTIVO' %}
+      <option value="ACTIVO" {{ 'selected' if current == 'ACTIVO' }}>Activo</option>
+      <option value="INACTIVO" {{ 'selected' if current == 'INACTIVO' }}>Inactivo</option>
+    </select>
+  </label>
+
+  <div class="section-title">Licencia de conducir (brevete)</div>
+  <div class="form-row">
+    <label>N° de licencia
+      <input type="text" name="license_number" value="{{ driver.license_number if driver else '' }}">
+    </label>
+    <label>Vencimiento de brevete
+      <input type="date" name="license_expiry" value="{{ driver.license_expiry if driver else '' }}">
+    </label>
+  </div>
+
+  <div class="section-title">Examen médico ocupacional</div>
+  <div class="form-row">
+    <label>Fecha del último examen
+      <input type="date" name="medical_exam_date" value="{{ driver.medical_exam_date if driver else '' }}">
+    </label>
+    <label>Vencimiento
+      <input type="date" name="medical_exam_expiry" value="{{ driver.medical_exam_expiry if driver else '' }}">
+    </label>
+  </div>
+
+  <div class="section-title">Requisitos Backus</div>
+  <div class="form-row">
+    <label>Examen de manejo Backus — fecha
+      <input type="date" name="backus_driving_exam_date" value="{{ driver.backus_driving_exam_date if driver else '' }}">
+    </label>
+    <label>Examen de manejo Backus — vencimiento
+      <input type="date" name="backus_driving_exam_expiry" value="{{ driver.backus_driving_exam_expiry if driver else '' }}">
+    </label>
+  </div>
+  <div class="form-row">
+    <label>Capacitación Backus — fecha
+      <input type="date" name="backus_training_date" value="{{ driver.backus_training_date if driver else '' }}">
+    </label>
+    <label>Capacitación Backus — vencimiento
+      <input type="date" name="backus_training_expiry" value="{{ driver.backus_training_expiry if driver else '' }}">
+    </label>
+  </div>
+  <div class="form-row">
+    <label>DDS (Diálogo Diario de Seguridad) — fecha
+      <input type="date" name="dds_date" value="{{ driver.dds_date if driver else '' }}">
+    </label>
+    <label>DDS — vencimiento
+      <input type="date" name="dds_expiry" value="{{ driver.dds_expiry if driver else '' }}">
+    </label>
+  </div>
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Guardar</button>
+    <a href="{{ url_for('conductores.list_view') }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+{% endblock %}

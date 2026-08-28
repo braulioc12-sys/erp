@@ -1,0 +1,44 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Guía {{ waybill.series }}-{{ '%06d'|format(waybill.series_number) }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Guía {{ waybill.series }}-{{ '%06d'|format(waybill.series_number) }} {{ m.badge(waybill.sunat_status) }}</h1>
+  <div class="page-actions">
+    <form method="post" action="{{ url_for('guias.send_sunat', waybill_id=waybill.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-primary">📤 Enviar a SUNAT</button>
+    </form>
+  </div>
+</div>
+
+<div class="detail-grid">
+  <div class="detail-item"><div class="label">Viaje</div><div class="value"><a href="{{ url_for('viajes.detail', trip_id=waybill.trip_id) }}">{{ waybill.trip_code }}</a></div></div>
+  <div class="detail-item"><div class="label">Cliente</div><div class="value">{{ waybill.client_name }}</div></div>
+  <div class="detail-item"><div class="label">Ruta</div><div class="value">{{ waybill.origin_address }} → {{ waybill.destination_address }}</div></div>
+  <div class="detail-item"><div class="label">Fecha de emisión</div><div class="value">{{ waybill.issue_date }}</div></div>
+  <div class="detail-item"><div class="label">Peso / bultos</div><div class="value">{{ waybill.weight_kg or '—' }} kg / {{ waybill.packages or '—' }}</div></div>
+  <div class="detail-item"><div class="label">Vehículo</div><div class="value">{{ waybill.vehicle_plate or '—' }}</div></div>
+  <div class="detail-item"><div class="label">Conductor</div><div class="value">{{ waybill.driver_name or '—' }} ({{ waybill.driver_document or 'sin DNI' }})</div></div>
+</div>
+
+<div class="panel">
+  <h2>Estado ante SUNAT {{ m.badge(waybill.sunat_status) }}</h2>
+  {% if waybill.sunat_message %}<p class="mt-0 muted">{{ waybill.sunat_message }}</p>{% endif %}
+  {% if waybill.sunat_sent_at %}<p class="mt-0 muted">Último envío: {{ waybill.sunat_sent_at }}</p>{% endif %}
+  {% if waybill.sunat_pdf_url or waybill.sunat_xml_url or waybill.sunat_cdr_url %}
+  <p class="mt-0">
+    {% if waybill.sunat_pdf_url %}<a href="{{ waybill.sunat_pdf_url }}" target="_blank" rel="noopener">PDF</a>{% endif %}
+    {% if waybill.sunat_xml_url %}· <a href="{{ waybill.sunat_xml_url }}" target="_blank" rel="noopener">XML</a>{% endif %}
+    {% if waybill.sunat_cdr_url %}· <a href="{{ waybill.sunat_cdr_url }}" target="_blank" rel="noopener">CDR</a>{% endif %}
+  </p>
+  {% endif %}
+  {% if waybill.sunat_status == 'NO_ENVIADA' %}
+  <p class="mt-0 muted">Aún no se ha enviado a SUNAT. Revisa que la facturación electrónica esté configurada (ver README, sección "Facturación electrónica (SUNAT)") antes de enviar.</p>
+  {% endif %}
+</div>
+
+{% if waybill.notes %}
+<div class="panel"><h2>Observaciones</h2><p class="mt-0">{{ waybill.notes }}</p></div>
+{% endif %}
+{% endblock %}

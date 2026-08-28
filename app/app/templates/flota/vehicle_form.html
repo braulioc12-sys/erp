@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Editar unidad' if mode == 'edit' else 'Nueva unidad' }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>{{ 'Editar unidad' if mode == 'edit' else 'Nueva unidad' }}</h1></div>
+<form class="form panel" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="form-row">
+    <label>Placa *
+      <input type="text" name="plate" value="{{ vehicle.plate if vehicle else '' }}" required>
+    </label>
+    <label>Capacidad (kg)
+      <input type="number" step="0.01" name="capacity_kg" value="{{ vehicle.capacity_kg if vehicle else '' }}">
+    </label>
+  </div>
+  <div class="form-row">
+    <label>Marca
+      <input type="text" name="brand" value="{{ vehicle.brand if vehicle else '' }}">
+    </label>
+    <label>Modelo
+      <input type="text" name="model" value="{{ vehicle.model if vehicle else '' }}">
+    </label>
+  </div>
+  <div class="form-row">
+    <label>Estado
+      <select name="status">
+        {% set current = vehicle.status if vehicle else 'ACTIVO' %}
+        <option value="ACTIVO" {{ 'selected' if current == 'ACTIVO' }}>Activo</option>
+        <option value="MANTENIMIENTO" {{ 'selected' if current == 'MANTENIMIENTO' }}>En mantenimiento</option>
+        <option value="INACTIVO" {{ 'selected' if current == 'INACTIVO' }}>Inactivo</option>
+      </select>
+    </label>
+    <label>Tipo de unidad
+      <select name="vehicle_type">
+        {% set current_type = vehicle.vehicle_type if vehicle and vehicle.vehicle_type else 'CAMION' %}
+        <option value="CAMION" {{ 'selected' if current_type == 'CAMION' }}>Camión (unidad simple)</option>
+        <option value="TRACTO" {{ 'selected' if current_type == 'TRACTO' }}>Tracto camión (cabezal)</option>
+        <option value="CARRETA" {{ 'selected' if current_type == 'CARRETA' }}>Carreta / semirremolque</option>
+      </select>
+    </label>
+  </div>
+  <p class="muted" style="margin-top:-8px;">El tipo de unidad determina el diagrama de posiciones que se usa en Mantenimiento → Neumáticos.</p>
+
+  <div class="section-title">Documentos obligatorios</div>
+  <div class="form-row">
+    <label>Vencimiento de SOAT
+      <input type="date" name="soat_expiry" value="{{ vehicle.soat_expiry if vehicle else '' }}">
+    </label>
+    <label>Vencimiento de Revisión Técnica
+      <input type="date" name="technical_review_expiry" value="{{ vehicle.technical_review_expiry if vehicle else '' }}">
+    </label>
+  </div>
+
+  <div class="form-row">
+    <label>Kilometraje actual
+      <input type="number" step="1" name="current_km" value="{{ vehicle.current_km if vehicle and vehicle.current_km is not none else '' }}" placeholder="Ej. 118500">
+    </label>
+    <label>ID en el proveedor de GPS (opcional)
+      <input type="text" name="gps_external_id" value="{{ vehicle.gps_external_id if vehicle else '' }}" placeholder="Ej. el ID o placa como aparece en Frotcom">
+    </label>
+  </div>
+  {% if mode == 'edit' and vehicle and vehicle.current_km_updated_at %}
+  <p class="muted" style="margin-top:-8px;">Última actualización de kilometraje: {{ vehicle.current_km_updated_at }}</p>
+  {% endif %}
+
+  <label>Notas
+    <textarea name="notes">{{ vehicle.notes if vehicle else '' }}</textarea>
+  </label>
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Guardar</button>
+    <a href="{{ url_for('flota.list_view') }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends 'base.html' %}
+{% block title %}Clientes{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Clientes</h1>
+  <div class="page-actions">
+    {% if can(current_user.role, 'clientes', 'edit') %}
+    <a href="{{ url_for('clientes.new') }}" class="btn btn-primary">+ Nuevo cliente</a>
+    {% endif %}
+  </div>
+</div>
+
+<form class="filters" method="get">
+  <label>Buscar
+    <input type="text" name="q" value="{{ q }}" placeholder="Nombre o RUC">
+  </label>
+  <button class="btn btn-secondary" type="submit">Filtrar</button>
+</form>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Nombre</th><th>RUC</th><th>Teléfono</th><th>Correo</th><th>Dirección</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for c in clients %}
+      <tr>
+        <td>{{ c.name }}</td>
+        <td>{{ c.ruc or '—' }}</td>
+        <td>{{ c.phone or '—' }}</td>
+        <td>{{ c.email or '—' }}</td>
+        <td class="wrap">{{ c.address or '—' }}</td>
+        <td>
+          {% if can(current_user.role, 'clientes', 'edit') %}
+          <div class="btn-group">
+            <a class="btn btn-secondary btn-sm" href="{{ url_for('clientes.edit', client_id=c.id) }}">Editar</a>
+            <form method="post" action="{{ url_for('clientes.delete', client_id=c.id) }}" onsubmit="return confirm('¿Eliminar este cliente?');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-danger btn-sm" type="submit">Eliminar</button>
+            </form>
+          </div>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="table-empty">No hay clientes registrados todavía.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

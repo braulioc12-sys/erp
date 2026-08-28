@@ -1,0 +1,240 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Editar gasto' if expense and expense.id else 'Registrar gasto' }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>{{ 'Editar gasto' if expense and expense.id else 'Registrar gasto' }}</h1></div>
+
+{% if locked %}
+<p class="flash flash-error">Este gasto ya forma parte de una liquidación cerrada. Puedes corregirlo si hace falta, pero ten en cuenta que el export contable de esa liquidación ya se generó — si el monto o la cuenta cambian, vuelve a exportar el resumen de ese mes/oficina.</p>
+{% endif %}
+
+<form class="form panel" method="post" enctype="multipart/form-data">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <label>Monto (S/) *
+    <input type="number" step="0.01" name="amount" value="{{ expense.amount if expense else '' }}" required>
+  </label>
+
+  <div class="form-row">
+    <div>
+      {% if preselected_trip %}
+      <span style="display:block; font-weight:600; margin-bottom:4px;">Viaje</span>
+      <input type="text" value="{{ preselected_trip_code or ('Viaje #' ~ preselected_trip) }}" readonly style="background:var(--bg-soft, #f3f5f8); width:100%;">
+      <input type="hidden" name="trip_id" value="{{ preselected_trip }}">
+      <p class="muted" style="margin:4px 0 0;">Este gasto se registra directo en la liquidación de este viaje.</p>
+      {% else %}
+      <label>Viaje relacionado
+        <select name="trip_id" id="trip_id" onchange="onTripChange()">
+          <option value="">-- Ninguno --</option>
+          {% for t in trips %}
+          <option value="{{ t.id }}" {{ 'selected' if expense and (expense.trip_id|string) == (t.id|string) }}>{{ t.code }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% endif %}
+    </div>
+    <div>
+      {% if preselected_trip and preselected_vehicle_plate %}
+      <span style="display:block; font-weight:600; margin-bottom:4px;">Unidad</span>
+      <input type="text" value="{{ preselected_vehicle_plate }}" readonly style="background:var(--bg-soft, #f3f5f8); width:100%;">
+      <input type="hidden" name="vehicle_id" value="{{ preselected_vehicle_id }}">
+      <p class="muted" style="margin:4px 0 0;">Es la unidad ya asignada a este viaje.</p>
+      {% else %}
+      <label>Unidad relacionada
+        <select name="vehicle_id" id="vehicle_id">
+          <option value="">-- Ninguna --</option>
+          {% for v in vehicles %}
+          <option value="{{ v.id }}" {{ 'selected' if expense and (expense.vehicle_id|string) == (v.id|string) }}>{{ v.plate }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% if not preselected_trip %}
+      <p class="muted" style="margin:4px 0 0;">Se completa sola si el viaje elegido ya tiene una unidad asignada — cámbiala aquí solo si este gasto en particular fue con otra unidad.</p>
+      {% endif %}
+      {% endif %}
+    </div>
+  </div>
+
+  <label>Fecha *
+    <input type="date" name="expense_date" value="{{ expense.expense_date if expense else today }}" required>
+  </label>
+
+  <label>Descripción
+    <textarea name="description">{{ expense.description if expense else '' }}</textarea>
+  </label>
+
+  <h2 style="margin-top:20px;">Datos contables</h2>
+  <p class="muted" style="margin-top:-8px;">El concepto es la única clasificación del gasto — al elegirlo se completan solas la cuenta contable y el tipo de comprobante que arman el export de <a href="{{ url_for('liquidaciones.resumen_view') }}" target="_blank">Resumen contable</a>. Si el concepto que necesitas no está en la lista, un Administrador puede agregarlo desde <a href="{{ url_for('liquidaciones.concepts_list') }}" target="_blank">Liquidaciones → Conceptos</a>.</p>
+
+  <div class="form-row">
+    <label>Concepto *
+      <select name="concept_id" id="concept_id" onchange="onConceptChange()" required>
+        <option value="" disabled {{ 'selected' if not expense or not expense.concept_id }}>-- Elige un concepto --</option>
+        {% for c in concepts %}
+        <option value="{{ c.id }}" {{ 'selected' if expense and (expense.concept_id|string) == (c.id|string) }}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Cuenta / comprobante
+      <input type="text" id="concept_info" value="" readonly placeholder="Se completa al elegir un concepto" style="background:var(--bg-soft, #f3f5f8);">
+    </label>
+  </div>
+
+  <div class="form-row">
+    <label>N° de documento
+      <input type="text" name="document_number" value="{{ expense.document_number if expense else '' }}" placeholder="Ej. F001-1234">
+    </label>
+    <label>Moneda
+      <select name="currency">
+        <option value="S" {{ 'selected' if not expense or (expense.currency or 'S') == 'S' }}>Soles (S)</option>
+        <option value="D" {{ 'selected' if expense and expense.currency == 'D' }}>Dólares (D)</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="form-row">
+    <label>RUC / DNI del proveedor
+      <input type="text" name="provider_ruc" id="provider_ruc" value="{{ expense.provider_ruc if expense else '' }}" oninput="onRucInput()">
+    </label>
+    <label>Razón social / Nombre del proveedor
+      <div style="display:flex; gap:6px; align-items:center;">
+        <input type="text" name="provider_name" id="provider_name" value="{{ expense.provider_name if expense else '' }}" style="flex:1;">
+        <button type="button" id="provider_name_edit_btn" class="btn btn-secondary" style="display:none; padding:6px 10px; font-size:0.85em; white-space:nowrap;" onclick="enableManualNameEdit()">✎ Editar</button>
+      </div>
+    </label>
+  </div>
+  <p class="muted" id="ruc_status" style="margin-top:-8px;"></p>
+
+  <label>Tipo de cambio (opcional)
+    <input type="number" step="0.001" name="exchange_rate" value="{{ expense.exchange_rate if expense and expense.exchange_rate else '' }}" placeholder="Se completa solo con el de SUNAT del día del comprobante">
+  </label>
+  <p class="muted" style="margin-top:-8px;">Déjalo vacío para que el sistema use el tipo de cambio SUNAT de la fecha del gasto. Solo complétalo a mano si el servicio no respondió o quieres forzar un valor distinto. La fecha de vencimiento se registra igual a la fecha de emisión.</p>
+
+  <label>Comprobante — tomar foto ahora (opcional)
+    <input type="file" name="receipt" accept="image/*" capture="environment">
+  </label>
+  <p class="muted" style="margin-top:-8px;">En el celular esto abre la cámara directamente. Si prefieres elegir una foto ya tomada o un PDF, usa el campo de abajo en su lugar (llena solo uno de los dos).</p>
+
+  <label>Comprobante — o subir un archivo (foto o PDF, opcional)
+    <input type="file" name="receipt" accept=".png,.jpg,.jpeg,.pdf,.webp">
+  </label>
+  {% if expense and expense.receipt_filename %}
+  <p class="muted" style="margin-top:-8px;">Ya tiene un comprobante adjunto — sube uno nuevo solo si quieres reemplazarlo.</p>
+  {% endif %}
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Guardar</button>
+    <a href="{{ url_for('liquidaciones.historial') }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+
+<script>
+  var CONCEPTS = {{ (concepts_json or []) | tojson }};
+  function onConceptChange() {
+    var select = document.getElementById('concept_id');
+    var info = document.getElementById('concept_info');
+    var id = select.value;
+    if (!id) { info.value = ''; return; }
+    for (var i = 0; i < CONCEPTS.length; i++) {
+      if (String(CONCEPTS[i].id) === String(id)) {
+        info.value = 'Cuenta ' + CONCEPTS[i].account_code + ' · ' + CONCEPTS[i].voucher_type_label;
+        return;
+      }
+    }
+    info.value = '';
+  }
+  document.addEventListener('DOMContentLoaded', onConceptChange);
+
+  // La Unidad se completa sola con la que ya tiene asignada el viaje
+  // elegido (trips.vehicle_id) — no tiene sentido volver a preguntarla si
+  // ya se sabe (pedido de Braulio, 28 ago).
+  var TRIPS = {{ (trips_json or []) | tojson }};
+  function onTripChange() {
+    var tripSelect = document.getElementById('trip_id');
+    var vehicleSelect = document.getElementById('vehicle_id');
+    if (!tripSelect || !vehicleSelect) { return; }
+    var tripId = tripSelect.value;
+    if (!tripId) { return; }
+    for (var i = 0; i < TRIPS.length; i++) {
+      if (String(TRIPS[i].id) === String(tripId) && TRIPS[i].vehicle_id) {
+        vehicleSelect.value = String(TRIPS[i].vehicle_id);
+        return;
+      }
+    }
+  }
+  document.addEventListener('DOMContentLoaded', function () {
+    var vehicleSelect = document.getElementById('vehicle_id');
+    // Solo auto-completa si todavía no hay una unidad elegida (al editar un
+    // gasto ya guardado, respeta lo que tenga guardado).
+    if (vehicleSelect && !vehicleSelect.value) { onTripChange(); }
+  });
+
+  // Autocompleta la razón social al escribir un RUC de 11 dígitos,
+  // consultando SUNAT vía decolecta.com (pedido de Braulio, 28 ago). Nunca
+  // bloquea el registro del gasto: si falla o el RUC no existe, el campo
+  // de razón social se deja tal cual para completarlo a mano.
+  var rucLookupTimer = null;
+  var lastRucLookedUp = '';
+  function onRucInput() {
+    var rucInput = document.getElementById('provider_ruc');
+    var status = document.getElementById('ruc_status');
+    var digits = (rucInput.value || '').replace(/\D/g, '');
+    if (rucLookupTimer) { clearTimeout(rucLookupTimer); }
+    if (digits.length === 0) {
+      // RUC borrado por completo: se resetea todo para empezar de nuevo.
+      status.textContent = '';
+      lastRucLookedUp = '';
+      var nameInput = document.getElementById('provider_name');
+      var editBtn = document.getElementById('provider_name_edit_btn');
+      if (nameInput.readOnly) {
+        nameInput.readOnly = false;
+        nameInput.style.background = '';
+        nameInput.value = '';
+        editBtn.style.display = 'none';
+      }
+      return;
+    }
+    if (digits.length !== 11) { status.textContent = ''; return; }
+    rucLookupTimer = setTimeout(function () { lookupRuc(digits); }, 500);
+  }
+  function lookupRuc(ruc) {
+    if (ruc === lastRucLookedUp) { return; }
+    lastRucLookedUp = ruc;
+    var status = document.getElementById('ruc_status');
+    var nameInput = document.getElementById('provider_name');
+    var editBtn = document.getElementById('provider_name_edit_btn');
+    status.textContent = 'Buscando en SUNAT…';
+    fetch('{{ url_for("liquidaciones.consultar_ruc") }}?ruc=' + ruc)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (ruc !== lastRucLookedUp) { return; }
+        if (!data.found) {
+          status.textContent = 'No se encontró ese RUC — escribe la razón social a mano.';
+          nameInput.readOnly = false;
+          nameInput.style.background = '';
+          editBtn.style.display = 'none';
+          return;
+        }
+        // Se completa directo en el campo de la derecha — ya no hace falta
+        // repetir el nombre abajo. El campo queda bloqueado (con botón
+        // "Editar" para cambiarlo a mano) para dejar claro que vino de SUNAT.
+        nameInput.value = data.razon_social;
+        nameInput.readOnly = true;
+        nameInput.style.background = 'var(--bg-soft, #f3f5f8)';
+        editBtn.style.display = 'inline-block';
+        status.textContent = data.estado && data.estado !== 'ACTIVO'
+          ? 'Estado SUNAT: ' + data.estado
+          : '';
+      })
+      .catch(function () { status.textContent = ''; });
+  }
+  function enableManualNameEdit() {
+    var nameInput = document.getElementById('provider_name');
+    var editBtn = document.getElementById('provider_name_edit_btn');
+    nameInput.readOnly = false;
+    nameInput.style.background = '';
+    editBtn.style.display = 'none';
+    nameInput.focus();
+    nameInput.select();
+  }
+</script>
+{% endblock %}

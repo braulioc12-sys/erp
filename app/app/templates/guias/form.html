@@ -1,0 +1,61 @@
+{% extends 'base.html' %}
+{% block title %}Generar guía de remisión — Viaje {{ trip.code }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Generar guía de remisión — Viaje {{ trip.code }}</h1></div>
+<p class="muted mt-0">Se completa con los datos del viaje; puedes ajustarlos antes de guardar. Después de guardar podrás enviarla a SUNAT (si la facturación electrónica ya está configurada).</p>
+
+<form class="form panel" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <div class="form-row">
+    <label>Fecha de emisión *
+      <input type="date" name="issue_date" value="{{ today }}" required>
+    </label>
+    <label>N.º de bultos
+      <input type="number" step="1" min="1" name="packages" value="1">
+    </label>
+    <label>Peso bruto total (kg)
+      <input type="number" step="0.01" name="weight_kg" value="{{ trip.cargo_weight_kg or '' }}">
+    </label>
+  </div>
+
+  <div class="form-row">
+    <label>Dirección de partida
+      <input type="text" name="origin_address" value="{{ trip.origin }}">
+    </label>
+    <label>Dirección de llegada
+      <input type="text" name="destination_address" value="{{ trip.destination }}">
+    </label>
+  </div>
+
+  <div class="form-row">
+    <label>Placa del vehículo
+      <input type="text" name="vehicle_plate" value="{{ trip.vehicle_plate or '' }}">
+    </label>
+    <label>Conductor
+      <input type="text" name="driver_name" value="{{ trip.driver_name or '' }}">
+    </label>
+  </div>
+
+  <div class="form-row">
+    <label>DNI del conductor
+      <input type="text" name="driver_document" value="{{ trip.driver_document or '' }}" placeholder="Necesario para SUNAT">
+    </label>
+    <label>Licencia de conducir
+      <input type="text" name="driver_license" value="{{ trip.driver_license or '' }}">
+    </label>
+  </div>
+  {% if not trip.driver_document %}
+  <p class="muted" style="margin-top:-8px;">Este conductor no tiene DNI registrado. Puedes escribirlo aquí, o guardarlo de forma permanente en Flota → Conductores para que se autocomplete la próxima vez.</p>
+  {% endif %}
+
+  <label>Observaciones
+    <textarea name="notes"></textarea>
+  </label>
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Guardar guía</button>
+    <a href="{{ url_for('viajes.detail', trip_id=trip.id) }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+{% endblock %}

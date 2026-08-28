@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Viaje {{ trip.code }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Viaje {{ trip.code }} {{ m.badge(trip.status) }}</h1>
+  <div class="page-actions">
+    {% if can(current_user.role, 'viajes', 'edit') %}
+      {% if trip.status in ('PENDIENTE', 'EN_CURSO') %}
+      <a href="{{ url_for('viajes.edit', trip_id=trip.id) }}" class="btn btn-secondary">Editar</a>
+      {% endif %}
+      {% for s in next_statuses %}
+      <form method="post" action="{{ url_for('viajes.change_status', trip_id=trip.id) }}" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="status" value="{{ s }}">
+        <button type="submit" class="btn {{ 'btn-danger' if s == 'CANCELADO' else 'btn-primary' }}">
+          Marcar {{ s.replace('_', ' ').title() }}
+        </button>
+      </form>
+      {% endfor %}
+    {% endif %}
+  </div>
+</div>
+
+<div class="detail-grid">
+  <div class="detail-item"><div class="label">Cliente</div><div class="value">{{ trip.client_name }}</div></div>
+  <div class="detail-item"><div class="label">Ruta</div><div class="value">{{ trip.origin }} → {{ trip.destination }}</div></div>
+  <div class="detail-item"><div class="label">Unidad</div><div class="value">{{ trip.vehicle_plate or '—' }}</div></div>
+  <div class="detail-item"><div class="label">Conductor</div><div class="value">{{ trip.driver_name or '—' }}</div></div>
+  <div class="detail-item"><div class="label">Carga</div><div class="value">{{ trip.cargo_description or '—' }} {% if trip.cargo_weight_kg %}({{ trip.cargo_weight_kg }} kg){% endif %}</div></div>
+  <div class="detail-item"><div class="label">Fecha programada</div><div class="value">{{ trip.scheduled_date }}</div></div>
+  <div class="detail-item"><div class="label">Fecha entrega</div><div class="value">{{ trip.delivered_date or '—' }}</div></div>
+  <div class="detail-item"><div class="label">Tarifa</div><div class="value">{{ trip.rate|money }}</div></div>
+  <div class="detail-item"><div class="label">Comisión del conductor</div><div class="value">{{ trip.driver_commission|money }}</div></div>
+  <div class="detail-item"><div class="label">Facturado</div><div class="value">{{ 'Sí' if trip.invoiced else 'No' }}</div></div>
+</div>
+
+<div class="btn-group" style="margin-bottom:16px;">
+  {% if can(current_user.role, 'guias', 'edit') and trip.status in ('EN_CURSO', 'ENTREGADO') %}
+  <a href="{{ url_for('guias.new', trip_id=trip.id) }}" class="btn btn-secondary btn-sm">📄 Generar guía de remisión (SUNAT)</a>
+  {% endif %}
+  {% if can(current_user.role, 'inspecciones', 'edit') %}
+  <a href="{{ url_for('inspecciones.new', trip_id=trip.id) }}" class="btn btn-secondary btn-sm">✅ Registrar inspección</a>
+  {% endif %}
+  {% if can(current_user.role, 'liquidaciones', 'edit') %}
+    {% if advance %}
+    <a href="{{ url_for('liquidaciones.detail', advance_id=advance.id) }}" class="btn btn-secondary btn-sm">💵 Ver liquidación de este viaje</a>
+    {% else %}
+    <a href="{{ url_for('liquidaciones.new_advance', trip_id=trip.id) }}" class="btn btn-secondary btn-sm">💵 Confirmar anticipo de viáticos</a>
+    {% endif %}
+  {% endif %}
+</div>
+
+{% if trip.notes %}
+<div class="panel"><h2>Notas</h2><p class="mt-0">{{ trip.notes }}</p></div>
+{% endif %}
+
+<div class="panel">
+  <h2>Gastos asociados a este viaje ({{ total_expenses|money }})</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Fecha</th><th>Tipo</th><th>Descripción</th><th class="text-right">Monto</th></tr></thead>
+      <tbody>
+        {% for e in expenses %}
+        <tr>
+          <td>{{ e.expense_date }}</td>
+          <td>{{ e.type.replace('_',' ').title() }}</td>
+          <td>{{ e.description or '—' }}</td>
+          <td class="text-right">{{ e.amount|money }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="table-empty">Sin gastos registrados para este viaje.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if can(current_user.role, 'liquidaciones', 'edit') %}
+  <p style="margin-top:12px;"><a href="{{ url_for('liquidaciones.new_expense', trip_id=trip.id) }}" class="btn btn-secondary btn-sm">+ Registrar gasto para este viaje</a></p>
+  {% endif %}
+</div>
+{% endblock %}

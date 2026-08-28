@@ -1,0 +1,78 @@
+{% extends 'base.html' %}
+{% block title %}Nueva inspección{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Nueva inspección{% if trip %} — Viaje {{ trip.code }}{% endif %}</h1></div>
+
+<form class="form panel" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <div class="form-row">
+    <label>Momento *
+      <select name="type" required>
+        <option value="PRE">Antes de salir</option>
+        <option value="POST">Al llegar</option>
+      </select>
+    </label>
+    <label>Fecha *
+      <input type="date" name="inspection_date" value="{{ today }}" required>
+    </label>
+  </div>
+
+  <div class="form-row">
+    <label>Unidad *
+      <select name="vehicle_id" required onchange="if (this.value) window.location = '{{ url_for('inspecciones.new') }}?vehicle_id=' + this.value;" {{ 'disabled' if trip and trip.vehicle_id }}>
+        <option value="">-- Selecciona una unidad --</option>
+        {% for v in vehicles %}
+        <option value="{{ v.id }}" {{ 'selected' if (trip and trip.vehicle_id == v.id) or (selected_vehicle_id and (selected_vehicle_id|string) == (v.id|string)) }}>{{ v.plate }}{% if v.vehicle_type in ('TRACTO', 'CARRETA') %} ({{ v.vehicle_type|title }} — usa el Check List de {{ v.vehicle_type|title }}){% endif %}</option>
+        {% endfor %}
+      </select>
+      {% if trip and trip.vehicle_id %}<input type="hidden" name="vehicle_id" value="{{ trip.vehicle_id }}">{% endif %}
+    </label>
+    <label>Conductor
+      <select name="driver_id">
+        <option value="">-- Ninguno --</option>
+        {% for d in drivers %}
+        <option value="{{ d.id }}" {{ 'selected' if trip and trip.driver_id == d.id }}>{{ d.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+
+  <h2 style="margin-top:20px;">Checklist</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Ítem</th><th>Estado</th><th>Observación</th></tr></thead>
+      <tbody>
+        {% for item in items %}
+        <tr>
+          <td>{{ item.name }}</td>
+          <td>
+            <label style="flex-direction:row; gap:4px; align-items:center; display:inline-flex; margin-right:10px;">
+              <input type="radio" name="item_{{ item.id }}_status" value="OK" checked style="width:auto;"> OK
+            </label>
+            <label style="flex-direction:row; gap:4px; align-items:center; display:inline-flex; margin-right:10px;">
+              <input type="radio" name="item_{{ item.id }}_status" value="FALLA" style="width:auto;"> Falla
+            </label>
+            <label style="flex-direction:row; gap:4px; align-items:center; display:inline-flex;">
+              <input type="radio" name="item_{{ item.id }}_status" value="NA" style="width:auto;"> N/A
+            </label>
+          </td>
+          <td><input type="text" name="item_{{ item.id }}_observation" placeholder="Opcional"></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3" class="table-empty">No hay ítems de inspección configurados. Agrégalos desde Catálogos.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <label style="margin-top:16px;">Observaciones generales
+    <textarea name="notes"></textarea>
+  </label>
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Guardar inspección</button>
+    <a href="{{ url_for('viajes.detail', trip_id=trip.id) if trip else url_for('inspecciones.list_view') }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+{% endblock %}

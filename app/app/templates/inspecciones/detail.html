@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% block title %}Inspección — {{ inspection.vehicle_plate }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Inspección — {{ inspection.vehicle_plate }}</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('inspecciones.print_view', inspection_id=inspection.id) }}" class="btn btn-secondary" target="_blank">🖨️ Imprimir / Descargar PDF</a>
+  </div>
+</div>
+
+<div class="detail-grid">
+  <div class="detail-item"><div class="label">Momento</div><div class="value">{{ 'Antes de salir' if inspection.type == 'PRE' else 'Al llegar' }}</div></div>
+  <div class="detail-item"><div class="label">Fecha</div><div class="value">{{ inspection.inspection_date }}</div></div>
+  <div class="detail-item"><div class="label">Viaje</div><div class="value">{% if inspection.trip_code %}<a href="{{ url_for('viajes.detail', trip_id=inspection.trip_id) }}">{{ inspection.trip_code }}</a>{% else %}—{% endif %}</div></div>
+  <div class="detail-item"><div class="label">Conductor</div><div class="value">{{ inspection.driver_name or '—' }}</div></div>
+</div>
+
+<div class="panel">
+  <h2>Checklist</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Ítem</th><th>Estado</th><th>Observación</th></tr></thead>
+      <tbody>
+        {% for it in items %}
+        <tr>
+          <td>{{ it.item_name }}</td>
+          <td>
+            {% if it.status == 'OK' %}<span class="badge badge-activo">OK</span>
+            {% elif it.status == 'FALLA' %}<span class="badge badge-error">Falla</span>
+            {% else %}<span class="badge">N/A</span>{% endif %}
+          </td>
+          <td class="wrap">{{ it.observation or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if inspection.notes %}
+<div class="panel"><h2>Observaciones generales</h2><p class="mt-0">{{ inspection.notes }}</p></div>
+{% endif %}
+{% endblock %}
