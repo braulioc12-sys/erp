@@ -1,0 +1,102 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Liquidación — Viaje {{ advance.trip_code }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Liquidación — Viaje {{ advance.trip_code }} {{ m.badge(advance.status) }}</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('viajes.detail', trip_id=advance.trip_id) }}" class="btn btn-secondary">← Volver al viaje</a>
+  </div>
+</div>
+
+<div class="detail-grid">
+  <div class="detail-item"><div class="label">Ruta</div><div class="value">{{ advance.origin }} → {{ advance.destination }}</div></div>
+  <div class="detail-item"><div class="label">Entregado</div><div class="value">{{ advance.amount_given|money }}</div></div>
+  <div class="detail-item"><div class="label">Fecha de entrega</div><div class="value">{{ advance.given_date }}</div></div>
+  <div class="detail-item"><div class="label">Gastado hasta ahora (todos los gastos del viaje)</div><div class="value">{{ spent|money }}</div></div>
+  <div class="detail-item">
+    <div class="label">{{ 'Saldo a favor' if difference >= 0 else 'Exceso sobre lo entregado' }}</div>
+    <div class="value" style="color:{{ 'var(--success)' if difference >= 0 else 'var(--danger)' }};">{{ (difference if difference >= 0 else -difference)|money }}</div>
+  </div>
+</div>
+
+{% if advance.status == 'LIQUIDADO' %}
+<div class="panel">
+  <h2>Liquidación cerrada</h2>
+  <p class="mt-0">Cerrada el {{ advance.liquidated_at }} con un total de gastos incluidos de {{ advance.liquidated_expenses_total|money }}.
+    Oficina: <strong>{{ office_labels.get(advance.office, advance.office or '—') }}</strong> ·
+    Voucher: <strong>{{ '%02d'|format(advance.voucher_number) if advance.voucher_number else '—' }}</strong>.
+    Aparece en <a href="{{ url_for('liquidaciones.resumen_view', month=advance.liquidated_at[:7], office=advance.office) }}">Liquidaciones → Resumen contable</a>.</p>
+</div>
+{% endif %}
+
+{% if advance.notes %}
+<div class="panel"><h2>Notas del anticipo</h2><p class="mt-0">{{ advance.notes }}</p></div>
+{% endif %}
+
+<div class="panel">
+  <h2>Gastos de este viaje</h2>
+  {% set can_liquidate = advance.status == 'PENDIENTE' and can(current_user.role, 'liquidaciones', 'edit') %}
+  {% if advance.status == 'PENDIENTE' %}
+  <p class="muted mt-0">Marca cuáles de estos gastos entran en la liquidación (por defecto se incluyen todos los que no estén ya en otra liquidación). Elige la oficina y presiona "Liquidar" para cerrarla — después ya no se puede editar.</p>
+  {% endif %}
+  {% if can_liquidate %}
+  <form method="post" action="{{ url_for('liquidaciones.liquidate', advance_id=advance.id) }}" onsubmit="return confirm('¿Cerrar esta liquidación con los gastos marcados?');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:14px; padding:12px; background:var(--bg-soft,#f3f5f8); border-radius:8px;">
+      <label style="margin:0;">Oficina donde se liquida *
+        <select name="office" required>
+          <option value="">-- Elige una oficina --</option>
+          {% for code, info in offices %}
+          <option value="{{ code }}">{{ info.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit" class="btn btn-primary">Liquidar</button>
+    </div>
+  {% endif %}
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          {% if can_liquidate %}<th>Incluir</th>{% else %}<th>Incluido</th>{% endif %}
+          <th>Fecha</th><th>Tipo</th><th>Descripción</th><th class="text-right">Monto</th><th>Comprobante</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in expenses %}
+        <tr>
+          <td>
+            {% if can_liquidate %}
+            <input type="checkbox" name="expense_ids" value="{{ e.id }}" {{ 'checked' if not e.expense_advance_id or e.expense_advance_id == advance.id }}>
+            {% else %}
+            {{ '✓' if e.expense_advance_id == advance.id else '—' }}
+            {% endif %}
+          </td>
+          <td>{{ e.expense_date }}</td>
+          <td>{{ e.type|pretty }}</td>
+          <td class="wrap">{{ e.description or '—' }}</td>
+          <td class="text-right">{{ e.amount|money }}</td>
+          <td>{% if e.receipt_filename %}<a href="{{ url_for('liquidaciones.receipt', expense_id=e.id) }}" target="_blank">Ver</a>{% else %}—{% endif %}</td>
+          <td>
+            {% if can(current_user.role, 'liquidaciones', 'edit') %}
+            <a href="{{ url_for('liquidaciones.edit_expense', expense_id=e.id) }}" class="btn btn-secondary btn-sm">Editar</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="table-empty">Aún no se han registrado gastos para este viaje.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if can_liquidate %}
+  </form>
+  {% endif %}
+
+  {% if can(current_user.role, 'liquidaciones', 'edit') %}
+  <p style="margin-top:12px;"><a href="{{ url_for('liquidaciones.new_expense', trip_id=advance.trip_id) }}" class="btn btn-secondary btn-sm">+ Registrar gasto para este viaje</a></p>
+  {% endif %}
+</div>
+{% endblock %}

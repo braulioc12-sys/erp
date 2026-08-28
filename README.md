@@ -20,7 +20,7 @@ El logo de Harraso Transport / BRMS está en `app/static/img/` (`logo-lockup.png
 - **Clientes:** datos de contacto y facturación.
 - **Flota:** unidades (placa, capacidad, tipo — camión, tracto o carreta —, estado), con vencimiento de **SOAT** y **Revisión Técnica** (alertas en el Panel).
 - **Conductores:** datos personales, vencimiento de brevete, y control de vencimientos de **examen médico ocupacional** y de los requisitos para operar con **Backus** (examen de manejo, capacitación, y DDS) — todos con alerta en el Panel.
-- **Gastos:** combustible, peajes, viáticos, mantenimiento u otros, asociados a un viaje y/o unidad. Filtrable por tipo y rango de fechas, con exportación a Excel (`.xlsx`) agrupada por tipo, con subtotales y total general. Se puede adjuntar el comprobante (foto o PDF) a cada gasto, definir **presupuestos mensuales** por unidad o tipo (con alerta en el Panel al acercarse o superarse), y gestionar **anticipos de viáticos** por viaje con su liquidación — ver la sección "Gastos, presupuestos y viáticos" más abajo.
+- **Liquidaciones:** una liquidación contable por viaje — el anticipo de viáticos entregado al conductor, los gastos reales (combustible, peajes, viáticos, mantenimiento u otros) que se le van asignando manualmente, y el cierre por oficina con numeración de voucher. Incluye **presupuestos mensuales** por unidad o tipo (con alerta en el Panel), un **historial de gastos** filtrable y exportable a Excel, y un **resumen contable exportable** en el formato exacto de la plantilla de liquidación de Harraso — ver la sección dedicada más abajo.
 - **Rutas:** catálogo de rutas frecuentes con un monto de viáticos predeterminado (usado para sugerir el anticipo de gastos de cada viaje) y un monto de **comisión del conductor** predeterminado (usado para sugerir la comisión al registrar un viaje por esa ruta).
 - **Mantenimiento:** historial de mantenimientos por unidad, costo, kilometraje registrado y próxima fecha/kilometraje. Los conceptos (tipos de mantenimiento) se administran desde Catálogos. Si indicas el kilometraje al registrar un mantenimiento, actualiza automáticamente el kilometraje actual de la unidad. Incluye un catálogo de **trabajos con tiempo estimado** (ej. cambio de aceite = 60 min) que se seleccionan al registrar un mantenimiento, y una vista de **historial y costos totales por unidad**.
 - **Neumáticos:** módulo independiente para controlar la vida útil y posición de cada llanta de cada unidad, con un diagrama distinto según el tipo de unidad — ver la sección dedicada más abajo.
@@ -45,7 +45,7 @@ El panel avisa (30 días antes de vencer, o si ya venció) sobre: vencimiento de
 | Clientes | Ver/Crear/Editar | Ver/Crear/Editar |
 | Flota | Ver/Crear/Editar | Solo ver |
 | Conductores | Ver/Crear/Editar | Solo ver |
-| Gastos (incl. presupuestos y viáticos) | Ver/Crear/Editar | Ver/Crear/Editar |
+| Liquidaciones (gastos, viáticos, presupuestos, resumen contable) | Ver/Crear/Editar | Ver/Crear/Editar |
 | Rutas | Ver/Crear/Editar | Solo ver |
 | Mantenimiento (incl. trabajos y costos por unidad) | Ver/Crear/Editar | Solo ver |
 | Neumáticos | Ver/Crear/Editar | Solo ver |
@@ -96,23 +96,26 @@ Desde el detalle de un viaje (o desde el menú **Inspecciones**) se puede regist
 
 **Imprimir / descargar como PDF:** en el detalle de cualquier inspección, el botón "🖨️ Imprimir / Descargar PDF" abre una vista de impresión aparte (calcada del formato correspondiente: genérico, tracto o carreta), con el logo de la empresa en el encabezado y espacios de firma. Desde ahí se usa el diálogo de impresión del propio navegador (Ctrl+P / el botón de la página) eligiendo "Guardar como PDF" como destino — no requiere ninguna librería adicional en el servidor ni descargas, funciona igual en celular y en computadora.
 
-## Gastos: presupuestos, viáticos y liquidación contable
+## Liquidaciones: una liquidación contable por viaje (gastos, viáticos, asignación manual y export)
 
-- **Comprobantes:** al registrar un gasto puedes adjuntar una foto o un PDF del recibo/boleta, de dos formas: el campo "tomar foto ahora" abre la cámara directamente en el celular (usa el atributo estándar HTML `capture="environment"` — funciona en Chrome/Android y en Safari/iOS al agregar el sistema a la pantalla de inicio como PWA); el campo "o subir un archivo" abre el selector normal de galería/archivos, para elegir una foto ya tomada o un PDF. Solo se llena uno de los dos. El archivo se guarda en el servidor y aparece como enlace "Ver" en la lista de gastos. *Aviso:* en hosting gratuito con disco efímero (ver la sección de Render más abajo) estos archivos se pierden al reiniciar/redesplegar, igual que la base de datos SQLite — el mismo `AUTO_SEED_DEMO` no los recupera. Para un uso serio en producción, sube a un plan con disco persistente (ver esa sección).
-- **Compresión automática de fotos:** toda foto de comprobante se redimensiona (máximo 1600px en el lado más largo) y se recodifica como JPEG con calidad optimizada antes de guardarse (`app/routes/gastos.py`, función `_compress_receipt_image`, usa Pillow). Una foto de celular sin comprimir suele pesar 3–8 MB; después de este proceso normalmente queda entre 50 KB y 300 KB, sin que se note pérdida de legibilidad del comprobante. Esto ahorra muchísimo espacio en disco (importante en planes gratuitos con disco limitado) y hace que "Ver" cargue más rápido en el celular. Los PDF no se comprimen, se guardan tal cual. Si una foto viene en un formato que no se puede abrir (poco común, algunos HEIC de iPhone sin convertir), se guarda el original sin comprimir para no perder el comprobante.
-- **Presupuestos** (Gastos → Presupuestos): define un tope mensual de gasto por unidad o por tipo de gasto (ej. "Combustible: S/ 2000/mes"). Cuando el gasto acumulado del mes llega al 90% del presupuesto o lo supera, aparece una alerta en el Panel.
-- **Rutas y viáticos** (menú Rutas): define, por cada ruta frecuente (origen → destino), un monto estándar de viáticos. Desde el detalle de un viaje puedes "Confirmar anticipo de viáticos" — el sistema sugiere el monto de la ruta si existe una configurada, y confirma que el conductor recibió ese dinero. Más adelante, desde el mismo anticipo, el botón "Liquidar" pide elegir la **oficina** donde se hace la liquidación (Lima, Pucallpa o Tarapoto), compara el monto entregado contra la suma de los gastos reales registrados para ese viaje, y muestra el saldo a favor o el exceso.
+Este módulo (menú **Liquidaciones**, antes eran dos menús separados "Gastos" y "Viáticos") reúne todo el ciclo de gasto de un viaje: el anticipo entregado al conductor, los gastos que se van registrando, y el cierre contable de esa liquidación. Hay **exactamente una liquidación por viaje** (nace al confirmar el anticipo de viáticos desde el detalle del viaje).
 
-### Liquidación contable exportable
+- **Abrir una liquidación:** desde el detalle de un viaje, "Confirmar anticipo de viáticos" — el sistema sugiere el monto según la ruta (configurable en Rutas) y registra que el conductor recibió ese dinero. Esto abre la liquidación de ese viaje.
+- **Registrar gastos:** desde el detalle de la liquidación (o desde el detalle del viaje) se registran los gastos reales con su comprobante — igual que antes: foto con cámara o archivo/PDF, comprimidos automáticamente (máximo 1600px, JPEG calidad optimizada, `_compress_receipt_image` en `app/routes/liquidaciones.py`, usa Pillow), tipo, monto, descripción.
+- **Asignar gastos a la liquidación (manual):** en el detalle de la liquidación, cada gasto del viaje aparece con una casilla "Incluir" — por defecto vienen marcados, pero se puede desmarcar cualquiera antes de cerrar (por ejemplo, un gasto que en realidad corresponde a otra liquidación, o que se quiere corregir después). Antes esta asignación era automática (todo lo del viaje entraba); ahora es una decisión explícita del usuario, pedida por Braulio al replantear el módulo (28 ago).
+- **Liquidar:** se elige la **oficina** (Lima, Pucallpa o Tarapoto) donde se hace la liquidación y se presiona "Liquidar" — el selector de oficina y el botón están arriba de la lista de gastos, junto con las casillas de inclusión, todo en un mismo formulario. Al liquidar se calcula el correlativo de voucher de esa oficina (se reinicia cada mes, empieza en 01) y la liquidación queda **cerrada**: ya no se pueden cambiar los gastos incluidos, y los gastos que quedaron dentro no se pueden eliminar (si hace falta corregir un monto, se puede editar el gasto, pero conviene volver a exportar el resumen de ese mes/oficina después).
+- **Presupuestos** (Liquidaciones → Presupuestos): define un tope mensual de gasto por unidad o por tipo de gasto (ej. "Combustible: S/ 2000/mes"). Cuando el gasto acumulado del mes llega al 90% del presupuesto o lo supera, aparece una alerta en el Panel.
+- **Historial de gastos** (Liquidaciones → Historial de gastos): la lista plana de todos los gastos, tengan o no viaje asociado (útil para gastos sueltos de una unidad, sin viaje) — filtrable por tipo y fecha, exportable a Excel.
 
-Cada gasto tiene, además de su "Tipo" de siempre (el que usan Presupuestos y el Panel — no se tocó, para no romper nada de lo existente), un campo nuevo y opcional **Concepto**, tomado de **Gastos → Conceptos** (solo Administrador, mismo permiso que Catálogos porque define códigos contables). Cada concepto amarra un nombre (ej. "PEAJE") a su **cuenta contable** (ej. 42121) y su **tipo de comprobante** (ej. "factura", código SUNAT "01"); al elegirlo en el formulario de gasto, la cuenta y el comprobante se completan solos. Los 16 conceptos de la hoja "Conceptos" de la plantilla de liquidación de Harraso vienen precargados por el seed de datos de ejemplo.
+### Resumen contable exportable
 
-Con eso, **Gastos → Liquidación contable** arma automáticamente, por mes y oficina, una fila **Haber** por cada anticipo de viáticos ya liquidado (el "vale", contra la cuenta "por liquidar" de esa oficina) más una fila **Debe** por cada gasto documentado que se vinculó a esa liquidación — exactamente en el mismo formato de columnas de la "hoja resumen" de la plantilla real de Harraso (Origen, Num.Voucher, Fecha de Liquidacion, Cuenta, Monto Debe, Monto Haber, Moneda S/D, T.Cambio, Doc, Num.Doc, Fec.Doc, Fec.Ven, RUC O DNI, Glosa, RUC O DNI, R. Social). El botón "⬇ Exportar a Excel" descarga esa misma tabla lista para pegar directo en el sistema contable.
+Cada gasto tiene, además de su "Tipo" de siempre (el que usan Presupuestos y el Panel — no se tocó, para no romper nada de lo existente), un campo opcional **Concepto**, tomado de **Liquidaciones → Conceptos** (solo Administrador, mismo permiso que Catálogos porque define códigos contables). Cada concepto amarra un nombre (ej. "PEAJE") a su **cuenta contable** (ej. 42121) y su **tipo de comprobante** (ej. "factura", código SUNAT "01"); al elegirlo en el formulario de gasto, la cuenta y el comprobante se completan solos. Los 16 conceptos de la hoja "Conceptos" de la plantilla de liquidación de Harraso vienen precargados por el seed de datos de ejemplo.
 
-- **Origen / Num.Voucher:** "Origen" es el código de la oficina donde se liquida (14 = Lima, 15 = Pucallpa, 16 = Tarapoto — ver nota abajo). "Num.Voucher" es el correlativo de liquidación de esa oficina, y se reinicia cada mes empezando en 01 (pedido explícito de Braulio) — se asigna recién al momento de liquidar el anticipo, no al crearlo.
+Con eso, **Liquidaciones → Resumen contable** arma automáticamente, por mes y oficina, una fila **Haber** por cada liquidación de viaje ya cerrada (el "vale", contra la cuenta "por liquidar" de esa oficina) más una fila **Debe** por cada gasto que quedó incluido en esa liquidación — exactamente en el mismo formato de columnas de la "hoja resumen" de la plantilla real de Harraso (Origen, Num.Voucher, Fecha de Liquidacion, Cuenta, Monto Debe, Monto Haber, Moneda S/D, T.Cambio, Doc, Num.Doc, Fec.Doc, Fec.Ven, RUC O DNI, Glosa, RUC O DNI, R. Social). El botón "⬇ Exportar a Excel" descarga esa misma tabla lista para pegar directo en el sistema contable.
+
+- **Origen / Num.Voucher:** "Origen" es el código de la oficina donde se liquida (14 = Lima, 15 = Pucallpa, 16 = Tarapoto — ver nota abajo). "Num.Voucher" es el correlativo de liquidación de esa oficina, y se reinicia cada mes empezando en 01 (pedido explícito de Braulio) — se asigna recién al momento de liquidar, no al confirmar el anticipo.
 - **Tipo de cambio:** se completa automáticamente con el tipo de cambio SUNAT del día de emisión del comprobante (`app/integrations/sunat_exchange_rate.py`, vía la API pública de [decolecta.com](https://decolecta.com)), y queda en caché en la base de datos para no volver a consultarlo. Si el servicio no responde (sin internet, caído, etc.) el gasto se guarda igual — el campo queda vacío y aparece un aviso para completarlo a mano si hace falta; nunca bloquea el registro del gasto. Se puede forzar un valor manual en el campo "Tipo de cambio (opcional)" del formulario.
 - **Fecha de vencimiento:** siempre igual a la fecha de emisión del gasto (pedido explícito de Braulio), no se pide por separado.
-- **Vinculación exacta:** al liquidar un anticipo, todos los gastos del viaje que todavía no estaban vinculados a ninguna liquidación quedan marcados como parte de esa liquidación (columna interna `expense_advance_id`) — así, si después se agregan más gastos a ese mismo viaje, no se cuelan por error en una liquidación ya cerrada.
 
 **Dos cosas por confirmar con Braulio antes de usar esto con datos reales** (marcadas "AJUSTAR" en el código):
 - El código de oficina y la cuenta contable del vale de **Tarapoto** (16 / 14133) son una inferencia a partir del patrón de Lima (14) y Pucallpa (15) — Braulio solo confirmó esas dos.
@@ -294,24 +297,25 @@ erp-transporte/
 │   ├── auth.py              # login, sesiones y permisos por rol
 │   ├── db.py                 # acceso a SQLite
 │   ├── helpers.py            # utilidades (fechas, montos, códigos correlativos, pretty_label)
-│   ├── reports.py             # generación del reporte de gastos en Excel
+│   ├── accounting.py          # oficinas, tipos de documento y columnas de la liquidación contable
+│   ├── reports.py             # generación de reportes en Excel (gastos, comisiones, liquidación)
 │   ├── seed_data.py           # datos y catálogos de ejemplo (usados por seed.py y por el auto-seed)
 │   ├── schema.sql            # esquema de la base de datos
 │   ├── integrations/
 │   │   ├── frotcom.py          # cliente de la API de Frotcom (GPS) — ver aviso en el archivo
-│   │   └── sunat_ose.py         # cliente OSE para facturación electrónica SUNAT — ver aviso en el archivo
+│   │   ├── sunat_ose.py         # cliente OSE para facturación electrónica SUNAT — ver aviso en el archivo
+│   │   └── sunat_exchange_rate.py # tipo de cambio SUNAT del día (para la liquidación contable)
 │   ├── routes/                # un blueprint por módulo
 │   │   ├── dashboard.py
 │   │   ├── clientes.py
 │   │   ├── flota.py
 │   │   ├── viajes.py
-│   │   ├── gastos.py
+│   │   ├── liquidaciones.py       # gastos, viáticos, presupuestos, conceptos y liquidación contable
 │   │   ├── mantenimiento.py
 │   │   ├── facturacion.py
 │   │   ├── guias.py              # guías de remisión electrónica (modalidad Transportista)
 │   │   ├── inspecciones.py        # checklist de inspección de unidades
 │   │   ├── rutas.py                # rutas frecuentes con viáticos predeterminados
-│   │   ├── viaticos.py             # anticipos de viáticos y liquidación
 │   │   ├── usuarios.py
 │   │   ├── catalogos.py         # catálogos editables (conceptos, tipos de gasto, ítems de inspección)
 │   │   └── integraciones.py      # pantalla y sincronización de ubicación GPS

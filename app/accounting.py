@@ -7,7 +7,7 @@ archivo — si cambian una cuenta contable o agregan una oficina nueva, es
 el único lugar que hay que tocar.
 
 Cómo se arma cada liquidación exportada: cada anticipo de viáticos
-liquidado (`expense_advances`, ver app/routes/viaticos.py) genera una fila
+liquidado (`expense_advances`, ver app/routes/liquidaciones.py) genera una fila
 "Haber" (el vale entregado al conductor, contra la cuenta "por liquidar"
 de su oficina) más una fila "Debe" por cada gasto documentado que se le
 vinculó al liquidar (`expenses.expense_advance_id`). Los gastos que no

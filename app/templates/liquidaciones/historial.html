@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+{% block title %}Historial de gastos{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Historial de gastos</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('liquidaciones.export_excel', type=type_filter, from_date=from_date, to_date=to_date) }}" class="btn btn-secondary">⬇ Exportar a Excel</a>
+    <a href="{{ url_for('liquidaciones.list_view') }}" class="btn btn-secondary">← Volver a Liquidaciones</a>
+    {% if can(current_user.role, 'liquidaciones', 'edit') %}
+    <a href="{{ url_for('liquidaciones.new_expense') }}" class="btn btn-primary">+ Registrar gasto</a>
+    {% endif %}
+  </div>
+</div>
+<p class="muted mt-0">Todos los gastos registrados, tengan o no viaje asociado. Los gastos de un viaje se asignan a su liquidación desde el detalle de esa liquidación.</p>
+
+<form class="filters" method="get">
+  <label>Tipo
+    <select name="type">
+      <option value="">Todos</option>
+      {% for t in types %}
+      <option value="{{ t }}" {{ 'selected' if type_filter == t }}>{{ t.replace('_',' ').title() }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Desde
+    <input type="date" name="from_date" value="{{ from_date }}">
+  </label>
+  <label>Hasta
+    <input type="date" name="to_date" value="{{ to_date }}">
+  </label>
+  <button class="btn btn-secondary" type="submit">Filtrar</button>
+  <div class="muted" style="margin-left:auto;">Total: <strong>{{ total|money }}</strong></div>
+</form>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Fecha</th><th>Tipo</th><th>Viaje</th><th>Unidad</th><th>Descripción</th><th>Comprobante</th><th class="text-right">Monto</th><th></th></tr></thead>
+    <tbody>
+      {% for e in expenses %}
+      <tr>
+        <td>{{ e.expense_date }}</td>
+        <td>{{ e.type.replace('_',' ').title() }}</td>
+        <td>{% if e.trip_id %}<a href="{{ url_for('viajes.detail', trip_id=e.trip_id) }}">{{ e.trip_code }}</a>{% else %}—{% endif %}</td>
+        <td>{{ e.vehicle_plate or '—' }}</td>
+        <td class="wrap">{{ e.description or '—' }}</td>
+        <td>{% if e.receipt_filename %}<a href="{{ url_for('liquidaciones.receipt', expense_id=e.id) }}" target="_blank">Ver</a>{% else %}—{% endif %}</td>
+        <td class="text-right">{{ e.amount|money }}</td>
+        <td>
+          {% if can(current_user.role, 'liquidaciones', 'edit') %}
+          <div style="display:flex; gap:6px;">
+            <a href="{{ url_for('liquidaciones.edit_expense', expense_id=e.id) }}" class="btn btn-secondary btn-sm">Editar</a>
+            <form method="post" action="{{ url_for('liquidaciones.delete_expense', expense_id=e.id) }}" onsubmit="return confirm('¿Eliminar este gasto?');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-danger btn-sm" type="submit">Eliminar</button>
+            </form>
+          </div>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="table-empty">No hay gastos registrados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

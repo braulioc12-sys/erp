@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+{% block title %}Presupuestos de gasto{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Presupuestos mensuales de gasto</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('liquidaciones.list_view') }}" class="btn btn-secondary">← Volver a Liquidaciones</a>
+  </div>
+</div>
+<p class="muted mt-0">Define un tope de gasto mensual por unidad o por tipo de gasto. Cuando el gasto acumulado del mes llega al 90% del presupuesto (o lo supera), aparece una alerta en el Panel.</p>
+
+<div class="panel" style="max-width:640px;">
+  <form method="post" action="{{ url_for('liquidaciones.budgets_add') }}" class="filters" style="margin-bottom:18px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Ámbito
+      <select name="scope_type" id="scope_type" onchange="toggleScope()">
+        <option value="VEHICLE">Por unidad</option>
+        <option value="TYPE">Por tipo de gasto</option>
+      </select>
+    </label>
+    <label id="scope_vehicle_wrap">Unidad
+      <select name="scope_value" id="scope_vehicle">
+        {% for v in vehicles %}
+        <option value="{{ v.id }}">{{ v.plate }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label id="scope_type_wrap" style="display:none;">Tipo
+      <select name="scope_value" id="scope_type_value" disabled>
+        {% for t in types %}
+        <option value="{{ t }}">{{ t|pretty }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Monto mensual (S/)
+      <input type="number" step="0.01" name="monthly_amount" required>
+    </label>
+    <button type="submit" class="btn btn-primary">+ Agregar</button>
+  </form>
+  <script>
+    function toggleScope() {
+      var isVehicle = document.getElementById('scope_type').value === 'VEHICLE';
+      document.getElementById('scope_vehicle_wrap').style.display = isVehicle ? '' : 'none';
+      document.getElementById('scope_type_wrap').style.display = isVehicle ? 'none' : '';
+      document.getElementById('scope_vehicle').disabled = !isVehicle;
+      document.getElementById('scope_type_value').disabled = isVehicle;
+    }
+  </script>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Ámbito</th><th class="text-right">Monto mensual</th><th>Estado</th><th></th></tr></thead>
+      <tbody>
+        {% for b in budgets %}
+        <tr>
+          <td>{% if b.scope_type == 'VEHICLE' %}Unidad {{ vehicle_plates.get(b.scope_value|int, b.scope_value) }}{% else %}Tipo: {{ b.scope_value|pretty }}{% endif %}</td>
+          <td class="text-right">{{ b.monthly_amount|money }}</td>
+          <td><span class="badge {{ 'badge-activo' if b.active else 'badge-inactivo' }}">{{ 'Activo' if b.active else 'Inactivo' }}</span></td>
+          <td>
+            <form method="post" action="{{ url_for('liquidaciones.budgets_toggle', budget_id=b.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-secondary btn-sm" type="submit">{{ 'Desactivar' if b.active else 'Reactivar' }}</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="table-empty">No hay presupuestos definidos.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

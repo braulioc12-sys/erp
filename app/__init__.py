@@ -37,13 +37,12 @@ def create_app(config_object=Config):
         flota,
         conductores,
         viajes,
-        gastos,
+        liquidaciones,
         mantenimiento,
         facturacion,
         guias,
         inspecciones,
         rutas,
-        viaticos,
         neumaticos,
         usuarios,
         catalogos,
@@ -55,13 +54,12 @@ def create_app(config_object=Config):
     app.register_blueprint(flota.bp)
     app.register_blueprint(conductores.bp)
     app.register_blueprint(viajes.bp)
-    app.register_blueprint(gastos.bp)
+    app.register_blueprint(liquidaciones.bp)
     app.register_blueprint(mantenimiento.bp)
     app.register_blueprint(facturacion.bp)
     app.register_blueprint(guias.bp)
     app.register_blueprint(inspecciones.bp)
     app.register_blueprint(rutas.bp)
-    app.register_blueprint(viaticos.bp)
     app.register_blueprint(neumaticos.bp)
     app.register_blueprint(usuarios.bp)
     app.register_blueprint(catalogos.bp)

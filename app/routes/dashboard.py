@@ -5,7 +5,7 @@ from app.db import query_all, query_one
 from app.helpers import today_str
 from app.routes.conductores import document_alerts as driver_document_alerts
 from app.routes.flota import vehicle_document_alerts
-from app.routes.gastos import budget_alerts
+from app.routes.liquidaciones import budget_alerts
 from app.routes.mantenimiento import km_alerts
 from app.routes.neumaticos import tire_alerts
 

@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Liquidaciones{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Liquidaciones</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('liquidaciones.resumen_view') }}" class="btn btn-secondary">Resumen contable</a>
+    <a href="{{ url_for('liquidaciones.historial') }}" class="btn btn-secondary">Historial de gastos</a>
+    {% if can(current_user.role, 'liquidaciones', 'edit') %}
+    <a href="{{ url_for('liquidaciones.budgets_list') }}" class="btn btn-secondary">Presupuestos</a>
+    {% endif %}
+    {% if can(current_user.role, 'catalogos', 'edit') %}
+    <a href="{{ url_for('liquidaciones.concepts_list') }}" class="btn btn-secondary">Conceptos</a>
+    {% endif %}
+  </div>
+</div>
+<p class="muted mt-0">Una liquidación por viaje: se abre al confirmar el anticipo de viáticos desde el detalle de un viaje, ahí se van registrando y asignando sus gastos, y se cierra eligiendo la oficina. Para empezar una nueva, entra al viaje correspondiente.</p>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Viaje</th><th>Ruta</th><th class="text-right">Entregado</th><th class="text-right">Gastado</th><th>Estado</th><th>Oficina</th><th>Voucher</th></tr></thead>
+    <tbody>
+      {% for a in advances %}
+      <tr onclick="window.location='{{ url_for('liquidaciones.detail', advance_id=a.id) }}'" style="cursor:pointer;">
+        <td><a href="{{ url_for('liquidaciones.detail', advance_id=a.id) }}">{{ a.trip_code }}</a></td>
+        <td>{{ a.origin }} → {{ a.destination }}</td>
+        <td class="text-right">{{ a.amount_given|money }}</td>
+        <td class="text-right">{{ a.spent|money }}</td>
+        <td>{{ m.badge(a.status) }}</td>
+        <td>{{ a.office or '—' }}</td>
+        <td>{{ '%02d'|format(a.voucher_number) if a.voucher_number else '—' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="table-empty">No hay liquidaciones registradas todavía.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

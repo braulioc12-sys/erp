@@ -18,7 +18,7 @@ PERMISSIONS = {
         "flota": {"view"},
         "conductores": {"view"},
         "viajes": {"view", "edit"},
-        "gastos": {"view", "edit"},
+        "liquidaciones": {"view", "edit"},
         "mantenimiento": {"view"},
         "neumaticos": {"view"},
         "facturacion": set(),

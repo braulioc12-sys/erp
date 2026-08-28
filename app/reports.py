@@ -268,7 +268,7 @@ def build_liquidacion_workbook(rows, company_name, filter_description):
     tipo, tal como la usan para pegarla directo en su sistema contable.
 
     `rows` es una lista de dicts ya armados por
-    app/routes/gastos.py::_liquidacion_rows(), con una fila "Haber" por
+    app/routes/liquidaciones.py::_liquidacion_rows(), con una fila "Haber" por
     cada anticipo liquidado y una fila "Debe" por cada gasto documentado
     vinculado a ese anticipo. Claves esperadas por fila: origen,
     num_voucher, fecha_liquidacion, cuenta, monto_debe, monto_haber,

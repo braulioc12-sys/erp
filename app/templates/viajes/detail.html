@@ -42,11 +42,11 @@
   {% if can(current_user.role, 'inspecciones', 'edit') %}
   <a href="{{ url_for('inspecciones.new', trip_id=trip.id) }}" class="btn btn-secondary btn-sm">✅ Registrar inspección</a>
   {% endif %}
-  {% if can(current_user.role, 'gastos', 'edit') %}
+  {% if can(current_user.role, 'liquidaciones', 'edit') %}
     {% if advance %}
-    <a href="{{ url_for('viaticos.detail', advance_id=advance.id) }}" class="btn btn-secondary btn-sm">💵 Ver anticipo de viáticos</a>
+    <a href="{{ url_for('liquidaciones.detail', advance_id=advance.id) }}" class="btn btn-secondary btn-sm">💵 Ver liquidación de este viaje</a>
     {% else %}
-    <a href="{{ url_for('viaticos.new', trip_id=trip.id) }}" class="btn btn-secondary btn-sm">💵 Confirmar anticipo de viáticos</a>
+    <a href="{{ url_for('liquidaciones.new_advance', trip_id=trip.id) }}" class="btn btn-secondary btn-sm">💵 Confirmar anticipo de viáticos</a>
     {% endif %}
   {% endif %}
 </div>
@@ -74,8 +74,8 @@
       </tbody>
     </table>
   </div>
-  {% if can(current_user.role, 'gastos', 'edit') %}
-  <p style="margin-top:12px;"><a href="{{ url_for('gastos.new', trip_id=trip.id) }}" class="btn btn-secondary btn-sm">+ Registrar gasto para este viaje</a></p>
+  {% if can(current_user.role, 'liquidaciones', 'edit') %}
+  <p style="margin-top:12px;"><a href="{{ url_for('liquidaciones.new_expense', trip_id=trip.id) }}" class="btn btn-secondary btn-sm">+ Registrar gasto para este viaje</a></p>
   {% endif %}
 </div>
 {% endblock %}
