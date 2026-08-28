@@ -117,11 +117,12 @@ Con eso, **Liquidaciones → Resumen contable** arma automáticamente, por mes y
 
 - **Origen / Num.Voucher:** "Origen" es el código de la oficina donde se liquida (14 = Lima, 15 = Pucallpa, 16 = Tarapoto — ver nota abajo). "Num.Voucher" es el correlativo de liquidación de esa oficina, y se reinicia cada mes empezando en 01 (pedido explícito de Braulio) — se asigna recién al momento de liquidar, no al confirmar el anticipo.
 - **Tipo de cambio:** se completa automáticamente con el tipo de cambio SUNAT del día de emisión del comprobante (`app/integrations/sunat_exchange_rate.py`, vía la API pública de [decolecta.com](https://decolecta.com)), y queda en caché en la base de datos para no volver a consultarlo. Si el servicio no responde (sin internet, caído, etc.) el gasto se guarda igual — el campo queda vacío y aparece un aviso para completarlo a mano si hace falta; nunca bloquea el registro del gasto. Se puede forzar un valor manual en el campo "Tipo de cambio (opcional)" del formulario.
+- **Razón social del proveedor:** al escribir el RUC del proveedor (11 dígitos) en el formulario de gasto, la "Razón social / Nombre del proveedor" se autocompleta sola, consultando SUNAT vía el mismo servicio de decolecta.com (`app/integrations/sunat_ruc.py`, endpoint propio `GET /liquidaciones/gastos/consultar-ruc`), y queda en caché por RUC para no repetir la consulta. Si el RUC no existe o el servicio no responde, simplemente no se autocompleta — se escribe a mano, nunca bloquea el registro. Comparte el mismo `DECOLECTA_TOKEN` que el tipo de cambio (no hace falta una cuenta aparte).
 - **Fecha de vencimiento:** siempre igual a la fecha de emisión del gasto (pedido explícito de Braulio), no se pide por separado.
 
-**Dos cosas por confirmar con Braulio antes de usar esto con datos reales** (marcadas "AJUSTAR" en el código):
+**Cosas por confirmar con Braulio antes de usar esto con datos reales** (marcadas "AJUSTAR" en el código):
 - El código de oficina y la cuenta contable del vale de **Tarapoto** (16 / 14133) son una inferencia a partir del patrón de Lima (14) y Pucallpa (15) — Braulio solo confirmó esas dos.
-- La integración con la API de tipo de cambio SUNAT de decolecta.com no se pudo probar con una llamada real desde este entorno (sin salida a internet). Conviene verificarla ya desplegado en Render, registrando un gasto y revisando que el campo "Tipo de cambio" se complete solo.
+- La integración con la API de tipo de cambio SUNAT y la de consulta de RUC de decolecta.com no se pudieron probar con una llamada real desde este entorno (sin salida a internet) — ambas se probaron simulando la respuesta del servicio. Conviene verificarlas ya desplegado en Render, registrando un gasto y revisando que el "Tipo de cambio" y, al escribir un RUC real, la "Razón social" se completen solos. La consulta de RUC además necesita que `DECOLECTA_TOKEN` esté configurado en Render (registrarse gratis en decolecta.com) — sin token, el campo simplemente no se autocompleta.
 
 ## Integración con Frotcom (GPS)
 
@@ -306,7 +307,8 @@ erp-transporte/
 │   ├── integrations/
 │   │   ├── frotcom.py          # cliente de la API de Frotcom (GPS) — ver aviso en el archivo
 │   │   ├── sunat_ose.py         # cliente OSE para facturación electrónica SUNAT — ver aviso en el archivo
-│   │   └── sunat_exchange_rate.py # tipo de cambio SUNAT del día (para la liquidación contable)
+│   │   ├── sunat_exchange_rate.py # tipo de cambio SUNAT del día (para la liquidación contable)
+│   │   └── sunat_ruc.py           # consulta de RUC (autocompletar razón social del proveedor)
 │   ├── routes/                # un blueprint por módulo
 │   │   ├── dashboard.py
 │   │   ├── clientes.py

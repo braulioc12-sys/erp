@@ -30,8 +30,12 @@ class Config:
     INVOICE_SERIES = os.environ.get("INVOICE_SERIES", "F001")
     WAYBILL_SERIES = os.environ.get("WAYBILL_SERIES", "T001")
 
-    # Tipo de cambio SUNAT para el export de liquidación de Gastos. Ver
-    # README, sección "Gastos: liquidación contable exportable", y
-    # app/integrations/sunat_exchange_rate.py.
+    # decolecta.com: tipo de cambio SUNAT (liquidación de Gastos) y
+    # consulta de RUC (autocompletar proveedor al registrar un gasto).
+    # Ambos servicios comparten el mismo token (DECOLECTA_TOKEN) — decisión
+    # explícita de Braulio para no pedir una cuenta aparte. Ver README,
+    # sección "Liquidaciones", y app/integrations/sunat_exchange_rate.py /
+    # app/integrations/sunat_ruc.py.
     DECOLECTA_BASE_URL = os.environ.get("DECOLECTA_BASE_URL", "")
+    DECOLECTA_RUC_BASE_URL = os.environ.get("DECOLECTA_RUC_BASE_URL", "")
     DECOLECTA_TOKEN = os.environ.get("DECOLECTA_TOKEN", "")

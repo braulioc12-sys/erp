@@ -93,12 +93,13 @@
 
   <div class="form-row">
     <label>RUC / DNI del proveedor
-      <input type="text" name="provider_ruc" value="{{ expense.provider_ruc if expense else '' }}">
+      <input type="text" name="provider_ruc" id="provider_ruc" value="{{ expense.provider_ruc if expense else '' }}" oninput="onRucInput()">
     </label>
     <label>Razón social / Nombre del proveedor
-      <input type="text" name="provider_name" value="{{ expense.provider_name if expense else '' }}">
+      <input type="text" name="provider_name" id="provider_name" value="{{ expense.provider_name if expense else '' }}">
     </label>
   </div>
+  <p class="muted" id="ruc_status" style="margin-top:-8px;"></p>
 
   <label>Tipo de cambio (opcional)
     <input type="number" step="0.001" name="exchange_rate" value="{{ expense.exchange_rate if expense and expense.exchange_rate else '' }}" placeholder="Se completa solo con el de SUNAT del día del comprobante">
@@ -163,5 +164,38 @@
     // gasto ya guardado, respeta lo que tenga guardado).
     if (vehicleSelect && !vehicleSelect.value) { onTripChange(); }
   });
+
+  // Autocompleta la razón social al escribir un RUC de 11 dígitos,
+  // consultando SUNAT vía decolecta.com (pedido de Braulio, 28 ago). Nunca
+  // bloquea el registro del gasto: si falla o el RUC no existe, el campo
+  // de razón social se deja tal cual para completarlo a mano.
+  var rucLookupTimer = null;
+  var lastRucLookedUp = '';
+  function onRucInput() {
+    var rucInput = document.getElementById('provider_ruc');
+    var status = document.getElementById('ruc_status');
+    var digits = (rucInput.value || '').replace(/\D/g, '');
+    if (rucLookupTimer) { clearTimeout(rucLookupTimer); }
+    if (digits.length !== 11) { status.textContent = ''; return; }
+    rucLookupTimer = setTimeout(function () { lookupRuc(digits); }, 500);
+  }
+  function lookupRuc(ruc) {
+    if (ruc === lastRucLookedUp) { return; }
+    lastRucLookedUp = ruc;
+    var status = document.getElementById('ruc_status');
+    var nameInput = document.getElementById('provider_name');
+    status.textContent = 'Buscando en SUNAT…';
+    fetch('{{ url_for("liquidaciones.consultar_ruc") }}?ruc=' + ruc)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (ruc !== lastRucLookedUp) { return; }
+        if (!data.found) { status.textContent = 'No se encontró ese RUC — escribe la razón social a mano.'; return; }
+        if (!nameInput.value) { nameInput.value = data.razon_social; }
+        status.textContent = data.estado && data.estado !== 'ACTIVO'
+          ? data.razon_social + ' (estado SUNAT: ' + data.estado + ')'
+          : data.razon_social;
+      })
+      .catch(function () { status.textContent = ''; });
+  }
 </script>
 {% endblock %}

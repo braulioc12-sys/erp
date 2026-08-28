@@ -15,7 +15,7 @@ import io
 import os
 import uuid
 
-from flask import Blueprint, Response, abort, current_app, flash, redirect, render_template, request, send_from_directory, url_for
+from flask import Blueprint, Response, abort, current_app, flash, jsonify, redirect, render_template, request, send_from_directory, url_for
 from PIL import Image, ImageOps
 
 from app.accounting import (
@@ -30,6 +30,7 @@ from app.auth import permission_required, validate_csrf
 from app.db import execute, query_all, query_one
 from app.helpers import parse_date, parse_float, pretty_label, today_str
 from app.integrations.sunat_exchange_rate import get_rate_for_date
+from app.integrations.sunat_ruc import get_company_for_ruc
 from app.reports import build_expenses_workbook, build_liquidacion_workbook
 from app.routes.rutas import find_route
 
@@ -344,6 +345,29 @@ def _fetch_exchange_rate(date_str):
     except Exception:
         return None
     return rate["sell_rate"] if rate else None
+
+
+@bp.route("/gastos/consultar-ruc")
+@permission_required("liquidaciones", "edit")
+def consultar_ruc():
+    """Endpoint JSON que usa el formulario de gastos para autocompletar la
+    razón social apenas se escribe un RUC de 11 dígitos (ver
+    app/integrations/sunat_ruc.py). Nunca devuelve error 500: si el
+    servicio externo falla o el RUC no existe, responde found=false y el
+    campo se llena a mano — pedido de Braulio, 28 ago ("Si vamos a usar el
+    mismo token de decolecta")."""
+    ruc = request.args.get("ruc", "")
+    try:
+        company = get_company_for_ruc(
+            ruc,
+            base_url=current_app.config.get("DECOLECTA_RUC_BASE_URL") or None,
+            token=current_app.config.get("DECOLECTA_TOKEN") or None,
+        )
+    except Exception:
+        company = None
+    if not company:
+        return jsonify({"found": False})
+    return jsonify({"found": True, "razon_social": company["razon_social"], "estado": company["estado"]})
 
 
 def _expense_form_context(expense=None, preselected_trip=None):

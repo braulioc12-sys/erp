@@ -319,6 +319,19 @@ CREATE TABLE IF NOT EXISTS sunat_exchange_rates (
     fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Caché de la consulta de RUC (ver app/integrations/sunat_ruc.py), para
+-- autocompletar la razón social del proveedor al registrar un gasto sin
+-- volver a golpear el servicio externo cada vez que se repite un RUC (el
+-- mismo grifo, el mismo taller, etc.).
+CREATE TABLE IF NOT EXISTS sunat_ruc_cache (
+    ruc TEXT PRIMARY KEY,
+    razon_social TEXT,
+    estado TEXT,
+    condicion TEXT,
+    direccion TEXT,
+    fetched_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Catálogos editables por el administrador (conceptos de mantenimiento,
 -- tipos de gasto, etc.) sin necesidad de tocar código.
 CREATE TABLE IF NOT EXISTS catalog_items (
