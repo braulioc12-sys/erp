@@ -96,7 +96,10 @@
       <input type="text" name="provider_ruc" id="provider_ruc" value="{{ expense.provider_ruc if expense else '' }}" oninput="onRucInput()">
     </label>
     <label>Razón social / Nombre del proveedor
-      <input type="text" name="provider_name" id="provider_name" value="{{ expense.provider_name if expense else '' }}">
+      <div style="display:flex; gap:6px; align-items:center;">
+        <input type="text" name="provider_name" id="provider_name" value="{{ expense.provider_name if expense else '' }}" style="flex:1;">
+        <button type="button" id="provider_name_edit_btn" class="btn btn-secondary" style="display:none; padding:6px 10px; font-size:0.85em; white-space:nowrap;" onclick="enableManualNameEdit()">✎ Editar</button>
+      </div>
     </label>
   </div>
   <p class="muted" id="ruc_status" style="margin-top:-8px;"></p>
@@ -176,6 +179,20 @@
     var status = document.getElementById('ruc_status');
     var digits = (rucInput.value || '').replace(/\D/g, '');
     if (rucLookupTimer) { clearTimeout(rucLookupTimer); }
+    if (digits.length === 0) {
+      // RUC borrado por completo: se resetea todo para empezar de nuevo.
+      status.textContent = '';
+      lastRucLookedUp = '';
+      var nameInput = document.getElementById('provider_name');
+      var editBtn = document.getElementById('provider_name_edit_btn');
+      if (nameInput.readOnly) {
+        nameInput.readOnly = false;
+        nameInput.style.background = '';
+        nameInput.value = '';
+        editBtn.style.display = 'none';
+      }
+      return;
+    }
     if (digits.length !== 11) { status.textContent = ''; return; }
     rucLookupTimer = setTimeout(function () { lookupRuc(digits); }, 500);
   }
@@ -184,18 +201,40 @@
     lastRucLookedUp = ruc;
     var status = document.getElementById('ruc_status');
     var nameInput = document.getElementById('provider_name');
+    var editBtn = document.getElementById('provider_name_edit_btn');
     status.textContent = 'Buscando en SUNAT…';
     fetch('{{ url_for("liquidaciones.consultar_ruc") }}?ruc=' + ruc)
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (ruc !== lastRucLookedUp) { return; }
-        if (!data.found) { status.textContent = 'No se encontró ese RUC — escribe la razón social a mano.'; return; }
-        if (!nameInput.value) { nameInput.value = data.razon_social; }
+        if (!data.found) {
+          status.textContent = 'No se encontró ese RUC — escribe la razón social a mano.';
+          nameInput.readOnly = false;
+          nameInput.style.background = '';
+          editBtn.style.display = 'none';
+          return;
+        }
+        // Se completa directo en el campo de la derecha — ya no hace falta
+        // repetir el nombre abajo. El campo queda bloqueado (con botón
+        // "Editar" para cambiarlo a mano) para dejar claro que vino de SUNAT.
+        nameInput.value = data.razon_social;
+        nameInput.readOnly = true;
+        nameInput.style.background = 'var(--bg-soft, #f3f5f8)';
+        editBtn.style.display = 'inline-block';
         status.textContent = data.estado && data.estado !== 'ACTIVO'
-          ? data.razon_social + ' (estado SUNAT: ' + data.estado + ')'
-          : data.razon_social;
+          ? 'Estado SUNAT: ' + data.estado
+          : '';
       })
       .catch(function () { status.textContent = ''; });
+  }
+  function enableManualNameEdit() {
+    var nameInput = document.getElementById('provider_name');
+    var editBtn = document.getElementById('provider_name_edit_btn');
+    nameInput.readOnly = false;
+    nameInput.style.background = '';
+    editBtn.style.display = 'none';
+    nameInput.focus();
+    nameInput.select();
   }
 </script>
 {% endblock %}
