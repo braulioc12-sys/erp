@@ -14,14 +14,20 @@
     </select>
   </label>
 
-  <div class="form-row">
-    <label>Origen *
-      <input type="text" id="trip-origin" name="origin" value="{{ trip.origin if trip else '' }}" required>
-    </label>
-    <label>Destino *
-      <input type="text" id="trip-destination" name="destination" value="{{ trip.destination if trip else '' }}" required>
-    </label>
-  </div>
+  <label>Ruta *
+    <select name="route_id" id="trip-route" required>
+      <option value="">-- Selecciona una ruta --</option>
+      {% if mode == 'edit' and selected_route_id == '__current__' %}
+      <option value="__current__" selected>Ruta actual (no está en el catálogo): {{ trip.origin }} → {{ trip.destination }}</option>
+      {% endif %}
+      {% for r in routes %}
+      <option value="{{ r.id }}" {{ 'selected' if selected_route_id == (r.id|string) }}>{{ r.origin }} → {{ r.destination }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% if not routes %}
+  <p class="flash flash-error">Todavía no hay rutas activas en el catálogo. <a href="{{ url_for('rutas.list_view') }}" target="_blank">Agrega una ruta en Rutas</a> y vuelve a esta pantalla para poder elegirla aquí.</p>
+  {% endif %}
 
   <div class="form-row">
     <label>Unidad asignada
@@ -79,20 +85,17 @@
 
 <script>
   (function () {
-    var routes = {{ (routes_for_js or []) | tojson }};
-    var origin = document.getElementById('trip-origin');
-    var destination = document.getElementById('trip-destination');
+    var routes = {{ (routes or []) | tojson }};
+    var routeSelect = document.getElementById('trip-route');
     var commission = document.getElementById('trip-commission');
     var hint = document.getElementById('commission-hint');
     var lastSuggested = null;
 
-    function norm(s) { return (s || '').trim().toLowerCase(); }
-
     function suggest() {
-      var o = norm(origin.value), d = norm(destination.value);
-      if (!o || !d) { hint.textContent = ''; return; }
-      var match = routes.find(function (r) { return norm(r.origin) === o && norm(r.destination) === d; });
-      if (!match) { hint.textContent = 'Esta ruta no tiene comisión predeterminada configurada en Rutas.'; return; }
+      var id = routeSelect.value;
+      if (!id || id === '__current__') { hint.textContent = ''; return; }
+      var match = routes.find(function (r) { return String(r.id) === String(id); });
+      if (!match) { hint.textContent = ''; return; }
       hint.textContent = 'Comisión sugerida según la ruta: S/ ' + Number(match.default_commission_amount).toFixed(2);
       // Solo autocompletar si el campo está vacío o todavía tiene el último valor sugerido (no lo tocó el usuario).
       if (!commission.value || Number(commission.value) === lastSuggested) {
@@ -101,9 +104,8 @@
       }
     }
 
-    origin.addEventListener('blur', suggest);
-    destination.addEventListener('blur', suggest);
-    if (origin.value && destination.value) { suggest(); }
+    routeSelect.addEventListener('change', suggest);
+    if (routeSelect.value) { suggest(); }
   })();
 </script>
 {% endblock %}

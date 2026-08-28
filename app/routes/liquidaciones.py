@@ -214,6 +214,8 @@ def new_advance(trip_id):
             flash("Indica un monto válido.", "error")
             return render_template("liquidaciones/advance_form.html", trip=trip, route=route, today=today_str())
 
+        given_date = parse_date(request.form.get("given_date")) or today_str()
+        notes = request.form.get("notes", "").strip()
         advance_id = execute(
             """INSERT INTO expense_advances (trip_id, route_id, amount_given, given_date, notes, created_by)
                VALUES (?, ?, ?, ?, ?, ?)""",
@@ -221,15 +223,86 @@ def new_advance(trip_id):
                 trip_id,
                 route["id"] if route else None,
                 amount,
-                parse_date(request.form.get("given_date")) or today_str(),
-                request.form.get("notes", "").strip(),
+                given_date,
+                notes,
                 None,
             ),
+        )
+        # El monto inicial también queda como el primer registro en
+        # advance_payments — así la liquidación arranca con su historial
+        # de anticipos completo (ver _recalc_advance_total más abajo, y el
+        # pedido de Braulio del 28 ago de poder dar más de un anticipo por
+        # liquidación: uno al inicio del viaje, otro a mitad de camino).
+        execute(
+            "INSERT INTO advance_payments (advance_id, amount, payment_date, notes) VALUES (?, ?, ?, ?)",
+            (advance_id, amount, given_date, notes),
         )
         flash(f"Anticipo confirmado: {trip['code']} recibió S/ {amount:.2f}. Ya puedes registrar sus gastos.", "success")
         return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
 
     return render_template("liquidaciones/advance_form.html", trip=trip, route=route, today=today_str())
+
+
+def _recalc_advance_total(advance_id):
+    """`expense_advances.amount_given` sigue siendo el monto TOTAL entregado
+    — se recalcula sumando advance_payments cada vez que se agrega o quita
+    un anticipo, para que el resto del sistema (Resumen contable, la
+    comparación contra lo gastado, etc.) siga leyendo un solo número."""
+    total = query_one(
+        "SELECT COALESCE(SUM(amount), 0) s FROM advance_payments WHERE advance_id = ?", (advance_id,)
+    )["s"]
+    execute("UPDATE expense_advances SET amount_given = ? WHERE id = ?", (total, advance_id))
+
+
+@bp.route("/<int:advance_id>/anticipos", methods=["POST"])
+@permission_required("liquidaciones", "edit")
+def add_payment(advance_id):
+    if not validate_csrf():
+        abort(400)
+    advance = query_one("SELECT * FROM expense_advances WHERE id = ?", (advance_id,))
+    if advance is None:
+        abort(404)
+    if advance["status"] == "LIQUIDADO":
+        flash("Esta liquidación ya está cerrada — no se pueden agregar más anticipos.", "error")
+        return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
+    amount = parse_float(request.form.get("amount"))
+    if amount <= 0:
+        flash("Indica un monto válido para el anticipo.", "error")
+        return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
+    payment_date = parse_date(request.form.get("payment_date")) or today_str()
+    execute(
+        "INSERT INTO advance_payments (advance_id, amount, payment_date, notes) VALUES (?, ?, ?, ?)",
+        (advance_id, amount, payment_date, request.form.get("notes", "").strip()),
+    )
+    _recalc_advance_total(advance_id)
+    flash(f"Anticipo adicional registrado: S/ {amount:.2f}.", "success")
+    return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
+
+
+@bp.route("/anticipos/<int:payment_id>/eliminar", methods=["POST"])
+@permission_required("liquidaciones", "edit")
+def delete_payment(payment_id):
+    if not validate_csrf():
+        abort(400)
+    payment = query_one("SELECT * FROM advance_payments WHERE id = ?", (payment_id,))
+    if payment is None:
+        abort(404)
+    advance = query_one("SELECT * FROM expense_advances WHERE id = ?", (payment["advance_id"],))
+    if advance is None:
+        abort(404)
+    if advance["status"] == "LIQUIDADO":
+        flash("Esta liquidación ya está cerrada.", "error")
+        return redirect(url_for("liquidaciones.detail", advance_id=advance["id"]))
+    count = query_one(
+        "SELECT COUNT(*) c FROM advance_payments WHERE advance_id = ?", (advance["id"],)
+    )["c"]
+    if count <= 1:
+        flash("Debe quedar al menos un anticipo registrado en la liquidación.", "error")
+        return redirect(url_for("liquidaciones.detail", advance_id=advance["id"]))
+    execute("DELETE FROM advance_payments WHERE id = ?", (payment_id,))
+    _recalc_advance_total(advance["id"])
+    flash("Anticipo eliminado.", "success")
+    return redirect(url_for("liquidaciones.detail", advance_id=advance["id"]))
 
 
 @bp.route("/<int:advance_id>")
@@ -245,12 +318,16 @@ def detail(advance_id):
     expenses = query_all(
         "SELECT * FROM expenses WHERE trip_id = ? ORDER BY expense_date", (advance["trip_id"],)
     )
+    payments = query_all(
+        "SELECT * FROM advance_payments WHERE advance_id = ? ORDER BY payment_date, id", (advance_id,)
+    )
     spent = sum(e["amount"] for e in expenses)
     difference = advance["amount_given"] - spent
     offices = office_choices()
     return render_template(
         "liquidaciones/detail.html", advance=advance, expenses=expenses, spent=spent, difference=difference,
-        offices=offices, office_labels={code: info["label"] for code, info in offices},
+        payments=payments, offices=offices, office_labels={code: info["label"] for code, info in offices},
+        today=today_str(),
     )
 
 

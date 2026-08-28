@@ -11,13 +11,56 @@
 
 <div class="detail-grid">
   <div class="detail-item"><div class="label">Ruta</div><div class="value">{{ advance.origin }} → {{ advance.destination }}</div></div>
-  <div class="detail-item"><div class="label">Entregado</div><div class="value">{{ advance.amount_given|money }}</div></div>
-  <div class="detail-item"><div class="label">Fecha de entrega</div><div class="value">{{ advance.given_date }}</div></div>
+  <div class="detail-item"><div class="label">Total entregado ({{ payments|length }} anticipo{{ 's' if payments|length != 1 }})</div><div class="value">{{ advance.amount_given|money }}</div></div>
   <div class="detail-item"><div class="label">Gastado hasta ahora (todos los gastos del viaje)</div><div class="value">{{ spent|money }}</div></div>
   <div class="detail-item">
     <div class="label">{{ 'Saldo a favor' if difference >= 0 else 'Exceso sobre lo entregado' }}</div>
     <div class="value" style="color:{{ 'var(--success)' if difference >= 0 else 'var(--danger)' }};">{{ (difference if difference >= 0 else -difference)|money }}</div>
   </div>
+</div>
+
+<div class="panel">
+  <h2>Anticipos entregados</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Fecha</th><th class="text-right">Monto</th><th>Notas</th>{% if advance.status == 'PENDIENTE' and can(current_user.role, 'liquidaciones', 'edit') %}<th></th>{% endif %}</tr></thead>
+      <tbody>
+        {% for p in payments %}
+        <tr>
+          <td>{{ p.payment_date }}</td>
+          <td class="text-right">{{ p.amount|money }}</td>
+          <td class="wrap">{{ p.notes or '—' }}</td>
+          {% if advance.status == 'PENDIENTE' and can(current_user.role, 'liquidaciones', 'edit') %}
+          <td>
+            {% if payments|length > 1 %}
+            <form method="post" action="{{ url_for('liquidaciones.delete_payment', payment_id=p.id) }}" onsubmit="return confirm('¿Eliminar este anticipo?');" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-secondary btn-sm">Eliminar</button>
+            </form>
+            {% endif %}
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if advance.status == 'PENDIENTE' and can(current_user.role, 'liquidaciones', 'edit') %}
+  <form method="post" action="{{ url_for('liquidaciones.add_payment', advance_id=advance.id) }}" style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; margin-top:12px; padding:12px; background:var(--bg-soft,#f3f5f8); border-radius:8px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label style="margin:0;">Monto (S/) *
+      <input type="number" step="0.01" name="amount" required>
+    </label>
+    <label style="margin:0;">Fecha *
+      <input type="date" name="payment_date" value="{{ today }}" required>
+    </label>
+    <label style="margin:0;">Notas
+      <input type="text" name="notes" placeholder="Ej. Entregado a mitad de viaje">
+    </label>
+    <button type="submit" class="btn btn-secondary">+ Agregar anticipo</button>
+  </form>
+  {% endif %}
 </div>
 
 {% if advance.status == 'LIQUIDADO' %}

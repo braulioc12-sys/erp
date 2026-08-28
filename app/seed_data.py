@@ -402,6 +402,13 @@ def seed_demo_data(log=print):
                VALUES (?, ?, ?, 'LIQUIDADO', ?, ?, ?, ?)""",
             (demo_trip["id"], 300.0, given_date, f"{liquidated_date} 09:00:00", 178.0, "PUCALLPA", 1),
         )
+        # Espejo en advance_payments (ver schema.sql) para que el detalle de
+        # la liquidación muestre el desglose de anticipos también en la
+        # demo, no solo en liquidaciones nuevas creadas desde la app.
+        execute(
+            "INSERT INTO advance_payments (advance_id, amount, payment_date, notes) VALUES (?, ?, ?, ?)",
+            (advance_id, 300.0, given_date, ""),
+        )
         peaje = query_one("SELECT id FROM expense_concepts WHERE name = 'PEAJE'")
         consumo = query_one("SELECT id FROM expense_concepts WHERE name = 'CONSUMO ALIMENTOS'")
         demo_expenses = [

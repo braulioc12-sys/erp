@@ -40,24 +40,56 @@ def list_view():
     return render_template("viajes/list.html", trips=trips, status=status, q=q)
 
 
-def _routes_for_suggestions():
-    """Rutas activas con su comisión predeterminada, para sugerir el monto
-    en el formulario de viajes según el origen/destino escrito. Se convierte
-    a dicts porque sqlite3.Row no es serializable a JSON directamente."""
+def _active_routes():
+    """Rutas activas del catálogo, para el desplegable de selección del
+    formulario de viajes (ya no se escribe origen/destino a mano — pedido
+    de Braulio, 28 ago: la ruta se elige de las que ya están registradas
+    en Rutas). Se convierte a dicts porque sqlite3.Row no es serializable
+    a JSON directamente (se usa también para la sugerencia de comisión en JS)."""
     rows = query_all(
-        "SELECT origin, destination, default_commission_amount FROM routes WHERE active = 1"
+        "SELECT id, origin, destination, default_commission_amount FROM routes WHERE active = 1 ORDER BY origin, destination"
     )
     return [dict(r) for r in rows]
 
 
-def _resolve_commission(form, origin, destination):
+def _resolve_route_selection(form, current_trip=None):
+    """Resuelve la ruta elegida en el desplegable del formulario de viajes.
+    Devuelve (origin, destination, route_row_o_None, error_o_None).
+
+    `route_id` normalmente es el id de una ruta activa del catálogo. El
+    valor especial "__current__" solo aparece al editar un viaje cuya
+    ruta (origen/destino ya guardados) no está en el catálogo activo —
+    deja la ruta tal cual estaba en vez de obligar a elegir una nueva
+    sin querer."""
+    route_id = (form.get("route_id") or "").strip()
+    if route_id == "__current__" and current_trip is not None:
+        return current_trip["origin"], current_trip["destination"], None, None
+    if not route_id:
+        return "", "", None, "Selecciona una ruta del catálogo (Rutas)."
+    route = query_one("SELECT * FROM routes WHERE id = ? AND active = 1", (route_id,))
+    if not route:
+        return "", "", None, "La ruta elegida ya no está disponible — elige otra."
+    return route["origin"], route["destination"], route, None
+
+
+def _resolve_commission(form, origin, destination, route=None):
     """Si el usuario dejó vacío el campo de comisión, se usa el monto
-    predeterminado de la ruta (origen-destino) que coincida, si existe."""
+    predeterminado de la ruta elegida (o, si no se resolvió una ruta
+    directamente — caso "__current__" —, se busca por origen/destino)."""
     raw = (form.get("driver_commission") or "").strip()
     if raw:
         return parse_float(raw, 0)
-    route = find_route(origin, destination)
+    if route is None:
+        route = find_route(origin, destination)
     return route["default_commission_amount"] if route else 0
+
+
+def _selected_route_id_for_edit(trip):
+    """Id a preseleccionar en el desplegable al editar un viaje: el de la
+    ruta activa que coincide con el origen/destino ya guardados, o
+    "__current__" si esa ruta ya no está en el catálogo activo."""
+    route = find_route(trip["origin"], trip["destination"])
+    return str(route["id"]) if route else "__current__"
 
 
 @bp.route("/nuevo", methods=["GET", "POST"])
@@ -66,20 +98,19 @@ def new():
     clients = query_all("SELECT * FROM clients WHERE active = 1 ORDER BY name")
     vehicles = query_all("SELECT * FROM vehicles WHERE status = 'ACTIVO' ORDER BY plate")
     drivers = query_all("SELECT * FROM drivers WHERE status = 'ACTIVO' ORDER BY name")
-    routes_for_js = _routes_for_suggestions()
+    routes = _active_routes()
 
     if request.method == "POST":
         if not validate_csrf():
             abort(400)
         client_id = request.form.get("client_id")
-        origin = request.form.get("origin", "").strip()
-        destination = request.form.get("destination", "").strip()
+        origin, destination, route, route_error = _resolve_route_selection(request.form)
         scheduled_date = parse_date(request.form.get("scheduled_date"))
         errors = []
         if not client_id:
             errors.append("Selecciona un cliente.")
-        if not origin or not destination:
-            errors.append("Origen y destino son obligatorios.")
+        if route_error:
+            errors.append(route_error)
         if not scheduled_date:
             errors.append("La fecha programada no es válida.")
 
@@ -88,13 +119,14 @@ def new():
                 flash(e, "error")
             return render_template(
                 "viajes/form.html", trip=request.form, mode="new",
-                clients=clients, vehicles=vehicles, drivers=drivers, routes_for_js=routes_for_js,
+                clients=clients, vehicles=vehicles, drivers=drivers, routes=routes,
+                selected_route_id=request.form.get("route_id", ""),
             )
 
         code = next_code("V", "trips")
         vehicle_id = request.form.get("vehicle_id") or None
         driver_id = request.form.get("driver_id") or None
-        driver_commission = _resolve_commission(request.form, origin, destination)
+        driver_commission = _resolve_commission(request.form, origin, destination, route)
         trip_id = execute(
             """INSERT INTO trips (code, client_id, vehicle_id, driver_id, origin, destination,
                cargo_description, cargo_weight_kg, scheduled_date, rate, driver_commission, notes, created_by)
@@ -120,7 +152,8 @@ def new():
 
     return render_template(
         "viajes/form.html", trip=None, mode="new",
-        clients=clients, vehicles=vehicles, drivers=drivers, routes_for_js=routes_for_js, today=today_str(),
+        clients=clients, vehicles=vehicles, drivers=drivers, routes=routes, today=today_str(),
+        selected_route_id="",
     )
 
 
@@ -133,15 +166,21 @@ def edit(trip_id):
     clients = query_all("SELECT * FROM clients WHERE active = 1 ORDER BY name")
     vehicles = query_all("SELECT * FROM vehicles WHERE status = 'ACTIVO' OR id = ? ORDER BY plate", (trip["vehicle_id"],))
     drivers = query_all("SELECT * FROM drivers WHERE status = 'ACTIVO' OR id = ? ORDER BY name", (trip["driver_id"],))
-    routes_for_js = _routes_for_suggestions()
+    routes = _active_routes()
 
     if request.method == "POST":
         if not validate_csrf():
             abort(400)
         scheduled_date = parse_date(request.form.get("scheduled_date")) or trip["scheduled_date"]
-        origin = request.form.get("origin", "").strip()
-        destination = request.form.get("destination", "").strip()
-        driver_commission = _resolve_commission(request.form, origin, destination)
+        origin, destination, route, route_error = _resolve_route_selection(request.form, current_trip=trip)
+        if route_error:
+            flash(route_error, "error")
+            return render_template(
+                "viajes/form.html", trip=trip, mode="edit", trip_id=trip_id,
+                clients=clients, vehicles=vehicles, drivers=drivers, routes=routes,
+                selected_route_id=request.form.get("route_id", ""),
+            )
+        driver_commission = _resolve_commission(request.form, origin, destination, route)
         execute(
             """UPDATE trips SET client_id=?, vehicle_id=?, driver_id=?, origin=?, destination=?,
                cargo_description=?, cargo_weight_kg=?, scheduled_date=?, rate=?, driver_commission=?, notes=?
@@ -166,7 +205,8 @@ def edit(trip_id):
 
     return render_template(
         "viajes/form.html", trip=trip, mode="edit", trip_id=trip_id,
-        clients=clients, vehicles=vehicles, drivers=drivers, routes_for_js=routes_for_js,
+        clients=clients, vehicles=vehicles, drivers=drivers, routes=routes,
+        selected_route_id=_selected_route_id_for_edit(trip),
     )
 
 

@@ -12,13 +12,15 @@
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
   <div class="form-row">
-    <label>Monto entregado al conductor (S/) *
+    <label>Monto de este anticipo (S/) *
       <input type="number" step="0.01" name="amount_given" value="{{ route.default_expense_amount if route else '' }}" required>
     </label>
     <label>Fecha de entrega *
       <input type="date" name="given_date" value="{{ today }}" required>
     </label>
   </div>
+
+  <p class="muted" style="margin-top:-8px;">Si le vas a dar más anticipos después (por ejemplo uno al inicio del viaje y otro a mitad de camino), no hace falta poner el total ahora — podrás agregar cada anticipo por separado desde el detalle de esta liquidación.</p>
 
   <label>Notas
     <textarea name="notes" placeholder="Ej. Entregado en efectivo antes de la salida"></textarea>

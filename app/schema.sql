@@ -289,6 +289,22 @@ CREATE TABLE IF NOT EXISTS expense_advances (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Cada entrega de dinero al conductor dentro de una misma liquidación
+-- (pedido de Braulio, 28 ago: a veces se da un anticipo al inicio del
+-- viaje y otro a mitad de camino). `expense_advances.amount_given` sigue
+-- existiendo y sigue siendo el total — se recalcula como la suma de estas
+-- filas cada vez que se agrega o elimina una, así el resto del sistema
+-- (Resumen contable, exports, la comparación contra lo gastado) no tiene
+-- que cambiar: sigue leyendo `amount_given` como el monto total entregado.
+CREATE TABLE IF NOT EXISTS advance_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    advance_id INTEGER NOT NULL REFERENCES expense_advances(id),
+    amount REAL NOT NULL,
+    payment_date TEXT NOT NULL,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Conceptos de gasto para el export contable de liquidación: cada uno
 -- amarra un nombre visible (glosa) a su cuenta contable, tipo de
 -- comprobante y código de documento SUNAT, según la plantilla real de
