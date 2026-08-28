@@ -10,28 +10,28 @@
 <form class="form panel" method="post" enctype="multipart/form-data">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-  <div class="form-row">
-    <label>Tipo *
-      <select name="type" required>
-        {% for t in types %}
-        <option value="{{ t }}" {{ 'selected' if expense and expense.type == t }}>{{ t.replace('_',' ').title() }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label>Monto (S/) *
-      <input type="number" step="0.01" name="amount" value="{{ expense.amount if expense else '' }}" required>
-    </label>
-  </div>
+  <label>Monto (S/) *
+    <input type="number" step="0.01" name="amount" value="{{ expense.amount if expense else '' }}" required>
+  </label>
 
   <div class="form-row">
-    <label>Viaje relacionado
-      <select name="trip_id">
-        <option value="">-- Ninguno --</option>
-        {% for t in trips %}
-        <option value="{{ t.id }}" {{ 'selected' if (expense and (expense.trip_id|string) == (t.id|string)) or (preselected_trip and preselected_trip == t.id) }}>{{ t.code }}</option>
-        {% endfor %}
-      </select>
-    </label>
+    <div>
+      {% if preselected_trip %}
+      <span style="display:block; font-weight:600; margin-bottom:4px;">Viaje</span>
+      <input type="text" value="{{ preselected_trip_code or ('Viaje #' ~ preselected_trip) }}" readonly style="background:var(--bg-soft, #f3f5f8); width:100%;">
+      <input type="hidden" name="trip_id" value="{{ preselected_trip }}">
+      <p class="muted" style="margin:4px 0 0;">Este gasto se registra directo en la liquidación de este viaje.</p>
+      {% else %}
+      <label>Viaje relacionado
+        <select name="trip_id">
+          <option value="">-- Ninguno --</option>
+          {% for t in trips %}
+          <option value="{{ t.id }}" {{ 'selected' if expense and (expense.trip_id|string) == (t.id|string) }}>{{ t.code }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% endif %}
+    </div>
     <label>Unidad relacionada
       <select name="vehicle_id">
         <option value="">-- Ninguna --</option>
@@ -50,13 +50,13 @@
     <textarea name="description">{{ expense.description if expense else '' }}</textarea>
   </label>
 
-  <h2 style="margin-top:20px;">Datos contables (para la liquidación)</h2>
-  <p class="muted" style="margin-top:-8px;">Al elegir un concepto se completan solas la cuenta contable y el tipo de comprobante — así se arma el export de <a href="{{ url_for('liquidaciones.resumen_view') }}" target="_blank">Resumen contable</a>. Si el concepto que necesitas no está en la lista, un Administrador puede agregarlo desde <a href="{{ url_for('liquidaciones.concepts_list') }}" target="_blank">Liquidaciones → Conceptos</a>.</p>
+  <h2 style="margin-top:20px;">Datos contables</h2>
+  <p class="muted" style="margin-top:-8px;">El concepto es la única clasificación del gasto — al elegirlo se completan solas la cuenta contable y el tipo de comprobante que arman el export de <a href="{{ url_for('liquidaciones.resumen_view') }}" target="_blank">Resumen contable</a>. Si el concepto que necesitas no está en la lista, un Administrador puede agregarlo desde <a href="{{ url_for('liquidaciones.concepts_list') }}" target="_blank">Liquidaciones → Conceptos</a>.</p>
 
   <div class="form-row">
-    <label>Concepto
-      <select name="concept_id" id="concept_id" onchange="onConceptChange()">
-        <option value="">-- Sin concepto --</option>
+    <label>Concepto *
+      <select name="concept_id" id="concept_id" onchange="onConceptChange()" required>
+        <option value="" disabled {{ 'selected' if not expense or not expense.concept_id }}>-- Elige un concepto --</option>
         {% for c in concepts %}
         <option value="{{ c.id }}" {{ 'selected' if expense and (expense.concept_id|string) == (c.id|string) }}>{{ c.name }}</option>
         {% endfor %}

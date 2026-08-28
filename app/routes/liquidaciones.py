@@ -31,7 +31,6 @@ from app.db import execute, query_all, query_one
 from app.helpers import parse_date, parse_float, pretty_label, today_str
 from app.integrations.sunat_exchange_rate import get_rate_for_date
 from app.reports import build_expenses_workbook, build_liquidacion_workbook
-from app.routes.catalogos import get_catalog
 from app.routes.rutas import find_route
 
 bp = Blueprint("liquidaciones", __name__, url_prefix="/liquidaciones")
@@ -349,14 +348,18 @@ def _fetch_exchange_rate(date_str):
 
 def _expense_form_context(expense=None, preselected_trip=None):
     concepts = _expense_concepts(exclude_vale=True)
+    preselected_trip_code = None
+    if preselected_trip:
+        t = query_one("SELECT code FROM trips WHERE id = ?", (preselected_trip,))
+        preselected_trip_code = t["code"] if t else None
     return {
         "trips": query_all("SELECT id, code FROM trips WHERE status != 'CANCELADO' ORDER BY scheduled_date DESC"),
         "vehicles": query_all("SELECT id, plate FROM vehicles ORDER BY plate"),
-        "types": [c["name"] for c in get_catalog("expense_type")],
         "concepts": concepts,
         "concepts_json": [dict(c) for c in concepts],
         "expense": expense,
         "preselected_trip": preselected_trip,
+        "preselected_trip_code": preselected_trip_code,
         "today": today_str(),
     }
 
@@ -381,14 +384,22 @@ def new_expense():
             abort(400)
         amount = parse_float(request.form.get("amount"))
         expense_date = parse_date(request.form.get("expense_date")) or today_str()
-        expense_type = request.form.get("type")
-        trip_id = request.form.get("trip_id") or None
-        vehicle_id = request.form.get("vehicle_id") or None
+        # El campo "Tipo" se retiró (28 ago, pedido de Braulio: se estaba
+        # pidiendo la misma clasificación dos veces). Ahora el Concepto es la
+        # única clasificación del gasto, y expenses.type (columna NOT NULL,
+        # usada también para agrupar en Presupuestos e Historial) se completa
+        # solo con el nombre del concepto elegido.
         concept_id = request.form.get("concept_id") or None
+        concept = query_one("SELECT * FROM expense_concepts WHERE id = ?", (concept_id,)) if concept_id else None
+        # Si el gasto viene de una liquidación específica (link "+ Registrar
+        # gasto para este viaje"), el viaje llega fijo por un campo oculto —
+        # no se vuelve a preguntar (pedido de Braulio, 28 ago).
+        trip_id = (request.form.get("trip_id") or "").strip() or None
+        vehicle_id = request.form.get("vehicle_id") or None
 
         errors = []
-        if expense_type not in ctx["types"]:
-            errors.append("Selecciona un tipo de gasto válido.")
+        if not concept:
+            errors.append("Selecciona un concepto de gasto válido.")
         if amount <= 0:
             errors.append("El monto debe ser mayor a cero.")
         if not trip_id and not vehicle_id:
@@ -399,6 +410,7 @@ def new_expense():
                 flash(e, "error")
             return render_template("liquidaciones/expense_form.html", **{**ctx, "expense": request.form})
 
+        expense_type = concept["name"]
         receipt_filename = _save_receipt(_first_uploaded_file())
 
         # El tipo de cambio se completa solo con el de SUNAT del día del
@@ -455,14 +467,14 @@ def edit_expense(expense_id):
             abort(400)
         amount = parse_float(request.form.get("amount"))
         expense_date = parse_date(request.form.get("expense_date")) or today_str()
-        expense_type = request.form.get("type")
+        concept_id = request.form.get("concept_id") or None
+        concept = query_one("SELECT * FROM expense_concepts WHERE id = ?", (concept_id,)) if concept_id else None
         trip_id = request.form.get("trip_id") or None
         vehicle_id = request.form.get("vehicle_id") or None
-        concept_id = request.form.get("concept_id") or None
 
         errors = []
-        if expense_type not in ctx["types"]:
-            errors.append("Selecciona un tipo de gasto válido.")
+        if not concept:
+            errors.append("Selecciona un concepto de gasto válido.")
         if amount <= 0:
             errors.append("El monto debe ser mayor a cero.")
         if not trip_id and not vehicle_id:
@@ -475,6 +487,7 @@ def edit_expense(expense_id):
             merged["id"] = expense_id
             return render_template("liquidaciones/expense_form.html", **{**ctx, "expense": merged})
 
+        expense_type = concept["name"]
         new_receipt = _save_receipt(_first_uploaded_file())
         receipt_filename = new_receipt or expense["receipt_filename"]
 
@@ -571,7 +584,7 @@ def _filtered_expenses(args):
 def historial():
     expenses, type_filter, from_date, to_date = _filtered_expenses(request.args)
     total = sum(e["amount"] for e in expenses)
-    types = [c["name"] for c in get_catalog("expense_type")]
+    types = [c["name"] for c in _expense_concepts(exclude_vale=True)]
     return render_template(
         "liquidaciones/historial.html", expenses=expenses, types=types, type_filter=type_filter,
         from_date=from_date or "", to_date=to_date or "", total=total,
@@ -595,7 +608,7 @@ def export_excel():
         expenses,
         company_name=current_app.config["COMPANY_NAME"],
         filter_description=filter_description,
-        known_type_order=[c["name"] for c in get_catalog("expense_type", only_active=False)],
+        known_type_order=[c["name"] for c in _expense_concepts(only_active=False, exclude_vale=True)],
     )
     filename = f"gastos_{today_str()}.xlsx"
     return Response(
@@ -612,7 +625,7 @@ def export_excel():
 def budgets_list():
     budgets = query_all("SELECT * FROM expense_budgets ORDER BY scope_type, scope_value")
     vehicles = query_all("SELECT id, plate FROM vehicles ORDER BY plate")
-    types = [c["name"] for c in get_catalog("expense_type", only_active=False)]
+    types = [c["name"] for c in _expense_concepts(only_active=False, exclude_vale=True)]
     vehicle_plates = {v["id"]: v["plate"] for v in vehicles}
     return render_template(
         "liquidaciones/budgets.html", budgets=budgets, vehicles=vehicles, types=types, vehicle_plates=vehicle_plates,

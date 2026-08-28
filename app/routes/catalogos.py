@@ -10,7 +10,6 @@ bp = Blueprint("catalogos", __name__, url_prefix="/configuracion/catalogos")
 
 CATEGORIES = {
     "maintenance_type": "Conceptos de mantenimiento",
-    "expense_type": "Tipos de gasto",
     "inspection_item": "Ítems de inspección",
 }
 

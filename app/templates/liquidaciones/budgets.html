@@ -7,7 +7,7 @@
     <a href="{{ url_for('liquidaciones.list_view') }}" class="btn btn-secondary">← Volver a Liquidaciones</a>
   </div>
 </div>
-<p class="muted mt-0">Define un tope de gasto mensual por unidad o por tipo de gasto. Cuando el gasto acumulado del mes llega al 90% del presupuesto (o lo supera), aparece una alerta en el Panel.</p>
+<p class="muted mt-0">Define un tope de gasto mensual por unidad o por concepto de gasto. Cuando el gasto acumulado del mes llega al 90% del presupuesto (o lo supera), aparece una alerta en el Panel.</p>
 
 <div class="panel" style="max-width:640px;">
   <form method="post" action="{{ url_for('liquidaciones.budgets_add') }}" class="filters" style="margin-bottom:18px;">
@@ -15,7 +15,7 @@
     <label>Ámbito
       <select name="scope_type" id="scope_type" onchange="toggleScope()">
         <option value="VEHICLE">Por unidad</option>
-        <option value="TYPE">Por tipo de gasto</option>
+        <option value="TYPE">Por concepto de gasto</option>
       </select>
     </label>
     <label id="scope_vehicle_wrap">Unidad
@@ -25,7 +25,7 @@
         {% endfor %}
       </select>
     </label>
-    <label id="scope_type_wrap" style="display:none;">Tipo
+    <label id="scope_type_wrap" style="display:none;">Concepto
       <select name="scope_value" id="scope_type_value" disabled>
         {% for t in types %}
         <option value="{{ t }}">{{ t|pretty }}</option>
@@ -53,7 +53,7 @@
       <tbody>
         {% for b in budgets %}
         <tr>
-          <td>{% if b.scope_type == 'VEHICLE' %}Unidad {{ vehicle_plates.get(b.scope_value|int, b.scope_value) }}{% else %}Tipo: {{ b.scope_value|pretty }}{% endif %}</td>
+          <td>{% if b.scope_type == 'VEHICLE' %}Unidad {{ vehicle_plates.get(b.scope_value|int, b.scope_value) }}{% else %}Concepto: {{ b.scope_value|pretty }}{% endif %}</td>
           <td class="text-right">{{ b.monthly_amount|money }}</td>
           <td><span class="badge {{ 'badge-activo' if b.active else 'badge-inactivo' }}">{{ 'Activo' if b.active else 'Inactivo' }}</span></td>
           <td>

@@ -23,12 +23,12 @@ def _upsert_user(name, email, password, role):
     return uid, True
 
 
-# Catálogos por defecto. Los códigos de "expense_type" se mantienen en
-# mayúsculas por compatibilidad con instalaciones previas a la versión con
-# catálogos editables; "maintenance_type" siempre fue texto libre, así que
-# usa nombres directamente legibles.
+# Catálogos por defecto. "expense_type" (tipos de gasto) se retiró el 28
+# ago: Braulio pidió que Presupuestos y el formulario de gastos usen solo
+# los Conceptos de gasto (ver DEFAULT_EXPENSE_CONCEPTS abajo), así que ya no
+# hay un catálogo aparte de tipos. "maintenance_type" siempre fue texto
+# libre, así que usa nombres directamente legibles.
 DEFAULT_CATALOGS = {
-    "expense_type": ["COMBUSTIBLE", "PEAJE", "VIATICOS", "MANTENIMIENTO", "OTRO"],
     "maintenance_type": [
         "Cambio de aceite",
         "Revisión general de frenos",
