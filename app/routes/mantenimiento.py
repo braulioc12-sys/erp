@@ -5,6 +5,7 @@ from flask import Blueprint, abort, flash, redirect, render_template, request, u
 from app.auth import permission_required, validate_csrf
 from app.db import execute, get_db, get_setting, query_all, query_one
 from app.helpers import parse_date, parse_float, today_str
+from app.routes.inventarios import get_catalog_items
 from app.seed_data import DEFAULT_JOB_TYPES, MECHANIC_TYPES, labor_cost_setting_key
 
 bp = Blueprint("mantenimiento", __name__, url_prefix="/mantenimiento")
@@ -71,9 +72,14 @@ def _insert_selected_jobs(db, record_id, selected_jobs):
 
 def _insert_selected_materials(db, record_id, selected_materials):
     """Inserta filas nuevas en maintenance_record_materials para los
-    materiales marcados, leyendo la cantidad de cada uno desde el
+    materiales/repuestos marcados, leyendo la cantidad de cada uno desde el
     formulario (campo material_qty_<id>). Ignora los que quedaron con
-    cantidad 0 o vacía."""
+    cantidad 0 o vacía. Descuenta la cantidad usada del stock del repuesto
+    en Inventarios (inventory_items.stock_quantity) — se permite que quede
+    en negativo (pedido explícito de Braulio: no bloquear, solo avisar);
+    devuelve la lista de avisos de stock negativo para que el llamador los
+    muestre con flash()."""
+    warnings = []
     for m in selected_materials:
         qty = parse_float(request.form.get(f"material_qty_{m['id']}"), 0) or 0
         if qty <= 0:
@@ -84,6 +90,18 @@ def _insert_selected_materials(db, record_id, selected_materials):
                VALUES (?, ?, ?, ?, ?)""",
             (record_id, m["id"], m["name"], m["unit_cost"], qty),
         )
+        db.execute(
+            "UPDATE inventory_items SET stock_quantity = stock_quantity - ? WHERE id = ?",
+            (qty, m["id"]),
+        )
+        new_stock = db.execute(
+            "SELECT stock_quantity FROM inventory_items WHERE id = ?", (m["id"],)
+        ).fetchone()
+        if new_stock is not None and new_stock["stock_quantity"] < 0:
+            warnings.append(
+                f'Stock de "{m["name"]}" quedó en {new_stock["stock_quantity"]:g} (negativo) — revisa Inventarios.'
+            )
+    return warnings
 
 
 @bp.route("")
@@ -127,7 +145,7 @@ def list_view():
 def new():
     vehicles = query_all("SELECT id, plate, current_km FROM vehicles ORDER BY plate")
     job_types = get_catalog_jobs()
-    materials = get_catalog_materials()
+    materials = get_catalog_items()
     labor_costs = {t: get_setting(labor_cost_setting_key(t), "0") for t in MECHANIC_TYPES}
 
     if request.method == "POST":
@@ -182,8 +200,10 @@ def new():
         if selected_jobs or selected_materials:
             db = get_db()
             _insert_selected_jobs(db, record_id, selected_jobs)
-            _insert_selected_materials(db, record_id, selected_materials)
+            stock_warnings = _insert_selected_materials(db, record_id, selected_materials)
             db.commit()
+            for w in stock_warnings:
+                flash(w, "error")
 
         # Si se indicó el kilometraje al momento del mantenimiento, lo usamos
         # para actualizar el kilometraje actual de la unidad (evita tener que
@@ -242,7 +262,7 @@ def detail(record_id):
     mechanics = get_catalog_mechanics()
     used_job_names = {j["job_name"] for j in jobs}
     available_job_types = [j for j in get_catalog_jobs() if j["name"] not in used_job_names]
-    available_materials = get_catalog_materials()
+    available_materials = get_catalog_items()
     labor_costs = {t: get_setting(labor_cost_setting_key(t), "0") for t in MECHANIC_TYPES}
     materials_total = sum((mtl["unit_cost"] or 0) * (mtl["quantity"] or 0) for mtl in materials)
     return render_template(
@@ -271,7 +291,7 @@ def add_more(record_id):
     job_ids = [int(j) for j in request.form.getlist("job_type_ids")]
     selected_jobs = [j for j in job_types if j["id"] in job_ids]
 
-    materials_catalog = get_catalog_materials()
+    materials_catalog = get_catalog_items()
     material_ids = [int(m) for m in request.form.getlist("material_ids")]
     selected_materials = [m for m in materials_catalog if m["id"] in material_ids]
 
@@ -281,7 +301,7 @@ def add_more(record_id):
 
     db = get_db()
     added_minutes = _insert_selected_jobs(db, record_id, selected_jobs)
-    _insert_selected_materials(db, record_id, selected_materials)
+    stock_warnings = _insert_selected_materials(db, record_id, selected_materials)
 
     added_cost = parse_float(request.form.get("added_cost"), 0) or 0
     db.execute(
@@ -290,6 +310,8 @@ def add_more(record_id):
     )
     db.commit()
     flash("Se agregaron trabajos/materiales a la orden.", "success")
+    for w in stock_warnings:
+        flash(w, "error")
     return redirect(url_for("mantenimiento.detail", record_id=record_id))
 
 
@@ -569,70 +591,6 @@ def mechanics_toggle(mechanic_id):
     execute("UPDATE mechanics SET active = ? WHERE id = ?", (0 if mechanic["active"] else 1, mechanic_id))
     flash("Actualizado." if mechanic["active"] else "Reactivado.", "success")
     return redirect(url_for("mantenimiento.mechanics_list"))
-
-
-# --- Materiales (catálogo con costo unitario, para el costo de materiales de una orden) ---
-
-def get_catalog_materials(only_active=True):
-    sql = "SELECT * FROM maintenance_materials WHERE 1=1"
-    if only_active:
-        sql += " AND active = 1"
-    sql += " ORDER BY sort_order, name"
-    return query_all(sql)
-
-
-@bp.route("/materiales")
-@permission_required("mantenimiento", "view")
-def materials_list():
-    materials = query_all("SELECT * FROM maintenance_materials ORDER BY sort_order, name")
-    return render_template("mantenimiento/materials.html", materials=materials)
-
-
-@bp.route("/materiales/agregar", methods=["POST"])
-@permission_required("mantenimiento", "edit")
-def materials_add():
-    if not validate_csrf():
-        abort(400)
-    name = request.form.get("name", "").strip()
-    unit_cost = parse_float(request.form.get("unit_cost"), 0)
-    if not name:
-        flash("Escribe el nombre del material.", "error")
-        return redirect(url_for("mantenimiento.materials_list"))
-
-    existing = query_one("SELECT id, active FROM maintenance_materials WHERE name = ?", (name,))
-    if existing:
-        if existing["active"]:
-            flash("Ese material ya existe.", "error")
-        else:
-            execute(
-                "UPDATE maintenance_materials SET active = 1, unit_cost = ? WHERE id = ?",
-                (unit_cost, existing["id"]),
-            )
-            flash(f'"{name}" reactivado.', "success")
-    else:
-        max_order = query_one("SELECT COALESCE(MAX(sort_order), -1) m FROM maintenance_materials")["m"]
-        execute(
-            "INSERT INTO maintenance_materials (name, unit_cost, sort_order) VALUES (?, ?, ?)",
-            (name, unit_cost, max_order + 1),
-        )
-        flash(f'"{name}" agregado.', "success")
-    return redirect(url_for("mantenimiento.materials_list"))
-
-
-@bp.route("/materiales/<int:material_id>/alternar", methods=["POST"])
-@permission_required("mantenimiento", "edit")
-def materials_toggle(material_id):
-    if not validate_csrf():
-        abort(400)
-    material = query_one("SELECT * FROM maintenance_materials WHERE id = ?", (material_id,))
-    if material is None:
-        abort(404)
-    execute(
-        "UPDATE maintenance_materials SET active = ? WHERE id = ?",
-        (0 if material["active"] else 1, material_id),
-    )
-    flash("Actualizado." if material["active"] else "Reactivado.", "success")
-    return redirect(url_for("mantenimiento.materials_list"))
 
 
 # --- Historial y costos por unidad ---

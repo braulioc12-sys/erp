@@ -98,6 +98,7 @@ td.wrap, th.wrap { white-space: normal; }
 .badge-en_proceso { background: var(--primary-soft); color: var(--primary-dark); }
 .badge-terminada, .badge-terminado { background: var(--success-soft); color: var(--success); }
 .badge-sin_trabajos { background: var(--text-muted-soft, #eee); color: var(--text-muted); }
+.badge-recibido { background: var(--success-soft); color: var(--success); }
 
 /* Forms */
 form.form { display: flex; flex-direction: column; gap: 14px; max-width: 640px; }

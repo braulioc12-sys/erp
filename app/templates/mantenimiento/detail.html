@@ -151,12 +151,12 @@
     </div>
     {% endif %}
     {% if available_materials %}
-    <label>Materiales</label>
+    <label>Materiales / repuestos</label>
     <div class="panel" style="background:var(--bg-soft, #f8f9fb); margin-top:-8px;">
       {% for mtl in available_materials %}
       <label style="flex-direction:row; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
         <input type="checkbox" name="material_ids" value="{{ mtl.id }}" class="add-material-check" data-unit-cost="{{ mtl.unit_cost }}" data-material-id="{{ mtl.id }}" style="width:auto;">
-        {{ mtl.name }} <span class="muted">({{ mtl.unit_cost|money }} c/u)</span>
+        {{ mtl.name }} <span class="muted">({{ mtl.unit_cost|money }} c/u — stock: {{ mtl.stock_quantity|round(2) }})</span>
         <input type="number" name="material_qty_{{ mtl.id }}" class="add-material-qty" data-material-id="{{ mtl.id }}" min="0" step="0.01" value="1" style="width:80px; margin-left:auto;" title="Cantidad">
       </label>
       {% endfor %}

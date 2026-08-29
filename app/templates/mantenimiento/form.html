@@ -50,18 +50,19 @@
     <p class="mt-0">Tiempo estimado total: <strong id="job-minutes-total">0</strong> min · <a href="{{ url_for('mantenimiento.jobs_list') }}" target="_blank">Registrar un trabajo nuevo</a></p>
   </div>
 
-  <label>Materiales usados (opcional)</label>
+  <label>Materiales / repuestos usados (opcional)</label>
   <div class="panel" style="background:var(--bg-soft, #f8f9fb); margin-top:-8px;">
     {% for mtl in materials %}
     <label style="flex-direction:row; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
       <input type="checkbox" name="material_ids" value="{{ mtl.id }}" class="material-check" data-unit-cost="{{ mtl.unit_cost }}" data-material-id="{{ mtl.id }}" style="width:auto;">
-      {{ mtl.name }} <span class="muted">({{ mtl.unit_cost|money }} c/u)</span>
+      {{ mtl.name }} <span class="muted">({{ mtl.unit_cost|money }} c/u — stock: {{ mtl.stock_quantity|round(2) }})</span>
       <input type="number" name="material_qty_{{ mtl.id }}" class="material-qty" data-material-id="{{ mtl.id }}" min="0" step="0.01" value="1" style="width:80px; margin-left:auto;" title="Cantidad">
     </label>
     {% else %}
-    <p class="muted mt-0">Todavía no hay materiales registrados.</p>
+    <p class="muted mt-0">Todavía no hay repuestos registrados.</p>
     {% endfor %}
-    <p class="mt-0"><a href="{{ url_for('mantenimiento.materials_list') }}" target="_blank">Registrar un material nuevo</a></p>
+    <p class="mt-0"><a href="{{ url_for('inventarios.list_view') }}" target="_blank">Ver/agregar repuestos en Inventarios</a></p>
+    <p class="muted mt-0" style="margin-top:2px;">Si usas más de lo que hay en stock, se permite igual — solo se avisa (el stock puede quedar en negativo).</p>
   </div>
   <script>
     (function () {

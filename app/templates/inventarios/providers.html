@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+{% block title %}Proveedores{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Proveedores de repuestos</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('inventarios.list_view') }}" class="btn btn-secondary">← Volver a Inventarios</a>
+  </div>
+</div>
+<p class="muted mt-0">Estos proveedores aparecen al registrar una nueva compra de repuestos.</p>
+
+<div class="panel" style="max-width:640px;">
+  {% if can(current_user.role, 'inventarios', 'edit') %}
+  <form method="post" action="{{ url_for('inventarios.providers_add') }}" class="filters" style="margin-bottom:18px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label style="flex:1;">Nombre del proveedor
+      <input type="text" name="name" placeholder="Ej. Repuestos Pucallpa SAC" required>
+    </label>
+    <label>RUC (opcional)
+      <input type="text" name="ruc" placeholder="20123456789" style="max-width:140px;">
+    </label>
+    <label>Teléfono (opcional)
+      <input type="text" name="phone" style="max-width:120px;">
+    </label>
+    <button type="submit" class="btn btn-primary">+ Agregar</button>
+  </form>
+  {% endif %}
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Proveedor</th><th>RUC</th><th>Teléfono</th><th>Estado</th><th></th></tr></thead>
+      <tbody>
+        {% for p in providers %}
+        <tr>
+          <td>{{ p.name }}</td>
+          <td>{{ p.ruc or '—' }}</td>
+          <td>{{ p.phone or '—' }}</td>
+          <td><span class="badge {{ 'badge-activo' if p.active else 'badge-inactivo' }}">{{ 'Activo' if p.active else 'Inactivo' }}</span></td>
+          <td>
+            {% if can(current_user.role, 'inventarios', 'edit') %}
+            <form method="post" action="{{ url_for('inventarios.providers_toggle', provider_id=p.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-secondary btn-sm" type="submit">{{ 'Desactivar' if p.active else 'Reactivar' }}</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="table-empty">No hay proveedores registrados todavía.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted" style="margin-top:12px; margin-bottom:0;">Desactivar un proveedor lo quita de los formularios nuevos, pero no afecta las compras que ya se le hicieron — cada compra guarda su propia copia del nombre del proveedor.</p>
+</div>
+{% endblock %}

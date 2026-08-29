@@ -208,31 +208,87 @@ CREATE TABLE IF NOT EXISTS maintenance_record_jobs (
     PRIMARY KEY (maintenance_record_id, job_name)
 );
 
--- Catálogo de materiales de taller, con su costo unitario de referencia
--- (S/), para poder incluir el costo de materiales en una orden de
--- mantenimiento además del costo de mano de obra (pedido de Braulio, 28
--- ago — 3ª ronda). Se administra desde Mantenimiento → Materiales, mismo
--- patrón que Trabajos y Mecánicos.
-CREATE TABLE IF NOT EXISTS maintenance_materials (
+-- Módulo Inventarios (29 ago — pedido de Braulio: "cada compra de
+-- repuestos debe figurar el proveedor, orden de compra, cantidad y
+-- precio; una vez ingresado al stock, Mantenimiento puede disponer de
+-- estos repuestos"). Unifica lo que antes era el catálogo "Materiales" de
+-- Mantenimiento (nombre + costo unitario, sin stock, tabla
+-- maintenance_materials) con control de stock real: este es ahora el
+-- catálogo de repuestos, con la cantidad disponible en almacén.
+-- unit_cost es el costo de referencia (se actualiza solo al último precio
+-- de compra recibido) usado para sugerir el costo de mano de obra +
+-- materiales de una orden de mantenimiento.
+CREATE TABLE IF NOT EXISTS inventory_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
     unit_cost REAL NOT NULL DEFAULT 0,
+    stock_quantity REAL NOT NULL DEFAULT 0,
     active INTEGER NOT NULL DEFAULT 1,
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Materiales usados en cada orden de mantenimiento (además de los
--- trabajos). Se guarda una copia del nombre y costo unitario al momento de
--- agregarlo (mismo motivo que job_name/estimated_minutes en
+-- Proveedores de repuestos — catálogo simple, mismo patrón que Mecánicos y
+-- el resto de catálogos de Mantenimiento/Inventarios.
+CREATE TABLE IF NOT EXISTS inventory_providers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    ruc TEXT,
+    phone TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Compras de repuestos (encabezado): proveedor + N° de orden de compra +
+-- fecha. Nace en PENDIENTE (se hizo el pedido pero no ha llegado); al
+-- marcarla RECIBIDA se suma la cantidad de cada línea al stock del
+-- repuesto correspondiente y se actualiza su costo unitario de referencia
+-- al último precio pagado — ver receive_purchase() en
+-- app/routes/inventarios.py. provider_name es una copia (mismo motivo que
+-- el resto del proyecto: que el historial no cambie si el proveedor se
+-- edita/desactiva después en el catálogo).
+CREATE TABLE IF NOT EXISTS inventory_purchases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider_id INTEGER REFERENCES inventory_providers(id),
+    provider_name TEXT NOT NULL,
+    purchase_order_number TEXT,
+    purchase_date TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDIENTE' CHECK (status IN ('PENDIENTE', 'RECIBIDO')),
+    received_at TEXT,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Líneas de una compra: qué repuesto, cuánta cantidad y a qué precio
+-- unitario. item_name es una copia (mismo motivo que en el resto del
+-- proyecto: que el historial de la compra no cambie si el repuesto se
+-- renombra o desactiva después en el catálogo).
+CREATE TABLE IF NOT EXISTS inventory_purchase_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_id INTEGER NOT NULL REFERENCES inventory_purchases(id),
+    item_id INTEGER REFERENCES inventory_items(id),
+    item_name TEXT NOT NULL,
+    quantity REAL NOT NULL DEFAULT 0,
+    unit_price REAL NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_inventory_purchase_items_purchase ON inventory_purchase_items(purchase_id);
+
+-- Materiales/repuestos usados en cada orden de mantenimiento (además de
+-- los trabajos). Se guarda una copia del nombre y costo unitario al
+-- momento de agregarlo (mismo motivo que job_name/estimated_minutes en
 -- maintenance_record_jobs: que el historial no cambie si luego se edita
--- ese material en el catálogo). Usa un id propio (a diferencia de
+-- ese repuesto en el catálogo). Usa un id propio (a diferencia de
 -- maintenance_record_jobs) porque no hay razón para impedir agregar el
--- mismo material más de una vez a la misma orden.
+-- mismo repuesto más de una vez a la misma orden. Al agregarse, descuenta
+-- la cantidad del stock de inventory_items (se permite que el stock quede
+-- en negativo — solo se avisa, no se bloquea; pedido explícito de
+-- Braulio).
 CREATE TABLE IF NOT EXISTS maintenance_record_materials (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     maintenance_record_id INTEGER NOT NULL REFERENCES maintenance_records(id),
-    material_id INTEGER REFERENCES maintenance_materials(id),
+    material_id INTEGER REFERENCES inventory_items(id),
     material_name TEXT NOT NULL,
     unit_cost REAL NOT NULL DEFAULT 0,
     quantity REAL NOT NULL DEFAULT 1,

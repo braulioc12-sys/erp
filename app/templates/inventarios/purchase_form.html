@@ -1,0 +1,82 @@
+{% extends 'base.html' %}
+{% block title %}Nueva compra{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Nueva compra de repuestos</h1></div>
+<form class="form panel" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <div class="form-row">
+    <label>Proveedor *
+      <select name="provider_id" required>
+        <option value="">-- Selecciona un proveedor --</option>
+        {% for p in providers %}
+        <option value="{{ p.id }}" {{ 'selected' if purchase and (purchase.provider_id|string) == (p.id|string) }}>{{ p.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Orden de compra (N°)
+      <input type="text" name="purchase_order_number" value="{{ purchase.purchase_order_number if purchase else '' }}" placeholder="Ej. OC-0003">
+    </label>
+    <label>Fecha *
+      <input type="date" name="purchase_date" value="{{ purchase.purchase_date if purchase else today }}" required>
+    </label>
+  </div>
+  {% if not providers %}
+  <p class="muted mt-0">Todavía no hay proveedores. <a href="{{ url_for('inventarios.providers_list') }}" target="_blank">Agrega uno primero en Proveedores</a>.</p>
+  {% endif %}
+
+  <label>Repuestos de esta compra *</label>
+  <div class="panel" style="background:var(--bg-soft, #f8f9fb); margin-top:-8px;">
+    {% for i in items %}
+    <label style="flex-direction:row; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
+      <input type="checkbox" name="item_ids" value="{{ i.id }}" class="purchase-item-check" data-item-id="{{ i.id }}" style="width:auto;">
+      {{ i.name }} <span class="muted">(stock actual: {{ i.stock_quantity|round(2) }})</span>
+      <span style="margin-left:auto; display:flex; gap:6px; align-items:center;">
+        <label style="flex-direction:row; gap:4px; align-items:center;">Cant.
+          <input type="number" name="item_qty_{{ i.id }}" min="0" step="0.01" value="1" style="width:70px;">
+        </label>
+        <label style="flex-direction:row; gap:4px; align-items:center;">Precio unit. (S/)
+          <input type="number" name="item_price_{{ i.id }}" min="0" step="0.01" value="{{ i.unit_cost }}" style="width:80px;">
+        </label>
+      </span>
+    </label>
+    {% else %}
+    <p class="muted mt-0">Todavía no hay repuestos en el catálogo. <a href="{{ url_for('inventarios.list_view') }}" target="_blank">Agrega uno primero en Inventarios</a>.</p>
+    {% endfor %}
+    <p class="mt-0">Total de la compra: <strong id="purchase-total">S/ 0.00</strong></p>
+  </div>
+  <p class="muted" style="margin-top:-8px;">La compra se guarda como <strong>Pendiente</strong> — el stock recién sube cuando la marques como Recibida desde su detalle (ej. cuando el repuesto realmente llega al almacén).</p>
+
+  <label>Notas (opcional)
+    <textarea name="notes"></textarea>
+  </label>
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Guardar como pendiente</button>
+    <a href="{{ url_for('inventarios.purchases_list') }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+<script>
+  (function () {
+    var checks = document.querySelectorAll('.purchase-item-check');
+    var total = document.getElementById('purchase-total');
+    function qtyInput(id) { return document.querySelector('input[name="item_qty_' + id + '"]'); }
+    function priceInput(id) { return document.querySelector('input[name="item_price_' + id + '"]'); }
+    function update() {
+      var sum = 0;
+      checks.forEach(function (c) {
+        if (!c.checked) return;
+        var qty = parseFloat((qtyInput(c.dataset.itemId) || {}).value || '0') || 0;
+        var price = parseFloat((priceInput(c.dataset.itemId) || {}).value || '0') || 0;
+        sum += qty * price;
+      });
+      total.textContent = 'S/ ' + sum.toFixed(2);
+    }
+    checks.forEach(function (c) { c.addEventListener('change', update); });
+    document.querySelectorAll('[name^="item_qty_"], [name^="item_price_"]').forEach(function (inp) {
+      inp.addEventListener('input', update);
+    });
+    update();
+  })();
+</script>
+{% endblock %}

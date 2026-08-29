@@ -1,0 +1,72 @@
+{% extends 'base.html' %}
+{% block title %}Inventarios{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Inventarios — Repuestos</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('inventarios.providers_list') }}" class="btn btn-secondary">Proveedores</a>
+    <a href="{{ url_for('inventarios.purchases_list') }}" class="btn btn-secondary">
+      Compras{% if pending_purchases %} <span class="badge badge-pendiente">{{ pending_purchases }} pendiente{{ 's' if pending_purchases != 1 }}</span>{% endif %}
+    </a>
+    {% if can(current_user.role, 'inventarios', 'edit') %}
+    <a href="{{ url_for('inventarios.purchases_new') }}" class="btn btn-primary">+ Nueva compra</a>
+    {% endif %}
+  </div>
+</div>
+<p class="muted mt-0">Catálogo de repuestos con su stock disponible en almacén. El stock sube cuando se recibe una compra (ver Compras) y baja cuando Mantenimiento usa un repuesto en una orden — ver <a href="{{ url_for('mantenimiento.list_view') }}">Mantenimiento</a>.</p>
+
+<div class="panel" style="max-width:680px;">
+  {% if can(current_user.role, 'inventarios', 'edit') %}
+  <form method="post" action="{{ url_for('inventarios.items_add') }}" class="filters" style="margin-bottom:18px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label style="flex:1;">Nombre del repuesto
+      <input type="text" name="name" placeholder="Ej. Filtro de aceite" required>
+    </label>
+    <label>Costo unitario (S/)
+      <input type="number" step="0.01" min="0" name="unit_cost" value="0" required style="max-width:110px;">
+    </label>
+    <label>Stock inicial
+      <input type="number" step="0.01" name="stock_quantity" value="0" style="max-width:100px;">
+    </label>
+    <button type="submit" class="btn btn-primary">+ Agregar</button>
+  </form>
+  {% endif %}
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Repuesto</th><th>Costo unitario</th><th>Stock</th><th>Estado</th><th></th></tr></thead>
+      <tbody>
+        {% for it in items %}
+        <tr>
+          <td>{{ it.name }}</td>
+          <td>{{ it.unit_cost|money }}</td>
+          <td>
+            <span {% if it.stock_quantity <= 0 %}style="color: var(--danger);"{% endif %}>{{ it.stock_quantity|round(2) }}</span>
+            {% if it.stock_quantity <= 0 %}<br><span class="muted" style="font-size:0.8em;">sin stock</span>{% endif %}
+          </td>
+          <td><span class="badge {{ 'badge-activo' if it.active else 'badge-inactivo' }}">{{ 'Activo' if it.active else 'Inactivo' }}</span></td>
+          <td style="white-space:nowrap;">
+            {% if can(current_user.role, 'inventarios', 'edit') %}
+            <form method="post" action="{{ url_for('inventarios.items_adjust_stock', item_id=it.id) }}" style="display:inline-flex; gap:4px; align-items:center;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="number" name="stock_quantity" step="0.01" value="{{ it.stock_quantity }}" style="width:70px;" title="Ajustar stock manualmente">
+              <button class="btn btn-secondary btn-sm" type="submit">Ajustar</button>
+            </form>
+            <form method="post" action="{{ url_for('inventarios.items_toggle', item_id=it.id) }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-secondary btn-sm" type="submit">{{ 'Desactivar' if it.active else 'Reactivar' }}</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="table-empty">No hay repuestos registrados todavía.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if can(current_user.role, 'inventarios', 'edit') %}
+  <p class="muted" style="margin-top:12px; margin-bottom:0;">"Ajustar" pone el stock directo en el valor indicado (útil para corregir un conteo físico) — para sumar stock por una compra real, usa <a href="{{ url_for('inventarios.purchases_new') }}">+ Nueva compra</a> en vez de ajustarlo a mano. Desactivar un repuesto lo quita de los formularios nuevos, pero no afecta las órdenes de mantenimiento ni compras que ya lo usaron.</p>
+  {% endif %}
+</div>
+{% endblock %}

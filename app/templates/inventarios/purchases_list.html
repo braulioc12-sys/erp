@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Compras{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Compras de repuestos</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('inventarios.list_view') }}" class="btn btn-secondary">← Volver a Inventarios</a>
+    {% if can(current_user.role, 'inventarios', 'edit') %}
+    <a href="{{ url_for('inventarios.purchases_new') }}" class="btn btn-primary">+ Nueva compra</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Fecha</th><th>Proveedor</th><th>Orden de compra</th><th>Total</th><th>Estado</th><th></th></tr></thead>
+    <tbody>
+      {% for p in purchases %}
+      <tr>
+        <td>{{ p.purchase_date }}</td>
+        <td>{{ p.provider_name }}</td>
+        <td>{{ p.purchase_order_number or '—' }}</td>
+        <td>{{ p.total|money }}</td>
+        <td>{{ m.badge(p.status) }}</td>
+        <td>
+          <a href="{{ url_for('inventarios.purchases_detail', purchase_id=p.id) }}" class="btn btn-secondary btn-sm">Ver</a>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="table-empty">No hay compras registradas todavía.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

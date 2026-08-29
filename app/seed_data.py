@@ -154,19 +154,31 @@ DEFAULT_LABOR_COST_PER_MINUTE = {
     "Otros": "2.50",
 }
 
-# Materiales de taller, con costo unitario de referencia (S/) — catálogo
-# nuevo (pedido de Braulio, 28 ago — 3ª ronda): cada orden de
-# mantenimiento puede incluir materiales usados además de los trabajos,
-# para que el costo total de la orden sume mano de obra + materiales.
+# Repuestos de taller, con costo unitario de referencia (S/) y stock
+# inicial en almacén — catálogo del módulo Inventarios (29 ago), que
+# reemplaza al catálogo "Materiales" que tenía Mantenimiento (mismo
+# concepto, ahora con control de stock real: las compras suman, usarlos en
+# una orden de mantenimiento resta). (nombre, costo_unitario, stock_inicial).
 # Valores de ejemplo, no del taller real — AJUSTAR: Braulio debe cargar su
-# propio inventario de materiales con los costos reales.
-DEFAULT_MATERIALS = [
-    ("Filtro de aceite", 35.00),
-    ("Aceite de motor (galón)", 68.00),
-    ("Pastillas de freno (juego)", 180.00),
-    ("Filtro de aire", 45.00),
-    ("Grasa industrial (kg)", 22.00),
-    ("Filtro de combustible", 40.00),
+# propio inventario de repuestos con costos y stock reales. El filtro de
+# combustible arranca en 0 a propósito, para mostrar en la demo que
+# Mantenimiento puede seguir usando un repuesto sin stock (solo avisa, no
+# bloquea) mientras llega la compra pendiente sembrada más abajo.
+DEFAULT_INVENTORY_ITEMS = [
+    ("Filtro de aceite", 35.00, 20),
+    ("Aceite de motor (galón)", 68.00, 15),
+    ("Pastillas de freno (juego)", 180.00, 4),
+    ("Filtro de aire", 45.00, 10),
+    ("Grasa industrial (kg)", 22.00, 8),
+    ("Filtro de combustible", 40.00, 0),
+]
+
+# Proveedores de repuestos, de ejemplo — catálogo del módulo Inventarios.
+# (nombre, RUC, teléfono). AJUSTAR: reemplazar por los proveedores reales
+# de Harraso en Inventarios → Proveedores.
+DEFAULT_INVENTORY_PROVIDERS = [
+    ("Repuestos Pucallpa SAC", "20123456789", "061-234567"),
+    ("Importadora Diesel Perú EIRL", "20456789123", "01-7654321"),
 ]
 
 
@@ -193,10 +205,16 @@ def _seed_catalogs():
             "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)",
             (labor_cost_setting_key(mechanic_type), cost),
         )
-    for order, (name, unit_cost) in enumerate(DEFAULT_MATERIALS):
+    for order, (name, unit_cost, stock_quantity) in enumerate(DEFAULT_INVENTORY_ITEMS):
         db.execute(
-            "INSERT OR IGNORE INTO maintenance_materials (name, unit_cost, sort_order) VALUES (?, ?, ?)",
-            (name, unit_cost, order),
+            """INSERT OR IGNORE INTO inventory_items (name, unit_cost, stock_quantity, sort_order)
+               VALUES (?, ?, ?, ?)""",
+            (name, unit_cost, stock_quantity, order),
+        )
+    for order, (name, ruc, phone) in enumerate(DEFAULT_INVENTORY_PROVIDERS):
+        db.execute(
+            "INSERT OR IGNORE INTO inventory_providers (name, ruc, phone, sort_order) VALUES (?, ?, ?, ?)",
+            (name, ruc, phone, order),
         )
     db.commit()
 
@@ -405,9 +423,9 @@ def seed_demo_data(log=print):
             "Practicante", mechanic_ids.get("Carlos Torres"), "Carlos Torres", f"{oil_date} 11:00",
         ),
     )
-    # Materiales de ejemplo en la orden de frenos, para que la demo muestre
-    # de una vez el costo de materiales dentro de una orden.
-    material_ids = {row["name"]: row["id"] for row in query_all("SELECT id, name FROM maintenance_materials")}
+    # Materiales/repuestos de ejemplo en la orden de frenos, para que la
+    # demo muestre de una vez el costo de materiales dentro de una orden.
+    material_ids = {row["name"]: row["id"] for row in query_all("SELECT id, name FROM inventory_items")}
     if material_ids.get("Pastillas de freno (juego)"):
         execute(
             """INSERT INTO maintenance_record_materials
@@ -422,6 +440,46 @@ def seed_demo_data(log=print):
                VALUES (?, ?, ?, ?, ?)""",
             (oil_record_id, material_ids["Aceite de motor (galón)"], "Aceite de motor (galón)", 68.00, 2),
         )
+
+    # Compras de ejemplo (módulo Inventarios), para que la demo muestre de
+    # una vez el flujo completo: una ya RECIBIDA (aumentó el stock sembrado
+    # arriba) y una PENDIENTE (todavía no llegó — el filtro de combustible
+    # arrancó en 0 stock justamente para mostrar esta compra en camino).
+    provider_ids = {row["name"]: row["id"] for row in query_all("SELECT id, name FROM inventory_providers")}
+    received_date = (today - timedelta(days=10)).strftime("%Y-%m-%d")
+    if provider_ids.get("Repuestos Pucallpa SAC"):
+        purchase_id = execute(
+            """INSERT INTO inventory_purchases
+               (provider_id, provider_name, purchase_order_number, purchase_date, status, received_at)
+               VALUES (?, ?, ?, ?, 'RECIBIDO', ?)""",
+            (provider_ids["Repuestos Pucallpa SAC"], "Repuestos Pucallpa SAC", "OC-0001", received_date, received_date),
+        )
+        for item_name, qty, price in (
+            ("Pastillas de freno (juego)", 4, 175.00),
+            ("Filtro de aceite", 10, 34.00),
+        ):
+            if material_ids.get(item_name):
+                execute(
+                    """INSERT INTO inventory_purchase_items (purchase_id, item_id, item_name, quantity, unit_price)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (purchase_id, material_ids[item_name], item_name, qty, price),
+                )
+    if provider_ids.get("Importadora Diesel Perú EIRL"):
+        purchase_id = execute(
+            """INSERT INTO inventory_purchases
+               (provider_id, provider_name, purchase_order_number, purchase_date, status)
+               VALUES (?, ?, ?, ?, 'PENDIENTE')""",
+            (
+                provider_ids["Importadora Diesel Perú EIRL"], "Importadora Diesel Perú EIRL", "OC-0002",
+                today.strftime("%Y-%m-%d"),
+            ),
+        )
+        if material_ids.get("Filtro de combustible"):
+            execute(
+                """INSERT INTO inventory_purchase_items (purchase_id, item_id, item_name, quantity, unit_price)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (purchase_id, material_ids["Filtro de combustible"], "Filtro de combustible", 15, 38.00),
+            )
     # Neumáticos de ejemplo: unidad ABC-123 (tracto, 10 posiciones) con casi
     # todas sus llantas registradas y con distintos niveles de desgaste
     # (para ver las tres alertas de color en la demo), y la carreta TRL-321

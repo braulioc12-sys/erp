@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Compra de repuestos{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Compra — {{ purchase.provider_name }}</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('inventarios.purchases_list') }}" class="btn btn-secondary">← Volver a Compras</a>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="detail-grid">
+    <div><span class="muted">Proveedor</span><br>{{ purchase.provider_name }}</div>
+    <div><span class="muted">Orden de compra</span><br>{{ purchase.purchase_order_number or '—' }}</div>
+    <div><span class="muted">Fecha de compra</span><br>{{ purchase.purchase_date }}</div>
+    <div><span class="muted">Estado</span><br>{{ m.badge(purchase.status) }}</div>
+    <div><span class="muted">Total</span><br>{{ total|money }}</div>
+    {% if purchase.received_at %}
+    <div><span class="muted">Recibida el</span><br>{{ purchase.received_at }}</div>
+    {% endif %}
+  </div>
+  {% if purchase.notes %}
+  <p style="margin-top:14px;"><span class="muted">Notas</span><br>{{ purchase.notes }}</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>Repuestos de esta compra</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Repuesto</th><th>Cantidad</th><th>Precio unitario</th><th>Subtotal</th></tr></thead>
+      <tbody>
+        {% for i in items %}
+        <tr>
+          <td>{{ i.item_name }}</td>
+          <td>{{ i.quantity }}</td>
+          <td>{{ i.unit_price|money }}</td>
+          <td>{{ (i.quantity * i.unit_price)|money }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="mt-0" style="margin-top:10px;"><strong>Total: {{ total|money }}</strong></p>
+</div>
+
+{% if can(current_user.role, 'inventarios', 'edit') %}
+<div class="panel">
+  {% if purchase.status == 'PENDIENTE' %}
+  <p class="muted mt-0">Esta compra todavía no afectó el stock. Márcala como recibida cuando el pedido llegue al almacén — sumará la cantidad de cada repuesto al stock y actualizará su costo unitario de referencia al precio pagado aquí.</p>
+  <form method="post" action="{{ url_for('inventarios.purchases_receive', purchase_id=purchase.id) }}" style="display:inline;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-primary">✓ Marcar como recibida</button>
+  </form>
+  <form method="post" action="{{ url_for('inventarios.purchases_delete', purchase_id=purchase.id) }}" onsubmit="return confirm('¿Eliminar esta orden de compra?');" style="display:inline; margin-left:8px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-danger">Eliminar</button>
+  </form>
+  {% else %}
+  <p class="muted mt-0">Esta compra ya está recibida — el stock de sus repuestos ya se actualizó, así que no se puede eliminar ni volver a marcar.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}
