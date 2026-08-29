@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}{{ item.name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ item.name }}</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('inventarios.list_view') }}" class="btn btn-secondary">← Volver a Inventarios</a>
+    {% if can(current_user.role, 'inventarios', 'edit') %}
+    <a href="{{ url_for('inventarios.purchases_new') }}" class="btn btn-primary">+ Nueva compra</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="panel">
+  <div class="detail-grid">
+    <div><span class="muted">Costo unitario de referencia</span><br>{{ item.unit_cost|money }}</div>
+    <div><span class="muted">Stock actual</span><br>
+      <span {% if item.stock_quantity <= 0 %}style="color: var(--danger);"{% endif %}>{{ item.stock_quantity|round(2) }}</span>
+      {% if item.stock_quantity <= 0 %} <span class="muted" style="font-size:0.85em;">(sin stock)</span>{% endif %}
+    </div>
+    <div><span class="muted">Estado</span><br><span class="badge {{ 'badge-activo' if item.active else 'badge-inactivo' }}">{{ 'Activo' if item.active else 'Inactivo' }}</span></div>
+    <div><span class="muted">Último precio pagado</span><br>{{ last_price|money if last_price is not none else '—' }}</div>
+    <div><span class="muted">Precio promedio pagado</span><br>{{ avg_price|money if avg_price is not none else '—' }}</div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2 class="mt-0">Historial de compras</h2>
+  <p class="muted">A qué proveedor, cuándo, cuánta cantidad y a qué precio se compró este repuesto — incluye compras todavía pendientes de recibir.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Fecha</th><th>Proveedor</th><th>Orden de compra</th><th>Cantidad</th><th>Precio unitario</th><th>Subtotal</th><th>Estado</th><th></th></tr></thead>
+      <tbody>
+        {% for h in purchase_history %}
+        <tr>
+          <td>{{ h.purchase_date }}</td>
+          <td>{{ h.provider_name }}</td>
+          <td>{{ h.purchase_order_number or '—' }}</td>
+          <td>{{ h.quantity }}</td>
+          <td>{{ h.unit_price|money }}</td>
+          <td>{{ (h.quantity * h.unit_price)|money }}</td>
+          <td>{{ m.badge(h.status) }}</td>
+          <td><a href="{{ url_for('inventarios.purchases_detail', purchase_id=h.purchase_id) }}" class="btn btn-secondary btn-sm">Ver compra</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="table-empty">Este repuesto todavía no tiene compras registradas.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

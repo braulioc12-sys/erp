@@ -32,11 +32,53 @@ def get_catalog_items(only_active=True):
 @bp.route("")
 @permission_required("inventarios", "view")
 def list_view():
-    items = query_all("SELECT * FROM inventory_items ORDER BY sort_order, name")
+    q = request.args.get("q", "").strip()
+    sql = "SELECT * FROM inventory_items WHERE 1=1"
+    params = []
+    if q:
+        sql += " AND name LIKE ?"
+        params.append(f"%{q}%")
+    sql += " ORDER BY sort_order, name"
+    items = query_all(sql, params)
     pending_purchases = query_one(
         "SELECT COUNT(*) n FROM inventory_purchases WHERE status = 'PENDIENTE'"
     )["n"]
-    return render_template("inventarios/list.html", items=items, pending_purchases=pending_purchases)
+    return render_template(
+        "inventarios/list.html", items=items, pending_purchases=pending_purchases, q=q
+    )
+
+
+@bp.route("/repuestos/<int:item_id>")
+@permission_required("inventarios", "view")
+def item_detail(item_id):
+    """Detalle de un repuesto: sus datos y su historial de compras — a qué
+    proveedor, cuándo, cuánta cantidad y a qué precio — pedido de Braulio,
+    29 ago: "poder buscar los repuestos y que salga su historial de
+    compras que se hizo a cada proveedor y a qué precio"."""
+    item = query_one("SELECT * FROM inventory_items WHERE id = ?", (item_id,))
+    if item is None:
+        abort(404)
+    purchase_history = query_all(
+        """SELECT pi.quantity, pi.unit_price, p.id AS purchase_id, p.provider_name,
+                  p.purchase_order_number, p.purchase_date, p.status
+           FROM inventory_purchase_items pi
+           JOIN inventory_purchases p ON p.id = pi.purchase_id
+           WHERE pi.item_id = ?
+           ORDER BY p.purchase_date DESC, p.id DESC""",
+        (item_id,),
+    )
+    received = [h for h in purchase_history if h["status"] == "RECIBIDO"]
+    last_price = received[0]["unit_price"] if received else None
+    total_qty = sum(h["quantity"] or 0 for h in received)
+    total_amount = sum((h["quantity"] or 0) * (h["unit_price"] or 0) for h in received)
+    avg_price = (total_amount / total_qty) if total_qty else None
+    return render_template(
+        "inventarios/item_detail.html",
+        item=item,
+        purchase_history=purchase_history,
+        last_price=last_price,
+        avg_price=avg_price,
+    )
 
 
 @bp.route("/repuestos/agregar", methods=["POST"])
