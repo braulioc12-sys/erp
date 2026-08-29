@@ -107,6 +107,21 @@ Braulio pidió un módulo de Inventarios ligado a Mantenimiento: "cada compra de
 
 Cada unidad tiene un campo **Propietario** (pedido de Braulio, 28 ago), elegido de un desplegable en vez de escrito a mano — los propietarios disponibles se administran en **Catálogos → Propietarios de unidades** (solo Administrador), mismo patrón que los demás catálogos editables del sistema: se agregan o desactivan sin tocar código. La columna aparece también en el listado de Flota. **Viene con dos valores de ejemplo ("Harraso Transport", "Tercero afiliado") — AJUSTAR: reemplázalos por los propietarios reales de tu flota en Catálogos.** Si una unidad ya tenía un propietario que después se desactivó en el catálogo, no se pierde el dato — se sigue mostrando en su formulario como una opción aparte ("no está en el catálogo") hasta que se cambie explícitamente.
 
+## Importación masiva desde Excel: Flota, Conductores y Rutas (30 ago)
+
+Braulio pidió poder cargar varias unidades, conductores o rutas de una sola vez en vez de crearlos uno por uno: "habilita una opción de poder importar de manera masiva a través de un formato de excel que tú pongas disponible para importar." Cada uno de los tres módulos tiene ahora un botón **"Importar desde Excel"** junto al de "+ Nuevo/a" en su listado, que lleva a una pantalla de dos pasos:
+
+1. **Descargar la plantilla** (botón "⬇ Descargar plantilla Excel"): un archivo `.xlsx` con una hoja **Datos** (encabezados de columna en la fila 3, una fila de ejemplo ya llena en la fila 4, y listas desplegables ya puestas en las columnas que solo aceptan ciertos valores — por ejemplo Tipo de unidad o Estado) y una hoja **Instrucciones** con el detalle de cada columna (cuáles son obligatorias, formato de fecha, valores válidos).
+2. **Subir el archivo completado**: se valida fila por fila y se muestra un resumen — cuántos se crearon, cuántos se actualizaron (solo aplica a Rutas, ver abajo), cuántos se omitieron y por qué, y cualquier observación (por ejemplo una fecha con formato inválido, o un valor que no coincide con ninguno de los válidos) con el número de fila del Excel para ubicarla fácil. Cuando la observación es sobre un dato opcional, la fila igual se importa, sin ese dato — solo se avisa.
+
+Cómo se maneja cada módulo si el dato ya existe (para poder reimportar el mismo archivo corregido sin duplicar nada):
+
+- **Flota**: se identifica por **placa**. Si la placa ya existe, esa fila se omite (no se sobrescribe la unidad existente) — hay que editarla a mano si se quiere corregir. Si el archivo trae la misma placa dos veces, solo se importa la primera aparición.
+- **Conductores**: se identifica por **DNI** si la fila lo trae; si no, por el **nombre exacto** (sin distinguir mayúsculas). Igual que en Flota, si ya existe se omite en vez de sobrescribir.
+- **Rutas**: se identifica por **origen + destino**, la misma combinación que ya era única en el catálogo de Rutas — si ya existe, en vez de omitirla **se actualizan sus montos de viáticos y comisión** (mismo comportamiento que ya tenía el formulario de "+ Guardar ruta" del listado), y por eso Rutas sí puede mostrar "actualizados" además de "creados".
+
+La fila de ejemplo de la plantilla se reconoce y se descarta sola al importar (no hace falta acordarse de borrarla); si de todos modos la reemplazas con datos reales, se importa como cualquier otra fila. Las fechas se aceptan en formato AAAA-MM-DD (el que pide la plantilla) o DD/MM/AAAA. Por ahora la importación solo crea/actualiza registros — no hay una opción de "deshacer" una importación completa, así que conviene revisar el resumen antes de dar por buena una carga grande.
+
 ## Viajes: comisión del conductor y reporte mensual
 
 Cada viaje tiene, además de la tarifa, un campo de **comisión del conductor**. Al registrar o editar un viaje, si el campo se deja vacío, el sistema sugiere automáticamente el monto configurado para esa ruta en **Rutas** — al elegir la ruta verás la sugerencia aparecer debajo del campo; si lo dejas en blanco al guardar, se usa ese monto. El campo siempre se puede editar manualmente para un viaje puntual.

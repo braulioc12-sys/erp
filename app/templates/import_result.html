@@ -1,0 +1,57 @@
+{% extends 'base.html' %}
+{% block title %}Resultado de la importación{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Resultado de la importación</h1>
+  <div class="page-actions">
+    <a href="{{ back_url }}" class="btn btn-secondary">← Volver al listado</a>
+  </div>
+</div>
+
+<div class="panel" style="max-width:860px;">
+  <div class="tag-list" style="margin-bottom: 14px;">
+    <span class="badge badge-activo">{{ result.created }} creado(s)</span>
+    {% if result.updated %}<span class="badge badge-activo">{{ result.updated }} actualizado(s)</span>{% endif %}
+    {% if result.skipped %}<span class="badge badge-mantenimiento">{{ result.skipped|length }} omitido(s)</span>{% endif %}
+    {% if result.errors %}<span class="badge badge-vencida">{{ result.errors|length }} con observación</span>{% endif %}
+  </div>
+
+  {% if result.skipped %}
+  <h2>Filas omitidas</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Fila del Excel</th><th>Motivo</th></tr></thead>
+      <tbody>
+        {% for s in result.skipped %}
+        <tr><td>{{ s.row }}</td><td class="wrap">{{ s.message }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if result.errors %}
+  <h2>Filas con observaciones</h2>
+  <p class="muted" style="margin-top:-8px;">Datos que faltaron o no se reconocieron. Cuando el dato en cuestión no era obligatorio, la fila igual se importó, sin ese valor.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Fila del Excel</th><th>Detalle</th></tr></thead>
+      <tbody>
+        {% for e in result.errors %}
+        <tr><td>{{ e.row }}</td><td class="wrap">{{ e.message }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if not result.skipped and not result.errors %}
+  <p class="muted">Todas las filas se importaron sin observaciones.</p>
+  {% endif %}
+
+  <div class="btn-group" style="margin-top:16px;">
+    <a href="{{ retry_url }}" class="btn btn-secondary">Importar otro archivo</a>
+    <a href="{{ back_url }}" class="btn btn-primary">Ir al listado</a>
+  </div>
+</div>
+{% endblock %}

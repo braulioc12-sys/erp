@@ -3,6 +3,11 @@
 {% block content %}
 <div class="page-header">
   <h1>Rutas frecuentes y viáticos predeterminados</h1>
+  <div class="page-actions">
+    {% if can(current_user.role, 'rutas', 'edit') %}
+    <a href="{{ url_for('rutas.import_routes') }}" class="btn btn-secondary">Importar desde Excel</a>
+    {% endif %}
+  </div>
 </div>
 <p class="muted mt-0">Define aquí el monto estándar de viáticos y de comisión del conductor para cada ruta. Al confirmar el anticipo de gastos de un viaje se sugiere el monto de viáticos, y al registrar un viaje se sugiere la comisión — ambos según la ruta que coincida.</p>
 

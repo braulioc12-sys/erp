@@ -1,8 +1,9 @@
 from datetime import datetime, timedelta
 
-from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+from flask import Blueprint, Response, abort, flash, redirect, render_template, request, url_for
 
 from app.auth import permission_required, validate_csrf
+from app.bulk_import import VEHICLE_COLUMNS, VEHICLE_EXAMPLE, XLSX_MIME, build_import_template, read_import_rows
 from app.db import execute, query_all, query_one
 from app.helpers import parse_date, parse_float, today_str
 
@@ -142,3 +143,85 @@ def delete_vehicle(vehicle_id):
         execute("DELETE FROM vehicles WHERE id = ?", (vehicle_id,))
         flash("Unidad eliminada.", "success")
     return redirect(url_for("flota.list_view"))
+
+
+# --- Importación masiva desde Excel (30 ago, pedido de Braulio) ---
+
+@bp.route("/importar/plantilla")
+@permission_required("flota", "edit")
+def import_template():
+    buffer = build_import_template("Flota (unidades)", VEHICLE_COLUMNS, VEHICLE_EXAMPLE)
+    return Response(
+        buffer.getvalue(),
+        mimetype=XLSX_MIME,
+        headers={"Content-Disposition": 'attachment; filename="plantilla_flota.xlsx"'},
+    )
+
+
+def _apply_vehicle_import(rows, example_skips):
+    created, errors = 0, []
+    skipped = [
+        {"row": r, "message": "Fila de ejemplo de la plantilla; se omitió automáticamente."}
+        for r in example_skips
+    ]
+    seen_plates = set()
+    for row in rows:
+        n = row["_row_number"]
+        for warn in row["_warnings"]:
+            errors.append({"row": n, "message": warn})
+        plate = (row.get("plate") or "").strip().upper()
+        if not plate:
+            errors.append({"row": n, "message": "Falta la placa; la fila no se importó."})
+            continue
+        if plate in seen_plates:
+            skipped.append({"row": n, "message": f"Placa {plate} repetida dentro del archivo; ya se había importado antes."})
+            continue
+        existing = query_one("SELECT id FROM vehicles WHERE plate = ?", (plate,))
+        if existing:
+            skipped.append({"row": n, "message": f"La placa {plate} ya existe en Flota; no se modificó."})
+            continue
+        seen_plates.add(plate)
+        execute(
+            """INSERT INTO vehicles (plate, brand, model, capacity_kg, status, vehicle_type, notes,
+               soat_expiry, technical_review_expiry, current_km, current_km_updated_at, gps_external_id, owner)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                plate,
+                row.get("brand") or "",
+                row.get("model") or "",
+                row.get("capacity_kg"),
+                row.get("status") or "ACTIVO",
+                row.get("vehicle_type") or "CAMION",
+                row.get("notes") or "",
+                row.get("soat_expiry"),
+                row.get("technical_review_expiry"),
+                row.get("current_km"),
+                today_str() if row.get("current_km") is not None else None,
+                None,
+                row.get("owner") or None,
+            ),
+        )
+        created += 1
+    return {"created": created, "updated": 0, "skipped": skipped, "errors": errors}
+
+
+@bp.route("/importar", methods=["GET", "POST"])
+@permission_required("flota", "edit")
+def import_vehicles():
+    if request.method == "POST":
+        if not validate_csrf():
+            abort(400)
+        rows, file_error, example_skips = read_import_rows(request.files.get("file"), VEHICLE_COLUMNS, VEHICLE_EXAMPLE)
+        if file_error:
+            flash(file_error, "error")
+            return redirect(url_for("flota.import_vehicles"))
+        result = _apply_vehicle_import(rows, example_skips)
+        return render_template(
+            "import_result.html", result=result,
+            back_url=url_for("flota.list_view"), retry_url=url_for("flota.import_vehicles"),
+        )
+    return render_template(
+        "import_form.html", title="Importar unidades", module_label="las unidades de Flota",
+        template_url=url_for("flota.import_template"), upload_url=url_for("flota.import_vehicles"),
+        back_url=url_for("flota.list_view"), columns=VEHICLE_COLUMNS,
+    )

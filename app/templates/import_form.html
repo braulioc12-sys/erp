@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ title }}</h1>
+  <div class="page-actions">
+    <a href="{{ back_url }}" class="btn btn-secondary">← Volver</a>
+  </div>
+</div>
+
+<div class="panel" style="max-width:760px;">
+  <h2>Paso 1 — Descarga la plantilla</h2>
+  <p class="muted mt-0">Descarga el archivo Excel, complétalo con los datos de {{ module_label }} (una fila por registro, sin borrar ni cambiar los encabezados) y guárdalo. La hoja "Instrucciones" del archivo explica cada columna.</p>
+  <a href="{{ template_url }}" class="btn btn-primary">⬇ Descargar plantilla Excel</a>
+</div>
+
+<div class="panel" style="max-width:760px;">
+  <h2>Paso 2 — Sube el archivo completado</h2>
+  <form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Archivo Excel (.xlsx)
+      <input type="file" name="file" accept=".xlsx" required>
+    </label>
+    <div class="btn-group" style="margin-top:14px;">
+      <button type="submit" class="btn btn-primary">Importar</button>
+      <a href="{{ back_url }}" class="btn btn-secondary">Cancelar</a>
+    </div>
+  </form>
+</div>
+
+<div class="panel" style="max-width:760px;">
+  <h2>Columnas de la plantilla</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Columna</th><th>Obligatoria</th><th>Notas</th></tr></thead>
+      <tbody>
+        {% for col in columns %}
+        <tr>
+          <td>{{ col.header }}</td>
+          <td>{{ 'Sí' if col.required else 'No' }}</td>
+          <td class="wrap">{{ col.note or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

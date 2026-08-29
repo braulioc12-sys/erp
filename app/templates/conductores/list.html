@@ -6,6 +6,7 @@
   <h1>Conductores</h1>
   <div class="page-actions">
     {% if can(current_user.role, 'conductores', 'edit') %}
+    <a href="{{ url_for('conductores.import_drivers') }}" class="btn btn-secondary">Importar desde Excel</a>
     <a href="{{ url_for('conductores.new_driver') }}" class="btn btn-primary">+ Nuevo conductor</a>
     {% endif %}
   </div>
