@@ -33,6 +33,7 @@ from app.integrations.sunat_exchange_rate import get_rate_for_date
 from app.integrations.sunat_ruc import get_company_for_ruc
 from app.reports import build_expenses_workbook, build_liquidacion_workbook
 from app.routes.rutas import find_route
+from app import storage
 
 bp = Blueprint("liquidaciones", __name__, url_prefix="/liquidaciones")
 
@@ -59,12 +60,6 @@ MIME_TO_EXTENSION = {
 }
 
 
-def _receipts_dir():
-    path = os.path.join(current_app.instance_path, "receipts")
-    os.makedirs(path, exist_ok=True)
-    return path
-
-
 def _first_uploaded_file():
     """El formulario de gastos ofrece dos campos con el mismo nombre
     ("receipt"): uno con `capture="environment"` (abre la cámara directo en
@@ -77,11 +72,11 @@ def _first_uploaded_file():
     return None
 
 
-def _compress_receipt_image(raw_bytes, dest_path):
+def _compress_receipt_image(raw_bytes):
     """Redimensiona y recomprime una foto de comprobante como JPEG, para que
-    ocupe el menor espacio posible en disco (importante porque el disco
-    gratuito de Render es limitado). Devuelve True si logró comprimirla y
-    guardarla; False si el archivo no se pudo abrir como imagen (por
+    ocupe el menor espacio posible (importante en disco local; en S3 baja
+    el costo de almacenamiento y de transferencia). Devuelve los bytes JPEG
+    ya comprimidos, o None si el archivo no se pudo abrir como imagen (por
     ejemplo, un formato no soportado como algunos HEIC de iPhone), en cuyo
     caso el llamador debe guardar el archivo original sin tocar."""
     try:
@@ -92,10 +87,11 @@ def _compress_receipt_image(raw_bytes, dest_path):
             if img.mode not in ("RGB", "L"):
                 img = img.convert("RGB")
             img.thumbnail((RECEIPT_MAX_DIMENSION, RECEIPT_MAX_DIMENSION), Image.LANCZOS)
-            img.save(dest_path, format="JPEG", quality=RECEIPT_JPEG_QUALITY, optimize=True)
-        return True
+            buffer = io.BytesIO()
+            img.save(buffer, format="JPEG", quality=RECEIPT_JPEG_QUALITY, optimize=True)
+            return buffer.getvalue()
     except Exception:
-        return False
+        return None
 
 
 def _save_receipt(file_storage):
@@ -103,9 +99,11 @@ def _save_receipt(file_storage):
     archivo guardado, o None si no se envió nada válido. Las fotos se
     redimensionan y recomprimen como JPEG para ocupar el menor espacio
     posible (ver _compress_receipt_image); los PDF se guardan tal cual.
-    Nota: en hosting gratuito con disco efímero (ver README, sección
-    Render) estos archivos se pierden al reiniciar/redesplegar, igual que
-    la base de datos SQLite."""
+    El guardado en sí (disco local o Amazon S3) lo decide app/storage.py
+    según el ambiente — ver README, sección "Base de datos persistente en
+    AWS (RDS + S3)". En disco local (por defecto) estos archivos se pierden
+    al reiniciar/redesplegar en hosting con disco efímero, igual que la
+    base de datos SQLite."""
     if not file_storage or not file_storage.filename:
         return None
     ext = os.path.splitext(file_storage.filename)[1].lower()
@@ -120,22 +118,21 @@ def _save_receipt(file_storage):
 
     if ext == ".pdf":
         filename = f"{uuid.uuid4().hex}.pdf"
-        with open(os.path.join(_receipts_dir(), filename), "wb") as f:
-            f.write(raw_bytes)
+        storage.save_receipt(filename, raw_bytes)
         return filename
 
     # Es una foto: intentamos comprimirla. Siempre se guarda como .jpg
     # porque para fotos, JPEG comprime mucho mejor que PNG/WEBP/HEIC.
-    filename = f"{uuid.uuid4().hex}.jpg"
-    dest_path = os.path.join(_receipts_dir(), filename)
-    if _compress_receipt_image(raw_bytes, dest_path):
+    compressed = _compress_receipt_image(raw_bytes)
+    if compressed is not None:
+        filename = f"{uuid.uuid4().hex}.jpg"
+        storage.save_receipt(filename, compressed)
         return filename
 
     # Si no se pudo abrir como imagen (formato raro o archivo corrupto),
     # guardamos el original sin comprimir para no perder el comprobante.
     filename = f"{uuid.uuid4().hex}{ext}"
-    with open(os.path.join(_receipts_dir(), filename), "wb") as f:
-        f.write(raw_bytes)
+    storage.save_receipt(filename, raw_bytes)
     return filename
 
 
@@ -667,7 +664,9 @@ def receipt(expense_id):
     expense = query_one("SELECT receipt_filename FROM expenses WHERE id = ?", (expense_id,))
     if expense is None or not expense["receipt_filename"]:
         abort(404)
-    return send_from_directory(_receipts_dir(), expense["receipt_filename"])
+    if storage.using_s3():
+        return redirect(storage.receipt_url(expense["receipt_filename"]))
+    return send_from_directory(storage.local_receipts_dir(), expense["receipt_filename"])
 
 
 # --- Historial de gastos (lista plana filtrable, para gastos sueltos de

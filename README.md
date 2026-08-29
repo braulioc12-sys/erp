@@ -330,12 +330,101 @@ Para que el enlace siempre funcione para que la gente lo pruebe, la app ya viene
 
 Si más adelante quieres usarlo en serio con tu negocio (datos que no se deben perder nunca), tienes dos opciones:
 
-- **Subir a un plan de pago con disco persistente** (Render: agrega un "Persistent Disk" montado en `/opt/render/project/src/instance` y define la variable `DATABASE_PATH=/opt/render/project/src/instance/erp.db`; luego pon `AUTO_SEED_DEMO=0` para que no se recreen los usuarios de ejemplo).
-- **Migrar a PostgreSQL** (ver siguiente sección) — Render ofrece una base de datos Postgres gratuita, aunque expira 30 días después de creada.
+- **Subir a un plan de pago con disco persistente** (Render: agrega un "Persistent Disk" montado en `/opt/render/project/src/instance` y define la variable `DATABASE_PATH=/opt/render/project/src/instance/erp.db`; luego pon `AUTO_SEED_DEMO=0` para que no se recreen los usuarios de ejemplo). Solución rápida, pero los comprobantes de gastos (Liquidaciones) seguirían en ese mismo disco.
+- **Base de datos y comprobantes persistentes en AWS** (ver la sección "Base de datos persistente en AWS (RDS + S3)" más abajo) — PostgreSQL gestionado (Amazon RDS) + almacenamiento de archivos (Amazon S3). Es más trabajo de configuración inicial, pero es la solución más robusta y la que no depende de las políticas de disco de Render.
 
-### Alternativa: crecer a PostgreSQL
+## Base de datos persistente en AWS (RDS + S3)
 
-Si el negocio crece y necesitas más de un servidor, mayor concurrencia, o simplemente no quieres depender de un disco persistente, el siguiente paso natural es migrar de SQLite a PostgreSQL (por ejemplo con Neon, Supabase, o el Postgres de Render/Railway). La capa de acceso a datos está centralizada en `app/db.py`, lo que facilita ese cambio más adelante.
+Si el negocio ya no puede depender de que la base de datos y los comprobantes de gastos se pierdan en cada reinicio (ver sección anterior), el proyecto ya viene preparado para guardar ambas cosas en Amazon Web Services, sin tocar ni una línea de código — solo hay que crear los recursos en AWS y poner sus datos como variables de entorno en Render:
+
+- La **base de datos** pasa de SQLite a **Amazon RDS para PostgreSQL** (gestionada por AWS: backups automáticos, no se pierde nunca).
+- Los **comprobantes de gastos** (Liquidaciones) pasan de guardarse en el disco de Render a un **bucket privado de Amazon S3**.
+
+Si no defines estas variables, la app sigue funcionando exactamente igual que ahora (SQLite + disco local) — es un cambio de todo o nada por variable, no un punto sin retorno. Como hoy el disco de Render es efímero, no hay datos reales que "migrar": es un cambio en limpio, no una migración con riesgo de pérdida de información.
+
+### Antes de empezar: por qué un usuario IAM y no la cuenta root
+
+La cuenta con la que te registras en AWS (la "root") puede hacer *cualquier cosa*, incluyendo borrar toda la cuenta o cambiar la forma de pago — por eso AWS mismo recomienda no usarla para el día a día. Todo lo de abajo se hace con un **usuario IAM** aparte, con permisos limitados solo a lo que este proyecto necesita (un bucket de S3 específico). Guarda la contraseña root en un lugar seguro, actívale verificación en dos pasos, y no la vuelvas a usar salvo para tareas de cuenta (facturación, cerrar la cuenta, etc.).
+
+### 1. Crea la cuenta de AWS y protégela
+
+1. Ve a [aws.amazon.com](https://aws.amazon.com/) → **Crear una cuenta de AWS** y sigue el registro (pide una tarjeta, aunque no se cobra nada si te mantienes dentro de lo gratuito).
+2. Activa verificación en dos pasos (MFA) en el usuario root: **IAM** → **Panel** → **Agregar MFA** en tu usuario root.
+3. Pon una alerta de gasto para que nunca te lleves una sorpresa: **Billing** → **Budgets** → **Create budget** → *Zero spend budget* (te avisa por correo apenas se genera cualquier cargo) o un monto fijo bajo (ej. US$ 10/mes).
+4. Elige una región cercana a Perú con buena latencia — normalmente **us-east-1 (Virginia del Norte)** o **sa-east-1 (São Paulo)**; usa la misma región para todo lo que sigue (S3, RDS).
+
+Los términos exactos de la capa gratuita (horas incluidas de RDS, créditos de bienvenida, GB gratis de S3) cambian de tanto en tanto — revisa la [calculadora de precios de AWS](https://calculator.aws/) o las páginas de precios de [RDS](https://aws.amazon.com/rds/postgresql/pricing/) y [S3](https://aws.amazon.com/s3/pricing/) al momento de crear los recursos para saber exactamente qué te van a cobrar. Como referencia: una instancia RDS pequeña (db.t3.micro/db.t4g.micro) y unos pocos GB de comprobantes en S3 suelen costar pocos dólares al mes fuera de cualquier periodo gratuito — muy por debajo de lo que cuesta un disco persistente de pago en la mayoría de plataformas.
+
+### 2. Crea el usuario IAM para el bucket de S3
+
+1. **IAM** → **Users** → **Create user**. Nombre: por ejemplo `erp-harraso-s3`. NO le des acceso a la consola (solo necesita acceso "programático").
+2. En permisos, elige **Attach policies directly** → **Create policy** → pestaña **JSON**, y pega una política que solo permita leer/escribir en el bucket que vas a crear en el siguiente paso (reemplaza `harraso-erp-comprobantes` por el nombre que le vayas a poner):
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Effect": "Allow",
+         "Action": ["s3:PutObject", "s3:GetObject"],
+         "Resource": "arn:aws:s3:::harraso-erp-comprobantes/*"
+       }
+     ]
+   }
+   ```
+3. Termina de crear el usuario, ábrelo, pestaña **Security credentials** → **Create access key** → elige "Application running outside AWS" → copia el **Access key ID** y el **Secret access key** (el secreto solo se muestra una vez — guárdalo ahora, lo vas a necesitar en el paso 5).
+
+### 3. Crea el bucket de S3 (comprobantes de gastos)
+
+1. **S3** → **Create bucket**. Nombre único globalmente, por ejemplo `harraso-erp-comprobantes` (debe coincidir exactamente con el que pusiste en la política IAM).
+2. Región: la misma que elegiste arriba.
+3. **Block all public access**: déjalo **activado** (por defecto) — el bucket debe ser privado; la app genera enlaces temporales (5 minutos) para que cada usuario vea su comprobante solo después de que la aplicación ya comprobó sus permisos, nunca por acceso público directo.
+4. **Bucket Versioning**: opcional, pero recomendable si quieres poder recuperar un comprobante si algo lo sobrescribe por error.
+5. **Default encryption**: déjalo en **SSE-S3** (por defecto) — la app ya pide cifrado en cada archivo que sube.
+6. Crea el bucket.
+
+### 4. Crea la base de datos en Amazon RDS (PostgreSQL)
+
+1. **RDS** → **Create database**.
+2. **Engine options**: PostgreSQL (la versión más reciente disponible).
+3. **Templates**: **Free tier** si tu cuenta todavía califica, o **Dev/Test** si no.
+4. **DB instance identifier**: por ejemplo `harraso-erp-db`.
+5. **Master username**: por ejemplo `erp_admin`. **Master password**: genera una larga y aleatoria y guárdala (ej. `python3 -c "import secrets; print(secrets.token_urlsafe(24))"`).
+6. **Instance configuration**: la más pequeña disponible (db.t3.micro o db.t4g.micro alcanza de sobra para este proyecto).
+7. **Storage**: 20 GB gp3 (de sobra para empezar; se puede crecer después sin recrear la base).
+8. **Connectivity**:
+   - **Public access**: **Yes** — Render no corre dentro de tu VPC de AWS, así que la base necesita ser alcanzable desde internet (protegida por el security group del siguiente punto y por la contraseña).
+   - **VPC security group**: crea uno nuevo, por ejemplo `harraso-erp-db-sg`.
+9. Crea la base. Tarda unos minutos en quedar disponible.
+10. Una vez creada, ábrela y en la pestaña **Connectivity & security** anota el **Endpoint** (algo como `harraso-erp-db.xxxxxxxxxx.us-east-1.rds.amazonaws.com`).
+11. Abre el security group `harraso-erp-db-sg` (**EC2** → **Security Groups**) → **Inbound rules** → **Edit** → agrega una regla: **Type** PostgreSQL, **Port** 5432, **Source**: `0.0.0.0/0` (cualquier IP — Render no publica un rango fijo de IPs salientes en el plan gratuito). Esto es seguro porque el acceso real sigue exigiendo la contraseña de la base; si más adelante usas un plan de Render con IP saliente fija, puedes restringir el Source a esa IP para una capa extra de seguridad.
+
+### 5. Configura las variables de entorno en Render
+
+En tu Web Service de Render → **Environment**, agrega:
+
+| Variable | Valor |
+|---|---|
+| `DATABASE_URL` | `postgresql://erp_admin:TU_PASSWORD@TU_ENDPOINT:5432/postgres` |
+| `AWS_S3_BUCKET` | `harraso-erp-comprobantes` |
+| `AWS_ACCESS_KEY_ID` | el Access key ID del usuario IAM (paso 2) |
+| `AWS_SECRET_ACCESS_KEY` | el Secret access key del usuario IAM (paso 2) |
+| `AWS_DEFAULT_REGION` | la región que elegiste (ej. `us-east-1`) |
+| `AUTO_SEED_DEMO` | `0` — **importante**: ya con una base persistente de verdad, no quieres que la app recree los usuarios de ejemplo encima de tus datos reales |
+
+Guarda los cambios — Render vuelve a desplegar automáticamente. Al arrancar, la app crea sola todas las tablas en tu base de Postgres (igual que hoy hace con SQLite) — no hace falta correr ningún script aparte.
+
+### Verificación después de desplegar
+
+1. Entra a la URL de tu app y confirma que el login funciona (si `AUTO_SEED_DEMO=0` y la base es nueva, no habrá usuarios todavía — pon `AUTO_SEED_DEMO=1` en el primer despliegue para que se cree el usuario Administrador, entra, cambia la contraseña, y luego vuelve a poner `AUTO_SEED_DEMO=0`).
+2. En **Liquidaciones**, registra un gasto con un comprobante adjunto y confirma que puedes volver a verlo — eso confirma que S3 está funcionando.
+3. Reinicia manualmente el servicio en Render (**Manual Deploy** → **Deploy latest commit**, o simplemente espera a que se duerma y despierte) y confirma que los datos siguen ahí — eso confirma que RDS está funcionando (ya no depende del disco efímero).
+
+### Notas de seguridad y costos
+
+- Nunca compartas el `AWS_SECRET_ACCESS_KEY` ni la contraseña de la base — viven solo como variables de entorno en Render, igual que las demás credenciales del proyecto (Frotcom, SUNAT, decolecta.com).
+- El bucket de S3 es privado: nadie puede leer un comprobante sin pasar antes por el login y los permisos de la propia aplicación.
+- Revisa el **Billing Dashboard** de AWS cada tanto los primeros meses para confirmar que el gasto es el esperado, sobre todo si dejaste pasar el periodo de capa gratuita.
+- Si por lo que sea quieres volver atrás, basta con borrar (o vaciar) `DATABASE_URL` y `AWS_S3_BUCKET` en Render — la app vuelve a SQLite + disco local sin ningún otro cambio.
 
 ## Estructura del proyecto
 

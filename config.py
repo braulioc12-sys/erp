@@ -9,6 +9,20 @@ class Config:
     DATABASE_PATH = os.environ.get(
         "DATABASE_PATH", str(BASE_DIR / "instance" / "erp.db")
     )
+    # Si se define, la app usa PostgreSQL (ej. Amazon RDS) en vez de SQLite
+    # — ver app/db.py y README, sección "Base de datos persistente en AWS
+    # (RDS + S3)". Vacío por defecto: sigue usando DATABASE_PATH como
+    # siempre.
+    DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
+    # Si se define, los comprobantes de gastos (Liquidaciones) se guardan en
+    # este bucket de Amazon S3 en vez de en disco local — ver app/storage.py
+    # y el mismo apartado del README. Las credenciales (AWS_ACCESS_KEY_ID /
+    # AWS_SECRET_ACCESS_KEY / AWS_DEFAULT_REGION) no se leen aquí: boto3 las
+    # toma solo, directo de esas variables de entorno estándar.
+    AWS_S3_BUCKET = os.environ.get("AWS_S3_BUCKET", "")
+    AWS_S3_PREFIX = os.environ.get("AWS_S3_PREFIX", "comprobantes")
+
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     # En producción detrás de HTTPS, activa esto en tu entorno:
