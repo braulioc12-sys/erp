@@ -13,7 +13,7 @@ cada llanta queda al día automáticamente sin ningún trabajo extra.
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 
 from app.auth import permission_required, validate_csrf
-from app.db import execute, query_all, query_one
+from app.db import execute, get_db, query_all, query_one
 from app.helpers import parse_date, parse_float, today_str
 from app.tire_positions import (
     DEFAULT_EXPECTED_LIFE_KM,
@@ -155,12 +155,40 @@ def diagram(vehicle_id):
         for t in retired
     ]
 
+    rotations = query_all(
+        "SELECT * FROM tire_rotations WHERE vehicle_id = ? ORDER BY rotation_date DESC, id DESC",
+        (vehicle_id,),
+    )
+    rotation_rows = []
+    for rot in rotations:
+        moves = query_all(
+            """SELECT trm.*, t.brand AS tire_brand FROM tire_rotation_moves trm
+               JOIN tires t ON t.id = trm.tire_id
+               WHERE trm.rotation_id = ? ORDER BY trm.id""",
+            (rot["id"],),
+        )
+        rotation_rows.append(
+            {
+                "rotation": rot,
+                "moves": [
+                    {
+                        "tire_brand": mv["tire_brand"],
+                        "from_label": get_position_label(vehicle["vehicle_type"], mv["from_position_code"]),
+                        "to_label": get_position_label(vehicle["vehicle_type"], mv["to_position_code"]),
+                    }
+                    for mv in moves
+                ],
+            }
+        )
+
     return render_template(
         "neumaticos/diagram.html",
         vehicle=vehicle,
         type_label=VEHICLE_TYPE_LABELS.get(vehicle["vehicle_type"], vehicle["vehicle_type"]),
         rows=rows,
         retired_rows=retired_rows,
+        rotation_rows=rotation_rows,
+        active_tire_count=len(active_tires),
         axle_ys=get_axle_ys(vehicle["vehicle_type"]),
         diagram_height=get_diagram_height(vehicle["vehicle_type"]),
         vehicle_type=vehicle["vehicle_type"],
@@ -306,3 +334,112 @@ def retire_tire(tire_id):
     )
     flash("Llanta retirada. La posición queda disponible en el diagrama.", "success")
     return redirect(url_for("neumaticos.diagram", vehicle_id=tire["vehicle_id"]))
+
+
+@bp.route("/unidad/<int:vehicle_id>/rotar", methods=["GET", "POST"])
+@permission_required("neumaticos", "edit")
+def rotate_tires(vehicle_id):
+    """Rota llantas ACTIVAS entre posiciones de la misma unidad para parejar
+    el desgaste. No toca km_at_install ni expected_life_km de cada llanta
+    (su acumulado se sigue calculando igual, solo que ahora medido desde su
+    nueva posición) — únicamente cambia position_code, y deja un registro
+    en tire_rotations/tire_rotation_moves con el detalle de qué llanta pasó
+    de dónde a dónde."""
+    vehicle = _get_vehicle_or_404(vehicle_id)
+    positions = get_positions(vehicle["vehicle_type"])
+    position_labels = {p["code"]: p["label"] for p in positions}
+    active_tires = query_all(
+        "SELECT * FROM tires WHERE vehicle_id = ? AND status = 'ACTIVO' ORDER BY position_code",
+        (vehicle_id,),
+    )
+    if len(active_tires) < 2:
+        flash("Se necesitan al menos 2 llantas activas instaladas para poder rotar.", "error")
+        return redirect(url_for("neumaticos.diagram", vehicle_id=vehicle_id))
+
+    if request.method == "POST":
+        if not validate_csrf():
+            abort(400)
+
+        # Posición de destino elegida para cada llanta activa (por defecto,
+        # la misma que ya tiene si no se tocó su selector).
+        chosen = {}
+        for tire in active_tires:
+            new_code = request.form.get(f"position_{tire['id']}", tire["position_code"])
+            if new_code not in position_labels:
+                flash("Posición de destino inválida.", "error")
+                return redirect(url_for("neumaticos.rotate_tires", vehicle_id=vehicle_id))
+            chosen[tire["id"]] = new_code
+
+        # El resultado final no puede repetir ninguna posición entre las
+        # llantas activas (se muevan o no).
+        seen = {}
+        for tire in active_tires:
+            new_code = chosen[tire["id"]]
+            if new_code in seen:
+                flash(
+                    f'No se puede dejar más de una llanta en la posición "{position_labels[new_code]}" '
+                    "— revisa que las posiciones de destino no se repitan.",
+                    "error",
+                )
+                return redirect(url_for("neumaticos.rotate_tires", vehicle_id=vehicle_id))
+            seen[new_code] = tire["id"]
+
+        moves = [
+            (tire, tire["position_code"], chosen[tire["id"]])
+            for tire in active_tires
+            if chosen[tire["id"]] != tire["position_code"]
+        ]
+        if not moves:
+            flash("No seleccionaste ningún cambio de posición.", "error")
+            return redirect(url_for("neumaticos.rotate_tires", vehicle_id=vehicle_id))
+
+        rotation_date = parse_date(request.form.get("rotation_date")) or today_str()
+        km_at_rotation = (
+            parse_float(request.form.get("km_at_rotation"), vehicle["current_km"])
+            if request.form.get("km_at_rotation", "").strip()
+            else vehicle["current_km"]
+        )
+        notes = request.form.get("notes", "").strip()
+
+        db = get_db()
+        # Dos pasadas: primero a un código temporal único por llanta, luego
+        # al destino final — evita chocar con el índice único de posición
+        # activa cuando dos llantas se intercambian entre sí.
+        for tire, _from_code, _to_code in moves:
+            db.execute(
+                "UPDATE tires SET position_code = ? WHERE id = ?",
+                (f"__ROT_TMP_{tire['id']}", tire["id"]),
+            )
+        for tire, _from_code, to_code in moves:
+            db.execute("UPDATE tires SET position_code = ? WHERE id = ?", (to_code, tire["id"]))
+        db.commit()
+
+        rotation_id = execute(
+            """INSERT INTO tire_rotations (vehicle_id, rotation_date, km_at_rotation, notes)
+               VALUES (?, ?, ?, ?)""",
+            (vehicle_id, rotation_date, km_at_rotation, notes or None),
+        )
+        db = get_db()
+        for tire, from_code, to_code in moves:
+            db.execute(
+                """INSERT INTO tire_rotation_moves (rotation_id, tire_id, from_position_code, to_position_code)
+                   VALUES (?, ?, ?, ?)""",
+                (rotation_id, tire["id"], from_code, to_code),
+            )
+        db.commit()
+
+        flash(f"Rotación registrada: {len(moves)} llanta(s) cambiaron de posición.", "success")
+        return redirect(url_for("neumaticos.diagram", vehicle_id=vehicle_id))
+
+    tires_for_form = [
+        {"tire": t, "position_label": position_labels.get(t["position_code"], t["position_code"])}
+        for t in active_tires
+    ]
+    return render_template(
+        "neumaticos/rotate_form.html",
+        vehicle=vehicle,
+        type_label=VEHICLE_TYPE_LABELS.get(vehicle["vehicle_type"], vehicle["vehicle_type"]),
+        tires_for_form=tires_for_form,
+        positions=positions,
+        today=today_str(),
+    )

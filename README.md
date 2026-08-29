@@ -129,6 +129,12 @@ Al hacer clic en una posición vacía del diagrama (o en su fila de la tabla) se
 
 Cada llanta activa muestra un indicador de color según su % de vida útil consumida (verde por debajo de 80%, ámbar de 80% a 99%, rojo en 100% o más — con alerta en el Panel a partir de 90%). Desde el detalle de una llanta puedes **"Reemplazar"** (retira la actual y registra la nueva en un solo paso, conservando el historial) o **"Retirar sin reemplazar"** (deja la posición vacía). El historial completo de llantas retiradas por unidad queda disponible en la misma página del diagrama.
 
+### Rotar llantas por desgaste (30 ago)
+
+Desde el diagrama de una unidad, el botón **"Rotar llantas"** (visible cuando hay 2 o más llantas activas) abre un formulario donde eliges la nueva posición para cada llanta según el patrón de rotación que estés aplicando (por ejemplo, cruzar las del eje de dirección con las de tracción para parejar el desgaste). Solo se registran los cambios reales — si dejas una llanta en su misma posición, no se toca — y el sistema no te deja dejar dos llantas terminando en la misma posición.
+
+Rotar **no reinicia el contador de vida útil de cada llanta**: cada llanta conserva su fecha e kilometraje de instalación originales, solo cambia de posición — el % de desgaste se sigue calculando igual que siempre, ahora medido desde su nueva ubicación. Cada rotación queda registrada con fecha, kilometraje de la unidad y el detalle de qué llanta pasó de qué posición a cuál, visible en el panel **"Historial de rotaciones"** de esa misma página.
+
 ## Inspecciones de unidades
 
 Desde el detalle de un viaje (o desde el menú **Inspecciones**) se puede registrar un checklist de inspección de la unidad — "antes de salir" o "al llegar". Hay dos formatos, según el tipo de unidad:

@@ -1,0 +1,54 @@
+{% extends 'base.html' %}
+{% block title %}Rotar llantas — {{ vehicle.plate }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Rotar llantas — {{ vehicle.plate }} <span class="muted" style="font-weight:400;font-size:0.9rem;">({{ type_label }})</span></h1>
+  <div class="page-actions">
+    <a href="{{ url_for('neumaticos.diagram', vehicle_id=vehicle.id) }}" class="btn btn-secondary">← Volver al diagrama</a>
+  </div>
+</div>
+<p class="muted mt-0">Elige la nueva posición para cada llanta activa según el patrón de rotación que estés aplicando. Deja sin cambio la que no quieras mover — solo quedan registradas las que realmente cambien de posición, y no se puede repetir una posición de destino entre dos llantas.</p>
+
+<form class="form panel" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <div class="form-row">
+    <label>Fecha de la rotación
+      <input type="date" name="rotation_date" value="{{ today }}" required>
+    </label>
+    <label>Kilometraje de la unidad en este momento (opcional)
+      <input type="number" step="1" name="km_at_rotation" value="{{ vehicle.current_km|round(0)|int if vehicle.current_km is not none else '' }}">
+    </label>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Posición actual</th><th>Marca</th><th>Nueva posición</th></tr></thead>
+      <tbody>
+        {% for row in tires_for_form %}
+        <tr>
+          <td>{{ row.position_label }}</td>
+          <td>{{ row.tire.brand or '—' }}</td>
+          <td>
+            <select name="position_{{ row.tire.id }}">
+              {% for p in positions %}
+              <option value="{{ p.code }}" {% if p.code == row.tire.position_code %}selected{% endif %}>{{ p.label }}</option>
+              {% endfor %}
+            </select>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <label>Notas (opcional)
+    <textarea name="notes" placeholder="Ej. patrón de rotación aplicado, motivo"></textarea>
+  </label>
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Registrar rotación</button>
+    <a href="{{ url_for('neumaticos.diagram', vehicle_id=vehicle.id) }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+{% endblock %}

@@ -330,6 +330,33 @@ CREATE INDEX IF NOT EXISTS idx_tires_vehicle ON tires(vehicle_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tires_active_position
     ON tires(vehicle_id, position_code) WHERE status = 'ACTIVO';
 
+-- Rotación de neumáticos (30 ago — pedido de Braulio: poder rotar llantas
+-- por desgaste). Mueve llantas ACTIVAS entre posiciones de una misma
+-- unidad para parejar el desgaste — no cambia km_at_install ni
+-- expected_life_km de cada llanta, solo su position_code: el acumulado de
+-- cada llanta se sigue calculando igual que siempre, ahora medido desde su
+-- nueva posición. tire_rotations es el evento (una rotación puede mover
+-- varias llantas a la vez); tire_rotation_moves es el detalle de qué
+-- llanta pasó de qué posición a cuál.
+CREATE TABLE IF NOT EXISTS tire_rotations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vehicle_id INTEGER NOT NULL REFERENCES vehicles(id),
+    rotation_date TEXT NOT NULL,
+    km_at_rotation REAL,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_tire_rotations_vehicle ON tire_rotations(vehicle_id);
+
+CREATE TABLE IF NOT EXISTS tire_rotation_moves (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rotation_id INTEGER NOT NULL REFERENCES tire_rotations(id),
+    tire_id INTEGER NOT NULL REFERENCES tires(id),
+    from_position_code TEXT NOT NULL,
+    to_position_code TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tire_rotation_moves_rotation ON tire_rotation_moves(rotation_id);
+
 -- Inspecciones de unidades (checklist antes/después de un viaje: llantas,
 -- frenos, luces, etc.). Los ítems del checklist se administran desde
 -- Catálogos (categoría "inspection_item").

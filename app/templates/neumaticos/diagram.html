@@ -4,6 +4,9 @@
 <div class="page-header">
   <h1>Neumáticos — {{ vehicle.plate }} <span class="muted" style="font-weight:400;font-size:0.9rem;">({{ type_label }})</span></h1>
   <div class="page-actions">
+    {% if active_tire_count >= 2 and can(current_user.role, 'neumaticos', 'edit') %}
+    <a href="{{ url_for('neumaticos.rotate_tires', vehicle_id=vehicle.id) }}" class="btn btn-primary">Rotar llantas</a>
+    {% endif %}
     <a href="{{ url_for('neumaticos.list_view') }}" class="btn btn-secondary">← Volver a Neumáticos</a>
   </div>
 </div>
@@ -88,6 +91,29 @@
     </table>
   </div>
 </div>
+
+{% if rotation_rows %}
+<div class="panel">
+  <h2>Historial de rotaciones</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Fecha</th><th class="text-right">Km de la unidad</th><th>Cambios</th><th>Notas</th></tr></thead>
+      <tbody>
+        {% for r in rotation_rows %}
+        <tr>
+          <td>{{ r.rotation.rotation_date }}</td>
+          <td class="text-right">{{ '{:,.0f}'.format(r.rotation.km_at_rotation) if r.rotation.km_at_rotation is not none else '—' }}</td>
+          <td class="wrap">
+            {% for mv in r.moves %}{{ mv.tire_brand or 'Sin marca' }}: {{ mv.from_label }} → {{ mv.to_label }}{% if not loop.last %}; {% endif %}{% endfor %}
+          </td>
+          <td class="wrap">{{ r.rotation.notes or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
 
 {% if retired_rows %}
 <div class="panel">
