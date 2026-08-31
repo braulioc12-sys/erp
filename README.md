@@ -425,7 +425,7 @@ En tu Web Service de Render → **Environment**, agrega:
 
 | Variable | Valor |
 |---|---|
-| `DATABASE_URL` | `postgresql://erp_admin:TU_PASSWORD@TU_ENDPOINT:5432/postgres` |
+| `DATABASE_URL` | `postgresql://erp_admin:TU_PASSWORD@TU_ENDPOINT:5432/postgres` — si tu contraseña tiene símbolos especiales (`!`, `@`, `/`, `#`, etc.) hay que codificarlos (ej. `!` → `%21`), si no la conexión falla |
 | `AWS_S3_BUCKET` | `harraso-erp-comprobantes` |
 | `AWS_ACCESS_KEY_ID` | el Access key ID del usuario IAM (paso 2) |
 | `AWS_SECRET_ACCESS_KEY` | el Secret access key del usuario IAM (paso 2) |
@@ -433,6 +433,8 @@ En tu Web Service de Render → **Environment**, agrega:
 | `AUTO_SEED_DEMO` | `0` — **importante**: ya con una base persistente de verdad, no quieres que la app recree los usuarios de ejemplo encima de tus datos reales |
 
 Guarda los cambios — Render vuelve a desplegar automáticamente. Al arrancar, la app crea sola todas las tablas en tu base de Postgres (igual que hoy hace con SQLite) — no hace falta correr ningún script aparte.
+
+**Nota sobre la versión de Python (agosto 2026)**: si al desplegar ves en los logs de Render un error como `ImportError: ... undefined symbol: _PyInterpreterState_Get` al importar `psycopg2`, es porque Render está usando una versión de Python demasiado nueva (ej. 3.14) para la que el paquete `psycopg2-binary` todavía no tiene una versión compatible — no tiene que ver con tus credenciales de AWS. El proyecto ya trae un archivo `.python-version` (fijado en `3.12.8`) para que Render use esa versión automáticamente; si tu servicio ya estaba creado antes de que existiera ese archivo, agrega además la variable `PYTHON_VERSION` = `3.12.8` en Render → Environment para forzarlo de inmediato.
 
 ### Verificación después de desplegar
 

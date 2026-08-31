@@ -56,6 +56,22 @@ def using_postgres():
     return url.startswith(_POSTGRES_PREFIXES)
 
 
+def _pg_connection_string(database_url):
+    """Amazon RDS exige conexión cifrada por defecto (el `pg_hba.conf` que
+    administra AWS solo acepta entradas `hostssl`); psycopg2/libpq no
+    siempre negocia SSL solo, y sin `sslmode` puede terminar intentando una
+    conexión sin cifrar que RDS rechaza con "no pg_hba.conf entry for host
+    ..., no encryption" (visto en despliegue real, 31 ago). Para no
+    depender de que cada `DATABASE_URL` lo incluya a mano, se agrega
+    `sslmode=require` automáticamente si el propio valor no trae ya un
+    `sslmode` explícito (por si alguna vez se conecta contra un Postgres
+    que no lo exige, o que use un modo distinto a propósito)."""
+    if "sslmode=" in database_url.lower():
+        return database_url
+    separator = "&" if "?" in database_url else "?"
+    return f"{database_url}{separator}sslmode=require"
+
+
 def _translate(sql):
     """Traduce una consulta "estilo SQLite" a PostgreSQL cuando ese es el
     motor activo. No toca nada si se está en modo SQLite (comportamiento
@@ -164,7 +180,7 @@ def get_db():
             import psycopg2.extras
 
             conn = psycopg2.connect(
-                current_app.config["DATABASE_URL"],
+                _pg_connection_string(current_app.config["DATABASE_URL"]),
                 cursor_factory=psycopg2.extras.RealDictCursor,
             )
             g.db = _PGConnCompat(conn)
@@ -331,7 +347,7 @@ def init_db(app):
     if database_url.startswith(_POSTGRES_PREFIXES):
         import psycopg2
 
-        conn = psycopg2.connect(database_url)
+        conn = psycopg2.connect(_pg_connection_string(database_url))
         try:
             cur = conn.cursor()
             cur.execute(_sqlite_schema_to_postgres(schema_sql))
