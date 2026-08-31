@@ -362,7 +362,9 @@ def build_import_template(title, columns, example_values):
 
 VEHICLE_COLUMNS = [
     ImportColumn("plate", "Placa", kind="text", required=True, width=14,
-                 note="Debe ser única; si la placa ya existe en Flota, esa fila se omite (no se sobrescribe)."),
+                 note="Debe ser única. Si la placa ya existe en Flota no se crea de nuevo, pero si la fila "
+                      "trae 'ID en el proveedor de GPS' se actualiza ese dato en la unidad existente (el "
+                      "resto de los campos de esa fila no se toca)."),
     ImportColumn("brand", "Marca", kind="text", width=16),
     ImportColumn("model", "Modelo", kind="text", width=16),
     ImportColumn(
@@ -390,6 +392,12 @@ VEHICLE_COLUMNS = [
     ImportColumn("soat_expiry", "Vencimiento SOAT", kind="date", width=18),
     ImportColumn("technical_review_expiry", "Vencimiento revisión técnica", kind="date", width=22),
     ImportColumn("notes", "Notas", kind="text", width=30),
+    ImportColumn(
+        "gps_external_id", "ID en el proveedor de GPS", kind="text", width=26,
+        note="Opcional. Tal como aparece en Frotcom (Configuración → Integraciones). Si la placa ya "
+             "existe en Flota, este es el único campo de la fila que se actualiza; si la placa es "
+             "nueva, la unidad se crea con este ID puesto desde el inicio.",
+    ),
 ]
 
 VEHICLE_EXAMPLE = {
@@ -404,6 +412,7 @@ VEHICLE_EXAMPLE = {
     "soat_expiry": "2026-12-31",
     "technical_review_expiry": "2026-12-31",
     "notes": "Fila de ejemplo — bórrala o sobrescríbela",
+    "gps_external_id": "190119",
 }
 
 DRIVER_COLUMNS = [

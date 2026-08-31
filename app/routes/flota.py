@@ -159,7 +159,7 @@ def import_template():
 
 
 def _apply_vehicle_import(rows, example_skips):
-    created, errors = 0, []
+    created, updated, errors = 0, 0, []
     skipped = [
         {"row": r, "message": "Fila de ejemplo de la plantilla; se omitió automáticamente."}
         for r in example_skips
@@ -176,9 +176,22 @@ def _apply_vehicle_import(rows, example_skips):
         if plate in seen_plates:
             skipped.append({"row": n, "message": f"Placa {plate} repetida dentro del archivo; ya se había importado antes."})
             continue
+        gps_external_id = (row.get("gps_external_id") or "").strip() or None
         existing = query_one("SELECT id FROM vehicles WHERE plate = ?", (plate,))
         if existing:
-            skipped.append({"row": n, "message": f"La placa {plate} ya existe en Flota; no se modificó."})
+            # 31 ago, pedido de Braulio: al re-importar la flota real ya
+            # cargada, no se crea de nuevo ni se toca el resto de la fila —
+            # pero si trae "ID en el proveedor de GPS" (para completar el
+            # mapeo con Frotcom en bloque) sí se actualiza ese campo puntual.
+            if gps_external_id:
+                execute(
+                    "UPDATE vehicles SET gps_external_id = ? WHERE id = ?",
+                    (gps_external_id, existing["id"]),
+                )
+                seen_plates.add(plate)
+                updated += 1
+            else:
+                skipped.append({"row": n, "message": f"La placa {plate} ya existe en Flota; no se modificó."})
             continue
         seen_plates.add(plate)
         execute(
@@ -197,12 +210,12 @@ def _apply_vehicle_import(rows, example_skips):
                 row.get("technical_review_expiry"),
                 row.get("current_km"),
                 today_str() if row.get("current_km") is not None else None,
-                None,
+                gps_external_id,
                 row.get("owner") or None,
             ),
         )
         created += 1
-    return {"created": created, "updated": 0, "skipped": skipped, "errors": errors}
+    return {"created": created, "updated": updated, "skipped": skipped, "errors": errors}
 
 
 @bp.route("/importar", methods=["GET", "POST"])

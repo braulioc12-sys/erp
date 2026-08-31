@@ -9,6 +9,14 @@ from app.integrations.frotcom import FrotcomError, build_client_from_config
 
 bp = Blueprint("integraciones", __name__, url_prefix="/configuracion/integraciones")
 
+# Cuántos IDs se listan como máximo en un solo mensaje de flash. Antes era
+# 15 (bastaba cuando Frotcom solo devolvía 15 unidades), pero desde que se
+# agregó el intento con kind=A la cuenta real subió a 49+ (31 ago) — con 15
+# Braulio tenía que sincronizar varias veces para ver toda la lista. 80 deja
+# margen sobre el tamaño real de la flota (50 tractos) sin volver el
+# mensaje ilegible.
+MAX_IDS_EN_MENSAJE = 80
+
 
 @bp.route("")
 @permission_required("integraciones", "view")
@@ -103,8 +111,14 @@ def sync_frotcom():
     # resultado del intento aquí para no depender de logs de Render.
     if client.last_asset_fetch_error:
         flash(f"Aviso: el intento adicional de traer unidades tipo 'Asset' (carretas) falló: {client.last_asset_fetch_error}", "info")
-    elif client.last_asset_fetch_count:
-        flash(f"Además, Frotcom devolvió {client.last_asset_fetch_count} unidad(es) más al pedirlas como tipo 'Asset' (posibles carretas/semirremolques).", "info")
+    elif client.last_asset_fetch_count is not None:
+        # Se muestra también el caso "0 nuevas" (antes quedaba en silencio
+        # porque 0 es "falsy" en Python) — así se sabe que el intento SÍ se
+        # hizo y no aportó nada, en vez de no saber si se intentó.
+        if client.last_asset_fetch_count:
+            flash(f"Además, Frotcom devolvió {client.last_asset_fetch_count} unidad(es) más al pedirlas como tipo 'Asset' (posibles carretas/semirremolques).", "info")
+        else:
+            flash("Además se probó pedir unidades tipo 'Asset' (carretas) por separado: Frotcom no devolvió ninguna unidad nueva por ese lado.", "info")
 
     if matched:
         flash(f"Sincronizado: {matched} unidad(es) actualizada(s) desde Frotcom.", "success")
@@ -112,7 +126,8 @@ def sync_frotcom():
             flash(
                 f"Frotcom también tiene {len(unmatched_frotcom_ids)} unidad(es) más sin mapear "
                 f'todavía en Flota. IDs pendientes: '
-                f'{", ".join(_fmt_id(f) for f in unmatched_frotcom_ids[:15])}. '
+                f'{", ".join(_fmt_id(f) for f in unmatched_frotcom_ids[:MAX_IDS_EN_MENSAJE])}'
+                f'{" (y " + str(len(unmatched_frotcom_ids) - MAX_IDS_EN_MENSAJE) + " más, no entraron en este mensaje)" if len(unmatched_frotcom_ids) > MAX_IDS_EN_MENSAJE else ""}. '
                 'Cópialos en el campo "ID en el proveedor de GPS" de la unidad que corresponda '
                 "(Flota → editar unidad) y vuelve a sincronizar.",
                 "info",
@@ -124,9 +139,9 @@ def sync_frotcom():
         # Frotcom.
         detalle = (
             f' IDs que devolvió Frotcom: '
-            f'{", ".join(_fmt_id(f) for f in frotcom_ids[:15]) or "(ninguno)"}.'
+            f'{", ".join(_fmt_id(f) for f in frotcom_ids[:MAX_IDS_EN_MENSAJE]) or "(ninguno)"}.'
             f' IDs configurados en Flota ("ID en el proveedor de GPS"): '
-            f'{", ".join(configured_ids[:15]) or "(ninguno todavía)"}.'
+            f'{", ".join(configured_ids[:MAX_IDS_EN_MENSAJE]) or "(ninguno todavía)"}.'
         )
         flash(
             "Frotcom respondió pero no se pudo asociar ninguna posición a tus unidades. "
