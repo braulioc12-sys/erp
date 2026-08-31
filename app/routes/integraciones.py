@@ -209,6 +209,7 @@ def daily_report():
             "plate": v["plate"],
             "hours": stats_by_vehicle.get(v["id"], {}).get("hours", 0.0),
             "km": stats_by_vehicle.get(v["id"], {}).get("km", 0.0),
+            "points": stats_by_vehicle.get(v["id"], {}).get("points", 0),
         }
         for v in vehicles
     ]

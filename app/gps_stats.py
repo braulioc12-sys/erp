@@ -96,5 +96,11 @@ def daily_stats_all(date_str):
                 km += cur["odometer_km"] - prev["odometer_km"]
             else:
                 km += _haversine_km(prev["latitude"], prev["longitude"], cur["latitude"], cur["longitude"])
-        result[vehicle_id] = {"hours": round(hours, 1), "km": round(km, 1)}
+        # "points" (31 ago, tras reporte de Braulio de horas/km en 0): cuántos
+        # puntos de historial hay ese día para la unidad. Con 0 o 1 punto es
+        # matemáticamente imposible calcular una diferencia — no es un error,
+        # simplemente todavía no se guardaron (o solo se guardó) suficientes
+        # sincronizaciones ese día. Se expone para que la vista pueda avisar
+        # "sin datos suficientes" en vez de mostrar un 0 que parece un bug.
+        result[vehicle_id] = {"hours": round(hours, 1), "km": round(km, 1), "points": len(points)}
     return result

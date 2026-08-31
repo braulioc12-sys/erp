@@ -11,8 +11,9 @@
 
 <form class="filters" method="get">
   <label>Día
-    <input type="date" name="date" value="{{ date }}" onchange="this.form.submit()">
+    <input type="date" name="date" value="{{ date }}">
   </label>
+  <button type="submit" class="btn btn-primary">Ver reporte</button>
 </form>
 
 <p class="muted">Horas manejadas y km avanzados por unidad ese día, calculados del historial de posiciones de GPS guardado en cada sincronización (manual o automática cada 2 minutos).</p>
@@ -25,7 +26,10 @@
         {% for r in rows %}
         <tr>
           <td>{{ r.plate }}</td>
-          <td class="text-right">{{ '%.1f h'|format(r.hours) }}</td>
+          <td class="text-right">
+            {{ '%.1f h'|format(r.hours) }}
+            {% if r.points < 2 %}<span class="muted">(sin datos suficientes ese día)</span>{% endif %}
+          </td>
           <td class="text-right">{{ '%.1f km'|format(r.km) }}</td>
         </tr>
         {% else %}
@@ -34,5 +38,6 @@
       </tbody>
     </table>
   </div>
+  <p class="muted" style="margin-top:10px;">Cuando una unidad muestra "sin datos suficientes ese día" es porque ese día se guardó como máximo 1 sincronización de esa unidad — hacen falta al menos 2 para calcular una diferencia de horas/km. Si acabas de activar la sincronización automática, esto se va a ir llenando solo cada 2 minutos.</p>
 </div>
 {% endblock %}

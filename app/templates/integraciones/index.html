@@ -53,8 +53,16 @@
           <td>{{ v.location_updated_at or '—' }}</td>
           <td>{{ '{:,.0f} km'.format(v.current_km) if v.current_km is not none else '—' }}</td>
           {% set stats = stats_by_vehicle.get(v.id) %}
-          <td>{{ '%.1f h'|format(stats.hours) if stats else '—' }}</td>
-          <td>{{ '%.1f km'|format(stats.km) if stats else '—' }}</td>
+          <td>
+            {% if stats and stats.points >= 2 %}{{ '%.1f h'|format(stats.hours) }}
+            {% elif stats %}0.0 h <span class="muted">(sin datos suficientes)</span>
+            {% else %}—{% endif %}
+          </td>
+          <td>
+            {% if stats and stats.points >= 2 %}{{ '%.1f km'|format(stats.km) }}
+            {% elif stats %}0.0 km <span class="muted">(sin datos suficientes)</span>
+            {% else %}—{% endif %}
+          </td>
         </tr>
         {% else %}
         <tr><td colspan="8" class="table-empty">No hay unidades registradas.</td></tr>
