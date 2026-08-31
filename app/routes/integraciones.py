@@ -1,3 +1,5 @@
+import json
+
 from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
 
 from app.auth import permission_required, validate_csrf
@@ -75,17 +77,44 @@ def sync_frotcom():
         matched += 1
     db.commit()
 
+    # IDs que Frotcom sí devolvió pero que ninguna unidad tiene configurados
+    # todavía — se muestran tanto si no se sincronizó nada (para diagnosticar
+    # un desfase de formato) como si ya se sincronizó algo (para poder mapear
+    # el resto de la flota de una sola vez, sin repetir "Sincronizar" unidad
+    # por unidad). 31 ago, tras el primer intento real de sincronización.
+    frotcom_ids = sorted({p["external_id"] for p in positions if p.get("external_id")})
+    configured_ids = sorted(by_external_id.keys())
+    unmatched_frotcom_ids = [fid for fid in frotcom_ids if fid not in by_external_id]
+
+    # Si Frotcom trae algo reconocible como placa/nombre por vehículo (ver
+    # "label" en get_vehicle_positions), lo mostramos junto al id — así no
+    # hace falta adivinar a qué camión corresponde cada id interno de
+    # Frotcom (31 ago: los ids reales de Braulio, ej. "190119", no se
+    # parecen en nada a una placa).
+    label_by_id = {p["external_id"]: p["label"] for p in positions if p.get("external_id") and p.get("label")}
+
+    def _fmt_id(fid):
+        return f"{fid} ({label_by_id[fid]})" if fid in label_by_id else fid
+
     if matched:
         flash(f"Sincronizado: {matched} unidad(es) actualizada(s) desde Frotcom.", "success")
+        if unmatched_frotcom_ids:
+            flash(
+                f"Frotcom también tiene {len(unmatched_frotcom_ids)} unidad(es) más sin mapear "
+                f'todavía en Flota. IDs pendientes: '
+                f'{", ".join(_fmt_id(f) for f in unmatched_frotcom_ids[:15])}. '
+                'Cópialos en el campo "ID en el proveedor de GPS" de la unidad que corresponda '
+                "(Flota → editar unidad) y vuelve a sincronizar.",
+                "info",
+            )
     else:
         # En vez de solo decir "no coincide", mostramos los valores reales de
         # los dos lados para que se puedan comparar de un vistazo — así no
         # hace falta ir a revisar logs de Render para saber qué ID usa
-        # Frotcom (31 ago, tras el primer intento real de sincronización).
-        frotcom_ids = sorted({p["external_id"] for p in positions if p.get("external_id")})
-        configured_ids = sorted(by_external_id.keys())
+        # Frotcom.
         detalle = (
-            f' IDs que devolvió Frotcom: {", ".join(frotcom_ids[:15]) or "(ninguno)"}.'
+            f' IDs que devolvió Frotcom: '
+            f'{", ".join(_fmt_id(f) for f in frotcom_ids[:15]) or "(ninguno)"}.'
             f' IDs configurados en Flota ("ID en el proveedor de GPS"): '
             f'{", ".join(configured_ids[:15]) or "(ninguno todavía)"}.'
         )
@@ -95,4 +124,10 @@ def sync_frotcom():
             "coincida exactamente con el identificador que usa Frotcom." + detalle,
             "error",
         )
+        if positions and not label_by_id:
+            # Ningún campo típico de placa/nombre coincidió — mostramos TODOS
+            # los campos crudos del primer vehículo para terminar de
+            # confirmar, sin adivinar más, cuál trae la placa real.
+            raw_preview = json.dumps(positions[0]["raw"], ensure_ascii=False)[:600]
+            flash(f"Campos reales que trae Frotcom por vehículo (el primero, de ejemplo): {raw_preview}", "info")
     return redirect(url_for("integraciones.index"))

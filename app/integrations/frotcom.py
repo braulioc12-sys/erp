@@ -134,15 +134,31 @@ class FrotcomClient:
 
         positions = []
         for item in raw_items:
+            # "label" es un intento de mostrar algo humano-reconocible (placa
+            # o nombre) junto al id interno de Frotcom, para que emparejar
+            # unidades no dependa de adivinar el id a ciegas — probamos varios
+            # nombres de campo típicos; si Frotcom no trae ninguno, queda
+            # vacío y no pasa nada (el emparejamiento sigue siendo por id).
+            label = (
+                item.get("plate") or item.get("licensePlate") or item.get("licencePlate")
+                or item.get("registrationNumber") or item.get("name") or item.get("vehicleName")
+                or item.get("description") or ""
+            )
             positions.append(
                 {
                     "external_id": str(item.get("id") or item.get("vehicleId") or item.get("plate") or ""),
+                    "label": str(label) if label else "",
                     "latitude": item.get("latitude") or item.get("lat"),
                     "longitude": item.get("longitude") or item.get("lon") or item.get("lng"),
                     "speed_kmh": item.get("speed"),
                     "heading": item.get("heading") or item.get("course"),
                     "odometer_km": item.get("odometer") or item.get("odometerKm"),
                     "recorded_at": item.get("timestamp") or item.get("recordedAt"),
+                    # Se guarda crudo (solo cuando aún no se pudo emparejar
+                    # nada) para poder mostrar TODOS los campos reales que
+                    # trae Frotcom y así terminar de confirmar los nombres
+                    # correctos sin adivinar más — ver sync_frotcom().
+                    "raw": item,
                 }
             )
         return positions
