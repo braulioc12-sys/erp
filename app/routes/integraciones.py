@@ -78,10 +78,21 @@ def sync_frotcom():
     if matched:
         flash(f"Sincronizado: {matched} unidad(es) actualizada(s) desde Frotcom.", "success")
     else:
+        # En vez de solo decir "no coincide", mostramos los valores reales de
+        # los dos lados para que se puedan comparar de un vistazo — así no
+        # hace falta ir a revisar logs de Render para saber qué ID usa
+        # Frotcom (31 ago, tras el primer intento real de sincronización).
+        frotcom_ids = sorted({p["external_id"] for p in positions if p.get("external_id")})
+        configured_ids = sorted(by_external_id.keys())
+        detalle = (
+            f' IDs que devolvió Frotcom: {", ".join(frotcom_ids[:15]) or "(ninguno)"}.'
+            f' IDs configurados en Flota ("ID en el proveedor de GPS"): '
+            f'{", ".join(configured_ids[:15]) or "(ninguno todavía)"}.'
+        )
         flash(
             "Frotcom respondió pero no se pudo asociar ninguna posición a tus unidades. "
             "Revisa que el campo \"ID en el proveedor de GPS\" de cada unidad (en Flota) "
-            "coincida exactamente con el identificador que usa Frotcom.",
+            "coincida exactamente con el identificador que usa Frotcom." + detalle,
             "error",
         )
     return redirect(url_for("integraciones.index"))
