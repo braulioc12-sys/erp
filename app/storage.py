@@ -17,6 +17,7 @@ sección "Base de datos persistente en AWS (RDS + S3)"):
 
 boto3 solo se importa (import perezoso) cuando el modo S3 está realmente
 activo, para no exigir esa dependencia en desarrollo local."""
+import mimetypes
 import os
 
 from flask import current_app
@@ -92,11 +93,22 @@ def save_receipt(filename, raw_bytes):
     ya generado por el llamador, ej. un uuid.hex + extensión). No sabe nada
     de fotos/PDFs ni de compresión — el llamador decide eso antes."""
     if using_s3():
+        # Sin ContentType, S3 guarda el objeto como "binary/octet-stream"
+        # por defecto — el navegador no sabe que es una imagen/PDF y fuerza
+        # la descarga en vez de mostrarlo (visto en producción real, 31
+        # ago: en disco local sí se veía bien, porque send_from_directory
+        # infiere el tipo solo por la extensión; en S3 hay que decírselo
+        # explícitamente al subir el archivo). ContentDisposition=inline
+        # refuerza lo mismo para que el navegador lo abra en pestaña en vez
+        # de descargarlo, incluso si por algún motivo no reconoce el tipo.
+        content_type, _ = mimetypes.guess_type(filename)
         _s3_client().put_object(
             Bucket=_s3_bucket(),
             Key=_s3_key(filename),
             Body=raw_bytes,
             ServerSideEncryption="AES256",
+            ContentType=content_type or "application/octet-stream",
+            ContentDisposition="inline",
         )
     else:
         with open(os.path.join(_local_dir(), filename), "wb") as f:
@@ -108,8 +120,21 @@ def receipt_url(filename):
     guardado en S3. Solo válida en modo S3 — en modo disco local, la ruta
     que sirve el archivo debe usar local_receipts_dir() + send_from_directory
     en su lugar (ver using_s3())."""
+    content_type, _ = mimetypes.guess_type(filename)
     return _s3_client().generate_presigned_url(
         "get_object",
-        Params={"Bucket": _s3_bucket(), "Key": _s3_key(filename)},
+        Params={
+            "Bucket": _s3_bucket(),
+            "Key": _s3_key(filename),
+            # Se piden estos dos encabezados en la respuesta del propio
+            # GET firmado (S3 los permite sobrescribir por request, sin
+            # importar los metadatos guardados en el objeto) para que los
+            # comprobantes subidos ANTES de este arreglo — que se guardaron
+            # sin ContentType, por eso el navegador los descargaba en vez
+            # de mostrarlos — también se abran bien, sin tener que volver
+            # a subirlos.
+            "ResponseContentType": content_type or "application/octet-stream",
+            "ResponseContentDisposition": "inline",
+        },
         ExpiresIn=300,
     )
