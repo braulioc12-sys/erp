@@ -56,11 +56,30 @@ def _s3_key(filename):
 def _s3_client():
     import boto3
 
-    # boto3 toma las credenciales (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY)
-    # y la región (AWS_DEFAULT_REGION) directo de las variables de entorno
-    # estándar — no hace falta pasarlas a mano. Ver README para los nombres
-    # exactos a configurar en Render.
-    return boto3.client("s3")
+    # boto3 puede tomar las credenciales (AWS_ACCESS_KEY_ID /
+    # AWS_SECRET_ACCESS_KEY) y la región (AWS_DEFAULT_REGION) directo de las
+    # variables de entorno estándar, pero NO recorta espacios ni saltos de
+    # línea de esos valores. En producción real (31 ago) esto causó
+    # "SignatureDoesNotMatch" en las URLs firmadas de forma persistente —
+    # incluso después de generar una llave de acceso nueva desde cero —
+    # porque al pegar el Secret Access Key en el panel de Render quedó un
+    # carácter invisible de más al final (frecuente al copiar desde un
+    # archivo de texto o el .csv que descarga AWS). Leyendo y limpiando
+    # (`strip()`) las variables acá mismo, en vez de dejar que boto3 las
+    # tome "tal cual", elimina esa clase de error de raíz, sin depender de
+    # que el copiar/pegar sea perfecto. Si no están configuradas, se cae al
+    # comportamiento normal de boto3 (por ejemplo un rol IAM), igual que
+    # antes.
+    access_key = (os.environ.get("AWS_ACCESS_KEY_ID") or "").strip()
+    secret_key = (os.environ.get("AWS_SECRET_ACCESS_KEY") or "").strip()
+    region = (os.environ.get("AWS_DEFAULT_REGION") or "").strip()
+    kwargs = {}
+    if access_key and secret_key:
+        kwargs["aws_access_key_id"] = access_key
+        kwargs["aws_secret_access_key"] = secret_key
+    if region:
+        kwargs["region_name"] = region
+    return boto3.client("s3", **kwargs)
 
 
 def save_receipt(filename, raw_bytes):
