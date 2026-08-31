@@ -49,6 +49,16 @@ _STRFTIME_NOW_RE = re.compile(r"strftime\(\s*'%Y-%m'\s*,\s*'now'\s*\)", re.IGNOR
 _STRFTIME_COL_RE = re.compile(r"strftime\(\s*'%Y-%m'\s*,\s*([A-Za-z0-9_.]+)\s*\)", re.IGNORECASE)
 _DATETIME_NOW_RE = re.compile(r"datetime\(\s*'now'\s*\)", re.IGNORECASE)
 _PG_NOW_TIMESTAMP = "to_char(now() at time zone 'utc', 'YYYY-MM-DD HH24:MI:SS')"
+_DATE_NOW_OFFSET_RE = re.compile(
+    r"date\(\s*'now'\s*,\s*'([+-]?)(\d+)\s+days?'\s*\)", re.IGNORECASE
+)
+_DATE_COL_RE = re.compile(r"\bdate\(\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\)", re.IGNORECASE)
+
+
+def _date_now_offset_sub(match):
+    sign, days = match.group(1), match.group(2)
+    op = "-" if sign == "-" else "+"
+    return f"(current_date {op} interval '{days} days')"
 
 
 def using_postgres():
@@ -75,10 +85,11 @@ def _pg_connection_string(database_url):
 def _translate(sql):
     """Traduce una consulta "estilo SQLite" a PostgreSQL cuando ese es el
     motor activo. No toca nada si se está en modo SQLite (comportamiento
-    idéntico al de siempre). Estas son las 4 diferencias de sintaxis que
-    aparecen en el proyecto (se revisaron todas las consultas a mano):
-    placeholder "?", `INSERT OR IGNORE`, `strftime('%Y-%m', ...)` y
-    `datetime('now')`."""
+    idéntico al de siempre). Diferencias de sintaxis que aparecen en el
+    proyecto: placeholder "?", `INSERT OR IGNORE`, `strftime('%Y-%m', ...)`,
+    `datetime('now')` y `date(...)` (usado en las alertas de vencimiento de
+    documentos y mantenimientos — bug real detectado en producción el
+    31 ago, `date(unknown, unknown) does not exist` en Postgres)."""
     if not using_postgres():
         return sql
     if _INSERT_OR_IGNORE_RE.search(sql):
@@ -87,6 +98,11 @@ def _translate(sql):
     sql = _STRFTIME_NOW_RE.sub("to_char(now(), 'YYYY-MM')", sql)
     sql = _STRFTIME_COL_RE.sub(r"substr(\1, 1, 7)", sql)
     sql = _DATETIME_NOW_RE.sub(_PG_NOW_TIMESTAMP, sql)
+    # date('now', '+30 days') -> (current_date + interval '30 days'); debe
+    # ir antes de _DATE_COL_RE para que no quede un `date(...)` suelto.
+    sql = _DATE_NOW_OFFSET_RE.sub(_date_now_offset_sub, sql)
+    # date(columna) -> (columna)::date
+    sql = _DATE_COL_RE.sub(r"(\1)::date", sql)
     sql = sql.replace("?", "%s")
     return sql
 
