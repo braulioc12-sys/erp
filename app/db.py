@@ -254,7 +254,13 @@ COLUMN_MIGRATIONS = [
     ("expense_advances", "office", "TEXT"),
     ("expense_advances", "voucher_number", "INTEGER"),
     ("maintenance_record_jobs", "status", "TEXT NOT NULL DEFAULT 'PENDIENTE'"),
-    ("maintenance_record_jobs", "mechanic_id", "INTEGER REFERENCES mechanics(id)"),
+    # Sin "REFERENCES" aquí a propósito (aunque schema.sql sí lo declara
+    # inline en la columna): la foreign key la agrega el propio mecanismo
+    # de _strip_forward_fks/init_db() una vez que la columna ya existe —
+    # declararla también aquí crearía una segunda FK duplicada en Postgres
+    # (una autogenerada por este ADD COLUMN, otra con nombre fijo del
+    # esquema). Ver la nota de "moved_to_tire_id" más abajo (31 ago).
+    ("maintenance_record_jobs", "mechanic_id", "INTEGER"),
     ("maintenance_record_jobs", "mechanic_name", "TEXT"),
     ("maintenance_record_jobs", "completed_at", "TEXT"),
     ("maintenance_record_jobs", "mechanic_type", "TEXT"),
@@ -262,7 +268,11 @@ COLUMN_MIGRATIONS = [
     ("maintenance_record_jobs", "mechanic_count", "INTEGER NOT NULL DEFAULT 1"),
     ("vehicles", "owner", "TEXT"),
     ("tires", "disposition", "TEXT"),
-    ("tires", "moved_to_tire_id", "INTEGER REFERENCES tires(id)"),
+    # Sin "REFERENCES tires(id)" aquí — mismo motivo que "mechanic_id" arriba:
+    # la FK la agrega el paso dedicado en init_db() (Postgres) una vez que
+    # esta columna ya existe, para no duplicarla. En SQLite esto no importa
+    # (no valida la referencia al hacer ALTER TABLE ADD COLUMN).
+    ("tires", "moved_to_tire_id", "INTEGER"),
 ]
 
 
@@ -348,21 +358,31 @@ def _strip_forward_fks(sql_text):
         f"END $$;"
         for table, column, ref_table, ref_col in fk_constraints
     )
-    return "\n".join(out_lines) + "\n" + alter_statements + "\n"
+    # Se devuelven por separado (no concatenados) porque quien llama debe
+    # correr las migraciones de columnas (_apply_column_migrations_postgres)
+    # ENTRE los dos: si una columna referenciada por una FK es nueva (agregada
+    # solo vía COLUMN_MIGRATIONS porque la tabla ya existía de antes, como
+    # pasó con tires.moved_to_tire_id el 31 ago), el ALTER TABLE ADD
+    # CONSTRAINT de más abajo fallaría con "column ... does not exist" si
+    # corriera antes de que la columna exista de verdad. Ver init_db().
+    return "\n".join(out_lines) + "\n", alter_statements + "\n"
 
 
 def _sqlite_schema_to_postgres(sql_text):
     """Convierte el schema.sql (escrito para SQLite) a una variante
     compatible con PostgreSQL, sustituyendo solo la sintaxis que difiere
     entre motores. El archivo schema.sql en sí no se toca — esta conversión
-    ocurre en memoria, únicamente al inicializar la base en modo Postgres."""
+    ocurre en memoria, únicamente al inicializar la base en modo Postgres.
+    Devuelve (create_sql, fk_sql): las sentencias CREATE TABLE por un lado,
+    y los ALTER TABLE ... ADD CONSTRAINT de las foreign keys por otro — deben
+    ejecutarse por separado, con las migraciones de columnas en medio (ver
+    init_db())."""
     sql_text = _PRAGMA_LINE_RE.sub("", sql_text)
     sql_text = sql_text.replace(
         "INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY"
     )
     sql_text = _DATETIME_NOW_RE.sub(_PG_NOW_TIMESTAMP, sql_text)
-    sql_text = _strip_forward_fks(sql_text)
-    return sql_text
+    return _strip_forward_fks(sql_text)
 
 
 def init_db(app):
@@ -378,8 +398,15 @@ def init_db(app):
         conn = psycopg2.connect(_pg_connection_string(database_url))
         try:
             cur = conn.cursor()
-            cur.execute(_sqlite_schema_to_postgres(schema_sql))
+            create_sql, fk_sql = _sqlite_schema_to_postgres(schema_sql)
+            # Orden importante: 1) crear tablas, 2) agregar columnas nuevas
+            # a tablas ya existentes (COLUMN_MIGRATIONS), 3) recién ahí
+            # agregar las foreign keys — algunas FK referencian una columna
+            # que en una base ya desplegada solo existe gracias al paso 2
+            # (ej. tires.moved_to_tire_id, 31 ago).
+            cur.execute(create_sql)
             _apply_column_migrations_postgres(conn)
+            cur.execute(fk_sql)
             conn.commit()
         finally:
             conn.close()
