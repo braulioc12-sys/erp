@@ -29,14 +29,42 @@
 
 {% if tire.notes %}<p><strong>Notas:</strong> {{ tire.notes }}</p>{% endif %}
 {% if tire.removal_reason %}<p><strong>Motivo del retiro:</strong> {{ tire.removal_reason }}</p>{% endif %}
+{% if tire.status == 'RETIRADO' and tire.disposition %}
+<p><strong>Resultado:</strong> {{ m.badge(tire.disposition) }}</p>
+{% endif %}
 
 {% if tire.status == 'ACTIVO' and can(current_user.role, 'neumaticos', 'edit') %}
 <div class="btn-group" style="margin-bottom:20px;">
   <a href="{{ url_for('neumaticos.replace_tire', tire_id=tire.id) }}" class="btn btn-primary">Reemplazar</a>
-  <form method="post" action="{{ url_for('neumaticos.retire_tire', tire_id=tire.id) }}" onsubmit="return confirm('¿Retirar esta llanta sin registrar una nueva en su lugar?');">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <button type="submit" class="btn btn-danger">Retirar sin reemplazar</button>
-  </form>
+  <a href="{{ url_for('neumaticos.retire_tire', tire_id=tire.id) }}" class="btn btn-danger">Retirar sin reemplazar</a>
+</div>
+{% endif %}
+
+{% if journey %}
+<div class="panel">
+  <h2>Historial completo de esta llanta</h2>
+  <p class="muted mt-0">Todas las unidades y posiciones por las que pasó esta llanta física, en orden.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Unidad</th><th>Posición</th><th>Instalación</th><th>Retiro</th><th>Resultado</th><th></th></tr></thead>
+      <tbody>
+        {% for j in journey %}
+        <tr {% if j.is_current %}style="font-weight:600;"{% endif %}>
+          <td>{{ j.plate }}</td>
+          <td>{{ j.position_label }}</td>
+          <td>{{ j.tire.install_date }}</td>
+          <td>{{ j.tire.removed_date or '—' }}</td>
+          <td>
+            {% if j.tire.status == 'ACTIVO' %}{{ m.badge('ACTIVO') }}
+            {% elif j.tire.disposition %}{{ m.badge(j.tire.disposition) }}
+            {% else %}{{ m.badge('RETIRADO') }}{% endif %}
+          </td>
+          <td>{% if j.is_current %}<span class="muted">(esta)</span>{% else %}<a href="{{ url_for('neumaticos.detail', tire_id=j.tire.id) }}">Ver</a>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endif %}
 

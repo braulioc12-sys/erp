@@ -261,6 +261,8 @@ COLUMN_MIGRATIONS = [
     ("mechanics", "mechanic_type", "TEXT NOT NULL DEFAULT 'Otros'"),
     ("maintenance_record_jobs", "mechanic_count", "INTEGER NOT NULL DEFAULT 1"),
     ("vehicles", "owner", "TEXT"),
+    ("tires", "disposition", "TEXT"),
+    ("tires", "moved_to_tire_id", "INTEGER REFERENCES tires(id)"),
 ]
 
 

@@ -321,6 +321,16 @@ CREATE TABLE IF NOT EXISTS tires (
     removed_date TEXT,
     removed_km REAL,
     removal_reason TEXT,
+    -- Qué pasó con la llanta al retirarla (31 ago — pedido de Braulio: un
+    -- historial que diga a qué otro carro se puso una llanta, o si se
+    -- descartó). NULL mientras está ACTIVO. 'MOVIDA' significa que se
+    -- instaló en otra unidad/posición — moved_to_tire_id apunta a esa fila
+    -- nueva (la misma llanta física, otra fila porque cada fila es una
+    -- instalación puntual). Para ir "hacia atrás" desde la fila nueva y
+    -- encontrar de dónde vino, se busca la fila cuyo moved_to_tire_id sea
+    -- el id de esta — no hace falta una columna inversa.
+    disposition TEXT,
+    moved_to_tire_id INTEGER REFERENCES tires(id),
     notes TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

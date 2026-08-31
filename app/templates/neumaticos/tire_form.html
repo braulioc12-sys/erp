@@ -1,30 +1,74 @@
 {% extends 'base.html' %}
-{% block title %}{{ 'Reemplazar llanta' if mode == 'replace' else 'Agregar llanta' }}{% endblock %}
+{% set f = form or {} %}
+{% set mode_title = {'replace': 'Reemplazar llanta', 'retire': 'Retirar llanta', 'new': 'Agregar llanta'}[mode] %}
+{% block title %}{{ mode_title }}{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>{{ 'Reemplazar llanta' if mode == 'replace' else 'Agregar llanta' }} — {{ vehicle.plate }}</h1>
+  <h1>{{ mode_title }} — {{ vehicle.plate }}</h1>
 </div>
 <p class="muted mt-0">Posición: <strong>{{ position_label }}</strong></p>
 
 <form class="form panel" method="post">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-  {% if mode == 'replace' %}
+  {% if mode in ('replace', 'retire') %}
   <div class="section-title">Llanta que se retira</div>
   <p class="muted" style="margin-top:-8px;">{{ tire.brand or 'Sin marca' }} — instalada el {{ tire.install_date }} con {{ '{:,.0f}'.format(tire.km_at_install) }} km.</p>
   <div class="form-row">
     <label>Fecha de retiro
-      <input type="date" name="removed_date" value="{{ today }}" required>
+      <input type="date" name="removed_date" value="{{ f.get('removed_date', today) }}" required>
     </label>
     <label>Kilometraje de la unidad al retirar
-      <input type="number" step="1" name="removed_km" value="{{ vehicle.current_km|round(0)|int if vehicle.current_km is not none else '' }}" required>
+      <input type="number" step="1" name="removed_km" value="{{ f.get('removed_km', vehicle.current_km|round(0)|int if vehicle.current_km is not none else '') }}" required>
     </label>
   </div>
   <label>Motivo del retiro (opcional)
-    <input type="text" name="removal_reason" placeholder="Ej. desgaste, pinchazo irreparable, corte en el flanco">
+    <input type="text" name="removal_reason" value="{{ f.get('removal_reason', '') }}" placeholder="Ej. desgaste, pinchazo irreparable, corte en el flanco">
   </label>
 
-  <div class="section-title">Llanta nueva</div>
+  <div class="section-title">¿Qué pasó con esta llanta?</div>
+  <div>
+    <label style="flex-direction:row; gap:4px; align-items:center; display:inline-flex; margin-right:16px;">
+      <input type="radio" name="disposition" value="DESCARTADA" style="width:auto;" required onchange="toggleMoveFields()" {% if f.get('disposition', 'DESCARTADA') == 'DESCARTADA' %}checked{% endif %}> Se descartó
+    </label>
+    <label style="flex-direction:row; gap:4px; align-items:center; display:inline-flex;">
+      <input type="radio" name="disposition" value="MOVIDA" style="width:auto;" required onchange="toggleMoveFields()" {% if f.get('disposition') == 'MOVIDA' %}checked{% endif %}> Se movió a otra unidad
+    </label>
+  </div>
+
+  <div id="move-fields" style="display:none;">
+    <div class="form-row">
+      <label>Unidad de destino
+        <select name="dest_vehicle_id" id="dest_vehicle_id" onchange="updateDestPositions()">
+          <option value="">Selecciona…</option>
+          {% for v in move_vehicles %}
+          <option value="{{ v.id }}" {% if f.get('dest_vehicle_id')|string == v.id|string %}selected{% endif %}>{{ v.plate }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Posición en esa unidad
+        <select name="dest_position_code" id="dest_position_code">
+          <option value="">Selecciona una unidad primero…</option>
+        </select>
+      </label>
+    </div>
+    <div class="form-row">
+      <label>Fecha de instalación allá
+        <input type="date" name="dest_install_date" value="{{ f.get('dest_install_date', today) }}">
+      </label>
+      <label>Vida útil estimada (km)
+        <input type="number" step="1" name="dest_expected_life_km" value="{{ f.get('dest_expected_life_km', tire.expected_life_km) }}">
+      </label>
+    </div>
+    <label>Notas sobre el traslado (opcional)
+      <textarea name="dest_notes">{{ f.get('dest_notes', '') }}</textarea>
+    </label>
+    <p class="muted" style="margin-top:-8px;">La marca y el desgaste acumulado de la llanta se conservan automáticamente en su nueva unidad — no reinician en 0.</p>
+  </div>
+  {% endif %}
+
+  {% if mode == 'replace' %}
+  <div class="section-title">Llanta nueva en esta posición</div>
   <div class="form-row">
     <label>Marca
       <input type="text" name="new_brand" placeholder="Ej. Michelin, Bridgestone, Goodyear">
@@ -44,7 +88,7 @@
   <label>Notas (opcional)
     <textarea name="new_notes"></textarea>
   </label>
-  {% else %}
+  {% elif mode == 'new' %}
   <div class="form-row">
     <label>Marca
       <input type="text" name="brand" placeholder="Ej. Michelin, Bridgestone, Goodyear">
@@ -71,4 +115,62 @@
     <a href="{{ url_for('neumaticos.diagram', vehicle_id=vehicle.id) }}" class="btn btn-secondary">Cancelar</a>
   </div>
 </form>
+
+{% if mode in ('replace', 'retire') %}
+<script>
+(function () {
+  var VEHICLES = {{ move_vehicles_data|tojson }};
+  var POSITIONS_BY_TYPE = {{ move_positions_by_type|tojson }};
+  var preselectPosition = {{ (f.get('dest_position_code') or '')|tojson }};
+
+  window.toggleMoveFields = function () {
+    var moved = document.querySelector('input[name="disposition"][value="MOVIDA"]');
+    var box = document.getElementById('move-fields');
+    box.style.display = (moved && moved.checked) ? '' : 'none';
+  };
+
+  window.updateDestPositions = function (preselect) {
+    var vehicleSelect = document.getElementById('dest_vehicle_id');
+    var positionSelect = document.getElementById('dest_position_code');
+    var vehicleId = vehicleSelect.value;
+    positionSelect.innerHTML = '';
+    if (!vehicleId || !VEHICLES[vehicleId]) {
+      var empty = document.createElement('option');
+      empty.value = '';
+      empty.textContent = 'Selecciona una unidad primero…';
+      positionSelect.appendChild(empty);
+      return;
+    }
+    var info = VEHICLES[vehicleId];
+    var positions = POSITIONS_BY_TYPE[info.type] || [];
+    var free = positions.filter(function (p) { return info.occupied.indexOf(p.code) === -1; });
+    if (free.length === 0) {
+      var none = document.createElement('option');
+      none.value = '';
+      none.textContent = 'Sin posiciones libres en esta unidad';
+      positionSelect.appendChild(none);
+      return;
+    }
+    var placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Selecciona…';
+    positionSelect.appendChild(placeholder);
+    free.forEach(function (p) {
+      var opt = document.createElement('option');
+      opt.value = p.code;
+      opt.textContent = p.label;
+      if (preselect && p.code === preselect) opt.selected = true;
+      positionSelect.appendChild(opt);
+    });
+  };
+
+  document.addEventListener('DOMContentLoaded', function () {
+    toggleMoveFields();
+    if (document.getElementById('dest_vehicle_id').value) {
+      updateDestPositions(preselectPosition);
+    }
+  });
+})();
+</script>
+{% endif %}
 {% endblock %}

@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
 {% block title %}Neumáticos — {{ vehicle.plate }}{% endblock %}
 {% block content %}
 <div class="page-header">
@@ -120,7 +121,7 @@
   <h2>Historial de llantas retiradas</h2>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Posición</th><th>Marca</th><th>Instalación</th><th>Retiro</th><th class="text-right">Km recorridos</th><th>Motivo</th></tr></thead>
+      <thead><tr><th>Posición</th><th>Marca</th><th>Instalación</th><th>Retiro</th><th class="text-right">Km recorridos</th><th>Resultado</th><th>Motivo</th></tr></thead>
       <tbody>
         {% for r in retired_rows %}
         <tr>
@@ -129,6 +130,15 @@
           <td>{{ r.tire.install_date }}</td>
           <td>{{ r.tire.removed_date or '—' }}</td>
           <td class="text-right">{{ '{:,.0f}'.format(r.tire.removed_km - r.tire.km_at_install) if r.tire.removed_km is not none else '—' }}</td>
+          <td>
+            {% if r.tire.disposition == 'MOVIDA' %}
+              {{ m.badge('MOVIDA') }}{% if r.moved_to_plate %} → <a href="{{ url_for('neumaticos.detail', tire_id=r.tire.moved_to_tire_id) }}">{{ r.moved_to_plate }}</a>{% endif %}
+            {% elif r.tire.disposition == 'DESCARTADA' %}
+              {{ m.badge('DESCARTADA') }}
+            {% else %}
+              <span class="muted">Sin registrar</span>
+            {% endif %}
+          </td>
           <td class="wrap">{{ r.tire.removal_reason or '—' }}</td>
         </tr>
         {% endfor %}
