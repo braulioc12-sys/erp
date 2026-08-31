@@ -59,17 +59,21 @@ def _s3_client():
     # boto3 puede tomar las credenciales (AWS_ACCESS_KEY_ID /
     # AWS_SECRET_ACCESS_KEY) y la región (AWS_DEFAULT_REGION) directo de las
     # variables de entorno estándar, pero NO recorta espacios ni saltos de
-    # línea de esos valores. En producción real (31 ago) esto causó
-    # "SignatureDoesNotMatch" en las URLs firmadas de forma persistente —
-    # incluso después de generar una llave de acceso nueva desde cero —
-    # porque al pegar el Secret Access Key en el panel de Render quedó un
-    # carácter invisible de más al final (frecuente al copiar desde un
-    # archivo de texto o el .csv que descarga AWS). Leyendo y limpiando
-    # (`strip()`) las variables acá mismo, en vez de dejar que boto3 las
-    # tome "tal cual", elimina esa clase de error de raíz, sin depender de
-    # que el copiar/pegar sea perfecto. Si no están configuradas, se cae al
-    # comportamiento normal de boto3 (por ejemplo un rol IAM), igual que
-    # antes.
+    # línea de esos valores — en producción real (31 ago) esto causó
+    # "SignatureDoesNotMatch" persistente, resuelto leyendo y limpiando
+    # (`strip()`) las variables acá mismo en vez de dejar que boto3 las tome
+    # "tal cual".
+    #
+    # Además, para `generate_presigned_url()` específicamente (no para
+    # put_object ni otras llamadas normales), boto3 puede terminar armando
+    # la URL contra el endpoint "global" de S3 (que se valida como si fuera
+    # us-east-1) en vez del endpoint regional real del bucket, aunque la
+    # región pasada a `region_name` sea la correcta — visto en producción
+    # real (31 ago) como "AuthorizationQueryParametersError: ... the region
+    # 'us-east-2' is wrong; expecting 'us-east-1'" con un bucket confirmado
+    # en us-east-2 (Ohio) desde la propia consola de AWS. Pasar
+    # `endpoint_url` explícito con la región fuerza el host correcto sin
+    # depender de esa resolución interna.
     access_key = (os.environ.get("AWS_ACCESS_KEY_ID") or "").strip()
     secret_key = (os.environ.get("AWS_SECRET_ACCESS_KEY") or "").strip()
     region = (os.environ.get("AWS_DEFAULT_REGION") or "").strip()
@@ -79,6 +83,7 @@ def _s3_client():
         kwargs["aws_secret_access_key"] = secret_key
     if region:
         kwargs["region_name"] = region
+        kwargs["endpoint_url"] = f"https://s3.{region}.amazonaws.com"
     return boto3.client("s3", **kwargs)
 
 
