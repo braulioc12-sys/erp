@@ -4,12 +4,25 @@
 <div class="page-header">
   <h1>Ubicación de la flota (Frotcom)</h1>
   <div class="page-actions">
+    <a href="{{ url_for('integraciones.daily_report') }}" class="btn btn-secondary">📅 Reportes diarios</a>
     <form method="post" action="{{ url_for('integraciones.sync_frotcom') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-primary">🔄 Sincronizar con Frotcom</button>
     </form>
   </div>
 </div>
+
+{% if auto_sync_enabled %}
+<p class="muted mt-0" id="auto-refresh-note">Esta página se actualiza sola cada 2 minutos.</p>
+<script>
+  // 31 ago, pedido de Braulio: la información se refresca sola cada 2
+  // minutos, sin que alguien tenga que apretar "Sincronizar" a mano. La
+  // sincronización real con Frotcom ya corre en segundo plano en el
+  // servidor (ver app/scheduler.py) — este script solo recarga la página
+  // para mostrar lo último que ese proceso ya guardó.
+  setTimeout(function () { window.location.reload(); }, 120000);
+</script>
+{% endif %}
 
 {% if not configured %}
 <div class="panel" style="border-color:#f0c36d;">
@@ -25,22 +38,30 @@
   <p class="muted mt-0">Cada unidad necesita su "ID en el proveedor de GPS" (tal como aparece en Frotcom) para poder cruzar los datos. Se edita desde Flota → editar unidad.</p>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Unidad</th><th>ID en Frotcom</th><th>Última posición</th><th>Velocidad</th><th>Última actualización</th><th>Km actual</th></tr></thead>
+      <thead><tr><th>Unidad</th><th>ID en Frotcom</th><th>Ubicación real</th><th>Velocidad</th><th>Última actualización</th><th>Km total</th><th>Horas manejadas hoy</th><th>Km avanzados hoy</th></tr></thead>
       <tbody>
         {% for v in vehicles %}
         <tr>
           <td>{{ v.plate }}</td>
           <td>{{ v.gps_external_id or '— (falta configurar)' }}</td>
-          <td>{% if v.latitude and v.longitude %}{{ '%.5f'|format(v.latitude) }}, {{ '%.5f'|format(v.longitude) }}{% else %}—{% endif %}</td>
+          <td>
+            {% if v.latitude and v.longitude %}
+            <a href="https://www.google.com/maps?q={{ v.latitude }},{{ v.longitude }}" target="_blank" rel="noopener">{{ '%.5f'|format(v.latitude) }}, {{ '%.5f'|format(v.longitude) }} 🗺️</a>
+            {% else %}—{% endif %}
+          </td>
           <td>{{ (v.speed_kmh ~ ' km/h') if v.speed_kmh is not none else '—' }}</td>
           <td>{{ v.location_updated_at or '—' }}</td>
           <td>{{ '{:,.0f} km'.format(v.current_km) if v.current_km is not none else '—' }}</td>
+          {% set stats = stats_by_vehicle.get(v.id) %}
+          <td>{{ '%.1f h'|format(stats.hours) if stats else '—' }}</td>
+          <td>{{ '%.1f km'|format(stats.km) if stats else '—' }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="6" class="table-empty">No hay unidades registradas.</td></tr>
+        <tr><td colspan="8" class="table-empty">No hay unidades registradas.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
+  <p class="muted" style="margin-top:10px;">"Horas manejadas hoy" y "Km avanzados hoy" se calculan del historial de posiciones de GPS guardado en cada sincronización — para ver otros días, usa <a href="{{ url_for('integraciones.daily_report') }}">Reportes diarios</a>.</p>
 </div>
 {% endblock %}

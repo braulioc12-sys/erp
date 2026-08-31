@@ -546,6 +546,26 @@ CREATE TABLE IF NOT EXISTS vehicle_locations (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Historial de posiciones de GPS (31 ago, pedido de Braulio: horas manejadas
+-- por día y reportes diarios de km/horas). A diferencia de vehicle_locations
+-- (una sola fila por unidad, se sobrescribe), acá se guarda una fila por
+-- cada sincronización con Frotcom, para poder calcular cuánto se movió cada
+-- unidad en un rango de tiempo (ej. "hoy"). Alimentada tanto por el botón
+-- manual "Sincronizar" como por la sincronización automática en segundo
+-- plano cada 2 minutos (ver app/scheduler.py).
+CREATE TABLE IF NOT EXISTS vehicle_location_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vehicle_id INTEGER NOT NULL REFERENCES vehicles(id),
+    latitude REAL,
+    longitude REAL,
+    speed_kmh REAL,
+    odometer_km REAL,
+    recorded_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_vehicle_location_history_vehicle_time
+    ON vehicle_location_history(vehicle_id, created_at);
+
 CREATE TABLE IF NOT EXISTS invoices (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     number TEXT NOT NULL UNIQUE,

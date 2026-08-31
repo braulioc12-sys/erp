@@ -273,6 +273,13 @@ COLUMN_MIGRATIONS = [
     # esta columna ya existe, para no duplicarla. En SQLite esto no importa
     # (no valida la referencia al hacer ALTER TABLE ADD COLUMN).
     ("tires", "moved_to_tire_id", "INTEGER"),
+    # 31 ago, pedido de Braulio: reporte de cumplimiento de hoja de ruta
+    # (horas de manejo/parada esperadas vs. reales por viaje). Se necesita
+    # saber CUÁNDO empezó y terminó realmente un viaje (no solo la fecha)
+    # para poder comparar contra el GPS de ese tramo — se completan solos
+    # al cambiar el estado del viaje a EN_CURSO/ENTREGADO (ver viajes.py).
+    ("trips", "actual_start_at", "TEXT"),
+    ("trips", "actual_end_at", "TEXT"),
 ]
 
 

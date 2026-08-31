@@ -368,3 +368,80 @@ def build_liquidacion_workbook(rows, company_name, filter_description):
     wb.save(buffer)
     buffer.seek(0)
     return buffer
+
+
+GPS_DAILY_COLUMNS = ["Unidad", "Horas manejadas", "Km avanzados"]
+GPS_DAILY_COLUMN_WIDTHS = [16, 18, 16]
+
+
+def build_gps_daily_workbook(rows, company_name, date):
+    """Construye el reporte diario de GPS (31 ago, pedido de Braulio):
+    horas manejadas y km avanzados por unidad en un día puntual, calculados
+    a partir del historial de posiciones (ver app/gps_stats.py). `rows` es
+    una lista de dicts {plate, hours, km}."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Reporte GPS diario"
+
+    last_col_letter = get_column_letter(len(GPS_DAILY_COLUMNS))
+
+    ws.merge_cells(f"A1:{last_col_letter}1")
+    ws["A1"] = f"{company_name} — Reporte diario de GPS"
+    ws["A1"].font = Font(bold=True, size=14, color=COLOR_PRIMARY)
+
+    ws.merge_cells(f"A2:{last_col_letter}2")
+    generated = datetime.now().strftime("%d/%m/%Y %H:%M")
+    ws["A2"] = f"Generado el {generated}  ·  Día: {date}"
+    ws["A2"].font = Font(italic=True, size=10, color=COLOR_GRAY)
+
+    header_row = 4
+    for idx, title in enumerate(GPS_DAILY_COLUMNS, start=1):
+        cell = ws.cell(row=header_row, column=idx, value=title)
+        cell.font = Font(bold=True, color=COLOR_HEADER_TEXT)
+        cell.fill = PatternFill("solid", fgColor=COLOR_PRIMARY)
+        cell.alignment = Alignment(horizontal="right" if title != "Unidad" else "left", vertical="center")
+        cell.border = _thin_border("all")
+
+    ws.freeze_panes = f"A{header_row + 1}"
+
+    row = header_row + 1
+    total_hours = 0.0
+    total_km = 0.0
+    for r in sorted(rows, key=lambda x: x["plate"]):
+        ws.cell(row=row, column=1, value=r["plate"])
+        hours_cell = ws.cell(row=row, column=2, value=round(float(r["hours"] or 0), 1))
+        hours_cell.alignment = Alignment(horizontal="right")
+        km_cell = ws.cell(row=row, column=3, value=round(float(r["km"] or 0), 1))
+        km_cell.alignment = Alignment(horizontal="right")
+        for col in range(1, len(GPS_DAILY_COLUMNS) + 1):
+            ws.cell(row=row, column=col).border = _thin_border("bottom")
+        total_hours += r["hours"] or 0
+        total_km += r["km"] or 0
+        row += 1
+
+    if not rows:
+        ws.cell(row=row, column=1, value="No hay unidades registradas.").font = Font(italic=True, color=COLOR_GRAY)
+        row += 1
+
+    row += 1
+    total_label = ws.cell(row=row, column=1, value="TOTAL GENERAL")
+    total_label.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
+    total_label.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
+    total_label.alignment = Alignment(horizontal="right", vertical="center")
+
+    total_hours_cell = ws.cell(row=row, column=2, value=round(total_hours, 1))
+    total_km_cell = ws.cell(row=row, column=3, value=round(total_km, 1))
+    for c in (total_hours_cell, total_km_cell):
+        c.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
+        c.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
+        c.alignment = Alignment(horizontal="right", vertical="center")
+
+    for idx, width in enumerate(GPS_DAILY_COLUMN_WIDTHS, start=1):
+        ws.column_dimensions[get_column_letter(idx)].width = width
+
+    ws.sheet_view.showGridLines = False
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer

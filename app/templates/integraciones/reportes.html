@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+{% block title %}Reporte diario de GPS{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Reporte diario de GPS</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('integraciones.daily_report_export', date=date) }}" class="btn btn-secondary">Exportar a Excel</a>
+    <a href="{{ url_for('integraciones.index') }}" class="btn btn-secondary">← Volver a Ubicación GPS</a>
+  </div>
+</div>
+
+<form class="filters" method="get">
+  <label>Día
+    <input type="date" name="date" value="{{ date }}" onchange="this.form.submit()">
+  </label>
+</form>
+
+<p class="muted">Horas manejadas y km avanzados por unidad ese día, calculados del historial de posiciones de GPS guardado en cada sincronización (manual o automática cada 2 minutos).</p>
+
+<div class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Unidad</th><th class="text-right">Horas manejadas</th><th class="text-right">Km avanzados</th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ r.plate }}</td>
+          <td class="text-right">{{ '%.1f h'|format(r.hours) }}</td>
+          <td class="text-right">{{ '%.1f km'|format(r.km) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3" class="table-empty">No hay unidades registradas.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

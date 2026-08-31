@@ -2,7 +2,7 @@ from flask import Blueprint, Response, abort, flash, redirect, render_template, 
 
 from app.auth import permission_required, validate_csrf
 from app.db import execute, query_all, query_one
-from app.helpers import next_code, parse_date, parse_float, today_str
+from app.helpers import next_code, now_str, parse_date, parse_float, today_str
 from app.routes.rutas import find_route
 
 bp = Blueprint("viajes", __name__, url_prefix="/viajes")
@@ -249,7 +249,19 @@ def change_status(trip_id):
         return redirect(url_for("viajes.detail", trip_id=trip_id))
 
     if new_status == "ENTREGADO":
-        execute("UPDATE trips SET status=?, delivered_date=? WHERE id=?", (new_status, today_str(), trip_id))
+        # 31 ago: además de la fecha (ya existía), se guarda el momento
+        # exacto de inicio/fin real del viaje — es lo que necesita el futuro
+        # reporte de cumplimiento de hoja de ruta para saber qué tramo del
+        # historial de GPS corresponde a este viaje.
+        execute(
+            "UPDATE trips SET status=?, delivered_date=?, actual_end_at=? WHERE id=?",
+            (new_status, today_str(), now_str(), trip_id),
+        )
+    elif new_status == "EN_CURSO":
+        execute(
+            "UPDATE trips SET status=?, actual_start_at=COALESCE(actual_start_at, ?) WHERE id=?",
+            (new_status, now_str(), trip_id),
+        )
     else:
         execute("UPDATE trips SET status=? WHERE id=?", (new_status, trip_id))
 

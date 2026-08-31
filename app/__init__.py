@@ -93,4 +93,8 @@ def create_app(config_object=Config):
 
         return render_template("errors/404.html"), 404
 
+    from app.scheduler import start_background_sync
+
+    start_background_sync(app)
+
     return app

@@ -33,6 +33,13 @@ def today_str():
     return datetime.now().strftime("%Y-%m-%d")
 
 
+def now_str():
+    """Fecha y hora actual como texto 'YYYY-MM-DD HH:MM:SS' (mismo formato
+    que datetime('now') de SQLite), para columnas que necesitan la hora
+    exacta y no solo la fecha — ej. trips.actual_start_at/actual_end_at."""
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
 def money(value):
     try:
         return f"S/ {float(value):,.2f}"

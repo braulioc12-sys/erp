@@ -34,6 +34,11 @@ class Config:
     FROTCOM_BASE_URL = os.environ.get("FROTCOM_BASE_URL", "")
     FROTCOM_USERNAME = os.environ.get("FROTCOM_USERNAME", "")
     FROTCOM_PASSWORD = os.environ.get("FROTCOM_PASSWORD", "")
+    # Cada cuántos segundos se sincroniza solo con Frotcom en segundo plano
+    # (31 ago, pedido de Braulio: la página de Ubicación GPS se actualiza
+    # sola cada 2 minutos). 0 desactiva la sincronización automática (queda
+    # solo el botón manual "Sincronizar") — ver app/scheduler.py.
+    FROTCOM_AUTO_SYNC_SECONDS = int(os.environ.get("FROTCOM_AUTO_SYNC_SECONDS", "120"))
 
     # Facturación electrónica SUNAT vía un OSE (NubeFacT, Efact, etc.). Ver
     # README, sección "Facturación electrónica (SUNAT)".
