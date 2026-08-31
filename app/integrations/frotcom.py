@@ -64,6 +64,11 @@ class FrotcomClient:
         self.password = password
         self.timeout = timeout
         self._token = None
+        # Diagnóstico del experimento "kind=A" (ver get_vehicle_positions):
+        # None = no se intentó todavía, "" = se intentó y funcionó,
+        # cualquier otro string = el mensaje de error de ese intento.
+        self.last_asset_fetch_error = None
+        self.last_asset_fetch_count = None
 
     def is_configured(self):
         return bool(self.username and self.password)
@@ -131,6 +136,40 @@ class FrotcomClient:
             raw_items = result.get("vehicles") or result.get("data") or []
         else:
             raw_items = []
+
+        # EXPERIMENTAL (31 ago): sin filtro, /v2/vehicles solo devuelve 15
+        # unidades en la cuenta real de Braulio, pero él tiene 50+ placas.
+        # La doc de Frotcom documenta un parámetro "kind" en este mismo
+        # endpoint (V = Vehicle, A = Asset) — es posible que sin ese
+        # parámetro la API solo traiga un tipo, y que las carretas /
+        # semirremolques estén registradas como "Asset" en vez de
+        # "Vehicle". Se agrega, sin tocar lo anterior (que ya funciona),
+        # un segundo pedido con kind=A y se suma lo que traiga (sin
+        # duplicar por id). Si esto no cambia el total, hay que seguir
+        # buscando por otro lado (paginación, otra cuenta/sub-cuenta,
+        # etc.) — no se asume que esto resuelve el tema.
+        seen_ids = {str(item.get("id") or item.get("vehicleId") or item.get("plate") or "") for item in raw_items}
+        try:
+            asset_result = self._request("GET", "/v2/vehicles?kind=A", token=token)
+        except FrotcomError as exc:
+            self.last_asset_fetch_error = str(exc)
+            self.last_asset_fetch_count = None
+        else:
+            if isinstance(asset_result, list):
+                asset_items = asset_result
+            elif isinstance(asset_result, dict):
+                asset_items = asset_result.get("vehicles") or asset_result.get("data") or []
+            else:
+                asset_items = []
+            added = 0
+            for item in asset_items:
+                item_id = str(item.get("id") or item.get("vehicleId") or item.get("plate") or "")
+                if item_id and item_id not in seen_ids:
+                    seen_ids.add(item_id)
+                    raw_items.append(item)
+                    added += 1
+            self.last_asset_fetch_error = ""
+            self.last_asset_fetch_count = added
 
         positions = []
         for item in raw_items:

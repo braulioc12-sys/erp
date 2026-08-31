@@ -96,6 +96,16 @@ def sync_frotcom():
     def _fmt_id(fid):
         return f"{fid} ({label_by_id[fid]})" if fid in label_by_id else fid
 
+    # Diagnóstico del experimento "kind=A" (ver get_vehicle_positions en
+    # frotcom.py): si Frotcom devolvió menos unidades de las que Braulio
+    # espera (31 ago: 15 vs 50+ reales), probamos si el resto está
+    # registrado como "Asset" en vez de "Vehicle". Se muestra el
+    # resultado del intento aquí para no depender de logs de Render.
+    if client.last_asset_fetch_error:
+        flash(f"Aviso: el intento adicional de traer unidades tipo 'Asset' (carretas) falló: {client.last_asset_fetch_error}", "info")
+    elif client.last_asset_fetch_count:
+        flash(f"Además, Frotcom devolvió {client.last_asset_fetch_count} unidad(es) más al pedirlas como tipo 'Asset' (posibles carretas/semirremolques).", "info")
+
     if matched:
         flash(f"Sincronizado: {matched} unidad(es) actualizada(s) desde Frotcom.", "success")
         if unmatched_frotcom_ids:
