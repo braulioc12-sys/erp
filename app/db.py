@@ -331,9 +331,19 @@ def _strip_forward_fks(sql_text):
         if paren_depth <= 0:
             current_table = None
 
+    # init_db() se ejecuta en cada arranque de la app (no solo la primera
+    # vez), y Postgres no soporta "ADD CONSTRAINT IF NOT EXISTS" — a
+    # diferencia de "CREATE TABLE IF NOT EXISTS" (ya idempotente) y "ADD
+    # COLUMN IF NOT EXISTS" (usado en _apply_column_migrations_postgres).
+    # Sin este bloque DO/EXCEPTION, el segundo arranque (cualquier reinicio
+    # o redeploy posterior al primero) tira abajo la app entera con
+    # "constraint ... already exists" (visto en producción real, 31 ago).
     alter_statements = "\n".join(
-        f"ALTER TABLE {table} ADD CONSTRAINT fk_{table}_{column} "
-        f"FOREIGN KEY ({column}) REFERENCES {ref_table}({ref_col});"
+        f"DO $$ BEGIN\n"
+        f"    ALTER TABLE {table} ADD CONSTRAINT fk_{table}_{column} "
+        f"FOREIGN KEY ({column}) REFERENCES {ref_table}({ref_col});\n"
+        f"EXCEPTION WHEN duplicate_object THEN NULL;\n"
+        f"END $$;"
         for table, column, ref_table, ref_col in fk_constraints
     )
     return "\n".join(out_lines) + "\n" + alter_statements + "\n"
