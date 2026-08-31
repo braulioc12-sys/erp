@@ -117,7 +117,20 @@ class FrotcomClient:
         # el nombre exacto del endpoint de posición/odómetro y sus campos
         # hay que confirmarlos contra el "Reference guide" de tu cuenta real.
         result = self._request("GET", "/v2/vehicles", token=token)
-        raw_items = result.get("vehicles") or result.get("data") or result if isinstance(result, list) else []
+        # Confirmado contra la cuenta real de Braulio (31 ago): /v2/vehicles
+        # devuelve directamente una lista JSON (no un objeto envolvente con
+        # "vehicles"/"data"). Se dejan esas dos claves como fallback por si
+        # la respuesta cambia de forma en otro endpoint/cuenta.
+        # (Antes había un bug de precedencia de operadores en Python: "A or B
+        # or C if D else E" evalúa "A or B or C" ANTES del if/else, así que
+        # "result.get(...)" se ejecutaba igual aunque result ya fuera una
+        # lista, y explotaba con "'list' object has no attribute 'get'".)
+        if isinstance(result, list):
+            raw_items = result
+        elif isinstance(result, dict):
+            raw_items = result.get("vehicles") or result.get("data") or []
+        else:
+            raw_items = []
 
         positions = []
         for item in raw_items:
