@@ -11,11 +11,30 @@
     {% endif %}
   </div>
 </div>
-<p class="muted mt-0">El vencimiento de brevete, examen médico ocupacional y los requisitos de Backus (examen de manejo, capacitación del plan de tráfico y escuela de conductores) se registran en el detalle de cada conductor.</p>
+<p class="muted mt-0">El vencimiento de brevete, examen médico ocupacional y los requisitos de Backus (examen de manejo, capacitación del plan de tráfico y escuela de conductores) se ven en la tabla; para editarlos entra al detalle de cada conductor (desplázate a la derecha si no ves todas las columnas).</p>
 
 <div class="table-wrap">
   <table>
-    <thead><tr><th>Nombre</th><th>DNI</th><th>N° Licencia</th><th>Vence brevete</th><th>Teléfono</th><th>Estado</th><th>Documentos</th><th></th></tr></thead>
+    <thead>
+      <tr>
+        <th>Nombre completo</th>
+        <th>DNI</th>
+        <th>N° de licencia</th>
+        <th>Vencimiento de brevete</th>
+        <th>Examen médico — fecha</th>
+        <th>Examen médico — vencimiento</th>
+        <th>Examen de manejo Backus — fecha</th>
+        <th>Examen de manejo Backus — vencimiento</th>
+        <th>Capacitación Plan de tráfico Backus — fecha</th>
+        <th>Capacitación Plan de tráfico Backus — vencimiento</th>
+        <th>Escuela de conductores — fecha</th>
+        <th>Escuela de conductores — vencimiento</th>
+        <th>Teléfono</th>
+        <th>Estado</th>
+        <th>Documentos</th>
+        <th></th>
+      </tr>
+    </thead>
     <tbody>
       {% for d in drivers %}
       <tr>
@@ -23,6 +42,14 @@
         <td>{{ d.document_number or '—' }}</td>
         <td>{{ d.license_number or '—' }}</td>
         <td>{{ d.license_expiry or '—' }}</td>
+        <td>{{ d.medical_exam_date or '—' }}</td>
+        <td>{{ d.medical_exam_expiry or '—' }}</td>
+        <td>{{ d.backus_driving_exam_date or '—' }}</td>
+        <td>{{ d.backus_driving_exam_expiry or '—' }}</td>
+        <td>{{ d.backus_training_date or '—' }}</td>
+        <td>{{ d.backus_training_expiry or '—' }}</td>
+        <td>{{ d.dds_date or '—' }}</td>
+        <td>{{ d.dds_expiry or '—' }}</td>
         <td>{{ d.phone or '—' }}</td>
         <td>{{ m.badge(d.status) }}</td>
         <td>
@@ -45,7 +72,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="8" class="table-empty">No hay conductores registrados.</td></tr>
+      <tr><td colspan="16" class="table-empty">No hay conductores registrados.</td></tr>
       {% endfor %}
     </tbody>
   </table>
