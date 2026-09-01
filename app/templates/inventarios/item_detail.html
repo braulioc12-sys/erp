@@ -30,7 +30,7 @@
   <p class="muted">A qué proveedor, cuándo, cuánta cantidad y a qué precio se compró este repuesto — incluye compras todavía pendientes de recibir.</p>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Fecha</th><th>Proveedor</th><th>Orden de compra</th><th>Cantidad</th><th>Precio unitario</th><th>Subtotal</th><th>Estado</th><th></th></tr></thead>
+      <thead><tr><th>Fecha</th><th>Proveedor</th><th>Orden de compra</th><th>Cantidad pedida</th><th>Recibido</th><th>Precio unitario</th><th>Subtotal</th><th>Estado</th><th></th></tr></thead>
       <tbody>
         {% for h in purchase_history %}
         <tr>
@@ -38,13 +38,14 @@
           <td>{{ h.provider_name }}</td>
           <td>{{ h.purchase_order_number or '—' }}</td>
           <td>{{ h.quantity }}</td>
+          <td>{{ h.received_quantity }}</td>
           <td>{{ h.unit_price|money }}</td>
           <td>{{ (h.quantity * h.unit_price)|money }}</td>
           <td>{{ m.badge(h.status) }}</td>
           <td><a href="{{ url_for('inventarios.purchases_detail', purchase_id=h.purchase_id) }}" class="btn btn-secondary btn-sm">Ver compra</a></td>
         </tr>
         {% else %}
-        <tr><td colspan="8" class="table-empty">Este repuesto todavía no tiene compras registradas.</td></tr>
+        <tr><td colspan="9" class="table-empty">Este repuesto todavía no tiene compras registradas.</td></tr>
         {% endfor %}
       </tbody>
     </table>

@@ -288,6 +288,17 @@ COLUMN_MIGRATIONS = [
     # ver el primer error real de la API directamente en la pantalla de
     # "Historial de viajes", sin tener que pedir logs de Render.
     ("frotcom_trip_import_jobs", "sample_error", "TEXT"),
+    # 1 sep, pedido de Braulio: autorización de administrador + recepción
+    # parcial en Inventarios → Compras (ver app/routes/inventarios.py).
+    # authorized_by_user_id sin "REFERENCES" aquí a propósito — mismo
+    # motivo que mechanic_id/moved_to_tire_id más arriba: la FK la agrega
+    # el paso dedicado de init_db() (Postgres) una vez que la columna ya
+    # existe, tomándola del "REFERENCES users(id)" que sí sigue declarado
+    # en schema.sql.
+    ("inventory_purchases", "authorized_at", "TEXT"),
+    ("inventory_purchases", "authorized_by_name", "TEXT"),
+    ("inventory_purchases", "authorized_by_user_id", "INTEGER"),
+    ("inventory_purchase_items", "received_quantity", "REAL NOT NULL DEFAULT 0"),
 ]
 
 

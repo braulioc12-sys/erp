@@ -102,6 +102,8 @@ td.wrap, th.wrap { white-space: normal; }
 .badge-movida { background: var(--primary-soft); color: var(--primary-dark); }
 .badge-descartada { background: var(--danger-soft); color: var(--danger); }
 .badge-retirado { background: var(--text-muted-soft, #eee); color: var(--text-muted); }
+.badge-autorizada { background: var(--primary-soft); color: var(--primary-dark); }
+.badge-parcial { background: var(--warning-soft); color: var(--warning); }
 
 /* Forms */
 form.form { display: flex; flex-direction: column; gap: 14px; max-width: 640px; }

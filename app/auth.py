@@ -20,7 +20,16 @@ PERMISSIONS = {
         "viajes": {"view", "edit"},
         "liquidaciones": {"view", "edit"},
         "mantenimiento": {"view"},
-        "inventarios": {"view"},
+        # 1 sep: Operador (ej. personal de almacén) ahora puede crear
+        # órdenes de compra y confirmar la recepción de repuestos — pero
+        # AUTORIZARLAS sigue siendo exclusivo de Administrador, chequeado
+        # por rol directamente en purchases_authorize() (no por este
+        # permiso de módulo, que es el mismo "edit" de siempre). Como
+        # efecto secundario, Operador también puede administrar el
+        # catálogo de repuestos/proveedores y ajustar stock a mano — el
+        # permiso es por módulo completo, igual que en el resto del
+        # proyecto (no hay un permiso más fino solo para compras).
+        "inventarios": {"view", "edit"},
         "neumaticos": {"view"},
         "facturacion": set(),
         "guias": {"view", "edit"},

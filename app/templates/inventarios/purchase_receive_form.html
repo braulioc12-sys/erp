@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+{% block title %}Registrar recepción{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Registrar recepción — {{ purchase.provider_name }}</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('inventarios.purchases_detail', purchase_id=purchase.id) }}" class="btn btn-secondary">← Volver a la orden</a>
+  </div>
+</div>
+
+<p class="muted">Indica cuánto llegó AHORA de cada repuesto pendiente — puede ser menos de lo pedido, no hace falta que llegue todo junto. Lo que dejes en 0 sigue quedando pendiente para una próxima recepción.</p>
+
+{% if not items %}
+<div class="panel"><p class="mt-0">No quedan repuestos pendientes de recibir en esta orden.</p></div>
+{% else %}
+<form class="form panel" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Repuesto</th><th>Pedido</th><th>Ya recibido</th><th>Pendiente</th><th>Llega ahora</th></tr></thead>
+      <tbody>
+        {% for i in items %}
+        {% set pendiente = i.quantity - i.received_quantity %}
+        <tr>
+          <td>{{ i.item_name }}</td>
+          <td>{{ i.quantity }}</td>
+          <td>{{ i.received_quantity }}</td>
+          <td>{{ pendiente|round(2) }}</td>
+          <td><input type="number" name="recv_qty_{{ i.id }}" min="0" max="{{ pendiente }}" step="0.01" value="0" style="width:90px;"></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <label>Notas de esta recepción (opcional)
+    <textarea name="notes" placeholder="Ej. llegó todo menos las pastillas de freno, el proveedor avisó que las manda la próxima semana"></textarea>
+  </label>
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Registrar recepción</button>
+    <a href="{{ url_for('inventarios.purchases_detail', purchase_id=purchase.id) }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+{% endif %}
+{% endblock %}

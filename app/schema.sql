@@ -241,13 +241,23 @@ CREATE TABLE IF NOT EXISTS inventory_providers (
 );
 
 -- Compras de repuestos (encabezado): proveedor + N° de orden de compra +
--- fecha. Nace en PENDIENTE (se hizo el pedido pero no ha llegado); al
--- marcarla RECIBIDA se suma la cantidad de cada línea al stock del
--- repuesto correspondiente y se actualiza su costo unitario de referencia
--- al último precio pagado — ver receive_purchase() en
--- app/routes/inventarios.py. provider_name es una copia (mismo motivo que
--- el resto del proyecto: que el historial no cambie si el proveedor se
--- edita/desactiva después en el catálogo).
+-- fecha. Nace en PENDIENTE (borrador, todavía editable/eliminable) y debe
+-- ser AUTORIZADA por un Administrador (authorized_at/authorized_by_*, 1 sep
+-- — pedido de Braulio: "cuando lo autoriza un administrador se registra su
+-- autorización debajo de la orden") antes de poder generarse su PDF o
+-- recibirse — ver purchases_authorize()/purchases_pdf() en
+-- app/routes/inventarios.py. Una vez autorizada, la recepción puede
+-- llegar en varias entregas parciales (ver inventory_purchase_receptions
+-- más abajo) — "status" solo pasa a RECIBIDO cuando ya no se espera más
+-- mercadería (todo llegó, o el usuario cierra la orden con lo que llegó);
+-- mientras tanto sigue en PENDIENTE aunque ya esté autorizada y con
+-- recepciones parciales — el avance real se calcula comparando
+-- inventory_purchase_items.received_quantity contra quantity (ver
+-- _purchase_display_status()), no se guarda como un tercer valor de
+-- status para no tener que alterar el CHECK ya desplegado en producción.
+-- authorized_by_name/received_by_name (en las recepciones) son copias,
+-- mismo motivo que provider_name: el historial no cambia si el usuario se
+-- desactiva después.
 CREATE TABLE IF NOT EXISTS inventory_purchases (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     provider_id INTEGER REFERENCES inventory_providers(id),
@@ -257,13 +267,19 @@ CREATE TABLE IF NOT EXISTS inventory_purchases (
     status TEXT NOT NULL DEFAULT 'PENDIENTE' CHECK (status IN ('PENDIENTE', 'RECIBIDO')),
     received_at TEXT,
     notes TEXT,
+    authorized_at TEXT,
+    authorized_by_name TEXT,
+    authorized_by_user_id INTEGER REFERENCES users(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- Líneas de una compra: qué repuesto, cuánta cantidad y a qué precio
 -- unitario. item_name es una copia (mismo motivo que en el resto del
 -- proyecto: que el historial de la compra no cambie si el repuesto se
--- renombra o desactiva después en el catálogo).
+-- renombra o desactiva después en el catálogo). received_quantity (1 sep)
+-- es el acumulado de lo que ya llegó de esta línea, sumado en cada
+-- recepción parcial — nunca puede superar quantity (validado en
+-- purchases_receive()).
 CREATE TABLE IF NOT EXISTS inventory_purchase_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     purchase_id INTEGER NOT NULL REFERENCES inventory_purchases(id),
@@ -271,9 +287,35 @@ CREATE TABLE IF NOT EXISTS inventory_purchase_items (
     item_name TEXT NOT NULL,
     quantity REAL NOT NULL DEFAULT 0,
     unit_price REAL NOT NULL DEFAULT 0,
+    received_quantity REAL NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_inventory_purchase_items_purchase ON inventory_purchase_items(purchase_id);
+
+-- Recepciones de una orden de compra (1 sep): un evento por cada vez que
+-- llega mercadería al almacén — puede haber varios por orden, ya que
+-- Braulio pidió explícitamente poder recibir en entregas parciales ("puede
+-- que a veces no lleguen todos"). Cabecera + líneas, mismo patrón ya usado
+-- en el proyecto (inventory_purchases+items, tire_rotations+moves).
+CREATE TABLE IF NOT EXISTS inventory_purchase_receptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    purchase_id INTEGER NOT NULL REFERENCES inventory_purchases(id),
+    received_at TEXT NOT NULL,
+    received_by_name TEXT,
+    received_by_user_id INTEGER REFERENCES users(id),
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_inventory_purchase_receptions_purchase ON inventory_purchase_receptions(purchase_id);
+
+CREATE TABLE IF NOT EXISTS inventory_purchase_reception_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reception_id INTEGER NOT NULL REFERENCES inventory_purchase_receptions(id),
+    purchase_item_id INTEGER NOT NULL REFERENCES inventory_purchase_items(id),
+    item_name TEXT NOT NULL,
+    quantity REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_inventory_purchase_reception_items_reception ON inventory_purchase_reception_items(reception_id);
 
 -- Materiales/repuestos usados en cada orden de mantenimiento (además de
 -- los trabajos). Se guarda una copia del nombre y costo unitario al

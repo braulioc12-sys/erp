@@ -3,9 +3,12 @@
 {% block title %}Compra de repuestos{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>Compra — {{ purchase.provider_name }}</h1>
+  <h1>Orden de compra — {{ purchase.provider_name }}</h1>
   <div class="page-actions">
     <a href="{{ url_for('inventarios.purchases_list') }}" class="btn btn-secondary">← Volver a Compras</a>
+    {% if purchase.authorized_at %}
+    <a href="{{ url_for('inventarios.purchases_pdf', purchase_id=purchase.id) }}" class="btn btn-secondary" target="_blank">🖨️ Ver / Descargar PDF</a>
+    {% endif %}
   </div>
 </div>
 
@@ -13,12 +16,10 @@
   <div class="detail-grid">
     <div><span class="muted">Proveedor</span><br>{{ purchase.provider_name }}</div>
     <div><span class="muted">Orden de compra</span><br>{{ purchase.purchase_order_number or '—' }}</div>
-    <div><span class="muted">Fecha de compra</span><br>{{ purchase.purchase_date }}</div>
-    <div><span class="muted">Estado</span><br>{{ m.badge(purchase.status) }}</div>
+    <div><span class="muted">Fecha</span><br>{{ purchase.purchase_date }}</div>
+    <div><span class="muted">Estado</span><br><span class="badge badge-{{ display_status_code|lower }}">{{ display_status_label }}</span></div>
     <div><span class="muted">Total</span><br>{{ total|money }}</div>
-    {% if purchase.received_at %}
-    <div><span class="muted">Recibida el</span><br>{{ purchase.received_at }}</div>
-    {% endif %}
+    <div><span class="muted">Avance de recepción</span><br>{{ received_qty|round(2) }} / {{ total_qty|round(2) }}</div>
   </div>
   {% if purchase.notes %}
   <p style="margin-top:14px;"><span class="muted">Notas</span><br>{{ purchase.notes }}</p>
@@ -26,15 +27,36 @@
 </div>
 
 <div class="panel">
-  <h2>Repuestos de esta compra</h2>
+  <h2 class="mt-0">Autorización</h2>
+  {% if purchase.authorized_at %}
+  <p class="mt-0">✓ Autorizada por <strong>{{ purchase.authorized_by_name }}</strong> el {{ purchase.authorized_at }}.</p>
+  {% else %}
+  <p class="muted mt-0">Esta orden todavía no está autorizada — no se puede generar su PDF ni recibir repuestos hasta que un Administrador la autorice.</p>
+  {% if is_admin %}
+  <form method="post" action="{{ url_for('inventarios.purchases_authorize', purchase_id=purchase.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-primary">✓ Autorizar orden de compra</button>
+  </form>
+  {% else %}
+  <p class="muted mt-0">Pídele a un Administrador que la autorice.</p>
+  {% endif %}
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2 class="mt-0">Repuestos de esta compra</h2>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Repuesto</th><th>Cantidad</th><th>Precio unitario</th><th>Subtotal</th></tr></thead>
+      <thead><tr><th>Repuesto</th><th>Cantidad pedida</th><th>Recibido</th><th>Precio unitario</th><th>Subtotal</th></tr></thead>
       <tbody>
         {% for i in items %}
         <tr>
           <td>{{ i.item_name }}</td>
           <td>{{ i.quantity }}</td>
+          <td>
+            {{ i.received_quantity }} / {{ i.quantity }}
+            {% if i.received_quantity >= i.quantity %} ✓{% endif %}
+          </td>
           <td>{{ i.unit_price|money }}</td>
           <td>{{ (i.quantity * i.unit_price)|money }}</td>
         </tr>
@@ -47,19 +69,36 @@
 
 {% if can(current_user.role, 'inventarios', 'edit') %}
 <div class="panel">
-  {% if purchase.status == 'PENDIENTE' %}
-  <p class="muted mt-0">Esta compra todavía no afectó el stock. Márcala como recibida cuando el pedido llegue al almacén — sumará la cantidad de cada repuesto al stock y actualizará su costo unitario de referencia al precio pagado aquí.</p>
-  <form method="post" action="{{ url_for('inventarios.purchases_receive', purchase_id=purchase.id) }}" style="display:inline;">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <button type="submit" class="btn btn-primary">✓ Marcar como recibida</button>
-  </form>
-  <form method="post" action="{{ url_for('inventarios.purchases_delete', purchase_id=purchase.id) }}" onsubmit="return confirm('¿Eliminar esta orden de compra?');" style="display:inline; margin-left:8px;">
+  {% if not purchase.authorized_at %}
+  <form method="post" action="{{ url_for('inventarios.purchases_delete', purchase_id=purchase.id) }}" onsubmit="return confirm('¿Eliminar esta orden de compra?');" style="display:inline;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button type="submit" class="btn btn-danger">Eliminar</button>
   </form>
+  {% elif purchase.status != 'RECIBIDO' %}
+  <a href="{{ url_for('inventarios.purchases_receive', purchase_id=purchase.id) }}" class="btn btn-primary">📦 Registrar recepción</a>
+  <form method="post" action="{{ url_for('inventarios.purchases_close', purchase_id=purchase.id) }}" onsubmit="return confirm('¿Cerrar esta orden aunque falten repuestos por llegar? Lo que no llegó quedará como faltante.');" style="display:inline; margin-left:8px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-secondary">Cerrar orden (no llegará el resto)</button>
+  </form>
   {% else %}
-  <p class="muted mt-0">Esta compra ya está recibida — el stock de sus repuestos ya se actualizó, así que no se puede eliminar ni volver a marcar.</p>
+  <p class="muted mt-0">Esta orden ya está cerrada — el stock de sus repuestos ya se actualizó con lo recibido.</p>
   {% endif %}
+</div>
+{% endif %}
+
+{% if receptions %}
+<div class="panel">
+  <h2 class="mt-0">Historial de recepciones</h2>
+  {% for r in receptions %}
+  <div style="padding:10px 0; border-bottom:1px solid var(--border);">
+    <p class="mt-0" style="margin-bottom:4px;"><strong>{{ r.received_at }}</strong> — registrado por {{ r.received_by_name or '—' }}{% if r.notes %} · <span class="muted">{{ r.notes }}</span>{% endif %}</p>
+    <ul style="margin:0; padding-left:18px;">
+      {% for it in reception_items.get(r.id, []) %}
+      <li>{{ it.item_name }}: {{ it.quantity }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endfor %}
 </div>
 {% endif %}
 {% endblock %}
