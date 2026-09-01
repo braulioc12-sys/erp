@@ -280,6 +280,14 @@ COLUMN_MIGRATIONS = [
     # al cambiar el estado del viaje a EN_CURSO/ENTREGADO (ver viajes.py).
     ("trips", "actual_start_at", "TEXT"),
     ("trips", "actual_end_at", "TEXT"),
+    # 31 ago, tras el primer intento real de "Traer historial" (Braulio):
+    # el job terminó "Completado" con 0 viajes importados, sin ninguna
+    # pista de por qué — perform_trips_backfill ya capturaba el error real
+    # de Frotcom por cada llamada fallida, pero solo lo mandaba al log del
+    # servidor (logger.warning), invisible para Braulio. Esta columna deja
+    # ver el primer error real de la API directamente en la pantalla de
+    # "Historial de viajes", sin tener que pedir logs de Render.
+    ("frotcom_trip_import_jobs", "sample_error", "TEXT"),
 ]
 
 

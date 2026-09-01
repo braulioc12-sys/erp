@@ -615,6 +615,16 @@ CREATE TABLE IF NOT EXISTS frotcom_trip_import_jobs (
     vehicles_done INTEGER NOT NULL DEFAULT 0,
     trips_imported INTEGER NOT NULL DEFAULT 0,
     error_message TEXT,
+    -- Primer error real que devolvió la API de Frotcom durante esta
+    -- importación (si hubo alguno) — distinto de error_message, que solo
+    -- se llena si el job entero se cae. Un job puede terminar
+    -- "COMPLETADO" con 0 viajes importados porque CADA llamada a Frotcom
+    -- falló (fecha con formato rechazado, límite de llamadas, etc.) sin
+    -- que eso tumbe el job completo (se seguía intentando con el resto de
+    -- unidades) — sin esto, esa causa quedaba invisible salvo en logs de
+    -- Render (31 ago, tras el primer intento real de Braulio: 46/46
+    -- unidades, 0 viajes, sin pista de por qué).
+    sample_error TEXT,
     started_at TEXT NOT NULL DEFAULT (datetime('now')),
     finished_at TEXT
 );

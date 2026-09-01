@@ -46,9 +46,13 @@
         <tr>
           <td>{{ job.date_from }} a {{ job.date_to }}</td>
           <td>
-            {% if job.status == 'COMPLETADO' %}✅ Completado
+            {% if job.status == 'COMPLETADO' and job.trips_imported == 0 and job.sample_error %}
+              ⚠️ Completado, pero 0 viajes — Frotcom devolvió un error en todas las unidades. Ejemplo: <span class="muted">{{ job.sample_error }}</span>
+            {% elif job.status == 'COMPLETADO' and job.trips_imported == 0 %}
+              ✅ Completado — 0 viajes en ese rango (puede ser normal si esas unidades no tuvieron viajes, o si el rango es muy corto)
+            {% elif job.status == 'COMPLETADO' %}✅ Completado
             {% elif job.status == 'ERROR' %}⚠️ Error: {{ job.error_message }}
-            {% elif job.status == 'EN_PROGRESO' %}⏳ En progreso ({{ job.vehicles_done }}/{{ job.vehicles_total }} unidades)
+            {% elif job.status == 'EN_PROGRESO' %}⏳ En progreso ({{ job.vehicles_done }}/{{ job.vehicles_total }} unidades){% if job.sample_error %} — algunas fallaron, ejemplo: <span class="muted">{{ job.sample_error }}</span>{% endif %}
             {% else %}⏳ Pendiente{% endif %}
           </td>
           <td class="text-right">{{ job.vehicles_done }}/{{ job.vehicles_total }}</td>

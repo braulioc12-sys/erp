@@ -104,11 +104,28 @@ def perform_trips_backfill(app, job_id, date_from, date_to):
             db.commit()
             chunks = _chunk_date_range(date_from, date_to)
             trips_imported = 0
+            errors_seen = 0
+            # Primer error real de la API que se encuentre en esta corrida
+            # (31 ago) — se guarda en el job para que sea visible en la
+            # pantalla de "Historial de viajes" sin necesitar logs de
+            # Render. Un job puede terminar "COMPLETADO" con 0 viajes
+            # importados si TODAS las llamadas a Frotcom fallaron (ej. un
+            # formato de fecha rechazado) — sin esto, esa causa quedaba
+            # invisible para Braulio.
+            sample_error = None
             for vehicle in vehicles:
                 for chunk_from, chunk_to in chunks:
                     try:
                         trips = client.get_vehicle_trips(vehicle["gps_external_id"], chunk_from, chunk_to)
                     except FrotcomError as exc:
+                        errors_seen += 1
+                        if sample_error is None:
+                            sample_error = f"Unidad {vehicle['gps_external_id']}: {exc}"
+                            db.execute(
+                                "UPDATE frotcom_trip_import_jobs SET sample_error=? WHERE id=?",
+                                (sample_error[:500], job_id),
+                            )
+                            db.commit()
                         logger.warning(
                             "No se pudo traer viajes de la unidad %s (%s a %s): %s",
                             vehicle["gps_external_id"], chunk_from, chunk_to, exc,
@@ -128,7 +145,10 @@ def perform_trips_backfill(app, job_id, date_from, date_to):
                 (job_id,),
             )
             db.commit()
-            logger.info("Importación de viajes #%s completada: %s viajes.", job_id, trips_imported)
+            logger.info(
+                "Importación de viajes #%s completada: %s viajes, %s llamadas fallidas.",
+                job_id, trips_imported, errors_seen,
+            )
         except Exception as exc:
             logger.exception("Error en la importación de viajes #%s", job_id)
             db.execute(
