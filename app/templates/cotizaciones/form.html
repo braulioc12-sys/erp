@@ -1,0 +1,216 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Editar cotización' if quotation else 'Nueva cotización' }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>{{ 'Editar cotización N° ' + quotation.number|string if quotation else 'Nueva cotización' }}</h1></div>
+
+<form class="form panel" method="post" id="quotation-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <div class="form-row">
+    <label>Cliente (opcional, autocompleta los datos de abajo)
+      <select id="client-select">
+        <option value="">-- Escribir a mano / cliente nuevo --</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}"
+          data-name="{{ c.name }}" data-ruc="{{ c.ruc or '' }}" data-address="{{ c.address or '' }}"
+          {{ 'selected' if quotation and (quotation.client_id|string) == (c.id|string) }}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+  <input type="hidden" name="client_id" id="client_id" value="{{ quotation.client_id if quotation and quotation.client_id else '' }}">
+
+  <div class="form-row">
+    <label>Señores (razón social) *
+      <input type="text" name="client_name" id="client_name" value="{{ quotation.client_name if quotation else '' }}" required>
+    </label>
+    <label>RUC
+      <input type="text" name="client_ruc" id="client_ruc" value="{{ quotation.client_ruc if quotation else '' }}">
+    </label>
+  </div>
+  <label>Dirección
+    <input type="text" name="client_address" id="client_address" value="{{ quotation.client_address if quotation else '' }}">
+  </label>
+
+  <div class="form-row">
+    <label>Fecha de emisión *
+      <input type="date" name="issue_date" value="{{ quotation.issue_date if quotation else today }}" required>
+    </label>
+    <label>Fecha de vencimiento
+      <input type="date" name="due_date" value="{{ quotation.due_date if quotation else '' }}">
+    </label>
+    <label>Moneda
+      <select name="currency">
+        {% for cur in ['SOLES', 'DOLARES'] %}
+        <option value="{{ cur }}" {{ 'selected' if (quotation.currency if quotation else 'SOLES') == cur }}>{{ cur.title() }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+  <div class="form-row">
+    <label>Forma de pago
+      <input type="text" name="payment_method" value="{{ quotation.payment_method if quotation else 'Transferencia bancaria' }}">
+    </label>
+    <label>Condición de pago
+      <input type="text" name="payment_condition" value="{{ quotation.payment_condition if quotation else 'CONTADO' }}">
+    </label>
+  </div>
+  <label>Observación (opcional)
+    <textarea name="observation">{{ quotation.observation if quotation else '' }}</textarea>
+  </label>
+
+  <label>Ítems de la cotización *</label>
+  <div class="table-wrap">
+    <table id="items-table">
+      <thead>
+        <tr>
+          <th style="width:10%;">Código</th>
+          <th>Descripción</th>
+          <th style="width:11%;">Unidad medida</th>
+          <th style="width:8%;">Cant.</th>
+          <th style="width:10%;">V. Unit</th>
+          <th style="width:10%;">Desc. U.</th>
+          <th style="width:11%;">Tributo</th>
+          <th style="width:10%;" class="text-right">V. Venta</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="items-tbody">
+        {% for it in items %}
+        <tr class="item-row">
+          <td><input type="text" name="item_code" value="{{ it.code or '' }}"></td>
+          <td><input type="text" name="item_description" value="{{ it.description }}" style="min-width:180px;"></td>
+          <td><input type="text" name="item_unit" value="{{ it.unit or '' }}"></td>
+          <td><input type="number" name="item_quantity" min="0" step="0.01" value="{{ it.quantity }}" class="qty-input" style="width:70px;"></td>
+          <td><input type="number" name="item_unit_price" min="0" step="0.01" value="{{ it.unit_price }}" class="price-input" style="width:85px;"></td>
+          <td><input type="number" name="item_unit_discount" min="0" step="0.01" value="{{ it.unit_discount }}" class="disc-input" style="width:80px;"></td>
+          <td>
+            <select name="item_tax_treatment" class="tax-select">
+              {% for t in ['GRAVADO', 'EXONERADO', 'INAFECTO'] %}
+              <option value="{{ t }}" {{ 'selected' if it.tax_treatment == t }}>{{ t.title() }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td class="text-right line-total">S/ 0.00</td>
+          <td><button type="button" class="btn btn-secondary btn-remove-row">✕</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="btn-group" style="margin-top:-8px;">
+    <button type="button" class="btn btn-secondary" id="btn-add-row">+ Agregar línea</button>
+  </div>
+
+  <div class="form-row">
+    <label>Total Descuentos (S/, opcional — ajuste aparte del "Desc. U." de cada línea)
+      <input type="number" name="discount_total" min="0" step="0.01" id="discount-input" value="{{ quotation.discount_total if quotation else 0 }}">
+    </label>
+    <label>Total Otros Cargos (S/, opcional)
+      <input type="number" name="other_charges_total" min="0" step="0.01" id="other-charges-input" value="{{ quotation.other_charges_total if quotation else 0 }}">
+    </label>
+  </div>
+
+  <div class="panel" style="background:var(--bg-soft, #f8f9fb);">
+    <p class="mt-0">Total Gravado: <strong id="calc-gravado">S/ 0.00</strong></p>
+    <p class="mt-0">Total Exonerado: <strong id="calc-exonerado">S/ 0.00</strong></p>
+    <p class="mt-0">Total Inafecto: <strong id="calc-inafecto">S/ 0.00</strong></p>
+    <p class="mt-0">Total IGV (18% de lo Gravado): <strong id="calc-igv">S/ 0.00</strong></p>
+    <p class="mt-0">Importe Total: <strong id="calc-total">S/ 0.00</strong></p>
+    <p class="muted mt-0" style="margin-bottom:0;">Estos totales son solo una vista previa — el sistema los vuelve a calcular al guardar.</p>
+  </div>
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">{{ 'Guardar cambios' if quotation else 'Crear cotización' }}</button>
+    <a href="{{ url_for('cotizaciones.detail', quotation_id=quotation.id) if quotation else url_for('cotizaciones.list_view') }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+
+<script>
+(function () {
+  var tbody = document.getElementById('items-tbody');
+  var rowTemplate = function () {
+    var tr = document.createElement('tr');
+    tr.className = 'item-row';
+    tr.innerHTML =
+      '<td><input type="text" name="item_code"></td>' +
+      '<td><input type="text" name="item_description" style="min-width:180px;"></td>' +
+      '<td><input type="text" name="item_unit"></td>' +
+      '<td><input type="number" name="item_quantity" min="0" step="0.01" value="1" class="qty-input" style="width:70px;"></td>' +
+      '<td><input type="number" name="item_unit_price" min="0" step="0.01" value="0" class="price-input" style="width:85px;"></td>' +
+      '<td><input type="number" name="item_unit_discount" min="0" step="0.01" value="0" class="disc-input" style="width:80px;"></td>' +
+      '<td><select name="item_tax_treatment" class="tax-select">' +
+      '<option value="GRAVADO" selected>Gravado</option><option value="EXONERADO">Exonerado</option><option value="INAFECTO">Inafecto</option>' +
+      '</select></td>' +
+      '<td class="text-right line-total">S/ 0.00</td>' +
+      '<td><button type="button" class="btn btn-secondary btn-remove-row">✕</button></td>';
+    return tr;
+  };
+
+  document.getElementById('btn-add-row').addEventListener('click', function () {
+    var tr = rowTemplate();
+    tbody.appendChild(tr);
+    bindRow(tr);
+    recalc();
+  });
+
+  function bindRow(tr) {
+    tr.querySelector('.btn-remove-row').addEventListener('click', function () {
+      tr.remove();
+      recalc();
+    });
+    tr.querySelectorAll('input, select').forEach(function (el) {
+      el.addEventListener('input', recalc);
+      el.addEventListener('change', recalc);
+    });
+  }
+
+  function recalc() {
+    var gravado = 0, exonerado = 0, inafecto = 0;
+    tbody.querySelectorAll('.item-row').forEach(function (tr) {
+      var qty = parseFloat(tr.querySelector('.qty-input').value) || 0;
+      var price = parseFloat(tr.querySelector('.price-input').value) || 0;
+      var disc = parseFloat(tr.querySelector('.disc-input').value) || 0;
+      var salePrice = price - disc;
+      var lineTotal = qty * salePrice;
+      tr.querySelector('.line-total').textContent = 'S/ ' + lineTotal.toFixed(2);
+      var tax = tr.querySelector('.tax-select').value;
+      if (tax === 'EXONERADO') exonerado += lineTotal;
+      else if (tax === 'INAFECTO') inafecto += lineTotal;
+      else gravado += lineTotal;
+    });
+    var igv = gravado * 0.18;
+    var descuentos = parseFloat(document.getElementById('discount-input').value) || 0;
+    var otrosCargos = parseFloat(document.getElementById('other-charges-input').value) || 0;
+    var total = gravado + exonerado + inafecto + igv - descuentos + otrosCargos;
+    document.getElementById('calc-gravado').textContent = 'S/ ' + gravado.toFixed(2);
+    document.getElementById('calc-exonerado').textContent = 'S/ ' + exonerado.toFixed(2);
+    document.getElementById('calc-inafecto').textContent = 'S/ ' + inafecto.toFixed(2);
+    document.getElementById('calc-igv').textContent = 'S/ ' + igv.toFixed(2);
+    document.getElementById('calc-total').textContent = 'S/ ' + total.toFixed(2);
+  }
+
+  tbody.querySelectorAll('.item-row').forEach(bindRow);
+  document.getElementById('discount-input').addEventListener('input', recalc);
+  document.getElementById('other-charges-input').addEventListener('input', recalc);
+
+  if (tbody.querySelectorAll('.item-row').length === 0) {
+    var tr = rowTemplate();
+    tbody.appendChild(tr);
+    bindRow(tr);
+  }
+  recalc();
+
+  var clientSelect = document.getElementById('client-select');
+  clientSelect.addEventListener('change', function () {
+    var opt = clientSelect.options[clientSelect.selectedIndex];
+    document.getElementById('client_id').value = clientSelect.value;
+    if (clientSelect.value) {
+      document.getElementById('client_name').value = opt.dataset.name || '';
+      document.getElementById('client_ruc').value = opt.dataset.ruc || '';
+      document.getElementById('client_address').value = opt.dataset.address || '';
+    }
+  });
+})();
+</script>
+{% endblock %}

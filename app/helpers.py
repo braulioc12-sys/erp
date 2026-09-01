@@ -47,6 +47,92 @@ def money(value):
         return "S/ 0.00"
 
 
+_UNIDADES = ["", "UNO", "DOS", "TRES", "CUATRO", "CINCO", "SEIS", "SIETE", "OCHO", "NUEVE"]
+_ESPECIALES_10_19 = ["DIEZ", "ONCE", "DOCE", "TRECE", "CATORCE", "QUINCE", "DIECISEIS",
+                     "DIECISIETE", "DIECIOCHO", "DIECINUEVE"]
+_DECENAS = ["", "", "VEINTE", "TREINTA", "CUARENTA", "CINCUENTA", "SESENTA", "SETENTA",
+            "OCHENTA", "NOVENTA"]
+_CENTENAS = ["", "CIENTO", "DOSCIENTOS", "TRESCIENTOS", "CUATROCIENTOS", "QUINIENTOS",
+             "SEISCIENTOS", "SETECIENTOS", "OCHOCIENTOS", "NOVECIENTOS"]
+
+
+def _tres_digitos_a_letras(n):
+    """Convierte un número de 0 a 999 a letras en español."""
+    if n == 0:
+        return ""
+    if n == 100:
+        return "CIEN"
+    resultado = []
+    centena, resto = divmod(n, 100)
+    if centena:
+        resultado.append(_CENTENAS[centena])
+    if resto:
+        if 10 <= resto <= 19:
+            resultado.append(_ESPECIALES_10_19[resto - 10])
+        else:
+            decena, unidad = divmod(resto, 10)
+            if decena == 2 and unidad:
+                resultado.append("VEINTI" + _UNIDADES[unidad])
+            else:
+                partes = [_DECENAS[decena]] if decena else []
+                if decena and unidad:
+                    partes.append("Y")
+                if unidad:
+                    partes.append(_UNIDADES[unidad])
+                resultado.append(" ".join(p for p in partes if p))
+    return " ".join(resultado)
+
+
+def _apocope_uno(palabras):
+    """Cualquier forma terminada en 'UNO' ('UNO', 'VEINTIUNO', 'TREINTA Y
+    UNO'...) pierde la O final antes de MIL o MILLONES en español
+    ('OCHENTA Y UN MIL', 'VEINTIUN MIL', no '...UNO MIL')."""
+    if palabras.endswith("UNO"):
+        return palabras[:-1]
+    return palabras
+
+
+def number_to_words_es(n):
+    """Convierte un entero no negativo a letras en español (mayúsculas),
+    soportando hasta los millones — suficiente para montos de cotizaciones
+    y facturas. Ej.: 95580 -> 'NOVENTA Y CINCO MIL QUINIENTOS OCHENTA'."""
+    n = int(n)
+    if n == 0:
+        return "CERO"
+    partes = []
+    millones, resto = divmod(n, 1_000_000)
+    if millones:
+        if millones == 1:
+            partes.append("UN MILLON")
+        else:
+            partes.append(f"{_apocope_uno(_tres_digitos_a_letras(millones))} MILLONES")
+    miles, resto = divmod(resto, 1000)
+    if miles:
+        if miles == 1:
+            partes.append("MIL")
+        else:
+            partes.append(f"{_apocope_uno(_tres_digitos_a_letras(miles))} MIL")
+    if resto:
+        partes.append(_tres_digitos_a_letras(resto))
+    return " ".join(partes)
+
+
+def amount_to_words_pen(amount):
+    """Monto en soles a letras, formato peruano estándar de comprobantes:
+    'SON: NOVENTA Y CINCO MIL QUINIENTOS OCHENTA Y 00/100 SOLES'."""
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        amount = 0.0
+    entero = int(amount)
+    centavos = round((amount - entero) * 100)
+    if centavos == 100:
+        entero += 1
+        centavos = 0
+    palabras = number_to_words_es(entero)
+    return f"{palabras} Y {centavos:02d}/100 SOLES"
+
+
 def pretty_label(value):
     """Convierte códigos tipo 'COMBUSTIBLE' o 'en_curso' en texto legible
     ('Combustible', 'En Curso'). Si el valor ya viene con formato humano

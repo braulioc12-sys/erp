@@ -44,10 +44,40 @@ class Config:
     # README, sección "Facturación electrónica (SUNAT)".
     OSE_RUTA = os.environ.get("OSE_RUTA", "")
     OSE_TOKEN = os.environ.get("OSE_TOKEN", "")
-    COMPANY_RUC = os.environ.get("COMPANY_RUC", "")
-    COMPANY_ADDRESS = os.environ.get("COMPANY_ADDRESS", "")
+    # Datos reales de Harraso Transport S.A.C. (tomados de una cotización
+    # real que Braulio compartió, 1 sep) — se usan como default porque
+    # antes quedaban vacíos; se pueden sobreescribir por variable de
+    # entorno si cambian.
+    COMPANY_RUC = os.environ.get("COMPANY_RUC", "20610357726")
+    COMPANY_ADDRESS = os.environ.get(
+        "COMPANY_ADDRESS", "AV. MANUEL DEL VALLE LT. 15 MZ. X - LIMA LIMA LURIN"
+    )
+    COMPANY_EMAIL = os.environ.get("COMPANY_EMAIL", "contacto@harraso.com")
+    COMPANY_PHONE = os.environ.get("COMPANY_PHONE", "994185119")
     INVOICE_SERIES = os.environ.get("INVOICE_SERIES", "F001")
     WAYBILL_SERIES = os.environ.get("WAYBILL_SERIES", "T001")
+    # Número inicial de Cotizaciones (1 sep) — Braulio pidió seguir la
+    # numeración real de sus cotizaciones anteriores (la última que mandó
+    # como referencia fue la N° 111), así que el módulo arranca en 112.
+    QUOTATION_START_NUMBER = int(os.environ.get("QUOTATION_START_NUMBER", "112"))
+    # Datos bancarios para la sección "Datos para la Transferencia" del PDF
+    # de Cotizaciones (tomados de la misma cotización real de referencia) —
+    # AJUSTAR aquí si las cuentas cambian.
+    COMPANY_BANK_NACION_ACCOUNT = os.environ.get(
+        "COMPANY_BANK_NACION_ACCOUNT", "00003351882"
+    )
+    COMPANY_BANK_NACION_CCI = os.environ.get(
+        "COMPANY_BANK_NACION_CCI", "01800300000335188240"
+    )
+    COMPANY_BANK_BCP_SAVINGS_ACCOUNT = os.environ.get(
+        "COMPANY_BANK_BCP_SAVINGS_ACCOUNT", "19477004008025"
+    )
+    COMPANY_BANK_BCP_SAVINGS_CCI = os.environ.get(
+        "COMPANY_BANK_BCP_SAVINGS_CCI", "00219417700400802598"
+    )
+    COMPANY_BANK_BCP_CHECKING_ACCOUNT = os.environ.get(
+        "COMPANY_BANK_BCP_CHECKING_ACCOUNT", "1949949117029"
+    )
 
     # decolecta.com: tipo de cambio SUNAT (liquidación de Gastos) y
     # consulta de RUC (autocompletar proveedor al registrar un gasto).

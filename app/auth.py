@@ -32,6 +32,10 @@ PERMISSIONS = {
         "inventarios": {"view", "edit"},
         "neumaticos": {"view"},
         "facturacion": set(),
+        # Cotizaciones (1 sep): mismo criterio de acceso que Facturación,
+        # por ser también un documento comercial con montos — Operador no
+        # entra a este módulo.
+        "cotizaciones": set(),
         "guias": {"view", "edit"},
         "inspecciones": {"view", "edit"},
         "rutas": {"view"},

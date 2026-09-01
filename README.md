@@ -4,7 +4,9 @@ Sistema web para gestionar Harraso Transport (empresa de transporte de carga): v
 
 ## Marca
 
-El logo de Harraso Transport / BRMS está en `app/static/img/` (`logo-lockup.png`, el logotipo horizontal usado en el login y el menú lateral; `logo-mark.png`, la marca circular "B" usada como base de los íconos de la app). Los íconos de la PWA (`app/static/icons/icon-192.png` y `icon-512.png`) y el manifest (`app/static/manifest.webmanifest`) ya están generados a partir de ese logo. `COMPANY_NAME` (variable de entorno, ver `.env.example`) controla el nombre que se muestra junto al logo y en el título de la pestaña del navegador — por defecto "Harraso Transport". Si el logo cambia, basta con reemplazar esos dos archivos PNG y regenerar los íconos con el mismo recorte/relleno.
+El logo de Harraso Transport está en `app/static/img/` (`logo-lockup.png`, el logotipo horizontal usado en el login y el menú lateral; `logo-mark.png`, la marca circular "B" usada como base de los íconos de la app). Los íconos de la PWA (`app/static/icons/icon-192.png` y `icon-512.png`) y el manifest (`app/static/manifest.webmanifest`) ya están generados a partir de ese logo. `COMPANY_NAME` (variable de entorno, ver `.env.example`) controla el nombre que se muestra junto al logo y en el título de la pestaña del navegador — por defecto "Harraso Transport". Si el logo cambia, basta con reemplazar esos dos archivos PNG y regenerar los íconos con el mismo recorte/relleno.
+
+**Logo de BRMS (1 sep):** junto al logo de Harraso Transport, en el mismo sitio, aparece también el logo de BRMS (`app/static/img/logo-brms.png`, fondo transparente) — pedido de Braulio para reforzar esa marca en todo el sistema. Aparece en 5 lugares: el menú lateral y el login (Harraso a la izquierda, BRMS a la derecha), y en los 3 documentos imprimibles/PDF (reporte de inspección, checklist de inspección, orden de compra). En el menú lateral y el login, ambos logos van en una sola fila con `flex-wrap: nowrap` — el de Harraso se encoge (conservando su proporción) para dejarle sitio fijo al de BRMS si el espacio es angosto, en vez de saltar a una segunda línea (ajuste del 1 sep, después de que el ajuste inicial dejaba que se apilaran en pantallas angostas).
 
 ## Stack técnico
 
@@ -27,6 +29,7 @@ El logo de Harraso Transport / BRMS está en `app/static/img/` (`logo-lockup.png
 - **Neumáticos:** módulo independiente para controlar la vida útil y posición de cada llanta de cada unidad, con un diagrama distinto según el tipo de unidad — ver la sección dedicada más abajo.
 - **Inspecciones:** checklist de inspección de una unidad (llantas, frenos, luces, etc.) antes de salir o al llegar de un viaje; los ítems del checklist se administran desde Catálogos. Cada inspección se puede **imprimir o descargar como PDF** con el logo de la empresa en el encabezado.
 - **Facturación:** genera facturas por cliente a partir de viajes entregados y aún no facturados; controla estado (pendiente, pagada, vencida, anulada); puede enviarse electrónicamente a SUNAT — ver la sección dedicada más abajo.
+- **Cotizaciones:** arma el documento comercial que se le envía a un cliente antes de un servicio, con el mismo formato (Gravado/Exonerado/Inafecto/IGV, monto en letras, datos bancarios) que ya usa Harraso — ver la sección dedicada más abajo.
 - **Guías de Remisión:** genera la guía de remisión electrónica ("modalidad Transportista") de un viaje, con los datos de traslado, vehículo y conductor; puede enviarse a SUNAT igual que las facturas.
 - **Usuarios:** solo el Administrador puede crear usuarios y asignar el rol Administrador u Operador.
 - **Catálogos** (solo Administrador): agrega o desactiva conceptos de mantenimiento, ítems de inspección y **propietarios de unidades** desde la web, sin tocar código (los conceptos de gasto, con su cuenta contable, se administran aparte en Liquidaciones → Conceptos).
@@ -53,6 +56,7 @@ El panel avisa (30 días antes de vencer, o si ya venció) sobre: vencimiento de
 | Neumáticos | Ver/Crear/Editar | Solo ver |
 | Inspecciones | Ver/Crear/Editar | Ver/Crear/Editar |
 | Facturación | Ver/Crear/Editar/Enviar a SUNAT | Sin acceso |
+| Cotizaciones | Ver/Crear/Editar | Sin acceso |
 | Guías de Remisión | Ver/Crear/Editar/Enviar a SUNAT | Ver/Crear/Editar/Enviar a SUNAT |
 | Usuarios | Ver/Crear/Editar | Sin acceso |
 | Catálogos | Ver/Crear/Editar | Sin acceso |
@@ -261,6 +265,21 @@ Esta integración **no ha podido probarse contra una cuenta real de ningún OSE*
 - El formato exacto de la respuesta del OSE (nombres de campos de éxito/error, enlaces de PDF/XML/CDR).
 
 **Antes de emitir un solo comprobante a un cliente real, pide a tu contador (o a alguien con experiencia en facturación electrónica peruana) que revise los primeros comprobantes emitidos en modo de pruebas.** Un código de catálogo equivocado puede hacer que SUNAT rechace el comprobante, o que lo acepte mal clasificado — con las implicancias tributarias que eso conlleva. Mientras tanto, el resto del sistema (facturas y guías internas, control de estados, historial) funciona con normalidad sin esta integración; simplemente los comprobantes quedan como "No enviados" hasta que la actives y confirmes.
+
+## Cotizaciones (1 sep)
+
+Módulo para armar el documento comercial que se le envía a un cliente **antes** de un servicio — replica exactamente el formato que ya usa Harraso en sus cotizaciones en papel/Excel (mismo encabezado con RUC/COTIZACIÓN/N°, tabla de ítems, bloque de totales Gravado/Exonerado/Inafecto/IGV, banner "IMPORTE TOTAL A PAGAR", monto en letras y datos bancarios).
+
+**Una cotización es un documento independiente** — no se convierte automáticamente en un Viaje ni en una Factura; es solo la propuesta comercial que se envía al cliente antes de acordar el servicio. Si el cliente acepta, el viaje y la factura se registran por separado como siempre.
+
+- **Numeración:** continúa la numeración que ya venía usando Harraso — la primera cotización emitida por el sistema es la **N° 112** (configurable con `QUOTATION_START_NUMBER` en `.env` si hace falta ajustarla), y cada cotización nueva toma el siguiente número correlativo.
+- **Cliente:** se puede elegir de la lista de Clientes (autocompleta razón social, RUC y dirección) o escribirlos a mano para un cliente nuevo que aún no está en el catálogo — en ambos casos los datos quedan guardados con la cotización y se pueden editar sin afectar el catálogo de Clientes.
+- **Ítems:** el "Código" de cada línea es **texto libre** (no depende de un catálogo de servicios) — se escribe lo que corresponda para esa cotización, igual que en el documento de referencia. Cada línea tiene su propio tratamiento tributario (Gravado/Exonerado/Inafecto), aunque en la práctica casi todas las líneas de Harraso son Gravado.
+- **Totales:** el sistema calcula automáticamente Total Gravado, Exonerado, Inafecto, IGV (18% solo sobre lo Gravado — tasa vigente, fija en `IGV_RATE` en `app/routes/cotizaciones.py`), Descuentos, Otros Cargos e Importe Total, además del monto en letras ("SON: ... Y XX/100 SOLES"). El formulario muestra una vista previa en vivo mientras escribes, pero el total que queda guardado siempre lo recalcula el servidor a partir de los valores enviados.
+- **Estados:** Borrador → Enviada → Aceptada / Rechazada. Solo se puede editar o eliminar una cotización mientras está en Borrador.
+- **PDF:** cada cotización se puede ver/descargar como PDF (botón "Imprimir / Guardar como PDF" del navegador, igual que el resto de documentos del sistema) con ambos logos (Harraso + BRMS) en el encabezado, para mantener consistencia con el resto de los documentos imprimibles.
+- **Datos bancarios y de la empresa:** el RUC, dirección, correo, teléfono y las cuentas bancarias (Banco de la Nación, BCP ahorro y cuenta corriente) que aparecen en el PDF vienen de variables de entorno (`COMPANY_RUC`, `COMPANY_ADDRESS`, `COMPANY_EMAIL`, `COMPANY_PHONE`, `COMPANY_BANK_*` — ver `.env.example`), precargadas con los datos reales de Harraso tomados de una cotización de referencia. **AJUSTAR:** antes de enviar cotizaciones reales a clientes, confirma que esos números de cuenta y datos de contacto sigan vigentes — si algo cambió, se actualiza sin tocar código, solo la variable de entorno correspondiente.
+- **Permisos:** por ahora es de acceso exclusivo del Administrador (igual que Facturación) — el Operador no ve el módulo. Se puede ajustar editando `PERMISSIONS["OPERADOR"]["cotizaciones"]` en `app/auth.py` si más adelante se quiere dar acceso al Operador.
 
 ## Cómo correrlo en tu computadora
 

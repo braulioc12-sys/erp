@@ -729,6 +729,53 @@ CREATE TABLE IF NOT EXISTS waybills (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Cotizaciones (1 sep) — documento comercial que se le envía a un cliente
+-- antes de un viaje/servicio, con el mismo formato de columnas/totales que
+-- ya usa Harraso en sus cotizaciones reales (Gravado/Exonerado/Inafecto/
+-- IGV/Descuentos/Otros Cargos). Independiente de Viajes/Facturación por
+-- ahora (decisión de Braulio, 1 sep) — solo genera el PDF para enviar.
+CREATE TABLE IF NOT EXISTS quotations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    number INTEGER NOT NULL UNIQUE,
+    client_id INTEGER REFERENCES clients(id),
+    -- Copia del cliente al momento de crear la cotización (mismo criterio
+    -- que inventory_purchases.provider_name) — permite corregir el dato a
+    -- mano para esta cotización puntual sin tocar el catálogo de Clientes,
+    -- y conserva el dato aunque el cliente se desactive después.
+    client_name TEXT NOT NULL,
+    client_ruc TEXT,
+    client_address TEXT,
+    issue_date TEXT NOT NULL,
+    due_date TEXT,
+    currency TEXT NOT NULL DEFAULT 'SOLES',
+    payment_method TEXT,
+    payment_condition TEXT,
+    observation TEXT,
+    discount_total REAL NOT NULL DEFAULT 0,
+    other_charges_total REAL NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'BORRADOR' CHECK (status IN ('BORRADOR', 'ENVIADA', 'ACEPTADA', 'RECHAZADA')),
+    created_by_user_id INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS quotation_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    quotation_id INTEGER NOT NULL REFERENCES quotations(id),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    code TEXT,
+    description TEXT NOT NULL,
+    unit TEXT,
+    quantity REAL NOT NULL DEFAULT 1,
+    unit_price REAL NOT NULL DEFAULT 0,
+    unit_discount REAL NOT NULL DEFAULT 0,
+    -- Tratamiento tributario de la línea (18% IGV solo sobre lo Gravado) —
+    -- la mayoría de líneas de Harraso son Gravado, pero se deja por línea
+    -- (no fijo para toda la cotización) para que el total Exonerado/
+    -- Inafecto salga bien si algún día hace falta.
+    tax_treatment TEXT NOT NULL DEFAULT 'GRAVADO' CHECK (tax_treatment IN ('GRAVADO', 'EXONERADO', 'INAFECTO'))
+);
+CREATE INDEX IF NOT EXISTS idx_quotation_items_quotation ON quotation_items(quotation_id);
+
 CREATE INDEX IF NOT EXISTS idx_trips_status ON trips(status);
 CREATE INDEX IF NOT EXISTS idx_trips_client ON trips(client_id);
 CREATE INDEX IF NOT EXISTS idx_expenses_trip ON expenses(trip_id);

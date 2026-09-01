@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cotización {{ quotation.number }} — {{ quotation.client_name }}</title>
+  <style>
+    :root {
+      --primary: #1d4ed8;
+      --text: #1c2430;
+      --text-muted: #667085;
+      --border: #d0d5dd;
+      --soft: #e8edfc;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text); font-size: 12.5px; line-height: 1.45;
+      max-width: 900px; margin: 0 auto; padding: 26px 30px;
+    }
+
+    .print-toolbar { text-align: right; margin-bottom: 16px; }
+    .print-toolbar button {
+      background: var(--primary); color: #fff; border: none; border-radius: 8px;
+      padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer;
+    }
+    .print-toolbar button:hover { background: #1737a6; }
+    .print-toolbar .hint { display: block; margin-top: 6px; font-size: 12px; color: var(--text-muted); }
+
+    .doc-header {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: 16px; margin-bottom: 12px;
+    }
+    .doc-header .logos { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; }
+    .doc-header .logos img { max-height: 48px; display: block; }
+    .doc-header .company-info { flex: 1 1 auto; text-align: center; }
+    .doc-header .company-info h1 { margin: 0 0 4px 0; font-size: 15.5px; color: var(--text); }
+    .doc-header .company-info div { font-size: 11.5px; color: var(--text-muted); }
+    .doc-header .code-box {
+      flex: 0 0 auto; border: 2px solid var(--primary); border-radius: 14px;
+      padding: 10px 18px; text-align: center; min-width: 160px;
+    }
+    .doc-header .code-box .ruc { font-size: 11px; color: var(--text-muted); }
+    .doc-header .code-box .title { font-size: 15px; font-weight: 700; color: var(--primary); margin: 3px 0; }
+    .doc-header .code-box .number { font-size: 12.5px; font-weight: 600; }
+
+    .meta-block {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px;
+      border-top: 2px solid var(--text); border-bottom: 1px solid var(--border);
+      padding: 10px 0; margin-bottom: 8px; font-size: 12px;
+    }
+    .meta-block .row span.label { color: var(--text-muted); display: inline-block; min-width: 90px; }
+
+    .observation { font-size: 11.5px; padding: 6px 0 10px 0; border-bottom: 1px solid var(--border); margin-bottom: 10px; }
+
+    table.items { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
+    table.items th, table.items td { border: 1px solid var(--border); padding: 6px 8px; text-align: left; font-size: 11px; }
+    table.items th { background: var(--text); color: #fff; font-weight: 600; }
+    table.items td.num, table.items th.num { text-align: right; }
+
+    .totals { width: 320px; margin-left: auto; margin-top: 6px; font-size: 12px; }
+    .totals .row { display: flex; justify-content: space-between; padding: 2px 0; }
+    .totals .row.total-final { border-top: 1px solid var(--text); margin-top: 4px; padding-top: 6px; font-weight: 700; }
+
+    .total-banner {
+      background: var(--text); color: #fff; text-align: center; font-weight: 700;
+      font-size: 13.5px; padding: 8px; margin: 16px 0 6px 0; border-radius: 4px;
+    }
+    .amount-words { font-size: 12px; margin-bottom: 16px; }
+
+    .bank-details { font-size: 11.5px; border-top: 1px solid var(--border); padding-top: 10px; }
+    .bank-details b { display: block; margin-top: 6px; }
+    .bank-details .bank-name { font-weight: 700; }
+
+    .doc-footer { margin-top: 24px; font-size: 9.5px; color: var(--text-muted); text-align: center; border-top: 1px solid var(--border); padding-top: 8px; }
+
+    @media print {
+      .print-toolbar { display: none; }
+      body { padding: 0; max-width: none; }
+      table.items { break-inside: auto; }
+      @page { margin: 12mm 10mm; }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-toolbar">
+    <button onclick="window.print()">🖨️ Imprimir / Guardar como PDF</button>
+    <span class="hint">En el diálogo de impresión, elige "Guardar como PDF" como destino/impresora.</span>
+  </div>
+
+  <div class="doc-header">
+    <div class="logos">
+      <img src="{{ url_for('static', filename='img/logo-lockup.png') }}" alt="{{ company_name }}">
+      <img src="{{ url_for('static', filename='img/logo-brms.png') }}" alt="BRMS">
+    </div>
+    <div class="company-info">
+      <h1>{{ company_name|upper }} S.A.C.</h1>
+      <div>{{ company_address }}</div>
+      <div>{{ company_email }}</div>
+      <div>{{ company_phone }}</div>
+    </div>
+    <div class="code-box">
+      <div class="ruc">RUC {{ company_ruc }}</div>
+      <div class="title">COTIZACIÓN</div>
+      <div class="number">N° {{ quotation.number }}</div>
+    </div>
+  </div>
+
+  <div class="meta-block">
+    <div class="row"><span class="label">Señores:</span> {{ quotation.client_name }}</div>
+    <div class="row"><span class="label">Emisión:</span> {{ quotation.issue_date }}</div>
+    <div class="row"><span class="label">RUC:</span> {{ quotation.client_ruc or '—' }}</div>
+    <div class="row"><span class="label">Vencimiento:</span> {{ quotation.due_date or '—' }}</div>
+    <div class="row"><span class="label">Dirección:</span> {{ quotation.client_address or '—' }}</div>
+    <div class="row"><span class="label">Moneda:</span> {{ quotation.currency }}</div>
+    <div class="row"><span class="label">Forma de pago:</span> {{ quotation.payment_method or '—' }}</div>
+    <div class="row"><span class="label">Condición de pago:</span> {{ quotation.payment_condition or '—' }}</div>
+  </div>
+
+  {% if quotation.observation %}
+  <div class="observation"><strong>Observación:</strong> {{ quotation.observation }}</div>
+  {% endif %}
+
+  <table class="items">
+    <thead>
+      <tr>
+        <th>Código</th><th>Cant.</th><th>Descripción</th><th>Unidad Medida</th>
+        <th class="num">V. Unit</th><th class="num">Desc. U.</th><th class="num">P. Venta</th><th class="num">V. Venta</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for it in items %}
+      <tr>
+        <td>{{ it.code or '—' }}</td>
+        <td class="num">{{ it.quantity|round(2) }}</td>
+        <td>{{ it.description }}</td>
+        <td>{{ it.unit or '—' }}</td>
+        <td class="num">{{ it.unit_price|money }}</td>
+        <td class="num">{{ it.unit_discount|money }}</td>
+        <td class="num">{{ it.sale_price|money }}</td>
+        <td class="num">{{ it.line_total|money }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="totals">
+    <div class="row"><span>Total Gravado S/</span><span>{{ '%.2f'|format(totals.gravado) }}</span></div>
+    <div class="row"><span>Total Exonerado S/</span><span>{{ '%.2f'|format(totals.exonerado) }}</span></div>
+    <div class="row"><span>Total Inafecto S/</span><span>{{ '%.2f'|format(totals.inafecto) }}</span></div>
+    <div class="row"><span>Total IGV S/</span><span>{{ '%.2f'|format(totals.igv) }}</span></div>
+    <div class="row"><span>Total Descuentos S/</span><span>{{ '%.2f'|format(totals.descuentos) }}</span></div>
+    <div class="row"><span>Total Otros Cargos S/</span><span>{{ '%.2f'|format(totals.otros_cargos) }}</span></div>
+    <div class="row total-final"><span>Importe Total S/</span><span>{{ '%.2f'|format(totals.total) }}</span></div>
+  </div>
+
+  <div class="total-banner">IMPORTE TOTAL A PAGAR S/ {{ '%.2f'|format(totals.total) }}</div>
+  <div class="amount-words">SON: {{ amount_words }}</div>
+
+  <div class="bank-details">
+    <div><strong>Datos para la Transferencia — Beneficiario {{ company_name|upper }} S.A.C.</strong></div>
+    <div class="bank-name">Banco de la Nación</div>
+    <div>Cuenta Detracción en Soles: {{ bank_nacion_account }} CCI: {{ bank_nacion_cci }}</div>
+    <div class="bank-name">Banco de Crédito del Perú</div>
+    <div>Cta Ahorro en Soles: {{ bank_bcp_savings_account }} CCI: {{ bank_bcp_savings_cci }}</div>
+    <div>Cta Cte. en Soles: {{ bank_bcp_checking_account }}</div>
+  </div>
+
+  <div class="doc-footer">{{ company_name }} — Cotización N° {{ quotation.number }} generada automáticamente por el sistema el {{ generated_at }}</div>
+</body>
+</html>

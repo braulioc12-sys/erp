@@ -1,0 +1,85 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Cotización {{ quotation.number }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Cotización N° {{ quotation.number }} {{ m.badge(quotation.status) }}</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('cotizaciones.pdf', quotation_id=quotation.id) }}" class="btn btn-primary" target="_blank">🖨️ Ver / Descargar PDF</a>
+    {% if quotation.status == 'BORRADOR' %}
+    <a href="{{ url_for('cotizaciones.edit', quotation_id=quotation.id) }}" class="btn btn-secondary">Editar</a>
+    <form method="post" action="{{ url_for('cotizaciones.delete', quotation_id=quotation.id) }}" style="display:inline;" onsubmit="return confirm('¿Eliminar esta cotización?');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-danger">Eliminar</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Estado</h2>
+  <div class="btn-group mt-0">
+    {% for s, label in [('BORRADOR', 'Borrador'), ('ENVIADA', 'Marcar como Enviada'), ('ACEPTADA', 'Marcar como Aceptada'), ('RECHAZADA', 'Marcar como Rechazada')] %}
+    {% if quotation.status != s %}
+    <form method="post" action="{{ url_for('cotizaciones.change_status', quotation_id=quotation.id) }}" style="display:inline;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="status" value="{{ s }}">
+      <button type="submit" class="btn btn-secondary">{{ label }}</button>
+    </form>
+    {% endif %}
+    {% endfor %}
+  </div>
+</div>
+
+<div class="detail-grid">
+  <div class="detail-item"><div class="label">Cliente</div><div class="value">{{ quotation.client_name }}</div></div>
+  <div class="detail-item"><div class="label">RUC</div><div class="value">{{ quotation.client_ruc or '—' }}</div></div>
+  <div class="detail-item"><div class="label">Dirección</div><div class="value">{{ quotation.client_address or '—' }}</div></div>
+  <div class="detail-item"><div class="label">Emisión</div><div class="value">{{ quotation.issue_date }}</div></div>
+  <div class="detail-item"><div class="label">Vencimiento</div><div class="value">{{ quotation.due_date or '—' }}</div></div>
+  <div class="detail-item"><div class="label">Moneda</div><div class="value">{{ quotation.currency }}</div></div>
+  <div class="detail-item"><div class="label">Forma de pago</div><div class="value">{{ quotation.payment_method or '—' }}</div></div>
+  <div class="detail-item"><div class="label">Condición de pago</div><div class="value">{{ quotation.payment_condition or '—' }}</div></div>
+  <div class="detail-item"><div class="label">Importe total</div><div class="value">{{ totals.total|money }}</div></div>
+</div>
+
+{% if quotation.observation %}
+<div class="panel"><h2>Observación</h2><p class="mt-0">{{ quotation.observation }}</p></div>
+{% endif %}
+
+<div class="panel">
+  <h2>Ítems</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Código</th><th>Descripción</th><th>Unidad</th><th class="text-right">Cant.</th><th class="text-right">V. Unit</th><th class="text-right">Desc. U.</th><th>Tributo</th><th class="text-right">V. Venta</th></tr>
+      </thead>
+      <tbody>
+        {% for it in items %}
+        <tr>
+          <td>{{ it.code or '—' }}</td>
+          <td class="wrap">{{ it.description }}</td>
+          <td>{{ it.unit or '—' }}</td>
+          <td class="text-right">{{ it.quantity|round(2) }}</td>
+          <td class="text-right">{{ it.unit_price|money }}</td>
+          <td class="text-right">{{ it.unit_discount|money }}</td>
+          <td>{{ it.tax_treatment.title() }}</td>
+          <td class="text-right">{{ it.line_total|money }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Totales</h2>
+  <p class="mt-0">Total Gravado: <strong>{{ totals.gravado|money }}</strong></p>
+  <p class="mt-0">Total Exonerado: <strong>{{ totals.exonerado|money }}</strong></p>
+  <p class="mt-0">Total Inafecto: <strong>{{ totals.inafecto|money }}</strong></p>
+  <p class="mt-0">Total IGV: <strong>{{ totals.igv|money }}</strong></p>
+  <p class="mt-0">Total Descuentos: <strong>{{ totals.descuentos|money }}</strong></p>
+  <p class="mt-0">Total Otros Cargos: <strong>{{ totals.otros_cargos|money }}</strong></p>
+  <p class="mt-0">Importe Total: <strong>{{ totals.total|money }}</strong></p>
+</div>
+{% endblock %}

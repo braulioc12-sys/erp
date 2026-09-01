@@ -41,6 +41,7 @@ def create_app(config_object=Config):
         inventarios,
         mantenimiento,
         facturacion,
+        cotizaciones,
         guias,
         inspecciones,
         rutas,
@@ -59,6 +60,7 @@ def create_app(config_object=Config):
     app.register_blueprint(inventarios.bp)
     app.register_blueprint(mantenimiento.bp)
     app.register_blueprint(facturacion.bp)
+    app.register_blueprint(cotizaciones.bp)
     app.register_blueprint(guias.bp)
     app.register_blueprint(inspecciones.bp)
     app.register_blueprint(rutas.bp)

@@ -36,15 +36,20 @@ p { margin: 0 0 1em 0; }
   display: flex; flex-direction: column; padding: 20px 0;
 }
 .sidebar-brand { padding: 0 20px 20px 20px; border-bottom: 1px solid rgba(255,255,255,0.08); }
-.sidebar-brand-logo { display: block; max-width: 100%; height: auto; background: #fff; border-radius: 8px; padding: 8px 10px; }
-/* Fila de logos (1 sep): Harraso Transport + BRMS lado a lado, cada uno con
-   su propia "ficha" blanca — mismo criterio que .sidebar-brand-logo, solo
-   que ahora puede haber más de un logo. El de BRMS es un lockup vertical
-   (marca + palabra apilada), por eso se limita por ALTURA en vez de ancho:
-   con dos aspect ratios tan distintos (uno bien ancho, el otro casi
-   cuadrado), igualar la altura es lo que los deja del mismo "peso" visual. */
-.brand-logos { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.brand-logos .sidebar-brand-logo.secondary { flex: 0 0 auto; height: 48px; width: auto; max-width: none; }
+.sidebar-brand-logo { display: block; max-width: 100%; height: auto; background: #fff; border-radius: 8px; padding: 8px 10px; min-width: 0; flex-shrink: 1; }
+/* Fila de logos (1 sep, ajustada 1 sep): Harraso Transport siempre a la
+   izquierda y BRMS siempre a la derecha, uno al lado del otro. El de BRMS
+   es un lockup vertical (marca + palabra apilada), por eso se limita por
+   ALTURA en vez de ancho y no se encoge (flex: 0 0 auto) — mismo criterio
+   que antes para que ambos logos tengan el mismo "peso" visual. Antes
+   había flex-wrap: wrap, lo que dejaba que el logo de Harraso (bien ancho)
+   empujara al de BRMS a una segunda línea cuando el sidebar es angosto.
+   Con flex-wrap: nowrap + flex-shrink/min-width:0 en el logo de Harraso,
+   este se va angostando (conservando su proporción, gracias a height:auto)
+   para dejarle sitio fijo al de BRMS, y los dos quedan siempre en una sola
+   fila, Harraso a la izquierda y BRMS a la derecha. */
+.brand-logos { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; }
+.brand-logos .sidebar-brand-logo.secondary { flex: 0 0 auto; height: 48px; width: auto; max-width: none; min-width: 0; }
 .sidebar-nav { display: flex; flex-direction: column; padding: 12px 0; flex: 1; }
 .sidebar-nav a { color: var(--sidebar-text); padding: 10px 20px; text-decoration: none; border-left: 3px solid transparent; }
 .sidebar-nav a:hover { background: rgba(255,255,255,0.06); color: #fff; }
@@ -58,9 +63,13 @@ p { margin: 0 0 1em 0; }
 /* Login */
 .login-screen { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #111827, #1d4ed8); }
 .login-card { background: var(--surface); padding: 40px; border-radius: var(--radius); width: 340px; box-shadow: 0 10px 40px rgba(0,0,0,0.25); display: flex; flex-direction: column; gap: 14px; }
-.login-brand { text-align: center; margin-bottom: 4px; display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; }
-.login-brand-logo { max-width: 220px; width: auto; height: auto; }
-.login-brand-logo.secondary { max-width: none; width: auto; height: 54px; }
+/* Mismo criterio que .brand-logos del sidebar (ver comentario arriba):
+   nowrap + flex-shrink/min-width:0 en el logo de Harraso para que Harraso
+   quede siempre a la izquierda y BRMS siempre a la derecha, en una sola
+   fila, sin apilarse (1 sep). */
+.login-brand { text-align: center; margin-bottom: 4px; display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: nowrap; }
+.login-brand-logo { max-width: 220px; width: auto; height: auto; min-width: 0; flex-shrink: 1; }
+.login-brand-logo.secondary { max-width: none; width: auto; height: 54px; flex: 0 0 auto; min-width: 0; }
 .login-card h1 { text-align: center; font-size: 1.2rem; margin-bottom: 10px; }
 
 /* Flashes */
@@ -113,6 +122,11 @@ td.wrap, th.wrap { white-space: normal; }
 .badge-retirado { background: var(--text-muted-soft, #eee); color: var(--text-muted); }
 .badge-autorizada { background: var(--primary-soft); color: var(--primary-dark); }
 .badge-parcial { background: var(--warning-soft); color: var(--warning); }
+/* Cotizaciones (1 sep) */
+.badge-borrador { background: var(--text-muted-soft, #eee); color: var(--text-muted); }
+.badge-enviada { background: var(--primary-soft); color: var(--primary-dark); }
+.badge-aceptada { background: var(--success-soft); color: var(--success); }
+.badge-rechazada { background: var(--danger-soft); color: var(--danger); }
 
 /* Forms */
 form.form { display: flex; flex-direction: column; gap: 14px; max-width: 640px; }

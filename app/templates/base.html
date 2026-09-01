@@ -47,6 +47,9 @@
       {% if can(current_user.role, 'facturacion', 'view') %}
       <a href="{{ url_for('facturacion.list_view') }}" class="{{ 'active' if request.blueprint == 'facturacion' }}">Facturación</a>
       {% endif %}
+      {% if can(current_user.role, 'cotizaciones', 'view') %}
+      <a href="{{ url_for('cotizaciones.list_view') }}" class="{{ 'active' if request.blueprint == 'cotizaciones' }}">Cotizaciones</a>
+      {% endif %}
       {% if can(current_user.role, 'guias', 'view') %}
       <a href="{{ url_for('guias.list_view') }}" class="{{ 'active' if request.blueprint == 'guias' }}">Guías de Remisión</a>
       {% endif %}
