@@ -2,11 +2,25 @@
 {% block title %}{{ 'Editar conductor' if mode == 'edit' else 'Nuevo conductor' }}{% endblock %}
 {% block content %}
 <div class="page-header"><h1>{{ 'Editar conductor' if mode == 'edit' else 'Nuevo conductor' }}</h1></div>
-<form class="form panel" method="post">
+<form class="form panel" method="post" enctype="multipart/form-data">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <label>Nombre completo *
     <input type="text" name="name" value="{{ driver.name if driver else '' }}" required>
   </label>
+
+  <div class="section-title">Foto</div>
+  {% if driver and driver.photo_filename %}
+  <div class="form-row" style="align-items:center;">
+    <img class="driver-photo" src="{{ url_for('conductores.driver_photo', driver_id=driver_id) }}" alt="Foto actual">
+    <label style="flex:1;">Reemplazar foto (opcional)
+      <input type="file" name="photo" accept="image/*">
+    </label>
+  </div>
+  {% else %}
+  <label>Subir foto (opcional)
+    <input type="file" name="photo" accept="image/*">
+  </label>
+  {% endif %}
   <div class="form-row">
     <label>DNI
       <input type="text" name="document_number" value="{{ driver.document_number if driver else '' }}" placeholder="Se usa al generar guías de remisión">

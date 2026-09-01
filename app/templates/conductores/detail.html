@@ -1,0 +1,61 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}{{ driver.name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ driver.name }} {{ m.badge(driver.status) }}</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('conductores.list_view') }}" class="btn btn-secondary">← Volver</a>
+    {% if can(current_user.role, 'conductores', 'edit') %}
+    <a href="{{ url_for('conductores.edit_driver', driver_id=driver.id) }}" class="btn btn-primary">Editar</a>
+    <form method="post" action="{{ url_for('conductores.delete_driver', driver_id=driver.id) }}" style="display:inline;" onsubmit="return confirm('¿Eliminar este conductor?');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-danger">Eliminar</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="panel">
+  <div class="form-row" style="align-items:flex-start;">
+    {% if driver.photo_filename %}
+    <img class="driver-photo" src="{{ url_for('conductores.driver_photo', driver_id=driver.id) }}" alt="Foto de {{ driver.name }}">
+    {% else %}
+    <div class="driver-photo-placeholder">Sin foto</div>
+    {% endif %}
+    <div class="detail-grid" style="flex:1; margin-bottom:0;">
+      <div class="detail-item"><div class="label">DNI</div><div class="value">{{ driver.document_number or '—' }}</div></div>
+      <div class="detail-item"><div class="label">N° de licencia</div><div class="value">{{ driver.license_number or '—' }}</div></div>
+      <div class="detail-item"><div class="label">Teléfono</div><div class="value">{{ driver.phone or '—' }}</div></div>
+      <div class="detail-item"><div class="label">Estado</div><div class="value">{{ m.badge(driver.status) }}</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Licencia de conducir</h2>
+  <div class="detail-grid">
+    <div class="detail-item"><div class="label">Vencimiento de brevete</div><div class="value">{{ driver.license_expiry or '—' }}</div></div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Examen médico ocupacional</h2>
+  <div class="detail-grid">
+    <div class="detail-item"><div class="label">Fecha del último examen</div><div class="value">{{ driver.medical_exam_date or '—' }}</div></div>
+    <div class="detail-item"><div class="label">Vencimiento</div><div class="value">{{ driver.medical_exam_expiry or '—' }}</div></div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Requisitos Backus</h2>
+  <div class="detail-grid">
+    <div class="detail-item"><div class="label">Examen de manejo Backus — fecha</div><div class="value">{{ driver.backus_driving_exam_date or '—' }}</div></div>
+    <div class="detail-item"><div class="label">Examen de manejo Backus — vencimiento</div><div class="value">{{ driver.backus_driving_exam_expiry or '—' }}</div></div>
+    <div class="detail-item"><div class="label">Capacitación Plan de tráfico Backus — fecha</div><div class="value">{{ driver.backus_training_date or '—' }}</div></div>
+    <div class="detail-item"><div class="label">Capacitación Plan de tráfico Backus — vencimiento</div><div class="value">{{ driver.backus_training_expiry or '—' }}</div></div>
+    <div class="detail-item"><div class="label">Escuela de conductores — fecha</div><div class="value">{{ driver.dds_date or '—' }}</div></div>
+    <div class="detail-item"><div class="label">Escuela de conductores — vencimiento</div><div class="value">{{ driver.dds_expiry or '—' }}</div></div>
+  </div>
+</div>
+{% endblock %}

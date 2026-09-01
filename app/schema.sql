@@ -73,6 +73,10 @@ CREATE TABLE IF NOT EXISTS drivers (
     dds_date TEXT,
     dds_expiry TEXT,
     phone TEXT,
+    -- Nombre del archivo de la foto del conductor, guardado con el mismo
+    -- mecanismo que los comprobantes de gastos (ver app/storage.py, bajo
+    -- un prefijo/carpeta separada para no mezclarlos).
+    photo_filename TEXT,
     status TEXT NOT NULL DEFAULT 'ACTIVO' CHECK (status IN ('ACTIVO', 'INACTIVO')),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

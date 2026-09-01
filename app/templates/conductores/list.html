@@ -11,25 +11,14 @@
     {% endif %}
   </div>
 </div>
-<p class="muted mt-0">El vencimiento de brevete, examen médico ocupacional y los requisitos de Backus (examen de manejo, capacitación del plan de tráfico y escuela de conductores) se ven en la tabla; para editarlos entra al detalle de cada conductor (desplázate a la derecha si no ves todas las columnas).</p>
+<p class="muted mt-0">Haz clic en un conductor para ver su foto, brevete, examen médico y los requisitos de Backus (examen de manejo, capacitación del plan de tráfico y escuela de conductores).</p>
 
 <div class="table-wrap">
   <table>
     <thead>
       <tr>
-        <th>Nombre completo</th>
+        <th>Nombre</th>
         <th>DNI</th>
-        <th>N° de licencia</th>
-        <th>Vencimiento de brevete</th>
-        <th>Examen médico — fecha</th>
-        <th>Examen médico — vencimiento</th>
-        <th>Examen de manejo Backus — fecha</th>
-        <th>Examen de manejo Backus — vencimiento</th>
-        <th>Capacitación Plan de tráfico Backus — fecha</th>
-        <th>Capacitación Plan de tráfico Backus — vencimiento</th>
-        <th>Escuela de conductores — fecha</th>
-        <th>Escuela de conductores — vencimiento</th>
-        <th>Teléfono</th>
         <th>Estado</th>
         <th>Documentos</th>
         <th></th>
@@ -37,20 +26,16 @@
     </thead>
     <tbody>
       {% for d in drivers %}
-      <tr>
-        <td>{{ d.name }}</td>
+      <tr onclick="window.location='{{ url_for('conductores.driver_detail', driver_id=d.id) }}'" style="cursor:pointer;">
+        <td>
+          <a href="{{ url_for('conductores.driver_detail', driver_id=d.id) }}">
+            {% if d.photo_filename %}
+            <img class="driver-thumb" src="{{ url_for('conductores.driver_photo', driver_id=d.id) }}" alt="">
+            {% endif %}
+            {{ d.name }}
+          </a>
+        </td>
         <td>{{ d.document_number or '—' }}</td>
-        <td>{{ d.license_number or '—' }}</td>
-        <td>{{ d.license_expiry or '—' }}</td>
-        <td>{{ d.medical_exam_date or '—' }}</td>
-        <td>{{ d.medical_exam_expiry or '—' }}</td>
-        <td>{{ d.backus_driving_exam_date or '—' }}</td>
-        <td>{{ d.backus_driving_exam_expiry or '—' }}</td>
-        <td>{{ d.backus_training_date or '—' }}</td>
-        <td>{{ d.backus_training_expiry or '—' }}</td>
-        <td>{{ d.dds_date or '—' }}</td>
-        <td>{{ d.dds_expiry or '—' }}</td>
-        <td>{{ d.phone or '—' }}</td>
         <td>{{ m.badge(d.status) }}</td>
         <td>
           {% if d.id in expiring_ids %}
@@ -59,7 +44,7 @@
           <span class="badge badge-activo">OK</span>
           {% endif %}
         </td>
-        <td>
+        <td onclick="event.stopPropagation();">
           {% if can(current_user.role, 'conductores', 'edit') %}
           <div class="btn-group">
             <a class="btn btn-secondary btn-sm" href="{{ url_for('conductores.edit_driver', driver_id=d.id) }}">Editar</a>
@@ -72,7 +57,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="16" class="table-empty">No hay conductores registrados.</td></tr>
+      <tr><td colspan="5" class="table-empty">No hay conductores registrados.</td></tr>
       {% endfor %}
     </tbody>
   </table>

@@ -1,5 +1,7 @@
-"""Almacenamiento de archivos subidos por los usuarios — hoy solo los
-comprobantes de gastos de Liquidaciones (ver app/routes/liquidaciones.py).
+"""Almacenamiento de archivos subidos por los usuarios: los comprobantes de
+gastos de Liquidaciones (ver app/routes/liquidaciones.py) y, desde el 1 sep,
+las fotos de conductores (ver app/routes/conductores.py) — mismo mecanismo,
+cada tipo bajo su propio prefijo/carpeta para no mezclarlos.
 
 Dos modos, elegidos por la variable de entorno AWS_S3_BUCKET (ver README,
 sección "Base de datos persistente en AWS (RDS + S3)"):
@@ -27,8 +29,8 @@ def using_s3():
     return bool(current_app.config.get("AWS_S3_BUCKET"))
 
 
-def _local_dir():
-    path = os.path.join(current_app.instance_path, "receipts")
+def _local_dir(subfolder):
+    path = os.path.join(current_app.instance_path, subfolder)
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -36,7 +38,14 @@ def _local_dir():
 def local_receipts_dir():
     """Solo para el modo disco local — la ruta que sirve el archivo la usa
     con send_from_directory. No se debe llamar en modo S3."""
-    return _local_dir()
+    return _local_dir("receipts")
+
+
+def local_photos_dir():
+    """Igual que local_receipts_dir() pero para las fotos de conductores
+    (1 sep) — carpeta separada en disco para no mezclarlas con los
+    comprobantes de gastos."""
+    return _local_dir("driver_photos")
 
 
 def _s3_bucket():
@@ -50,8 +59,12 @@ def _s3_prefix():
     return (current_app.config.get("AWS_S3_PREFIX") or "comprobantes").strip("/")
 
 
-def _s3_key(filename):
-    return f"{_s3_prefix()}/{filename}"
+def _s3_photos_prefix():
+    return (current_app.config.get("AWS_S3_PHOTOS_PREFIX") or "fotos-conductores").strip("/")
+
+
+def _s3_key(filename, prefix):
+    return f"{prefix}/{filename}"
 
 
 def _s3_client():
@@ -88,44 +101,33 @@ def _s3_client():
     return boto3.client("s3", **kwargs)
 
 
-def save_receipt(filename, raw_bytes):
-    """Guarda los bytes de un comprobante bajo `filename` (un nombre único
-    ya generado por el llamador, ej. un uuid.hex + extensión). No sabe nada
-    de fotos/PDFs ni de compresión — el llamador decide eso antes."""
-    if using_s3():
-        # Sin ContentType, S3 guarda el objeto como "binary/octet-stream"
-        # por defecto — el navegador no sabe que es una imagen/PDF y fuerza
-        # la descarga en vez de mostrarlo (visto en producción real, 31
-        # ago: en disco local sí se veía bien, porque send_from_directory
-        # infiere el tipo solo por la extensión; en S3 hay que decírselo
-        # explícitamente al subir el archivo). ContentDisposition=inline
-        # refuerza lo mismo para que el navegador lo abra en pestaña en vez
-        # de descargarlo, incluso si por algún motivo no reconoce el tipo.
-        content_type, _ = mimetypes.guess_type(filename)
-        _s3_client().put_object(
-            Bucket=_s3_bucket(),
-            Key=_s3_key(filename),
-            Body=raw_bytes,
-            ServerSideEncryption="AES256",
-            ContentType=content_type or "application/octet-stream",
-            ContentDisposition="inline",
-        )
-    else:
-        with open(os.path.join(_local_dir(), filename), "wb") as f:
-            f.write(raw_bytes)
+def _put_object(prefix, filename, raw_bytes):
+    # Sin ContentType, S3 guarda el objeto como "binary/octet-stream" por
+    # defecto — el navegador no sabe que es una imagen/PDF y fuerza la
+    # descarga en vez de mostrarlo (visto en producción real, 31 ago: en
+    # disco local sí se veía bien, porque send_from_directory infiere el
+    # tipo solo por la extensión; en S3 hay que decírselo explícitamente al
+    # subir el archivo). ContentDisposition=inline refuerza lo mismo para
+    # que el navegador lo abra en pestaña en vez de descargarlo, incluso si
+    # por algún motivo no reconoce el tipo.
+    content_type, _ = mimetypes.guess_type(filename)
+    _s3_client().put_object(
+        Bucket=_s3_bucket(),
+        Key=_s3_key(filename, prefix),
+        Body=raw_bytes,
+        ServerSideEncryption="AES256",
+        ContentType=content_type or "application/octet-stream",
+        ContentDisposition="inline",
+    )
 
 
-def receipt_url(filename):
-    """URL firmada de corta duración para descargar/ver un comprobante ya
-    guardado en S3. Solo válida en modo S3 — en modo disco local, la ruta
-    que sirve el archivo debe usar local_receipts_dir() + send_from_directory
-    en su lugar (ver using_s3())."""
+def _presigned_url(prefix, filename):
     content_type, _ = mimetypes.guess_type(filename)
     return _s3_client().generate_presigned_url(
         "get_object",
         Params={
             "Bucket": _s3_bucket(),
-            "Key": _s3_key(filename),
+            "Key": _s3_key(filename, prefix),
             # Se piden estos dos encabezados en la respuesta del propio
             # GET firmado (S3 los permite sobrescribir por request, sin
             # importar los metadatos guardados en el objeto) para que los
@@ -138,3 +140,40 @@ def receipt_url(filename):
         },
         ExpiresIn=300,
     )
+
+
+def save_receipt(filename, raw_bytes):
+    """Guarda los bytes de un comprobante bajo `filename` (un nombre único
+    ya generado por el llamador, ej. un uuid.hex + extensión). No sabe nada
+    de fotos/PDFs ni de compresión — el llamador decide eso antes."""
+    if using_s3():
+        _put_object(_s3_prefix(), filename, raw_bytes)
+    else:
+        with open(os.path.join(local_receipts_dir(), filename), "wb") as f:
+            f.write(raw_bytes)
+
+
+def receipt_url(filename):
+    """URL firmada de corta duración para descargar/ver un comprobante ya
+    guardado en S3. Solo válida en modo S3 — en modo disco local, la ruta
+    que sirve el archivo debe usar local_receipts_dir() + send_from_directory
+    en su lugar (ver using_s3())."""
+    return _presigned_url(_s3_prefix(), filename)
+
+
+def save_driver_photo(filename, raw_bytes):
+    """Igual que save_receipt(), pero para las fotos de conductores (1 sep)
+    — mismo mecanismo (disco local o S3 según el ambiente), guardadas bajo
+    un prefijo/carpeta separada para no mezclarlas con los comprobantes de
+    gastos."""
+    if using_s3():
+        _put_object(_s3_photos_prefix(), filename, raw_bytes)
+    else:
+        with open(os.path.join(local_photos_dir(), filename), "wb") as f:
+            f.write(raw_bytes)
+
+
+def driver_photo_url(filename):
+    """Igual que receipt_url(), pero para una foto de conductor guardada en
+    S3. En disco local, usar local_photos_dir() + send_from_directory."""
+    return _presigned_url(_s3_photos_prefix(), filename)

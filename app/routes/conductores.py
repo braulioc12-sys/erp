@@ -4,15 +4,36 @@ operar con Backus — examen de manejo, capacitación (plan de tráfico) y
 escuela de conductores). Antes vivía
 junto con Flota en un solo módulo con pestañas; se separaron en dos
 módulos porque cada uno creció con su propio conjunto de documentos y
-vencimientos a controlar."""
-from flask import Blueprint, Response, abort, flash, redirect, render_template, request, url_for
+vencimientos a controlar.
 
+La lista solo muestra Nombre/DNI/Estado/Documentos (1 sep, pedido de
+Braulio: "que solo se vea las columnas Nombre, DNI, Estado y Documentos") —
+el resto de columnas (vencimientos, teléfono, foto) se ven en el detalle de
+cada conductor (driver_detail), al que se llega haciendo clic en el nombre
+en la lista."""
+import os
+import uuid
+
+from flask import Blueprint, Response, abort, flash, redirect, render_template, request, send_from_directory, url_for
+
+from app import storage
 from app.auth import permission_required, validate_csrf
 from app.bulk_import import DRIVER_COLUMNS, DRIVER_EXAMPLE, XLSX_MIME, build_import_template, read_import_rows
 from app.db import execute, query_all, query_one
-from app.helpers import parse_date, today_str
+from app.helpers import compress_photo, parse_date, today_str
 
 bp = Blueprint("conductores", __name__, url_prefix="/conductores")
+
+# Fotos de conductores: mismo criterio que los comprobantes de gastos
+# (compress_photo en app/helpers.py), pero solo imágenes (no PDF).
+ALLOWED_PHOTO_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".heic", ".heif"}
+PHOTO_MIME_TO_EXTENSION = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/heic": ".heic",
+    "image/heif": ".heif",
+}
 
 DOCUMENT_ALERT_DAYS = 30
 # (columna de vencimiento, etiqueta para mostrar en el Panel)
@@ -76,11 +97,58 @@ def _driver_fields_from_form(form):
     )
 
 
+def _save_driver_photo(file_storage):
+    """Guarda la foto de un conductor (comprimida vía compress_photo) y
+    devuelve el nombre de archivo guardado, o None si no se subió nada
+    (el campo del formulario es opcional) o el archivo no es una imagen
+    reconocible."""
+    if not file_storage or not file_storage.filename:
+        return None
+    ext = os.path.splitext(file_storage.filename)[1].lower()
+    if ext not in ALLOWED_PHOTO_EXTENSIONS:
+        ext = PHOTO_MIME_TO_EXTENSION.get((file_storage.mimetype or "").lower())
+    if not ext:
+        return None
+    raw_bytes = file_storage.read()
+    if not raw_bytes:
+        return None
+    compressed = compress_photo(raw_bytes)
+    if compressed is not None:
+        filename = f"{uuid.uuid4().hex}.jpg"
+        storage.save_driver_photo(filename, compressed)
+        return filename
+    # No se pudo abrir como imagen (formato raro o archivo corrupto): se
+    # guarda el original sin comprimir para no perder la foto.
+    filename = f"{uuid.uuid4().hex}{ext}"
+    storage.save_driver_photo(filename, raw_bytes)
+    return filename
+
+
 @bp.route("")
 @permission_required("conductores", "view")
 def list_view():
     drivers = query_all("SELECT * FROM drivers ORDER BY name")
     return render_template("conductores/list.html", drivers=drivers, expiring_ids=_expiring_driver_ids())
+
+
+@bp.route("/<int:driver_id>")
+@permission_required("conductores", "view")
+def driver_detail(driver_id):
+    driver = query_one("SELECT * FROM drivers WHERE id = ?", (driver_id,))
+    if driver is None:
+        abort(404)
+    return render_template("conductores/detail.html", driver=driver, driver_id=driver_id)
+
+
+@bp.route("/<int:driver_id>/foto")
+@permission_required("conductores", "view")
+def driver_photo(driver_id):
+    driver = query_one("SELECT photo_filename FROM drivers WHERE id = ?", (driver_id,))
+    if driver is None or not driver["photo_filename"]:
+        abort(404)
+    if storage.using_s3():
+        return redirect(storage.driver_photo_url(driver["photo_filename"]))
+    return send_from_directory(storage.local_photos_dir(), driver["photo_filename"])
 
 
 @bp.route("/nuevo", methods=["GET", "POST"])
@@ -93,14 +161,16 @@ def new_driver():
         if not name:
             flash("El nombre del conductor es obligatorio.", "error")
             return render_template("conductores/driver_form.html", driver=request.form, mode="new")
+        fields = _driver_fields_from_form(request.form)
+        photo_filename = _save_driver_photo(request.files.get("photo"))
         execute(
             """INSERT INTO drivers (name, document_number, license_number, license_expiry,
                medical_exam_date, medical_exam_expiry,
                backus_driving_exam_date, backus_driving_exam_expiry,
                backus_training_date, backus_training_expiry,
-               dds_date, dds_expiry, phone, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            _driver_fields_from_form(request.form),
+               dds_date, dds_expiry, phone, photo_filename, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (*fields[:-1], photo_filename, fields[-1]),
         )
         flash("Conductor registrado.", "success")
         return redirect(url_for("conductores.list_view"))
@@ -116,14 +186,20 @@ def edit_driver(driver_id):
     if request.method == "POST":
         if not validate_csrf():
             abort(400)
+        fields = _driver_fields_from_form(request.form)
+        # Subir una foto nueva reemplaza la anterior; si no se sube nada,
+        # se conserva la que ya tenía (el campo del formulario es opcional
+        # tanto al crear como al editar).
+        new_photo = _save_driver_photo(request.files.get("photo"))
+        photo_filename = new_photo if new_photo else driver["photo_filename"]
         execute(
             """UPDATE drivers SET name=?, document_number=?, license_number=?, license_expiry=?,
                medical_exam_date=?, medical_exam_expiry=?,
                backus_driving_exam_date=?, backus_driving_exam_expiry=?,
                backus_training_date=?, backus_training_expiry=?,
-               dds_date=?, dds_expiry=?, phone=?, status=?
+               dds_date=?, dds_expiry=?, phone=?, photo_filename=?, status=?
                WHERE id=?""",
-            (*_driver_fields_from_form(request.form), driver_id),
+            (*fields[:-1], photo_filename, fields[-1], driver_id),
         )
         flash("Conductor actualizado.", "success")
         return redirect(url_for("conductores.list_view"))

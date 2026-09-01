@@ -1,5 +1,8 @@
 """Funciones auxiliares compartidas por las rutas."""
+import io
 from datetime import datetime
+
+from PIL import Image, ImageOps
 
 from app.db import query_one
 
@@ -140,3 +143,30 @@ def pretty_label(value):
     if not value:
         return ""
     return value.replace("_", " ").title()
+
+
+# Tamaño y calidad para fotos de conductores (1 sep) — mismo criterio que
+# los comprobantes de gastos (ver RECEIPT_MAX_DIMENSION en
+# app/routes/liquidaciones.py), pero más chico: es una foto tipo carné, no
+# un documento que haya que leer con detalle.
+PHOTO_MAX_DIMENSION = 800
+PHOTO_JPEG_QUALITY = 78
+
+
+def compress_photo(raw_bytes):
+    """Redimensiona y recomprime una foto como JPEG (ver
+    _compress_receipt_image en liquidaciones.py, mismo criterio). Devuelve
+    los bytes JPEG ya comprimidos, o None si el archivo no se pudo abrir
+    como imagen, en cuyo caso el llamador debe decidir qué hacer (guardar
+    el original, o rechazarlo)."""
+    try:
+        with Image.open(io.BytesIO(raw_bytes)) as img:
+            img = ImageOps.exif_transpose(img)
+            if img.mode not in ("RGB", "L"):
+                img = img.convert("RGB")
+            img.thumbnail((PHOTO_MAX_DIMENSION, PHOTO_MAX_DIMENSION), Image.LANCZOS)
+            buffer = io.BytesIO()
+            img.save(buffer, format="JPEG", quality=PHOTO_JPEG_QUALITY, optimize=True)
+            return buffer.getvalue()
+    except Exception:
+        return None
