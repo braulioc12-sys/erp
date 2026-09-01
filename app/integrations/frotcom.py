@@ -234,11 +234,13 @@ class FrotcomClient:
         for item in raw_items:
             # "label" es un intento de mostrar algo humano-reconocible (placa
             # o nombre) junto al id interno de Frotcom, para que emparejar
-            # unidades no dependa de adivinar el id a ciegas — probamos varios
-            # nombres de campo típicos; si Frotcom no trae ninguno, queda
-            # vacío y no pasa nada (el emparejamiento sigue siendo por id).
+            # unidades no dependa de adivinar el id a ciegas. "licensePlate"
+            # es el nombre confirmado (1 sep, ver nota de odómetro más abajo);
+            # el resto queda como fallback por si algún endpoint/cuenta trae
+            # otro nombre — si Frotcom no trae ninguno, queda vacío y no pasa
+            # nada (el emparejamiento sigue siendo por id).
             label = (
-                item.get("plate") or item.get("licensePlate") or item.get("licencePlate")
+                item.get("licensePlate") or item.get("plate") or item.get("licencePlate")
                 or item.get("registrationNumber") or item.get("name") or item.get("vehicleName")
                 or item.get("description") or ""
             )
@@ -249,9 +251,19 @@ class FrotcomClient:
                     "latitude": item.get("latitude") or item.get("lat"),
                     "longitude": item.get("longitude") or item.get("lon") or item.get("lng"),
                     "speed_kmh": item.get("speed"),
-                    "heading": item.get("heading") or item.get("course"),
-                    "odometer_km": item.get("odometer") or item.get("odometerKm"),
-                    "recorded_at": item.get("timestamp") or item.get("recordedAt"),
+                    "heading": item.get("direction") or item.get("heading") or item.get("course"),
+                    # Confirmado (1 sep, contra la documentación interactiva real
+                    # de la cuenta de Braulio, endpoint "Get vehicle details"):
+                    # Frotcom trae DOS lecturas de odómetro, no una — se prefiere
+                    # odometerCanbus (el real, reportado por la computadora del
+                    # vehículo, solo si tiene ese hardware — ver "hasCanbus" en
+                    # la respuesta) y se cae a odometerGps (estimado por Frotcom
+                    # a partir del GPS, siempre disponible) si el primero no
+                    # viene. odometer/odometerKm quedan como último fallback por
+                    # si algún endpoint/cuenta distinta usa esos nombres en vez
+                    # de los confirmados.
+                    "odometer_km": item.get("odometerCanbus") or item.get("odometerGps") or item.get("odometer") or item.get("odometerKm"),
+                    "recorded_at": item.get("lastCommunication") or item.get("timestamp") or item.get("recordedAt"),
                     # Se guarda crudo (solo cuando aún no se pudo emparejar
                     # nada) para poder mostrar TODOS los campos reales que
                     # trae Frotcom y así terminar de confirmar los nombres
