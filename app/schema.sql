@@ -566,6 +566,59 @@ CREATE TABLE IF NOT EXISTS vehicle_location_history (
 CREATE INDEX IF NOT EXISTS idx_vehicle_location_history_vehicle_time
     ON vehicle_location_history(vehicle_id, created_at);
 
+-- Viajes de Frotcom (31 ago) — a diferencia de vehicle_location_history
+-- (posiciones sueltas, calculamos nosotros horas/km con un estimado), acá
+-- se guardan los viajes YA calculados por Frotcom (GET
+-- /v2/vehicles/{id}/trips — ver app/integrations/frotcom.py), con tiempo de
+-- manejo y kilometraje exactos, y origen/destino de cada viaje. Se llena
+-- con el botón "Traer historial" (bajo demanda, no automático cada 2
+-- minutos — ver nota de "rate limit" en frotcom.py) y sirve tanto para
+-- rellenar reportes de días anteriores como, más adelante, para el reporte
+-- de cumplimiento de hoja de ruta que pidió Braulio.
+CREATE TABLE IF NOT EXISTS vehicle_trips (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    vehicle_id INTEGER NOT NULL REFERENCES vehicles(id),
+    frotcom_trip_id TEXT NOT NULL UNIQUE,
+    started_at TEXT,
+    ended_at TEXT,
+    start_place TEXT,
+    start_address TEXT,
+    start_latitude REAL,
+    start_longitude REAL,
+    start_odometer_km REAL,
+    end_place TEXT,
+    end_address TEXT,
+    end_latitude REAL,
+    end_longitude REAL,
+    end_odometer_km REAL,
+    driver_name TEXT,
+    drive_time_sec INTEGER,
+    trip_duration_sec INTEGER,
+    mileage_km REAL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_vehicle_trips_vehicle_started
+    ON vehicle_trips(vehicle_id, started_at);
+
+-- Progreso de una importación de historial de viajes en curso (31 ago) —
+-- como puede tardar varios minutos (varias unidades x varios tramos de 7
+-- días), corre en un hilo de segundo plano (igual que app/scheduler.py) en
+-- vez de bloquear la página; esta tabla es lo que permite mostrarle a
+-- Braulio el avance sin que tenga que quedarse con la pestaña abierta.
+CREATE TABLE IF NOT EXISTS frotcom_trip_import_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date_from TEXT NOT NULL,
+    date_to TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDIENTE',
+    vehicles_total INTEGER NOT NULL DEFAULT 0,
+    vehicles_done INTEGER NOT NULL DEFAULT 0,
+    trips_imported INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT,
+    started_at TEXT NOT NULL DEFAULT (datetime('now')),
+    finished_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS invoices (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     number TEXT NOT NULL UNIQUE,

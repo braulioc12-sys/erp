@@ -4,6 +4,7 @@
 <div class="page-header">
   <h1>Reporte diario de GPS</h1>
   <div class="page-actions">
+    <a href="{{ url_for('integraciones.trips_history') }}" class="btn btn-secondary">🗂️ Historial de viajes</a>
     <a href="{{ url_for('integraciones.daily_report_export', date=date) }}" class="btn btn-secondary">Exportar a Excel</a>
     <a href="{{ url_for('integraciones.index') }}" class="btn btn-secondary">← Volver a Ubicación GPS</a>
   </div>
@@ -16,28 +17,33 @@
   <button type="submit" class="btn btn-primary">Ver reporte</button>
 </form>
 
-<p class="muted">Horas manejadas y km avanzados por unidad ese día, calculados del historial de posiciones de GPS guardado en cada sincronización (manual o automática cada 2 minutos).</p>
+<p class="muted">Horas manejadas y km avanzados por unidad ese día. Se usan los viajes ya calculados por Frotcom cuando están importados (más exactos — ver "Historial de viajes"), y si no, un estimado a partir del historial de posiciones de GPS guardado en cada sincronización.</p>
 
 <div class="panel">
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Unidad</th><th class="text-right">Horas manejadas</th><th class="text-right">Km avanzados</th></tr></thead>
+      <thead><tr><th>Unidad</th><th class="text-right">Horas manejadas</th><th class="text-right">Km avanzados</th><th>Fuente</th></tr></thead>
       <tbody>
         {% for r in rows %}
         <tr>
           <td>{{ r.plate }}</td>
           <td class="text-right">
             {{ '%.1f h'|format(r.hours) }}
-            {% if r.points < 2 %}<span class="muted">(sin datos suficientes ese día)</span>{% endif %}
+            {% if r.source == 'estimado' and r.points < 2 %}<span class="muted">(sin datos suficientes ese día)</span>{% endif %}
           </td>
           <td class="text-right">{{ '%.1f km'|format(r.km) }}</td>
+          <td>
+            {% if r.source == 'frotcom' %}Frotcom (exacto)
+            {% elif r.source == 'estimado' %}<span class="muted">Estimado ({{ r.points }} muestra{{ 's' if r.points != 1 }})</span>
+            {% else %}<span class="muted">Sin datos</span>{% endif %}
+          </td>
         </tr>
         {% else %}
-        <tr><td colspan="3" class="table-empty">No hay unidades registradas.</td></tr>
+        <tr><td colspan="4" class="table-empty">No hay unidades registradas.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
-  <p class="muted" style="margin-top:10px;">Cuando una unidad muestra "sin datos suficientes ese día" es porque ese día se guardó como máximo 1 sincronización de esa unidad — hacen falta al menos 2 para calcular una diferencia de horas/km. Si acabas de activar la sincronización automática, esto se va a ir llenando solo cada 2 minutos.</p>
+  <p class="muted" style="margin-top:10px;">"Frotcom (exacto)" significa que ya se trajo el historial de viajes de Frotcom para ese día (ver "Historial de viajes" arriba) — son los números reales que calcula Frotcom, no un estimado. "Estimado" significa que todavía no se importó el historial de viajes de ese día, así que se calcula a partir de las posiciones sueltas guardadas cada 2 minutos; con pocas muestras ese estimado puede quedar muy por debajo de lo real.</p>
 </div>
 {% endblock %}

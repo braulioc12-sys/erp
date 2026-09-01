@@ -41,6 +41,25 @@ autenticación). Antes de usarlo en serio:
 Mientras tanto, el resto del ERP funciona perfectamente sin esto —
 simplemente no habrá datos de ubicación hasta que esta integración quede
 confirmada contra tu cuenta real.
+
+Actualización 31 ago — endpoint de VIAJES confirmado: Braulio compartió una
+captura de pantalla real de la documentación interactiva de su cuenta
+(`http://v2api.frotcom.com/documentation/index.html`, solo accesible
+logueado) para `GET /v2/vehicles/{id}/trips` ("Get vehicle trips"), con los
+nombres de campo exactos de la respuesta (`driveTimeSec`, `mileage`,
+`startPlace`/`endPlace`, etc. — ver `get_vehicle_trips` más abajo). A
+diferencia de `get_vehicle_positions`, este SÍ está confirmado contra la
+cuenta real, no es una estimación. Lo único que no se pudo confirmar con la
+captura fue el formato exacto que esperan los parámetros de fecha `df`/`dt`
+en el REQUEST (solo se vio el formato de la respuesta) — se manda en el
+mismo formato ISO 8601 UTC que usa la respuesta, por consistencia; si
+Frotcom lo rechaza, es lo primero a revisar (ver `_fmt_frotcom_date_param`).
+También quedan sin confirmar los límites de "rate limit" de la API (existe
+una página "Rate Limit Reference" en su documentación que no se pudo leer
+sin estar logueado) — por eso el historial de viajes se trae solo cuando
+Braulio lo pide manualmente (botón "Traer historial"), no automáticamente
+cada 2 minutos como las posiciones, hasta confirmar que no hay problema de
+límite de llamadas.
 """
 from datetime import datetime, timezone
 
@@ -48,6 +67,46 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import json
+
+# GET /v2/vehicles/{id}/trips (31 ago, confirmado por Braulio con captura de
+# pantalla de la documentación real de su cuenta — a diferencia de
+# get_vehicle_positions, este endpoint SÍ quedó confirmado con nombres de
+# campo exactos, no es una estimación). Devuelve viajes ya calculados por
+# Frotcom (tiempo de manejo, kilometraje, origen/destino) — mucho más
+# preciso que estimarlo nosotros a partir de posiciones sueltas.
+_ISO_UTC_FMT_MS = "%Y-%m-%dT%H:%M:%S.%fZ"
+_ISO_UTC_FMT = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def _parse_frotcom_iso(value):
+    """Convierte un timestamp ISO 8601 UTC de Frotcom (ej.
+    '2026-08-31T23:43:23.159Z') al formato de texto 'YYYY-MM-DD HH:MM:SS'
+    que usa el resto del proyecto (mismo formato que datetime('now') de
+    SQLite / la traducción a Postgres en app/db.py) — así estas columnas se
+    pueden comparar y ordenar igual que cualquier otra columna de fecha del
+    proyecto, sin tratamiento especial."""
+    if not value:
+        return None
+    text = str(value)
+    for fmt in (_ISO_UTC_FMT_MS, _ISO_UTC_FMT):
+        try:
+            return datetime.strptime(text, fmt).strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            continue
+    # Formato inesperado: se guarda tal cual reducido a 19 caracteres en vez
+    # de fallar todo el viaje — mejor un dato parcial que perder el viaje
+    # entero por un formato de fecha que no anticipamos.
+    return text[:19].replace("T", " ")
+
+
+def _fmt_frotcom_date_param(value):
+    """Los parámetros 'df'/'dt' del endpoint de viajes no se confirmaron
+    con un ejemplo explícito de formato de request (solo se vio el formato
+    de la RESPUESTA, ISO 8601 UTC) — se manda en ese mismo formato por
+    consistencia, ya que es el estándar que usa el resto de la API. Si
+    Frotcom lo rechaza, hay que ajustar este formato (ver docstring de
+    get_vehicle_trips)."""
+    return value.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class FrotcomError(Exception):
@@ -201,6 +260,64 @@ class FrotcomClient:
                 }
             )
         return positions
+
+    def get_vehicle_trips(self, external_vehicle_id, date_from, date_to):
+        """Trae los viajes de UNA unidad (external_vehicle_id = el mismo id
+        de Frotcom que se guarda en vehicles.gps_external_id) entre
+        date_from y date_to (objetos datetime, en UTC). Devuelve una lista
+        de dicts normalizados, uno por viaje:
+
+        {frotcom_trip_id, started_at, ended_at, start_place, start_address,
+         start_latitude, start_longitude, start_odometer_km, end_place,
+         end_address, end_latitude, end_longitude, end_odometer_km,
+         driver_name, drive_time_sec, trip_duration_sec, mileage_km}
+
+        Confirmado (31 ago, captura de pantalla real de Braulio de la
+        documentación de su cuenta): `GET /v2/vehicles/{id}/trips`, con
+        parámetros de query `df` (date from) y `dt` (date to). Reglas
+        confirmadas por la propia documentación:
+        - El período pedido no puede ser mayor a 7 días — por eso
+          `sync_vehicle_trips` (integraciones.py) parte rangos más largos
+          en tramos de 7 días antes de llamar esta función.
+        - Devuelve los viajes que tengan alguna parte dentro del período
+          pedido (aunque hayan empezado antes o terminen después), MÁS el
+          viaje en curso si arrancó dentro del período — por eso un mismo
+          viaje puede aparecer en dos llamadas consecutivas con el `ended`
+          actualizado; se resuelve guardando por `frotcom_trip_id` con
+          UPSERT (ver sync_vehicle_trips), no con INSERT simple.
+        """
+        token = self._token or self.authenticate()
+        params = urllib.parse.urlencode({
+            "df": _fmt_frotcom_date_param(date_from),
+            "dt": _fmt_frotcom_date_param(date_to),
+        })
+        result = self._request("GET", f"/v2/vehicles/{external_vehicle_id}/trips?{params}", token=token)
+        items = result if isinstance(result, list) else (result.get("data") or [])
+        trips = []
+        for item in items:
+            trip_id = item.get("id")
+            if trip_id is None:
+                continue
+            trips.append({
+                "frotcom_trip_id": str(trip_id),
+                "started_at": _parse_frotcom_iso(item.get("started")),
+                "ended_at": _parse_frotcom_iso(item.get("ended")),
+                "start_place": item.get("startPlace"),
+                "start_address": item.get("startAddress"),
+                "start_latitude": item.get("startLatitude"),
+                "start_longitude": item.get("startLongitude"),
+                "start_odometer_km": item.get("startOdometer"),
+                "end_place": item.get("endPlace"),
+                "end_address": item.get("endAddress"),
+                "end_latitude": item.get("endLatitude"),
+                "end_longitude": item.get("endLongitude"),
+                "end_odometer_km": item.get("endOdometer"),
+                "driver_name": item.get("driverName"),
+                "drive_time_sec": item.get("driveTimeSec"),
+                "trip_duration_sec": item.get("tripDurationSec"),
+                "mileage_km": item.get("mileage"),
+            })
+        return trips
 
 
 def build_client_from_config(app_config):

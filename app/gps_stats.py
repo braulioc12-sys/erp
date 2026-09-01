@@ -104,3 +104,55 @@ def daily_stats_all(date_str):
         # "sin datos suficientes" en vez de mostrar un 0 que parece un bug.
         result[vehicle_id] = {"hours": round(hours, 1), "km": round(km, 1), "points": len(points)}
     return result
+
+
+def daily_stats_from_trips(date_str):
+    """Igual que daily_stats_all pero a partir de `vehicle_trips` (31 ago) —
+    viajes ya calculados por Frotcom (GET /v2/vehicles/{id}/trips), con
+    tiempo de manejo y kilometraje exactos en vez de estimados a partir de
+    posiciones sueltas. Un viaje se cuenta en el día en que EMPEZÓ
+    (started_at) — un viaje que cruza la medianoche queda completo en el
+    día que arrancó, igual de simple que el criterio ya usado en
+    daily_stats_all (created_at de cada punto).
+
+    Devuelve {vehicle_id: {"hours": float, "km": float, "trips": int}}.
+    Solo trae algo para vehículos con viajes importados ese día — para eso
+    hace falta haber corrido "Traer historial" al menos una vez sobre ese
+    rango de fechas (ver perform_trips_backfill en integraciones.py)."""
+    rows = query_all(
+        """SELECT vehicle_id, drive_time_sec, mileage_km
+           FROM vehicle_trips
+           WHERE date(started_at) = ?""",
+        (date_str,),
+    )
+    result = {}
+    for row in rows:
+        entry = result.setdefault(row["vehicle_id"], {"hours": 0.0, "km": 0.0, "trips": 0})
+        entry["hours"] += (row["drive_time_sec"] or 0) / 3600.0
+        entry["km"] += row["mileage_km"] or 0.0
+        entry["trips"] += 1
+    for entry in result.values():
+        entry["hours"] = round(entry["hours"], 1)
+        entry["km"] = round(entry["km"], 1)
+    return result
+
+
+def combined_daily_stats(date_str):
+    """Combina daily_stats_from_trips (preferido — números exactos de
+    Frotcom) con daily_stats_all (estimado a partir de posiciones sueltas)
+    (31 ago). Por unidad: si hay viajes importados ese día, se usan esos
+    números y se marca source="frotcom"; si no, se usa el estimado y se
+    marca source="estimado" (o no aparece si tampoco hay posiciones). Así
+    el reporte siempre muestra el mejor dato disponible sin que Braulio
+    tenga que saber cuál de las dos fuentes se está usando — aunque igual
+    se lo mostramos (ver plantillas) para que sepa qué tan confiable es
+    cada número."""
+    from_trips = daily_stats_from_trips(date_str)
+    from_positions = daily_stats_all(date_str)
+    result = {}
+    for vehicle_id, stats in from_trips.items():
+        result[vehicle_id] = {**stats, "source": "frotcom"}
+    for vehicle_id, stats in from_positions.items():
+        if vehicle_id not in result:
+            result[vehicle_id] = {**stats, "source": "estimado"}
+    return result

@@ -5,6 +5,7 @@
   <h1>Ubicación de la flota (Frotcom)</h1>
   <div class="page-actions">
     <a href="{{ url_for('integraciones.daily_report') }}" class="btn btn-secondary">📅 Reportes diarios</a>
+    <a href="{{ url_for('integraciones.trips_history') }}" class="btn btn-secondary">🗂️ Historial de viajes</a>
     <form method="post" action="{{ url_for('integraciones.sync_frotcom') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-primary">🔄 Sincronizar con Frotcom</button>
@@ -53,13 +54,14 @@
           <td>{{ v.location_updated_at or '—' }}</td>
           <td>{{ '{:,.0f} km'.format(v.current_km) if v.current_km is not none else '—' }}</td>
           {% set stats = stats_by_vehicle.get(v.id) %}
+          {% set puntos_ok = stats and (stats.source == 'frotcom' or stats.get('points', 0) >= 2) %}
           <td>
-            {% if stats and stats.points >= 2 %}{{ '%.1f h'|format(stats.hours) }}
+            {% if puntos_ok %}{{ '%.1f h'|format(stats.hours) }}
             {% elif stats %}0.0 h <span class="muted">(sin datos suficientes)</span>
             {% else %}—{% endif %}
           </td>
           <td>
-            {% if stats and stats.points >= 2 %}{{ '%.1f km'|format(stats.km) }}
+            {% if puntos_ok %}{{ '%.1f km'|format(stats.km) }}
             {% elif stats %}0.0 km <span class="muted">(sin datos suficientes)</span>
             {% else %}—{% endif %}
           </td>
@@ -70,6 +72,6 @@
       </tbody>
     </table>
   </div>
-  <p class="muted" style="margin-top:10px;">"Horas manejadas hoy" y "Km avanzados hoy" se calculan del historial de posiciones de GPS guardado en cada sincronización — para ver otros días, usa <a href="{{ url_for('integraciones.daily_report') }}">Reportes diarios</a>.</p>
+  <p class="muted" style="margin-top:10px;">"Horas manejadas hoy" y "Km avanzados hoy" usan los viajes exactos de Frotcom si ya se importaron (ver <a href="{{ url_for('integraciones.trips_history') }}">Historial de viajes</a>), y si no, un estimado del historial de posiciones — para ver otros días, usa <a href="{{ url_for('integraciones.daily_report') }}">Reportes diarios</a>.</p>
 </div>
 {% endblock %}

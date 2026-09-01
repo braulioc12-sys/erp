@@ -205,6 +205,17 @@ El sistema incluye la integración lista para conectarse a Frotcom y mostrar la 
 
 El resto del sistema funciona con total normalidad sin esta integración — simplemente no habrá datos de ubicación hasta confirmarla.
 
+### Historial de viajes y reportes diarios de horas/km (31 ago)
+
+Además de la última posición, el sistema calcula horas manejadas y km avanzados por día por unidad (Menú → Ubicación GPS → "📅 Reportes diarios"). Hay dos fuentes de datos, y el sistema usa automáticamente la mejor disponible para cada unidad y día:
+
+- **Viajes de Frotcom (exacto)**: si se importó el historial de viajes de Frotcom para ese día (ver siguiente punto), se usan los números que Frotcom ya calculó (`driveTimeSec`, `mileage` del endpoint `GET /v2/vehicles/{id}/trips`) — más precisos que cualquier estimado propio.
+- **Estimado (posiciones)**: si no hay viajes importados ese día, se estima a partir del historial de posiciones sueltas que se va guardando en cada sincronización (manual o automática cada 2 minutos) — puede quedar por debajo de lo real si todavía no se acumularon suficientes sincronizaciones ese día.
+
+**Ubicación GPS → "🗂️ Historial de viajes"** deja traer de Frotcom el historial de viajes de TODAS las unidades para un rango de fechas (útil para rellenar reportes de días anteriores a que existiera esta función, ya que antes solo se guardaba la última posición, nunca un historial). Corre en segundo plano (puede tardar varios minutos con una flota grande) — la pantalla muestra el avance y no hace falta quedarse esperando. Esta misma tabla de viajes (`vehicle_trips`, con origen/destino/horarios reales de cada viaje) es también la base para el futuro reporte de cumplimiento de hoja de ruta.
+
+**Nota sobre límites de la API:** el endpoint de viajes solo admite pedir un rango de máximo 7 días por llamada (el sistema ya parte rangos más largos en tramos automáticamente) y es una llamada **por unidad** — a diferencia del endpoint de posición actual (una sola llamada trae todas las unidades), así que traer el historial de una flota grande implica muchas llamadas seguidas. El límite real de "rate limit" de la cuenta de Frotcom no está confirmado, por eso esta importación es manual (bajo demanda desde el botón), no automática cada 2 minutos como las posiciones.
+
 ## Facturación electrónica (SUNAT)
 
 El sistema puede emitir **facturas** y **guías de remisión electrónica (modalidad Transportista)** y enviarlas a SUNAT. Antes de activarlo conviene entender que hay dos caminos totalmente distintos, y el sistema usa el segundo:

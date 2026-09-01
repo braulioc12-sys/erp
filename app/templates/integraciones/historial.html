@@ -1,0 +1,67 @@
+{% extends 'base.html' %}
+{% block title %}Historial de viajes (Frotcom){% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Historial de viajes (Frotcom)</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('integraciones.index') }}" class="btn btn-secondary">← Volver a Ubicación GPS</a>
+  </div>
+</div>
+
+<p class="muted">Trae de Frotcom los viajes ya calculados de cada unidad (horas manejadas y km exactos, no estimados) para un rango de fechas — sirve para rellenar reportes de días anteriores a que existiera esta función. Se guarda en el sistema y desde ahí alimenta los reportes diarios automáticamente.</p>
+
+<div class="panel">
+  <h2>Traer historial</h2>
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <label>Desde
+        <input type="date" name="date_from" value="{{ today }}" required>
+      </label>
+      <label>Hasta
+        <input type="date" name="date_to" value="{{ today }}" required>
+      </label>
+    </div>
+    <button type="submit" class="btn btn-primary mt-2">Traer historial</button>
+  </form>
+  <p class="muted" style="margin-top:10px;">Trae TODAS las unidades con "ID en el proveedor de GPS" configurado. Un rango largo (varias semanas o meses) puede tardar varios minutos — no hace falta quedarse con la pestaña abierta, se puede volver más tarde a revisar el avance más abajo. No se puede iniciar una importación nueva mientras otra esté en curso.</p>
+</div>
+
+<div class="panel">
+  <h2>Importaciones recientes</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Rango</th>
+          <th>Estado</th>
+          <th class="text-right">Unidades</th>
+          <th class="text-right">Viajes importados</th>
+          <th>Iniciado</th>
+          <th>Terminado</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for job in jobs %}
+        <tr>
+          <td>{{ job.date_from }} a {{ job.date_to }}</td>
+          <td>
+            {% if job.status == 'COMPLETADO' %}✅ Completado
+            {% elif job.status == 'ERROR' %}⚠️ Error: {{ job.error_message }}
+            {% elif job.status == 'EN_PROGRESO' %}⏳ En progreso ({{ job.vehicles_done }}/{{ job.vehicles_total }} unidades)
+            {% else %}⏳ Pendiente{% endif %}
+          </td>
+          <td class="text-right">{{ job.vehicles_done }}/{{ job.vehicles_total }}</td>
+          <td class="text-right">{{ job.trips_imported }}</td>
+          <td>{{ job.started_at }}</td>
+          <td>{{ job.finished_at or '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="table-empty">Todavía no se hizo ninguna importación.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted" style="margin-top:10px;">Si una importación quedó "En progreso" hace mucho tiempo sin avanzar, actualiza la página — a veces solo hace falta refrescar para ver el estado real.</p>
+</div>
+{% endblock %}

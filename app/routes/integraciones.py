@@ -1,14 +1,19 @@
 import json
+import logging
+import threading
+import time
+from datetime import datetime, timedelta
 
 from flask import Blueprint, Response, current_app, flash, redirect, render_template, request, url_for
 
 from app.auth import permission_required, validate_csrf
-from app.db import get_db, query_all
-from app.gps_stats import daily_stats_all
-from app.helpers import today_str
+from app.db import execute, get_db, query_all, query_one
+from app.gps_stats import combined_daily_stats, daily_stats_all
+from app.helpers import parse_date, today_str
 from app.integrations.frotcom import FrotcomError, build_client_from_config
 
 bp = Blueprint("integraciones", __name__, url_prefix="/configuracion/integraciones")
+logger = logging.getLogger("frotcom_trips")
 
 # Cuántos IDs se listan como máximo en un solo mensaje de flash. Antes era
 # 15 (bastaba cuando Frotcom solo devolvía 15 unidades), pero desde que se
@@ -17,6 +22,120 @@ bp = Blueprint("integraciones", __name__, url_prefix="/configuracion/integracion
 # margen sobre el tamaño real de la flota (50 tractos) sin volver el
 # mensaje ilegible.
 MAX_IDS_EN_MENSAJE = 80
+
+# Límite real del endpoint de viajes de Frotcom (ver get_vehicle_trips en
+# app/integrations/frotcom.py): un pedido no puede cubrir más de 7 días, así
+# que un rango más largo pedido por Braulio se parte en tramos de este
+# tamaño antes de llamar la API, uno por uno.
+TRIPS_CHUNK_DAYS = 7
+
+# Pausa entre llamadas a la API de viajes (31 ago) — el límite real de
+# "rate limit" de Frotcom no está confirmado (ver frotcom.py), así que se
+# deja un margen conservador entre cada llamada en vez de dispararlas todas
+# seguidas. Si Braulio confirma que Frotcom permite más, se puede bajar.
+TRIPS_API_PAUSE_SECONDS = 0.3
+
+
+def _chunk_date_range(date_from, date_to, days=TRIPS_CHUNK_DAYS):
+    """Parte [date_from, date_to) en tramos de máximo `days` días."""
+    chunks = []
+    cur = date_from
+    while cur < date_to:
+        chunk_end = min(cur + timedelta(days=days), date_to)
+        chunks.append((cur, chunk_end))
+        cur = chunk_end
+    return chunks
+
+
+def _upsert_trip(db, vehicle_id, trip):
+    """Guarda (o actualiza si ya existía) un viaje de Frotcom — se
+    identifica por frotcom_trip_id, no por (vehicle_id, fecha), porque un
+    viaje en curso puede volver a aparecer en una llamada posterior con el
+    `ended_at` ya actualizado (ver docstring de get_vehicle_trips)."""
+    db.execute(
+        """INSERT INTO vehicle_trips (
+               vehicle_id, frotcom_trip_id, started_at, ended_at, start_place, start_address,
+               start_latitude, start_longitude, start_odometer_km, end_place, end_address,
+               end_latitude, end_longitude, end_odometer_km, driver_name, drive_time_sec,
+               trip_duration_sec, mileage_km, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+           ON CONFLICT(frotcom_trip_id) DO UPDATE SET
+               started_at=excluded.started_at, ended_at=excluded.ended_at,
+               start_place=excluded.start_place, start_address=excluded.start_address,
+               start_latitude=excluded.start_latitude, start_longitude=excluded.start_longitude,
+               start_odometer_km=excluded.start_odometer_km, end_place=excluded.end_place,
+               end_address=excluded.end_address, end_latitude=excluded.end_latitude,
+               end_longitude=excluded.end_longitude, end_odometer_km=excluded.end_odometer_km,
+               driver_name=excluded.driver_name, drive_time_sec=excluded.drive_time_sec,
+               trip_duration_sec=excluded.trip_duration_sec, mileage_km=excluded.mileage_km,
+               updated_at=datetime('now')""",
+        (
+            vehicle_id, trip["frotcom_trip_id"], trip["started_at"], trip["ended_at"],
+            trip["start_place"], trip["start_address"], trip["start_latitude"], trip["start_longitude"],
+            trip["start_odometer_km"], trip["end_place"], trip["end_address"],
+            trip["end_latitude"], trip["end_longitude"], trip["end_odometer_km"],
+            trip["driver_name"], trip["drive_time_sec"], trip["trip_duration_sec"], trip["mileage_km"],
+        ),
+    )
+
+
+def perform_trips_backfill(app, job_id, date_from, date_to):
+    """Corre en un hilo de segundo plano (lanzado desde la vista
+    `trips_history`, ver más abajo) — trae de Frotcom los viajes de TODAS
+    las unidades con GPS configurado, entre date_from y date_to (objetos
+    datetime), y los guarda en vehicle_trips. Actualiza
+    frotcom_trip_import_jobs en cada paso para que la pantalla de
+    "Historial de viajes" pueda mostrar el avance sin bloquear la petición
+    HTTP original — con 50 unidades x varios tramos de 7 días, esto puede
+    tardar varios minutos, más de lo que aguanta una sola petición web."""
+    with app.app_context():
+        db = get_db()
+        try:
+            client = build_client_from_config(app.config)
+            if not client.is_configured():
+                raise FrotcomError("Frotcom no está configurado.")
+            vehicles = query_all(
+                "SELECT id, gps_external_id FROM vehicles WHERE gps_external_id IS NOT NULL"
+            )
+            db.execute(
+                "UPDATE frotcom_trip_import_jobs SET vehicles_total=?, status='EN_PROGRESO' WHERE id=?",
+                (len(vehicles), job_id),
+            )
+            db.commit()
+            chunks = _chunk_date_range(date_from, date_to)
+            trips_imported = 0
+            for vehicle in vehicles:
+                for chunk_from, chunk_to in chunks:
+                    try:
+                        trips = client.get_vehicle_trips(vehicle["gps_external_id"], chunk_from, chunk_to)
+                    except FrotcomError as exc:
+                        logger.warning(
+                            "No se pudo traer viajes de la unidad %s (%s a %s): %s",
+                            vehicle["gps_external_id"], chunk_from, chunk_to, exc,
+                        )
+                        continue
+                    for trip in trips:
+                        _upsert_trip(db, vehicle["id"], trip)
+                        trips_imported += 1
+                    time.sleep(TRIPS_API_PAUSE_SECONDS)
+                db.execute(
+                    "UPDATE frotcom_trip_import_jobs SET vehicles_done = vehicles_done + 1, trips_imported=? WHERE id=?",
+                    (trips_imported, job_id),
+                )
+                db.commit()
+            db.execute(
+                "UPDATE frotcom_trip_import_jobs SET status='COMPLETADO', finished_at=datetime('now') WHERE id=?",
+                (job_id,),
+            )
+            db.commit()
+            logger.info("Importación de viajes #%s completada: %s viajes.", job_id, trips_imported)
+        except Exception as exc:
+            logger.exception("Error en la importación de viajes #%s", job_id)
+            db.execute(
+                "UPDATE frotcom_trip_import_jobs SET status='ERROR', error_message=?, finished_at=datetime('now') WHERE id=?",
+                (str(exc)[:500], job_id),
+            )
+            db.commit()
 
 
 def perform_frotcom_sync(client=None):
@@ -95,9 +214,11 @@ def index():
            ORDER BY v.plate"""
     )
     # Horas manejadas y km avanzados HOY por unidad (31 ago, pedido de
-    # Braulio) — se calculan del historial de posiciones, no de Frotcom
-    # directamente (ver app/gps_stats.py).
-    stats_by_vehicle = daily_stats_all(today_str())
+    # Braulio). Preferimos los viajes ya calculados por Frotcom
+    # (vehicle_trips, si ya se importaron con "Traer historial") y solo
+    # caemos al estimado por posiciones sueltas cuando no hay viajes
+    # importados ese día todavía — ver app/gps_stats.py.
+    stats_by_vehicle = combined_daily_stats(today_str())
     return render_template(
         "integraciones/index.html", vehicles=vehicles, configured=client.is_configured(),
         stats_by_vehicle=stats_by_vehicle, auto_sync_enabled=current_app.config.get("FROTCOM_AUTO_SYNC_SECONDS", 0) > 0,
@@ -199,10 +320,12 @@ def sync_frotcom():
 @permission_required("integraciones", "view")
 def daily_report():
     """Reporte diario de horas manejadas y km avanzados por unidad (31 ago,
-    pedido de Braulio) — calculado del historial de posiciones de GPS
-    guardado en cada sincronización (ver app/gps_stats.py)."""
+    pedido de Braulio). Preferimos los viajes ya calculados por Frotcom
+    (importados con "Traer historial") y solo caemos al estimado por
+    posiciones sueltas cuando no hay viajes para ese día — ver
+    app/gps_stats.py."""
     date = request.args.get("date") or today_str()
-    stats_by_vehicle = daily_stats_all(date)
+    stats_by_vehicle = combined_daily_stats(date)
     vehicles = query_all("SELECT id, plate FROM vehicles ORDER BY plate")
     rows = [
         {
@@ -210,6 +333,7 @@ def daily_report():
             "hours": stats_by_vehicle.get(v["id"], {}).get("hours", 0.0),
             "km": stats_by_vehicle.get(v["id"], {}).get("km", 0.0),
             "points": stats_by_vehicle.get(v["id"], {}).get("points", 0),
+            "source": stats_by_vehicle.get(v["id"], {}).get("source", ""),
         }
         for v in vehicles
     ]
@@ -222,7 +346,7 @@ def daily_report_export():
     from app.reports import build_gps_daily_workbook
 
     date = request.args.get("date") or today_str()
-    stats_by_vehicle = daily_stats_all(date)
+    stats_by_vehicle = combined_daily_stats(date)
     vehicles = query_all("SELECT id, plate FROM vehicles ORDER BY plate")
     rows = [
         {
@@ -238,3 +362,68 @@ def daily_report_export():
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename=reporte_gps_{date}.xlsx"},
     )
+
+
+@bp.route("/historial", methods=["GET", "POST"])
+@permission_required("integraciones", "edit")
+def trips_history():
+    """Trae de Frotcom el historial de viajes (GET /v2/vehicles/{id}/trips,
+    31 ago) de TODAS las unidades con GPS configurado, para un rango de
+    fechas que elige Braulio — sirve para (a) rellenar reportes de días
+    anteriores a que existiera esta función, y (b) es la base de datos que
+    va a necesitar más adelante el reporte de cumplimiento de hoja de ruta
+    (origen/destino/horarios reales de cada viaje).
+
+    Corre en un hilo de segundo plano (ver perform_trips_backfill) porque
+    puede tardar varios minutos con una flota de 50 unidades — la petición
+    HTTP solo lo dispara y redirige, no espera a que termine."""
+    if request.method == "POST":
+        if not validate_csrf():
+            flash("Sesión expirada, intenta de nuevo.", "error")
+            return redirect(url_for("integraciones.trips_history"))
+
+        date_from_str = parse_date(request.form.get("date_from"))
+        date_to_str = parse_date(request.form.get("date_to"))
+        if not date_from_str or not date_to_str:
+            flash("Elige una fecha 'desde' y 'hasta' válidas.", "error")
+            return redirect(url_for("integraciones.trips_history"))
+
+        dt_from = datetime.strptime(date_from_str, "%Y-%m-%d")
+        # "hasta" es inclusivo del día elegido, así que el rango real le
+        # pide a Frotcom hasta el final de ese día (medianoche del día
+        # siguiente) — si no, se perdería el propio día "hasta".
+        dt_to = datetime.strptime(date_to_str, "%Y-%m-%d") + timedelta(days=1)
+        if dt_to <= dt_from:
+            flash("La fecha 'hasta' debe ser igual o posterior a 'desde'.", "error")
+            return redirect(url_for("integraciones.trips_history"))
+
+        # Solo una importación a la vez (31 ago) — corren en el mismo hilo
+        # único de la app (ver justificación de un solo worker de gunicorn
+        # en app/scheduler.py), así que dos al mismo tiempo solo
+        # competirían por la misma conexión sin ninguna ventaja.
+        running = query_one(
+            "SELECT id FROM frotcom_trip_import_jobs WHERE status IN ('PENDIENTE', 'EN_PROGRESO') ORDER BY id DESC LIMIT 1"
+        )
+        if running:
+            flash("Ya hay una importación de viajes en curso — espera a que termine antes de iniciar otra.", "error")
+            return redirect(url_for("integraciones.trips_history"))
+
+        job_id = execute(
+            "INSERT INTO frotcom_trip_import_jobs (date_from, date_to, status) VALUES (?, ?, 'PENDIENTE')",
+            (date_from_str, date_to_str),
+        )
+        app_obj = current_app._get_current_object()
+        thread = threading.Thread(
+            target=perform_trips_backfill, args=(app_obj, job_id, dt_from, dt_to),
+            name=f"frotcom-trips-backfill-{job_id}", daemon=True,
+        )
+        thread.start()
+        flash(
+            f"Importación de viajes iniciada ({date_from_str} a {date_to_str}). "
+            "Puede tardar varios minutos con toda la flota — actualiza esta página para ver el avance.",
+            "success",
+        )
+        return redirect(url_for("integraciones.trips_history"))
+
+    jobs = query_all("SELECT * FROM frotcom_trip_import_jobs ORDER BY id DESC LIMIT 10")
+    return render_template("integraciones/historial.html", jobs=jobs, today=today_str())
