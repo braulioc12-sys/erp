@@ -61,8 +61,11 @@ CREATE TABLE IF NOT EXISTS drivers (
     medical_exam_date TEXT,
     medical_exam_expiry TEXT,
     -- Requisitos específicos para operar con Backus: examen de manejo,
-    -- capacitación, y DDS (Diálogo Diario de Seguridad). Se guarda la
-    -- fecha del último realizado y cuándo vence cada uno.
+    -- capacitación del plan de tráfico (backus_training_*), y escuela de
+    -- conductores (dds_*, nombre de columna heredado del primer borrador
+    -- del feature — el campo real, según la plantilla de Braulio, es
+    -- "Escuela de conductores", no DDS). Se guarda la fecha del último
+    -- realizado y cuándo vence cada uno.
     backus_driving_exam_date TEXT,
     backus_driving_exam_expiry TEXT,
     backus_training_date TEXT,
@@ -782,6 +785,61 @@ CREATE TABLE IF NOT EXISTS quotation_items (
     tax_treatment TEXT NOT NULL DEFAULT 'GRAVADO' CHECK (tax_treatment IN ('GRAVADO', 'EXONERADO', 'INAFECTO'))
 );
 CREATE INDEX IF NOT EXISTS idx_quotation_items_quotation ON quotation_items(quotation_id);
+
+-- Borradores de gasto extraídos automáticamente de una foto de factura
+-- recibida por WhatsApp (1 sep, pedido de Braulio: "quiero usar n8n para
+-- integrar Whatsapp... que tomando una foto a la factura se llene
+-- automaticamente los campos"). Un workflow de n8n (fuera de este
+-- repositorio — ver n8n/whatsapp-factura-intake.json) recibe la foto por
+-- WhatsApp Business API, la manda a un modelo de IA con visión para
+-- extraer los datos, y llama a POST /liquidaciones/whatsapp/intake (ver
+-- app/routes/liquidaciones.py) con esos datos + la imagen.
+--
+-- A propósito NO se escribe directo en `expenses`: la extracción por IA
+-- puede equivocarse (monto, RUC) y esto es dinero real, así que cada foto
+-- entra aquí como borrador PENDIENTE y un Administrador u Operador
+-- (mismo permiso "liquidaciones"/"edit" que ya existe, sin permiso nuevo)
+-- lo revisa/corrige y recién ahí lo aprueba, creando la fila real en
+-- `expenses` (queda enlazada en resulting_expense_id) — o lo rechaza si la
+-- foto no corresponde a un gasto válido.
+CREATE TABLE IF NOT EXISTS whatsapp_expense_drafts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    status TEXT NOT NULL DEFAULT 'PENDIENTE' CHECK (status IN ('PENDIENTE', 'APROBADO', 'RECHAZADO')),
+    -- Número de WhatsApp que mandó la foto, y el id del mensaje original
+    -- (lo manda n8n) — este último sirve para deduplicar: si n8n reintenta
+    -- la llamada (por un timeout de red, por ejemplo) no se crea un
+    -- segundo borrador para la misma foto. Puede quedar NULL si el
+    -- workflow no lo manda; UNIQUE permite varios NULL sin problema.
+    source_phone TEXT,
+    source_wa_message_id TEXT UNIQUE,
+    -- Nombre de archivo de la foto de la factura, guardada con el mismo
+    -- mecanismo que los comprobantes de gastos (ver app/storage.py). Al
+    -- aprobar el borrador, este mismo archivo pasa a ser el comprobante
+    -- del gasto real (expenses.receipt_filename) — no se duplica.
+    image_filename TEXT NOT NULL,
+    -- Datos que extrajo la IA — se muestran precargados (pero editables)
+    -- en la pantalla de revisión; nada de esto se copia a `expenses` hasta
+    -- que un humano aprueba el borrador.
+    extracted_provider_ruc TEXT,
+    extracted_provider_name TEXT,
+    extracted_amount REAL,
+    extracted_currency TEXT,
+    extracted_document_number TEXT,
+    extracted_document_date TEXT,
+    -- Respuesta cruda del modelo de IA, tal cual la mandó n8n — solo para
+    -- auditoría/depuración si algún día hay que revisar por qué extrajo
+    -- mal un dato; no se usa para nada funcional.
+    ai_raw_response TEXT,
+    -- Texto que haya escrito el conductor/usuario junto con la foto en
+    -- WhatsApp (el "caption" del mensaje), si lo hay.
+    caption TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    reviewed_by INTEGER REFERENCES users(id),
+    reviewed_at TEXT,
+    rejection_reason TEXT,
+    resulting_expense_id INTEGER REFERENCES expenses(id)
+);
+CREATE INDEX IF NOT EXISTS idx_whatsapp_expense_drafts_status ON whatsapp_expense_drafts(status);
 
 CREATE INDEX IF NOT EXISTS idx_trips_status ON trips(status);
 CREATE INDEX IF NOT EXISTS idx_trips_client ON trips(client_id);

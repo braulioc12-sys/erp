@@ -1,6 +1,7 @@
 """Conductores: datos personales y control de vencimientos (licencia de
 conducir, examen médico ocupacional, y los requisitos específicos para
-operar con Backus — examen de manejo, capacitación y DDS). Antes vivía
+operar con Backus — examen de manejo, capacitación (plan de tráfico) y
+escuela de conductores). Antes vivía
 junto con Flota en un solo módulo con pestañas; se separaron en dos
 módulos porque cada uno creció con su propio conjunto de documentos y
 vencimientos a controlar."""
@@ -19,8 +20,8 @@ DRIVER_DOCUMENT_FIELDS = [
     ("license_expiry", "Licencia de conducir (brevete)"),
     ("medical_exam_expiry", "Examen médico ocupacional"),
     ("backus_driving_exam_expiry", "Examen de manejo Backus"),
-    ("backus_training_expiry", "Capacitación Backus"),
-    ("dds_expiry", "DDS (Diálogo Diario de Seguridad)"),
+    ("backus_training_expiry", "Capacitación Plan de tráfico Backus"),
+    ("dds_expiry", "Escuela de conductores"),
 ]
 
 

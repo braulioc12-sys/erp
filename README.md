@@ -21,7 +21,7 @@ El logo de Harraso Transport está en `app/static/img/` (`logo-lockup.png`, el l
 - **Viajes / Órdenes de servicio:** registro de viajes con cliente, unidad, conductor, ruta, carga, tarifa y **comisión del conductor**; flujo de estados Pendiente → En curso → Entregado (o Cancelado). Incluye un **reporte mensual de comisiones** por conductor y ruta — ver la sección dedicada más abajo.
 - **Clientes:** datos de contacto y facturación.
 - **Flota:** unidades (placa, capacidad, tipo — camión, tracto o carreta —, estado, **propietario**), con vencimiento de **SOAT** y **Revisión Técnica** (alertas en el Panel).
-- **Conductores:** datos personales, vencimiento de brevete, y control de vencimientos de **examen médico ocupacional** y de los requisitos para operar con **Backus** (examen de manejo, capacitación, y DDS) — todos con alerta en el Panel.
+- **Conductores:** datos personales, vencimiento de brevete, y control de vencimientos de **examen médico ocupacional** y de los requisitos para operar con **Backus** (examen de manejo, capacitación del plan de tráfico, y escuela de conductores) — todos con alerta en el Panel.
 - **Liquidaciones:** una liquidación contable por viaje — el anticipo de viáticos entregado al conductor, los gastos reales (combustible, peajes, viáticos, mantenimiento u otros) que se le van asignando manualmente, y el cierre por oficina con numeración de voucher. Incluye **presupuestos mensuales** por unidad o tipo (con alerta en el Panel), un **historial de gastos** filtrable y exportable a Excel, y un **resumen contable exportable** en el formato exacto de la plantilla de liquidación de Harraso — ver la sección dedicada más abajo.
 - **Rutas:** catálogo de rutas frecuentes con un monto de viáticos predeterminado (usado para sugerir el anticipo de gastos de cada viaje) y un monto de **comisión del conductor** predeterminado (usado para sugerir la comisión al registrar un viaje por esa ruta).
 - **Mantenimiento:** historial de mantenimientos por unidad, costo, kilometraje registrado y próxima fecha/kilometraje. Los conceptos (tipos de mantenimiento) se administran desde Catálogos. Si indicas el kilometraje al registrar un mantenimiento, actualiza automáticamente el kilometraje actual de la unidad. Incluye un catálogo de **trabajos con tiempo estimado** (ej. cambio de aceite = 60 min) que se seleccionan al registrar un mantenimiento, y una vista de **historial y costos totales por unidad**. Los repuestos usados en una orden se descuentan del stock de **Inventarios** — ver la sección dedicada más abajo.
@@ -38,7 +38,7 @@ El logo de Harraso Transport está en `app/static/img/` (`logo-lockup.png`, el l
 
 ### Alertas del panel
 
-El panel avisa (30 días antes de vencer, o si ya venció) sobre: vencimiento de **brevete**, **examen médico ocupacional** y los requisitos de **Backus** (examen de manejo, capacitación, DDS) de cada conductor; vencimiento de **SOAT** y **Revisión Técnica** de cada unidad; mantenimientos programados por fecha; y presupuestos de gastos cercanos o superados. Además, avisa cuando una unidad se acerca (o ya superó) su próximo mantenimiento **por kilometraje**, comparando el kilometraje actual de la unidad contra el kilometraje programado del mantenimiento — el umbral son 1000 km (ajustable en `KM_ALERT_THRESHOLD`, en `app/routes/mantenimiento.py`) — y cuando una llanta llega al 90% o más de su vida útil estimada (ver la sección de Neumáticos). El kilometraje actual de una unidad se actualiza de tres formas: editándolo manualmente en Flota, indicándolo al registrar un mantenimiento, o automáticamente vía la sincronización con Frotcom (si está configurada).
+El panel avisa (30 días antes de vencer, o si ya venció) sobre: vencimiento de **brevete**, **examen médico ocupacional** y los requisitos de **Backus** (examen de manejo, capacitación del plan de tráfico, escuela de conductores) de cada conductor; vencimiento de **SOAT** y **Revisión Técnica** de cada unidad; mantenimientos programados por fecha; y presupuestos de gastos cercanos o superados. Además, avisa cuando una unidad se acerca (o ya superó) su próximo mantenimiento **por kilometraje**, comparando el kilometraje actual de la unidad contra el kilometraje programado del mantenimiento — el umbral son 1000 km (ajustable en `KM_ALERT_THRESHOLD`, en `app/routes/mantenimiento.py`) — y cuando una llanta llega al 90% o más de su vida útil estimada (ver la sección de Neumáticos). El kilometraje actual de una unidad se actualiza de tres formas: editándolo manualmente en Flota, indicándolo al registrar un mantenimiento, o automáticamente vía la sincronización con Frotcom (si está configurada).
 
 ### Permisos por rol
 
@@ -188,6 +188,18 @@ Este módulo (menú **Liquidaciones**, antes eran dos menús separados "Gastos" 
 - **Liquidar:** se elige la **oficina** (Lima, Pucallpa o Tarapoto) donde se hace la liquidación y se presiona "Liquidar" — el selector de oficina y el botón están arriba de la lista de gastos, junto con las casillas de inclusión, todo en un mismo formulario. Al liquidar se calcula el correlativo de voucher de esa oficina (se reinicia cada mes, empieza en 01) y la liquidación queda **cerrada**: ya no se pueden cambiar los gastos incluidos, y los gastos que quedaron dentro no se pueden eliminar (si hace falta corregir un monto, se puede editar el gasto, pero conviene volver a exportar el resumen de ese mes/oficina después).
 - **Presupuestos** (Liquidaciones → Presupuestos): define un tope mensual de gasto por unidad o por concepto de gasto (ej. "Peaje: S/ 2000/mes"). Cuando el gasto acumulado del mes llega al 90% del presupuesto o lo supera, aparece una alerta en el Panel.
 - **Historial de gastos** (Liquidaciones → Historial de gastos): la lista plana de todos los gastos, tengan o no viaje asociado (útil para gastos sueltos de una unidad, sin viaje) — filtrable por concepto y fecha, exportable a Excel.
+
+### Borradores de gasto desde WhatsApp, vía n8n (1 sep)
+
+Pedido de Braulio: *"quiero usar n8n para integrar Whatsapp a la plataforma... que tomando una foto a la factura se llene automaticamente los campos de datos de proveedor, monto entre otros. Quiero que las fotos se suban via whatsapp"*. Un workflow de n8n — construido y probado directamente en la cuenta de n8n de Braulio vía el conector de n8n, no un archivo importado a mano (guía completa en `n8n/README-n8n.md`) — recibe la foto por WhatsApp Business API, la manda a un modelo de IA con visión (Anthropic) para extraer proveedor, RUC, monto, moneda, N° de documento y fecha, y llama a `POST /liquidaciones/whatsapp/intake` con esos datos + la imagen (como JSON con la foto en base64 — se eligió ese formato en vez de multipart/form-data porque es más simple y confiable de armar desde n8n).
+
+- **Nunca se crea un gasto automático.** La foto y los datos extraídos entran como un **borrador pendiente de revisión** (Liquidaciones → 📷 Borradores WhatsApp, con el conteo de pendientes junto al botón) — decisión explícita confirmada con Braulio, porque la IA puede leerse mal un monto o un RUC y esto es dinero real.
+- **Revisar un borrador:** se ve la foto al lado de un formulario precargado (monto, concepto, proveedor, N° de documento, moneda, fecha) — igual que "Registrar gasto", con el mismo autocompletado de razón social por RUC vía SUNAT. Solo falta elegir el viaje o unidad relacionado (la foto llega por WhatsApp sin ese dato) y el concepto. Al **aprobar**, se crea el gasto real usando la misma foto como comprobante (no se duplica el archivo); al **rechazar** (con un motivo opcional), no se crea ningún gasto — útil si la foto no era una factura válida o llegó repetida.
+- **Deduplicación:** si n8n reintenta la llamada al endpoint (por ejemplo, por un timeout de red), no se crea un segundo borrador para el mismo mensaje de WhatsApp — se detecta por el id del mensaje.
+- **Permisos:** la pantalla de revisión usa el mismo permiso `liquidaciones`/`edit` que ya existe (Administrador y Operador) — no se agregó ningún permiso nuevo.
+- **Seguridad del endpoint:** `POST /liquidaciones/whatsapp/intake` no usa sesión de usuario ni el `csrf_token` normal (lo llama un servicio externo, n8n) — se protege con un token fijo en la cabecera `X-Webhook-Token`, comparado contra la variable de entorno `N8N_WEBHOOK_TOKEN`. Mientras esa variable esté vacía, el endpoint rechaza **todas** las peticiones — nunca queda abierto por accidente. Ver `n8n/README-n8n.md` para cómo generar y configurar este token.
+
+**Estado:** el lado del ERP (endpoint, borrador, revisión, aprobación) está probado de punta a punta contra SQLite y Postgres real (ver más abajo). El workflow de n8n también se probó: se validó su estructura y se corrió una ejecución de prueba real dentro de la cuenta de n8n de Braulio con datos simulados de una foto, confirmando que la lógica completa (interpretar el mensaje, filtrar que sea una foto, convertir a base64, interpretar la respuesta de la IA, enrutar éxito/error) funciona. Lo único que falta es una prueba con una foto real una vez Braulio complete las credenciales (Meta, y opcionalmente su propia cuenta de Anthropic — n8n ya asignó créditos propios por defecto) — ver `n8n/README-n8n.md`.
 
 ### Resumen contable exportable
 
@@ -531,6 +543,9 @@ erp-transporte/
 │       ├── sw.js                  # service worker (cache mínimo de estáticos)
 │       └── icons/                  # íconos de la PWA
 ├── config.py                  # configuración (lee variables de entorno)
+├── n8n/
+│   ├── whatsapp-factura-intake.json  # workflow importable: WhatsApp -> IA -> borrador de gasto
+│   └── README-n8n.md                  # guía de configuración (credenciales, variables, prueba)
 ├── seed.py                    # datos de ejemplo
 ├── run.py                     # punto de entrada para desarrollo
 ├── requirements.txt
@@ -547,3 +562,4 @@ erp-transporte/
 - Ver la ubicación de la flota en un mapa (hoy se muestra como tabla de coordenadas).
 - Reportes de rentabilidad por viaje (tarifa menos gastos asociados).
 - Migrar de SQLite a PostgreSQL si el volumen de datos o usuarios concurrentes crece.
+- Probar en vivo el workflow de WhatsApp → n8n → borradores de gasto (ver sección "Borradores de gasto desde WhatsApp" arriba y `n8n/README-n8n.md`): generar `N8N_WEBHOOK_TOKEN`, crear la cuenta de Anthropic, importar el workflow y mandar una foto real de prueba.
