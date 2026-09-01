@@ -2,7 +2,10 @@
 {% block content_guest %}
 <div class="login-screen">
   <form class="login-card" method="post">
-    <div class="login-brand"><img src="{{ url_for('static', filename='img/logo-lockup.png') }}" alt="{{ company_name }}" class="login-brand-logo"></div>
+    <div class="login-brand">
+      <img src="{{ url_for('static', filename='img/logo-lockup.png') }}" alt="{{ company_name }}" class="login-brand-logo">
+      <img src="{{ url_for('static', filename='img/logo-brms.png') }}" alt="BRMS" class="login-brand-logo secondary">
+    </div>
     <h1>Iniciar sesión</h1>
     <label>Correo electrónico
       <input type="email" name="email" required autofocus>

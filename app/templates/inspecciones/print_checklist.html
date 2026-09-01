@@ -33,6 +33,7 @@
       border-bottom: 3px solid var(--primary); padding-bottom: 12px; margin-bottom: 14px;
     }
     .doc-header img { max-height: 50px; display: block; }
+    .doc-header .logos { display: flex; align-items: center; gap: 12px; }
     .doc-header .title { text-align: right; }
     .doc-header .title h1 { margin: 0; font-size: 17px; color: var(--primary); }
     .doc-header .title .sub { color: var(--text-muted); font-size: 11px; margin-top: 2px; }
@@ -80,7 +81,10 @@
   </div>
 
   <div class="doc-header">
-    <img src="{{ url_for('static', filename='img/logo-lockup.png') }}" alt="{{ company_name }}">
+    <div class="logos">
+      <img src="{{ url_for('static', filename='img/logo-lockup.png') }}" alt="{{ company_name }}">
+      <img src="{{ url_for('static', filename='img/logo-brms.png') }}" alt="BRMS">
+    </div>
     <div class="title">
       <h1>{{ checklist_label }}</h1>
       <div class="sub">{{ company_name }} · Generado el {{ generated_at }}</div>

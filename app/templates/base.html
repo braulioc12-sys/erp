@@ -21,7 +21,10 @@
 <div class="app-shell">
   <aside class="sidebar">
     <div class="sidebar-brand">
-      <img src="{{ url_for('static', filename='img/logo-lockup.png') }}" alt="{{ company_name }}" class="sidebar-brand-logo">
+      <div class="brand-logos">
+        <img src="{{ url_for('static', filename='img/logo-lockup.png') }}" alt="{{ company_name }}" class="sidebar-brand-logo">
+        <img src="{{ url_for('static', filename='img/logo-brms.png') }}" alt="BRMS" class="sidebar-brand-logo secondary">
+      </div>
     </div>
     <nav class="sidebar-nav">
       <a href="{{ url_for('dashboard.index') }}" class="{{ 'active' if request.blueprint == 'dashboard' }}">Panel</a>
