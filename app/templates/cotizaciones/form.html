@@ -7,6 +7,16 @@
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
   <div class="form-row">
+    <label>Empresa que cotiza *
+      <select name="issuer" required>
+        <option value="HARRASO" {{ 'selected' if (quotation.issuer if quotation else 'HARRASO') == 'HARRASO' }}>Harraso Transport</option>
+        <option value="BRMS" {{ 'selected' if quotation and quotation.issuer == 'BRMS' }}>BRMS</option>
+      </select>
+    </label>
+  </div>
+  <p class="muted" style="margin-top:-8px;">Define el RUC, dirección y cuenta bancaria que aparecen en el PDF — ver "Cotizaciones" en el README para los datos de cada una.</p>
+
+  <div class="form-row">
     <label>Cliente (opcional, autocompleta los datos de abajo)
       <select id="client-select">
         <option value="">-- Escribir a mano / cliente nuevo --</option>
@@ -22,12 +32,16 @@
 
   <div class="form-row">
     <label>Señores (razón social) *
-      <input type="text" name="client_name" id="client_name" value="{{ quotation.client_name if quotation else '' }}" required>
+      <div style="display:flex; gap:6px; align-items:center;">
+        <input type="text" name="client_name" id="client_name" value="{{ quotation.client_name if quotation else '' }}" required style="flex:1;">
+        <button type="button" id="client_name_edit_btn" class="btn btn-secondary" style="display:none; padding:6px 10px; font-size:0.85em; white-space:nowrap;" onclick="enableManualClientEdit()">✎ Editar</button>
+      </div>
     </label>
     <label>RUC
-      <input type="text" name="client_ruc" id="client_ruc" value="{{ quotation.client_ruc if quotation else '' }}">
+      <input type="text" name="client_ruc" id="client_ruc" value="{{ quotation.client_ruc if quotation else '' }}" oninput="onClientRucInput()">
     </label>
   </div>
+  <p class="muted" id="client_ruc_status" style="margin-top:-8px;"></p>
   <label>Dirección
     <input type="text" name="client_address" id="client_address" value="{{ quotation.client_address if quotation else '' }}">
   </label>
@@ -206,11 +220,83 @@
     var opt = clientSelect.options[clientSelect.selectedIndex];
     document.getElementById('client_id').value = clientSelect.value;
     if (clientSelect.value) {
+      // Datos que vienen del catálogo de Clientes ya son de confianza — se
+      // dejan editables (no bloqueados como los que trae SUNAT) y se
+      // resetea cualquier bloqueo que hubiera quedado de una búsqueda de
+      // RUC anterior.
+      resetClientNameLock();
       document.getElementById('client_name').value = opt.dataset.name || '';
       document.getElementById('client_ruc').value = opt.dataset.ruc || '';
       document.getElementById('client_address').value = opt.dataset.address || '';
+      lastClientRucLookedUp = '';
+      document.getElementById('client_ruc_status').textContent = '';
     }
   });
+
+  // Autocompleta razón social y dirección del cliente al escribir un RUC de
+  // 11 dígitos, consultando SUNAT vía decolecta.com — mismo servicio y
+  // caché que ya usa Liquidaciones para el RUC del proveedor (pedido de
+  // Braulio, 1 sep: "que jale los datos de sunat como en lo hace el modulo
+  // de gastos"). Nunca bloquea el guardado de la cotización: si falla o el
+  // RUC no existe, los campos se completan a mano.
+  var clientRucLookupTimer = null;
+  var lastClientRucLookedUp = '';
+  window.onClientRucInput = function () {
+    var rucInput = document.getElementById('client_ruc');
+    var status = document.getElementById('client_ruc_status');
+    var digits = (rucInput.value || '').replace(/\D/g, '');
+    if (clientRucLookupTimer) { clearTimeout(clientRucLookupTimer); }
+    if (digits.length === 0) {
+      status.textContent = '';
+      lastClientRucLookedUp = '';
+      resetClientNameLock();
+      return;
+    }
+    if (digits.length !== 11) { status.textContent = ''; return; }
+    clientRucLookupTimer = setTimeout(function () { lookupClientRuc(digits); }, 500);
+  };
+  function lookupClientRuc(ruc) {
+    if (ruc === lastClientRucLookedUp) { return; }
+    lastClientRucLookedUp = ruc;
+    var status = document.getElementById('client_ruc_status');
+    var nameInput = document.getElementById('client_name');
+    var editBtn = document.getElementById('client_name_edit_btn');
+    status.textContent = 'Buscando en SUNAT…';
+    fetch('{{ url_for("cotizaciones.consultar_ruc") }}?ruc=' + ruc)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (ruc !== lastClientRucLookedUp) { return; }
+        if (!data.found) {
+          status.textContent = 'No se encontró ese RUC — escribe los datos a mano.';
+          resetClientNameLock();
+          return;
+        }
+        nameInput.value = data.razon_social;
+        nameInput.readOnly = true;
+        nameInput.style.background = 'var(--bg-soft, #f3f5f8)';
+        editBtn.style.display = 'inline-block';
+        if (data.direccion) {
+          document.getElementById('client_address').value = data.direccion;
+        }
+        status.textContent = data.estado && data.estado !== 'ACTIVO'
+          ? 'Estado SUNAT: ' + data.estado
+          : '';
+      })
+      .catch(function () { status.textContent = ''; });
+  }
+  function resetClientNameLock() {
+    var nameInput = document.getElementById('client_name');
+    var editBtn = document.getElementById('client_name_edit_btn');
+    nameInput.readOnly = false;
+    nameInput.style.background = '';
+    editBtn.style.display = 'none';
+  }
+  window.enableManualClientEdit = function () {
+    var nameInput = document.getElementById('client_name');
+    resetClientNameLock();
+    nameInput.focus();
+    nameInput.select();
+  };
 })();
 </script>
 {% endblock %}

@@ -23,18 +23,19 @@
 
 <div class="table-wrap">
   <table>
-    <thead><tr><th>N°</th><th>Cliente</th><th>Emisión</th><th class="text-right">Importe total</th><th>Estado</th></tr></thead>
+    <thead><tr><th>N°</th><th>Empresa</th><th>Cliente</th><th>Emisión</th><th class="text-right">Importe total</th><th>Estado</th></tr></thead>
     <tbody>
       {% for q in quotations %}
       <tr onclick="window.location='{{ url_for('cotizaciones.detail', quotation_id=q.id) }}'" style="cursor:pointer;">
         <td><a href="{{ url_for('cotizaciones.detail', quotation_id=q.id) }}">{{ q.number }}</a></td>
+        <td>{{ 'BRMS' if q.issuer == 'BRMS' else 'Harraso' }}</td>
         <td>{{ q.client_name }}</td>
         <td>{{ q.issue_date }}</td>
         <td class="text-right">{{ totals_by_id[q.id].total|money }}</td>
         <td>{{ m.badge(q.status) }}</td>
       </tr>
       {% else %}
-      <tr><td colspan="5" class="table-empty">No hay cotizaciones registradas.</td></tr>
+      <tr><td colspan="6" class="table-empty">No hay cotizaciones registradas.</td></tr>
       {% endfor %}
     </tbody>
   </table>

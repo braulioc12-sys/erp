@@ -13,11 +13,12 @@ catálogo de servicios); la numeración sigue la real de Harraso, arranca en
 QUOTATION_START_NUMBER (112, la de referencia era la N° 111); el PDF lleva
 el logo de Harraso + BRMS, igual que el resto de documentos del sistema.
 """
-from flask import Blueprint, abort, current_app, flash, g, redirect, render_template, request, url_for
+from flask import Blueprint, abort, current_app, flash, g, jsonify, redirect, render_template, request, url_for
 
 from app.auth import permission_required, validate_csrf
 from app.db import execute, get_db, query_all, query_one
 from app.helpers import amount_to_words_pen, parse_date, parse_float, today_str
+from app.integrations.sunat_ruc import get_company_for_ruc
 
 bp = Blueprint("cotizaciones", __name__, url_prefix="/cotizaciones")
 
@@ -25,6 +26,16 @@ bp = Blueprint("cotizaciones", __name__, url_prefix="/cotizaciones")
 # líneas marcadas como "Gravado". No se pidió que sea configurable; si
 # alguna vez cambia a nivel país, se ajusta aquí.
 IGV_RATE = 0.18
+
+
+def _parse_issuer(form):
+    """Empresa que emite la cotización — HARRASO o BRMS (1 sep, pedido de
+    Braulio: "la cotizacion debes poder elegir entre Harraso o BRMS ... ya
+    que son las 2"). Cualquier valor que no sea uno de los dos cae a
+    HARRASO por seguridad, en vez de fallar con un 400 por un valor de
+    formulario manipulado."""
+    issuer = (form.get("issuer") or "").strip().upper()
+    return issuer if issuer in ("HARRASO", "BRMS") else "HARRASO"
 
 
 def _next_quotation_number():
@@ -119,6 +130,38 @@ def _parse_items_from_form(form):
     return items, None
 
 
+@bp.route("/consultar-ruc")
+@permission_required("cotizaciones", "edit")
+def consultar_ruc():
+    """Endpoint JSON que usa el formulario de cotizaciones para autocompletar
+    la razón social y dirección del cliente apenas se escribe un RUC de 11
+    dígitos — mismo servicio y caché que ya usa Liquidaciones para el RUC
+    del proveedor (app/integrations/sunat_ruc.py), pedido por Braulio el 1
+    sep ("que jale los datos de sunat como en lo hace el modulo de
+    gastos"). A diferencia del endpoint de Liquidaciones, este también
+    devuelve la dirección — el formulario de Cotizaciones sí tiene un campo
+    de dirección del cliente (el de gastos no). Nunca devuelve error 500: si
+    el servicio externo falla o el RUC no existe, responde found=false y el
+    cliente se completa a mano."""
+    ruc = request.args.get("ruc", "")
+    try:
+        company = get_company_for_ruc(
+            ruc,
+            base_url=current_app.config.get("DECOLECTA_RUC_BASE_URL") or None,
+            token=current_app.config.get("DECOLECTA_TOKEN") or None,
+        )
+    except Exception:
+        company = None
+    if not company:
+        return jsonify({"found": False})
+    return jsonify({
+        "found": True,
+        "razon_social": company["razon_social"],
+        "estado": company["estado"],
+        "direccion": company["direccion"],
+    })
+
+
 @bp.route("")
 @permission_required("cotizaciones", "view")
 def list_view():
@@ -162,16 +205,17 @@ def new():
         number = _next_quotation_number()
         cur = db.execute(
             """INSERT INTO quotations
-               (number, client_id, client_name, client_ruc, client_address, issue_date, due_date,
+               (number, client_id, client_name, client_ruc, client_address, issuer, issue_date, due_date,
                 currency, payment_method, payment_condition, observation,
                 discount_total, other_charges_total, created_by_user_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 number,
                 client_id,
                 client_name,
                 request.form.get("client_ruc", "").strip() or None,
                 request.form.get("client_address", "").strip() or None,
+                _parse_issuer(request.form),
                 parse_date(request.form.get("issue_date")) or today_str(),
                 parse_date(request.form.get("due_date")),
                 request.form.get("currency", "SOLES").strip() or "SOLES",
@@ -251,13 +295,14 @@ def edit(quotation_id):
         db = get_db()
         db.execute(
             """UPDATE quotations SET client_id=?, client_name=?, client_ruc=?, client_address=?,
-               issue_date=?, due_date=?, currency=?, payment_method=?, payment_condition=?,
+               issuer=?, issue_date=?, due_date=?, currency=?, payment_method=?, payment_condition=?,
                observation=?, discount_total=?, other_charges_total=? WHERE id=?""",
             (
                 request.form.get("client_id") or None,
                 client_name,
                 request.form.get("client_ruc", "").strip() or None,
                 request.form.get("client_address", "").strip() or None,
+                _parse_issuer(request.form),
                 parse_date(request.form.get("issue_date")) or today_str(),
                 parse_date(request.form.get("due_date")),
                 request.form.get("currency", "SOLES").strip() or "SOLES",
@@ -344,21 +389,61 @@ def pdf(quotation_id):
     totals = _calc_totals(items, quotation["discount_total"], quotation["other_charges_total"])
     amount_words = amount_to_words_pen(totals["total"])
     cfg = current_app.config
+
+    # Datos de la empresa emisora — Harraso o BRMS (1 sep, pedido de
+    # Braulio: "la cotizacion debes poder elegir entre Harraso o BRMS ...
+    # ya que son las 2"). El correo/teléfono se comparten entre ambas
+    # (confirmado por Braulio); el RUC y la dirección de BRMS son propios
+    # (BRMS_RUC/BRMS_ADDRESS, ver config.py — AJUSTAR si quedaron vacíos).
+    # BRMS solo muestra una cuenta bancaria (BRMS_BANK_ACCOUNT), sin Banco
+    # de la Nación ni cuenta de ahorro — a diferencia de Harraso, que
+    # muestra las 3.
+    if quotation["issuer"] == "BRMS":
+        # Sin "S.A.C." fijo a propósito (a diferencia de Harraso, donde sí
+        # se confirmó) — la razón social legal completa de BRMS no se
+        # confirmó todavía. AJUSTAR en app/templates/cotizaciones/pdf.html
+        # si hace falta agregarle el tipo societario.
+        company_name = "BRMS"
+        company_legal_suffix = ""
+        company_ruc = cfg["BRMS_RUC"]
+        company_address = cfg["BRMS_ADDRESS"]
+        bank_accounts = [
+            {"bank": "Banco de Crédito del Perú (BCP)", "label": "Cuenta en Soles", "account": cfg["BRMS_BANK_ACCOUNT"]},
+        ]
+    else:
+        company_name = cfg["COMPANY_NAME"]
+        company_legal_suffix = "S.A.C."
+        company_ruc = cfg["COMPANY_RUC"]
+        company_address = cfg["COMPANY_ADDRESS"]
+        bank_accounts = [
+            {"bank": "Banco de la Nación", "label": "Cuenta Detracción en Soles", "account": cfg["COMPANY_BANK_NACION_ACCOUNT"], "cci": cfg["COMPANY_BANK_NACION_CCI"]},
+            {"bank": "Banco de Crédito del Perú", "label": "Cta Ahorro en Soles", "account": cfg["COMPANY_BANK_BCP_SAVINGS_ACCOUNT"], "cci": cfg["COMPANY_BANK_BCP_SAVINGS_CCI"]},
+            {"bank": "Banco de Crédito del Perú", "label": "Cta Cte. en Soles", "account": cfg["COMPANY_BANK_BCP_CHECKING_ACCOUNT"]},
+        ]
+
+    # Se agrupa por banco ANTES de pasarlo a la plantilla (en vez de hacerlo
+    # con {% set %} dentro de un {% for %} en Jinja, que no acumula estado
+    # entre iteraciones) — así el PDF muestra el nombre del banco una sola
+    # vez seguido de sus líneas, igual que el documento de referencia.
+    bank_groups = []
+    for acc in bank_accounts:
+        if bank_groups and bank_groups[-1]["bank"] == acc["bank"]:
+            bank_groups[-1]["lines"].append(acc)
+        else:
+            bank_groups.append({"bank": acc["bank"], "lines": [acc]})
+
     return render_template(
         "cotizaciones/pdf.html",
         quotation=quotation,
         items=items,
         totals=totals,
         amount_words=amount_words,
-        company_name=cfg["COMPANY_NAME"],
-        company_ruc=cfg["COMPANY_RUC"],
-        company_address=cfg["COMPANY_ADDRESS"],
+        company_name=company_name,
+        company_legal_suffix=company_legal_suffix,
+        company_ruc=company_ruc,
+        company_address=company_address,
         company_email=cfg["COMPANY_EMAIL"],
         company_phone=cfg["COMPANY_PHONE"],
-        bank_nacion_account=cfg["COMPANY_BANK_NACION_ACCOUNT"],
-        bank_nacion_cci=cfg["COMPANY_BANK_NACION_CCI"],
-        bank_bcp_savings_account=cfg["COMPANY_BANK_BCP_SAVINGS_ACCOUNT"],
-        bank_bcp_savings_cci=cfg["COMPANY_BANK_BCP_SAVINGS_CCI"],
-        bank_bcp_checking_account=cfg["COMPANY_BANK_BCP_CHECKING_ACCOUNT"],
+        bank_groups=bank_groups,
         generated_at=today_str(),
     )

@@ -79,6 +79,25 @@ class Config:
         "COMPANY_BANK_BCP_CHECKING_ACCOUNT", "1949949117029"
     )
 
+    # BRMS como segunda empresa que puede emitir una Cotización (1 sep,
+    # pedido de Braulio: "la cotizacion debes poder elegir entre Harraso o
+    # BRMS ... ya que son las 2"). El correo/teléfono de contacto se
+    # comparten con Harraso (COMPANY_EMAIL/COMPANY_PHONE) — Braulio
+    # confirmó que son los mismos. El RUC y la dirección de BRMS SÍ son
+    # propios y todavía no se confirmaron — quedan vacíos a propósito
+    # (AJUSTAR: complétalos aquí o por variable de entorno antes de emitir
+    # una cotización real a nombre de BRMS, si no el PDF va a salir con esos
+    # campos en blanco).
+    BRMS_RUC = os.environ.get("BRMS_RUC", "")
+    BRMS_ADDRESS = os.environ.get("BRMS_ADDRESS", "")
+    # Única cuenta bancaria que se muestra cuando la cotización es de BRMS
+    # (Braulio confirmó que, a diferencia de Harraso, BRMS no muestra
+    # Banco de la Nación ni cuenta de ahorro — solo esta). El formato del
+    # número (agencia-cuenta-dígito-moneda) es el que usa BCP para mostrar
+    # sus cuentas a clientes — AJUSTAR el nombre del banco en
+    # app/templates/cotizaciones/pdf.html si en realidad es de otro banco.
+    BRMS_BANK_ACCOUNT = os.environ.get("BRMS_BANK_ACCOUNT", "480-4768721-0-81")
+
     # decolecta.com: tipo de cambio SUNAT (liquidación de Gastos) y
     # consulta de RUC (autocompletar proveedor al registrar un gasto).
     # Ambos servicios comparten el mismo token (DECOLECTA_TOKEN) — decisión

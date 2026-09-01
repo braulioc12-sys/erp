@@ -95,13 +95,13 @@
       <img src="{{ url_for('static', filename='img/logo-brms.png') }}" alt="BRMS">
     </div>
     <div class="company-info">
-      <h1>{{ company_name|upper }} S.A.C.</h1>
-      <div>{{ company_address }}</div>
+      <h1>{{ company_name|upper }}{{ ' ' + company_legal_suffix if company_legal_suffix }}</h1>
+      <div>{{ company_address or '—' }}</div>
       <div>{{ company_email }}</div>
       <div>{{ company_phone }}</div>
     </div>
     <div class="code-box">
-      <div class="ruc">RUC {{ company_ruc }}</div>
+      <div class="ruc">RUC {{ company_ruc or '(sin configurar)' }}</div>
       <div class="title">COTIZACIÓN</div>
       <div class="number">N° {{ quotation.number }}</div>
     </div>
@@ -159,12 +159,13 @@
   <div class="amount-words">SON: {{ amount_words }}</div>
 
   <div class="bank-details">
-    <div><strong>Datos para la Transferencia — Beneficiario {{ company_name|upper }} S.A.C.</strong></div>
-    <div class="bank-name">Banco de la Nación</div>
-    <div>Cuenta Detracción en Soles: {{ bank_nacion_account }} CCI: {{ bank_nacion_cci }}</div>
-    <div class="bank-name">Banco de Crédito del Perú</div>
-    <div>Cta Ahorro en Soles: {{ bank_bcp_savings_account }} CCI: {{ bank_bcp_savings_cci }}</div>
-    <div>Cta Cte. en Soles: {{ bank_bcp_checking_account }}</div>
+    <div><strong>Datos para la Transferencia — Beneficiario {{ company_name|upper }}{{ ' ' + company_legal_suffix if company_legal_suffix }}</strong></div>
+    {% for group in bank_groups %}
+    <div class="bank-name">{{ group.bank }}</div>
+    {% for acc in group.lines %}
+    <div>{{ acc.label }}: {{ acc.account }}{{ ' CCI: ' + acc.cci if acc.cci }}</div>
+    {% endfor %}
+    {% endfor %}
   </div>
 
   <div class="doc-footer">{{ company_name }} — Cotización N° {{ quotation.number }} generada automáticamente por el sistema el {{ generated_at }}</div>

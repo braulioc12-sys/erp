@@ -745,6 +745,13 @@ CREATE TABLE IF NOT EXISTS quotations (
     client_name TEXT NOT NULL,
     client_ruc TEXT,
     client_address TEXT,
+    -- Empresa que emite la cotización (1 sep, pedido de Braulio: "la
+    -- cotizacion debes poder elegir entre Harraso o BRMS que sea la
+    -- empresa que cotice ( ya que son las 2 )") — define qué RUC/dirección/
+    -- cuenta bancaria se muestran en el PDF (ver app/routes/cotizaciones.py
+    -- → pdf()). Se guarda por cotización (no se recalcula) para que el
+    -- documento ya emitido no cambie si algún día se edita la config.
+    issuer TEXT NOT NULL DEFAULT 'HARRASO' CHECK (issuer IN ('HARRASO', 'BRMS')),
     issue_date TEXT NOT NULL,
     due_date TEXT,
     currency TEXT NOT NULL DEFAULT 'SOLES',

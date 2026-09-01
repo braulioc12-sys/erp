@@ -32,6 +32,7 @@
 </div>
 
 <div class="detail-grid">
+  <div class="detail-item"><div class="label">Empresa que cotiza</div><div class="value">{{ 'BRMS' if quotation.issuer == 'BRMS' else 'Harraso Transport' }}</div></div>
   <div class="detail-item"><div class="label">Cliente</div><div class="value">{{ quotation.client_name }}</div></div>
   <div class="detail-item"><div class="label">RUC</div><div class="value">{{ quotation.client_ruc or '—' }}</div></div>
   <div class="detail-item"><div class="label">Dirección</div><div class="value">{{ quotation.client_address or '—' }}</div></div>

@@ -299,6 +299,11 @@ COLUMN_MIGRATIONS = [
     ("inventory_purchases", "authorized_by_name", "TEXT"),
     ("inventory_purchases", "authorized_by_user_id", "INTEGER"),
     ("inventory_purchase_items", "received_quantity", "REAL NOT NULL DEFAULT 0"),
+    # 1 sep, pedido de Braulio: elegir si una cotización la emite Harraso o
+    # BRMS ("ya que son las 2"). Sin CHECK aquí (a diferencia del schema.sql
+    # de una base nueva) para no arriesgar la sintaxis de ADD COLUMN con
+    # CHECK en Postgres/SQLite — se valida igual en app/routes/cotizaciones.py.
+    ("quotations", "issuer", "TEXT NOT NULL DEFAULT 'HARRASO'"),
 ]
 
 
