@@ -62,7 +62,7 @@ def daily_stats_all(date_str):
     Las unidades sin ningún punto ese día simplemente no aparecen en el
     resultado (se interpretan como 0 en la vista/reporte)."""
     rows = query_all(
-        """SELECT vehicle_id, latitude, longitude, speed_kmh, odometer_km, created_at
+        """SELECT vehicle_id, latitude, longitude, speed_kmh, odometer_km, recorded_at, created_at
            FROM vehicle_location_history
            WHERE date(created_at) = ?
            ORDER BY vehicle_id, created_at""",
@@ -77,7 +77,27 @@ def daily_stats_all(date_str):
         hours = 0.0
         km = 0.0
         for prev, cur in zip(points, points[1:]):
-            gap_minutes = _minutes_between(prev["created_at"], cur["created_at"])
+            # 2 sep, tras reporte de Braulio de horas altas con 0 km (unidad
+            # ALZ728: 1.6h manejando pero 0.0 km): el tiempo real transcurrido
+            # entre dos lecturas es el que reporta Frotcom (recorded_at, su
+            # "lastCommunication"), no el momento en que NOSOTROS sincronizamos
+            # (created_at). Si Frotcom no recibió una posición nueva del
+            # vehículo entre dos sincronizaciones nuestras (p.ej. la unidad
+            # comunica cada varios minutos, más lento que nuestro polling
+            # cada 2 min), created_at avanza igual pero el dato es el mismo
+            # duplicado — usar created_at ahí cuenta minutos de "manejando"
+            # de más si la velocidad venía alta en esa lectura repetida, aun
+            # cuando el odómetro (real) no se movió nada. Usando recorded_at
+            # como base, un duplicado da gap=0 y el punto se salta solo (ver
+            # chequeo "gap_minutes <= 0" de abajo) — igual que ya pasaba con
+            # el km, que por comparar odómetros ya daba 0 en ese caso.
+            gap_minutes = _minutes_between(prev["recorded_at"], cur["recorded_at"])
+            if gap_minutes is None:
+                # Sin recorded_at utilizable en alguno de los dos puntos
+                # (dato viejo de antes de guardar ese campo, o Frotcom no lo
+                # mandó) — se usa el momento de sincronización como respaldo,
+                # igual que antes de este ajuste.
+                gap_minutes = _minutes_between(prev["created_at"], cur["created_at"])
             if gap_minutes is None or gap_minutes <= 0 or gap_minutes > MAX_GAP_MINUTES:
                 continue
             prev_speed = prev["speed_kmh"] or 0
