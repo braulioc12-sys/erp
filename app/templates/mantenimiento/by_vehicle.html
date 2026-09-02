@@ -10,20 +10,36 @@
 
 <div class="table-wrap">
   <table>
-    <thead><tr><th>Unidad</th><th class="text-right"># Mantenimientos</th><th class="text-right">Costo total</th><th>Último mantenimiento</th><th></th></tr></thead>
+    <thead><tr><th>Unidad</th><th>Kilometraje actual</th><th class="text-right"># Mantenimientos</th><th class="text-right">Costo total</th><th>Último mantenimiento</th><th></th></tr></thead>
     <tbody>
       {% for s in summary %}
       <tr>
         <td>{{ s.plate }}</td>
+        <td>
+          {{ '{:,.0f} km'.format(s.current_km) if s.current_km is not none else 'Sin dato' }}
+          {% if s.current_km_updated_at %}<br><span class="muted">Actualizado: {{ s.current_km_updated_at }}</span>{% endif %}
+          {% if can(current_user.role, 'mantenimiento', 'edit') %}
+          <details style="margin-top:4px;">
+            <summary class="muted" style="cursor:pointer;">Corregir kilometraje</summary>
+            <form method="post" action="{{ url_for('mantenimiento.update_vehicle_km', vehicle_id=s.id) }}" class="form-row" style="margin-top:6px; align-items:center;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="next" value="{{ url_for('mantenimiento.by_vehicle') }}">
+              <input type="number" step="1" name="current_km" value="{{ s.current_km if s.current_km is not none else '' }}" placeholder="Km" style="width:110px;">
+              <button type="submit" class="btn btn-secondary btn-sm">Guardar</button>
+            </form>
+          </details>
+          {% endif %}
+        </td>
         <td class="text-right">{{ s.n_records }}</td>
         <td class="text-right">{{ s.total_cost|money }}</td>
         <td>{{ s.last_date or '—' }}</td>
         <td><a href="{{ url_for('mantenimiento.list_view', vehicle_id=s.id) }}" class="btn btn-secondary btn-sm">Ver historial</a></td>
       </tr>
       {% else %}
-      <tr><td colspan="5" class="table-empty">No hay unidades registradas.</td></tr>
+      <tr><td colspan="6" class="table-empty">No hay unidades registradas.</td></tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
+<p class="muted" style="margin-top:10px;">El kilometraje se actualiza solo cada 2 minutos vía GPS (Frotcom) cuando la unidad está sincronizada. "Corregir kilometraje" es solo para cuando el GPS dejó de transmitir y hace falta ajustarlo a mano.</p>
 {% endblock %}

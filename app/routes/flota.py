@@ -49,6 +49,19 @@ def list_view():
     return render_template("flota/list.html", vehicles=vehicles)
 
 
+@bp.route("/<int:vehicle_id>")
+@permission_required("flota", "view")
+def vehicle_detail(vehicle_id):
+    """2 sep, pedido de Braulio: lista principal de Flota vuelta compacta
+    (mismo patrón ya usado en Conductores) — el resto de los datos de cada
+    unidad, incluido el kilometraje actual (ahora alimentado por GPS, ver
+    integraciones Frotcom), se ven acá en el detalle."""
+    vehicle = query_one("SELECT * FROM vehicles WHERE id = ?", (vehicle_id,))
+    if vehicle is None:
+        abort(404)
+    return render_template("flota/detail.html", vehicle=vehicle)
+
+
 # --- Vehículos ---
 
 @bp.route("/nuevo", methods=["GET", "POST"])

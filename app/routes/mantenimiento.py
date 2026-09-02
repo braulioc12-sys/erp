@@ -132,7 +132,10 @@ def list_view():
         for r in records:
             status_by_record[r["id"]] = _order_status(jobs_grouped.get(r["id"], []))
 
-    filtered_vehicle = query_one("SELECT plate FROM vehicles WHERE id = ?", (vehicle_id,)) if vehicle_id else None
+    filtered_vehicle = (
+        query_one("SELECT id, plate, current_km, current_km_updated_at FROM vehicles WHERE id = ?", (vehicle_id,))
+        if vehicle_id else None
+    )
     return render_template(
         "mantenimiento/list.html", records=records, jobs_by_record=jobs_by_record,
         status_by_record=status_by_record, order_status_labels=ORDER_STATUS_LABELS,
@@ -599,7 +602,7 @@ def mechanics_toggle(mechanic_id):
 @permission_required("mantenimiento", "view")
 def by_vehicle():
     summary = query_all(
-        """SELECT v.id, v.plate, COUNT(m.id) as n_records,
+        """SELECT v.id, v.plate, v.current_km, v.current_km_updated_at, COUNT(m.id) as n_records,
                   COALESCE(SUM(m.cost), 0) as total_cost,
                   MAX(m.maintenance_date) as last_date
            FROM vehicles v
@@ -608,6 +611,35 @@ def by_vehicle():
            ORDER BY v.plate"""
     )
     return render_template("mantenimiento/by_vehicle.html", summary=summary)
+
+
+@bp.route("/unidad/<int:vehicle_id>/kilometraje", methods=["POST"])
+@permission_required("mantenimiento", "edit")
+def update_vehicle_km(vehicle_id):
+    """2 sep, pedido de Braulio: un recuadro para corregir a mano el
+    kilometraje de una unidad directamente desde Mantenimiento ("dentro de
+    taller"), por si el GPS dejó de transmitir y `vehicles.current_km` (que
+    normalmente se actualiza solo cada 2 minutos vía Frotcom — ver
+    perform_frotcom_sync en integraciones.py) se quedó desactualizado. Mismo
+    campo que ya se puede editar en Flota → Editar unidad; esto solo agrega
+    un atajo más rápido, sin salir de Mantenimiento, para el caso de
+    emergencia."""
+    if not validate_csrf():
+        abort(400)
+    vehicle = query_one("SELECT id FROM vehicles WHERE id = ?", (vehicle_id,))
+    if vehicle is None:
+        abort(404)
+    new_km = parse_float(request.form.get("current_km"), None)
+    if new_km is None:
+        flash("Ingresa un kilometraje válido.", "error")
+    else:
+        execute(
+            "UPDATE vehicles SET current_km = ?, current_km_updated_at = ? WHERE id = ?",
+            (new_km, today_str(), vehicle_id),
+        )
+        flash("Kilometraje actualizado.", "success")
+    next_url = request.form.get("next") or url_for("mantenimiento.by_vehicle")
+    return redirect(next_url)
 
 
 def km_alerts():

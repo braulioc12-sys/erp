@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}{{ vehicle.plate }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ vehicle.plate }} {{ m.badge(vehicle.status) }}</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('flota.list_view') }}" class="btn btn-secondary">← Volver</a>
+    <a href="{{ url_for('neumaticos.diagram', vehicle_id=vehicle.id) }}" class="btn btn-secondary">Neumáticos</a>
+    <a href="{{ url_for('mantenimiento.list_view', vehicle_id=vehicle.id) }}" class="btn btn-secondary">Mantenimiento</a>
+    {% if can(current_user.role, 'flota', 'edit') %}
+    <a href="{{ url_for('flota.edit_vehicle', vehicle_id=vehicle.id) }}" class="btn btn-primary">Editar</a>
+    <form method="post" action="{{ url_for('flota.delete_vehicle', vehicle_id=vehicle.id) }}" style="display:inline;" onsubmit="return confirm('¿Eliminar esta unidad?');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-danger">Eliminar</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="panel">
+  <div class="detail-grid">
+    <div class="detail-item"><div class="label">Marca / Modelo</div><div class="value">{{ (vehicle.brand or '') ~ ' ' ~ (vehicle.model or '') if vehicle.brand or vehicle.model else '—' }}</div></div>
+    <div class="detail-item"><div class="label">Tipo de unidad</div>
+      <div class="value">
+        {% if vehicle.vehicle_type == 'TRACTO' %}Tracto
+        {% elif vehicle.vehicle_type == 'CARRETA' %}Carreta
+        {% else %}Camión{% endif %}
+      </div>
+    </div>
+    <div class="detail-item"><div class="label">Propietario</div><div class="value">{{ vehicle.owner or '—' }}</div></div>
+    <div class="detail-item"><div class="label">Capacidad (kg)</div><div class="value">{{ vehicle.capacity_kg or '—' }}</div></div>
+    <div class="detail-item"><div class="label">Estado</div><div class="value">{{ m.badge(vehicle.status) }}</div></div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Kilometraje</h2>
+  <div class="detail-grid">
+    <div class="detail-item">
+      <div class="label">Kilometraje actual</div>
+      <div class="value" style="font-size:1.3em;">{{ '{:,.0f} km'.format(vehicle.current_km) if vehicle.current_km is not none else 'Sin dato' }}</div>
+    </div>
+    <div class="detail-item"><div class="label">Última actualización</div><div class="value">{{ vehicle.current_km_updated_at or '—' }}</div></div>
+    <div class="detail-item"><div class="label">ID en el proveedor de GPS</div><div class="value">{{ vehicle.gps_external_id or '—' }}</div></div>
+  </div>
+  <p class="muted" style="margin-bottom:0;">Se actualiza solo cada 2 minutos vía GPS (Frotcom) cuando la unidad está sincronizada. Para corregirlo a mano (por ejemplo, si el GPS dejó de transmitir), puedes hacerlo desde "Editar" arriba o desde Mantenimiento → Historial y costos por unidad.</p>
+</div>
+
+<div class="panel">
+  <h2>Documentos obligatorios</h2>
+  <div class="detail-grid">
+    <div class="detail-item"><div class="label">Vencimiento de SOAT</div><div class="value">{{ vehicle.soat_expiry or '—' }}</div></div>
+    <div class="detail-item"><div class="label">Vencimiento de Revisión Técnica</div><div class="value">{{ vehicle.technical_review_expiry or '—' }}</div></div>
+  </div>
+</div>
+
+{% if vehicle.notes %}
+<div class="panel">
+  <h2>Notas</h2>
+  <p style="margin:0;">{{ vehicle.notes }}</p>
+</div>
+{% endif %}
+{% endblock %}

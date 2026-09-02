@@ -18,6 +18,23 @@
 </div>
 {% if filtered_vehicle %}
 <p class="mt-0"><a href="{{ url_for('mantenimiento.list_view') }}">← Ver todas las unidades</a></p>
+<div class="panel" style="margin-bottom:16px;">
+  <div class="form-row" style="align-items:center; justify-content:space-between;">
+    <div>
+      <span class="muted">Kilometraje actual</span><br>
+      <strong style="font-size:1.2em;">{{ '{:,.0f} km'.format(filtered_vehicle.current_km) if filtered_vehicle.current_km is not none else 'Sin dato' }}</strong>
+      {% if filtered_vehicle.current_km_updated_at %}<span class="muted"> — actualizado: {{ filtered_vehicle.current_km_updated_at }}</span>{% endif %}
+    </div>
+    {% if can(current_user.role, 'mantenimiento', 'edit') %}
+    <form method="post" action="{{ url_for('mantenimiento.update_vehicle_km', vehicle_id=filtered_vehicle.id) }}" class="form-row" style="align-items:center; margin-bottom:0;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="next" value="{{ url_for('mantenimiento.list_view', vehicle_id=filtered_vehicle.id) }}">
+      <input type="number" step="1" name="current_km" value="{{ filtered_vehicle.current_km if filtered_vehicle.current_km is not none else '' }}" placeholder="Corregir km" style="width:130px;">
+      <button type="submit" class="btn btn-secondary btn-sm">Guardar</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
 {% endif %}
 
 <div class="table-wrap">

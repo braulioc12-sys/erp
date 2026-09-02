@@ -11,28 +11,30 @@
     {% endif %}
   </div>
 </div>
+<p class="muted mt-0">Haz clic en una unidad para ver su detalle completo: marca/modelo, propietario, capacidad y kilometraje actual (vía GPS).</p>
+
+<label style="max-width:320px;">Buscar por placa
+  <input type="text" id="vehicleSearch" placeholder="Ej. ALZ728" oninput="filterVehicles()" autocomplete="off">
+</label>
 
 <div class="table-wrap">
-  <table>
-    <thead><tr><th>Placa</th><th>Marca / Modelo</th><th>Tipo</th><th>Propietario</th><th>Capacidad (kg)</th><th>Estado</th><th>SOAT vence</th><th>Rev. técnica vence</th><th></th></tr></thead>
+  <table id="vehicleTable">
+    <thead><tr><th>Placa</th><th>Marca / Modelo</th><th>Tipo</th><th>Estado</th><th>SOAT vence</th><th>Rev. técnica vence</th><th></th></tr></thead>
     <tbody>
       {% for v in vehicles %}
-      <tr>
-        <td>{{ v.plate }}</td>
+      <tr onclick="window.location='{{ url_for('flota.vehicle_detail', vehicle_id=v.id) }}'" style="cursor:pointer;" data-plate="{{ v.plate|lower }}">
+        <td><a href="{{ url_for('flota.vehicle_detail', vehicle_id=v.id) }}">{{ v.plate }}</a></td>
         <td>{{ v.brand or '' }} {{ v.model or '' }}</td>
         <td>
           {% if v.vehicle_type == 'TRACTO' %}Tracto
           {% elif v.vehicle_type == 'CARRETA' %}Carreta
           {% else %}Camión{% endif %}
         </td>
-        <td>{{ v.owner or '—' }}</td>
-        <td>{{ v.capacity_kg or '—' }}</td>
         <td>{{ m.badge(v.status) }}</td>
         <td>{{ v.soat_expiry or '—' }}</td>
         <td>{{ v.technical_review_expiry or '—' }}</td>
-        <td>
+        <td onclick="event.stopPropagation();">
           <div class="btn-group">
-            <a class="btn btn-secondary btn-sm" href="{{ url_for('neumaticos.diagram', vehicle_id=v.id) }}">Neumáticos</a>
             {% if can(current_user.role, 'flota', 'edit') %}
             <a class="btn btn-secondary btn-sm" href="{{ url_for('flota.edit_vehicle', vehicle_id=v.id) }}">Editar</a>
             <form method="post" action="{{ url_for('flota.delete_vehicle', vehicle_id=v.id) }}" onsubmit="return confirm('¿Eliminar esta unidad?');">
@@ -44,9 +46,24 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="9" class="table-empty">No hay unidades registradas.</td></tr>
+      <tr><td colspan="7" class="table-empty">No hay unidades registradas.</td></tr>
       {% endfor %}
     </tbody>
   </table>
+  <p id="vehicleSearchEmpty" class="table-empty" style="display:none;">Ninguna unidad coincide con la búsqueda.</p>
 </div>
+
+<script>
+function filterVehicles() {
+  var query = document.getElementById('vehicleSearch').value.trim().toLowerCase();
+  var rows = document.querySelectorAll('#vehicleTable tbody tr[data-plate]');
+  var visible = 0;
+  rows.forEach(function (row) {
+    var match = row.getAttribute('data-plate').indexOf(query) !== -1;
+    row.style.display = match ? '' : 'none';
+    if (match) visible++;
+  });
+  document.getElementById('vehicleSearchEmpty').style.display = (visible === 0 && rows.length > 0) ? '' : 'none';
+}
+</script>
 {% endblock %}
