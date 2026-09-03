@@ -11,11 +11,13 @@ app/accounting.py).
 Sigue habiendo exactamente **una liquidación por viaje** (una fila en
 `expense_advances` por `trip_id`), pero ahora la asignación de gastos a esa
 liquidación es explícita (checkboxes en el detalle) en vez de automática."""
+import base64
 import io
 import os
+import secrets
 import uuid
 
-from flask import Blueprint, Response, abort, current_app, flash, jsonify, redirect, render_template, request, send_from_directory, url_for
+from flask import Blueprint, Response, abort, current_app, flash, g, jsonify, redirect, render_template, request, send_from_directory, url_for
 from PIL import Image, ImageOps
 
 from app.accounting import (
@@ -28,7 +30,7 @@ from app.accounting import (
 )
 from app.auth import permission_required, validate_csrf
 from app.db import execute, query_all, query_one
-from app.helpers import parse_date, parse_float, pretty_label, today_str
+from app.helpers import now_str, parse_date, parse_float, pretty_label, today_str
 from app.integrations.sunat_exchange_rate import get_rate_for_date
 from app.integrations.sunat_ruc import get_company_for_ruc
 from app.reports import build_expenses_workbook, build_liquidacion_workbook
@@ -95,24 +97,34 @@ def _compress_receipt_image(raw_bytes):
 
 
 def _save_receipt(file_storage):
-    """Guarda el comprobante adjunto (foto o PDF) y devuelve el nombre de
-    archivo guardado, o None si no se envió nada válido. Las fotos se
-    redimensionan y recomprimen como JPEG para ocupar el menor espacio
-    posible (ver _compress_receipt_image); los PDF se guardan tal cual.
-    El guardado en sí (disco local o Amazon S3) lo decide app/storage.py
-    según el ambiente — ver README, sección "Base de datos persistente en
-    AWS (RDS + S3)". En disco local (por defecto) estos archivos se pierden
-    al reiniciar/redesplegar en hosting con disco efímero, igual que la
-    base de datos SQLite."""
+    """Guarda el comprobante adjunto (foto o PDF) subido como multipart/form-data
+    (formulario normal del navegador) y devuelve el nombre de archivo guardado,
+    o None si no se envió nada válido. Delega el guardado en sí a
+    _save_receipt_bytes (ver ahí el detalle de compresión/almacenamiento)."""
     if not file_storage or not file_storage.filename:
         return None
-    ext = os.path.splitext(file_storage.filename)[1].lower()
+    return _save_receipt_bytes(file_storage.read(), file_storage.filename, file_storage.mimetype)
+
+
+def _save_receipt_bytes(raw_bytes, filename, mimetype=None):
+    """Guarda el comprobante adjunto (foto o PDF) a partir de bytes ya en
+    memoria — usado tanto por _save_receipt (formulario/multipart) como por
+    el intake de WhatsApp/n8n (JSON con la imagen en base64, ver
+    whatsapp_intake). Devuelve el nombre de archivo guardado, o None si no
+    hay nada válido que guardar. Las fotos se redimensionan y recomprimen
+    como JPEG para ocupar el menor espacio posible (ver
+    _compress_receipt_image); los PDF se guardan tal cual. El guardado en sí
+    (disco local o Amazon S3) lo decide app/storage.py según el ambiente —
+    ver README, sección "Base de datos persistente en AWS (RDS + S3)". En
+    disco local (por defecto) estos archivos se pierden al
+    reiniciar/redesplegar en hosting con disco efímero, igual que la base de
+    datos SQLite."""
+    ext = os.path.splitext(filename or "")[1].lower()
     if ext not in ALLOWED_RECEIPT_EXTENSIONS:
-        ext = MIME_TO_EXTENSION.get((file_storage.mimetype or "").lower())
+        ext = MIME_TO_EXTENSION.get((mimetype or "").lower())
     if not ext:
         return None
 
-    raw_bytes = file_storage.read()
     if not raw_bytes:
         return None
 
@@ -187,7 +199,10 @@ def list_view():
            JOIN trips t ON t.id = a.trip_id
            ORDER BY a.given_date DESC, a.id DESC"""
     )
-    return render_template("liquidaciones/list.html", advances=advances)
+    whatsapp_pending_count = query_one(
+        "SELECT COUNT(*) n FROM whatsapp_expense_drafts WHERE status = 'PENDIENTE'"
+    )["n"]
+    return render_template("liquidaciones/list.html", advances=advances, whatsapp_pending_count=whatsapp_pending_count)
 
 
 @bp.route("/anticipo/<int:trip_id>", methods=["GET", "POST"])
@@ -667,6 +682,267 @@ def receipt(expense_id):
     if storage.using_s3():
         return redirect(storage.receipt_url(expense["receipt_filename"]))
     return send_from_directory(storage.local_receipts_dir(), expense["receipt_filename"])
+
+
+# --- Borradores de gasto desde WhatsApp (vía n8n) -----------------------
+#
+# Flujo (1 sep, pedido de Braulio: "quiero usar n8n para integrar Whatsapp
+# a la plataforma... que tomando una foto a la factura se llene
+# automaticamente los campos de datos de proveedor, monto entre otros"):
+# un workflow de n8n (fuera de este repositorio — ver
+# n8n/whatsapp-factura-intake.json) recibe la foto por WhatsApp Business
+# API, la manda a una IA con visión para extraer los datos, y llama a
+# whatsapp_intake() con esos datos + la imagen. Eso crea un borrador
+# PENDIENTE (whatsapp_expense_drafts) — nunca un gasto real directo, porque
+# la IA puede equivocarse en el monto o el RUC y esto es dinero real
+# (confirmado con Braulio). whatsapp_review() es donde un humano revisa,
+# corrige si hace falta, y recién ahí aprueba (crea la fila real en
+# `expenses`, reusando el mismo INSERT que new_expense()) o rechaza.
+
+def _n8n_token_valid():
+    """Compara el token de la cabecera "X-Webhook-Token" contra
+    N8N_WEBHOOK_TOKEN con comparación de tiempo constante (evita timing
+    attacks). Si el servidor no tiene el token configurado, siempre
+    devuelve False — el endpoint nunca queda abierto sin querer solo
+    porque alguien olvidó configurar la variable de entorno."""
+    configured = (current_app.config.get("N8N_WEBHOOK_TOKEN") or "").strip()
+    if not configured:
+        return False
+    provided = request.headers.get("X-Webhook-Token", "")
+    return secrets.compare_digest(configured, provided)
+
+
+@bp.route("/whatsapp/intake", methods=["POST"])
+def whatsapp_intake():
+    """Endpoint que llama el workflow de n8n después de extraer los datos
+    de una foto de factura recibida por WhatsApp. No usa sesión/login ni
+    el csrf_token normal (quien llama es un servicio externo, no un
+    navegador con la sesión de un usuario) — se autentica con
+    N8N_WEBHOOK_TOKEN (ver _n8n_token_valid). Responde JSON siempre, nunca
+    una página HTML ni una redirección, para que n8n pueda leer el
+    resultado y decidir si reintentar o no.
+
+    Acepta el body de dos formas:
+    - JSON con la imagen en base64 (`image_base64` + `image_filename`) —
+      la forma que usa el workflow de n8n, porque mandar JSON es más simple
+      y confiable desde ahí que armar un body multipart/form-data.
+    - multipart/form-data con un archivo `image` — se mantiene por si algún
+      día conviene llamarlo directo con un form (ej. para pruebas manuales
+      con curl -F), pero n8n no la necesita."""
+    if not _n8n_token_valid():
+        return jsonify({"ok": False, "error": "token inválido o no configurado"}), 401
+
+    if request.is_json:
+        data = request.get_json(silent=True) or {}
+        image_b64 = data.get("image_base64") or ""
+        # Por si mandan un data URL completo (data:image/jpeg;base64,xxxx)
+        # en vez de solo el base64.
+        if "," in image_b64 and image_b64.strip().lower().startswith("data:"):
+            image_b64 = image_b64.split(",", 1)[1]
+        try:
+            image_bytes = base64.b64decode(image_b64, validate=False) if image_b64 else b""
+        except Exception:
+            return jsonify({"ok": False, "error": "image_base64 no es base64 válido"}), 400
+        image_name = data.get("image_filename") or "foto.jpg"
+        image_mimetype = data.get("image_mimetype") or None
+        wa_message_id = (data.get("wa_message_id") or "").strip() or None
+        phone = (data.get("phone") or "").strip() or None
+        provider_ruc = (data.get("provider_ruc") or "").strip() or None
+        provider_name = (data.get("provider_name") or "").strip() or None
+        amount = parse_float(data.get("amount"), None)
+        currency = (data.get("currency") or "").strip() or None
+        document_number = (data.get("document_number") or "").strip() or None
+        document_date = parse_date(data.get("document_date") or "")
+        raw_extraction = data.get("raw_extraction") or None
+        caption = (data.get("caption") or "").strip() or None
+        if not image_bytes:
+            return jsonify({"ok": False, "error": "falta 'image_base64'"}), 400
+    else:
+        image = request.files.get("image")
+        if not image or not image.filename:
+            return jsonify({"ok": False, "error": "falta el archivo 'image'"}), 400
+        image_bytes = image.read()
+        image_name = image.filename
+        image_mimetype = image.mimetype
+        wa_message_id = (request.form.get("wa_message_id") or "").strip() or None
+        phone = (request.form.get("phone") or "").strip() or None
+        provider_ruc = (request.form.get("provider_ruc") or "").strip() or None
+        provider_name = (request.form.get("provider_name") or "").strip() or None
+        amount = parse_float(request.form.get("amount"), None)
+        currency = (request.form.get("currency") or "").strip() or None
+        document_number = (request.form.get("document_number") or "").strip() or None
+        document_date = parse_date(request.form.get("document_date") or "")
+        raw_extraction = request.form.get("raw_extraction") or None
+        caption = (request.form.get("caption") or "").strip() or None
+
+    # Si n8n manda el id del mensaje de WhatsApp y ya se procesó antes (por
+    # ejemplo, reintentó la llamada tras un timeout de red), se devuelve el
+    # borrador ya creado en vez de duplicarlo.
+    if wa_message_id:
+        existing = query_one(
+            "SELECT id, status FROM whatsapp_expense_drafts WHERE source_wa_message_id = ?",
+            (wa_message_id,),
+        )
+        if existing:
+            return jsonify({
+                "ok": True, "draft_id": existing["id"], "status": existing["status"], "duplicate": True,
+            })
+
+    image_filename = _save_receipt_bytes(image_bytes, image_name, image_mimetype)
+    if not image_filename:
+        return jsonify({"ok": False, "error": "no se pudo leer la imagen (formato no soportado o archivo vacío)"}), 400
+
+    draft_id = execute(
+        """INSERT INTO whatsapp_expense_drafts
+           (source_phone, source_wa_message_id, image_filename, extracted_provider_ruc,
+            extracted_provider_name, extracted_amount, extracted_currency, extracted_document_number,
+            extracted_document_date, ai_raw_response, caption)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            phone, wa_message_id, image_filename, provider_ruc, provider_name,
+            amount, currency, document_number, document_date, raw_extraction, caption,
+        ),
+    )
+    return jsonify({"ok": True, "draft_id": draft_id, "status": "PENDIENTE"})
+
+
+@bp.route("/whatsapp")
+@permission_required("liquidaciones", "view")
+def whatsapp_list():
+    status_filter = request.args.get("status", "PENDIENTE")
+    sql = "SELECT * FROM whatsapp_expense_drafts WHERE 1=1"
+    params = []
+    if status_filter:
+        sql += " AND status = ?"
+        params.append(status_filter)
+    sql += " ORDER BY created_at DESC, id DESC"
+    drafts = query_all(sql, params)
+    pending_count = query_one(
+        "SELECT COUNT(*) n FROM whatsapp_expense_drafts WHERE status = 'PENDIENTE'"
+    )["n"]
+    return render_template(
+        "liquidaciones/whatsapp_list.html", drafts=drafts, status_filter=status_filter, pending_count=pending_count,
+    )
+
+
+@bp.route("/whatsapp/<int:draft_id>/imagen")
+@permission_required("liquidaciones", "view")
+def whatsapp_draft_image(draft_id):
+    draft = query_one("SELECT image_filename FROM whatsapp_expense_drafts WHERE id = ?", (draft_id,))
+    if draft is None or not draft["image_filename"]:
+        abort(404)
+    if storage.using_s3():
+        return redirect(storage.receipt_url(draft["image_filename"]))
+    return send_from_directory(storage.local_receipts_dir(), draft["image_filename"])
+
+
+def _whatsapp_review_context(draft):
+    concepts = _expense_concepts(exclude_vale=True)
+    trips = query_all(
+        "SELECT id, code, vehicle_id FROM trips WHERE status != 'CANCELADO' ORDER BY scheduled_date DESC"
+    )
+    return {
+        "draft": draft,
+        "trips": trips,
+        "trips_json": [dict(t) for t in trips],
+        "vehicles": query_all("SELECT id, plate FROM vehicles ORDER BY plate"),
+        "concepts": concepts,
+        "concepts_json": [dict(c) for c in concepts],
+        "today": today_str(),
+    }
+
+
+@bp.route("/whatsapp/<int:draft_id>", methods=["GET", "POST"])
+@permission_required("liquidaciones", "edit")
+def whatsapp_review(draft_id):
+    draft = query_one("SELECT * FROM whatsapp_expense_drafts WHERE id = ?", (draft_id,))
+    if draft is None:
+        abort(404)
+    if draft["status"] != "PENDIENTE":
+        flash("Este borrador ya fue revisado.", "info")
+        return redirect(url_for("liquidaciones.whatsapp_list"))
+
+    ctx = _whatsapp_review_context(draft)
+
+    if request.method == "POST":
+        if not validate_csrf():
+            abort(400)
+        amount = parse_float(request.form.get("amount"))
+        expense_date = parse_date(request.form.get("expense_date")) or today_str()
+        concept_id = request.form.get("concept_id") or None
+        concept = query_one("SELECT * FROM expense_concepts WHERE id = ?", (concept_id,)) if concept_id else None
+        trip_id = request.form.get("trip_id") or None
+        vehicle_id = request.form.get("vehicle_id") or None
+
+        errors = []
+        if not concept:
+            errors.append("Selecciona un concepto de gasto válido.")
+        if amount <= 0:
+            errors.append("El monto debe ser mayor a cero.")
+        if not trip_id and not vehicle_id:
+            errors.append("Asocia el gasto a un viaje o a una unidad.")
+
+        if errors:
+            for e in errors:
+                flash(e, "error")
+            return render_template("liquidaciones/whatsapp_review.html", **{**ctx, "form": request.form})
+
+        expense_type = concept["name"]
+        manual_rate = request.form.get("exchange_rate", "").strip()
+        exchange_rate = parse_float(manual_rate, None) if manual_rate else _fetch_exchange_rate(expense_date)
+
+        # El comprobante del gasto real es la misma foto que ya se guardó al
+        # recibir el borrador — no hace falta volver a subirla ni duplicarla.
+        expense_id = execute(
+            """INSERT INTO expenses (trip_id, vehicle_id, type, amount, expense_date, description,
+               receipt_filename, concept_id, document_number, due_date, provider_ruc, provider_name,
+               currency, exchange_rate, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                trip_id, vehicle_id, expense_type, amount, expense_date,
+                request.form.get("description", "").strip(), draft["image_filename"], concept_id,
+                request.form.get("document_number", "").strip() or None,
+                expense_date,
+                request.form.get("provider_ruc", "").strip() or None,
+                request.form.get("provider_name", "").strip() or None,
+                request.form.get("currency", DEFAULT_CURRENCY) or DEFAULT_CURRENCY,
+                exchange_rate, g.user["id"],
+            ),
+        )
+        execute(
+            """UPDATE whatsapp_expense_drafts SET status = 'APROBADO', reviewed_by = ?, reviewed_at = ?,
+               resulting_expense_id = ? WHERE id = ?""",
+            (g.user["id"], now_str(), expense_id, draft_id),
+        )
+        flash("Gasto registrado a partir de la foto recibida por WhatsApp.", "success")
+        if trip_id:
+            advance = query_one("SELECT id FROM expense_advances WHERE trip_id = ?", (trip_id,))
+            if advance:
+                return redirect(url_for("liquidaciones.detail", advance_id=advance["id"]))
+            return redirect(url_for("viajes.detail", trip_id=trip_id))
+        return redirect(url_for("liquidaciones.whatsapp_list"))
+
+    return render_template("liquidaciones/whatsapp_review.html", **ctx)
+
+
+@bp.route("/whatsapp/<int:draft_id>/rechazar", methods=["POST"])
+@permission_required("liquidaciones", "edit")
+def whatsapp_reject(draft_id):
+    if not validate_csrf():
+        abort(400)
+    draft = query_one("SELECT id, status FROM whatsapp_expense_drafts WHERE id = ?", (draft_id,))
+    if draft is None:
+        abort(404)
+    if draft["status"] != "PENDIENTE":
+        flash("Este borrador ya fue revisado.", "info")
+        return redirect(url_for("liquidaciones.whatsapp_list"))
+    execute(
+        """UPDATE whatsapp_expense_drafts SET status = 'RECHAZADO', reviewed_by = ?, reviewed_at = ?,
+           rejection_reason = ? WHERE id = ?""",
+        (g.user["id"], now_str(), request.form.get("rejection_reason", "").strip() or None, draft_id),
+    )
+    flash("Borrador descartado.", "success")
+    return redirect(url_for("liquidaciones.whatsapp_list"))
 
 
 # --- Historial de gastos (lista plana filtrable, para gastos sueltos de
