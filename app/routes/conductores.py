@@ -224,15 +224,32 @@ def edit_driver(driver_id):
     return render_template("conductores/driver_form.html", driver=driver, mode="edit", driver_id=driver_id)
 
 
+# Mismo criterio que VEHICLE_HISTORY_TABLES en app/routes/flota.py (3 sep):
+# drivers.id también tiene foreign key desde "inspections" (además de
+# "trips", ya revisada) — un DELETE directo con una inspección asociada
+# pero sin viajes fallaba con error 500 en vez de marcar inactivo.
+DRIVER_HISTORY_TABLES = ["trips", "inspections"]
+
+
+def _driver_has_history(driver_id):
+    return any(
+        query_one(f"SELECT COUNT(*) n FROM {table} WHERE driver_id = ?", (driver_id,))["n"]
+        for table in DRIVER_HISTORY_TABLES
+    )
+
+
 @bp.route("/<int:driver_id>/eliminar", methods=["POST"])
 @permission_required("conductores", "edit")
 def delete_driver(driver_id):
     if not validate_csrf():
         abort(400)
-    in_use = query_one("SELECT COUNT(*) n FROM trips WHERE driver_id = ?", (driver_id,))["n"]
-    if in_use:
+    if _driver_has_history(driver_id):
         execute("UPDATE drivers SET status = 'INACTIVO' WHERE id = ?", (driver_id,))
-        flash("El conductor tiene viajes asociados; se marcó como inactivo.", "success")
+        flash(
+            "El conductor tiene historial asociado (viajes o inspecciones); se marcó como "
+            "inactivo para no perder ese historial.",
+            "success",
+        )
     else:
         execute("DELETE FROM drivers WHERE id = ?", (driver_id,))
         flash("Conductor eliminado.", "success")

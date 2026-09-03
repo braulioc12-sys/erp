@@ -4,7 +4,7 @@ from flask import Blueprint, Response, abort, flash, redirect, render_template, 
 
 from app.auth import permission_required, validate_csrf
 from app.bulk_import import VEHICLE_COLUMNS, VEHICLE_EXAMPLE, XLSX_MIME, build_import_template, read_import_rows
-from app.db import execute, query_all, query_one
+from app.db import execute, get_db, query_all, query_one
 from app.helpers import parse_date, parse_float, today_str
 
 bp = Blueprint("flota", __name__, url_prefix="/flota")
@@ -158,17 +158,48 @@ def edit_vehicle(vehicle_id):
     )
 
 
+# Tablas con historial "de negocio" ligado a una unidad — si tiene alguna
+# fila en cualquiera de estas, no se borra de verdad al "Eliminar" (se
+# marca INACTIVO en su lugar, ver delete_vehicle). Antes solo se revisaba
+# "trips" — pero vehicles.id también tiene foreign key desde estas otras
+# (ver schema.sql), así que un DELETE directo fallaba con un error 500 en
+# Postgres (RDS sí valida las FK; SQLite local también, con PRAGMA
+# foreign_keys=ON) apenas la unidad tenía, por ejemplo, una inspección o un
+# neumático registrado pero ningún viaje — el caso real que reportó Braulio
+# (3 sep, unidad id=4: "Internal Server Error" al eliminar).
+VEHICLE_HISTORY_TABLES = ["trips", "expenses", "maintenance_records", "tires", "tire_rotations", "inspections"]
+
+
+def _vehicle_has_history(vehicle_id):
+    return any(
+        query_one(f"SELECT COUNT(*) n FROM {table} WHERE vehicle_id = ?", (vehicle_id,))["n"]
+        for table in VEHICLE_HISTORY_TABLES
+    )
+
+
 @bp.route("/<int:vehicle_id>/eliminar", methods=["POST"])
 @permission_required("flota", "edit")
 def delete_vehicle(vehicle_id):
     if not validate_csrf():
         abort(400)
-    in_use = query_one("SELECT COUNT(*) n FROM trips WHERE vehicle_id = ?", (vehicle_id,))["n"]
-    if in_use:
+    if _vehicle_has_history(vehicle_id):
         execute("UPDATE vehicles SET status = 'INACTIVO' WHERE id = ?", (vehicle_id,))
-        flash("La unidad tiene viajes asociados; se marcó como inactiva.", "success")
+        flash(
+            "La unidad tiene historial asociado (viajes, gastos, mantenimiento, neumáticos o "
+            "inspecciones); se marcó como inactiva para no perder ese historial.",
+            "success",
+        )
     else:
-        execute("DELETE FROM vehicles WHERE id = ?", (vehicle_id,))
+        # Sin historial "de negocio", pero puede tener datos de rastreo GPS
+        # (vehicle_locations/vehicle_location_history/vehicle_trips) — esos
+        # no tienen valor propio sin la unidad, así que se borran junto con
+        # ella en vez de bloquear el borrado por esto.
+        db = get_db()
+        db.execute("DELETE FROM vehicle_locations WHERE vehicle_id = ?", (vehicle_id,))
+        db.execute("DELETE FROM vehicle_location_history WHERE vehicle_id = ?", (vehicle_id,))
+        db.execute("DELETE FROM vehicle_trips WHERE vehicle_id = ?", (vehicle_id,))
+        db.execute("DELETE FROM vehicles WHERE id = ?", (vehicle_id,))
+        db.commit()
         flash("Unidad eliminada.", "success")
     return redirect(url_for("flota.list_view"))
 
