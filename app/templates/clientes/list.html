@@ -4,7 +4,7 @@
 <div class="page-header">
   <h1>Clientes</h1>
   <div class="page-actions">
-    {% if can(current_user.role, 'clientes', 'edit') %}
+    {% if can(current_user.roles, 'clientes', 'edit') %}
     <a href="{{ url_for('clientes.new') }}" class="btn btn-primary">+ Nuevo cliente</a>
     {% endif %}
   </div>
@@ -31,7 +31,7 @@
         <td>{{ c.email or '—' }}</td>
         <td class="wrap">{{ c.address or '—' }}</td>
         <td>
-          {% if can(current_user.role, 'clientes', 'edit') %}
+          {% if can(current_user.roles, 'clientes', 'edit') %}
           <div class="btn-group">
             <a class="btn btn-secondary btn-sm" href="{{ url_for('clientes.edit', client_id=c.id) }}">Editar</a>
             <form method="post" action="{{ url_for('clientes.delete', client_id=c.id) }}" onsubmit="return confirm('¿Eliminar este cliente?');">

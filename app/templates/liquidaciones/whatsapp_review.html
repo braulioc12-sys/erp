@@ -1,0 +1,196 @@
+{% extends 'base.html' %}
+{% block title %}Revisar borrador WhatsApp{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Revisar borrador de WhatsApp</h1></div>
+<p class="muted mt-0">Recibido el {{ draft.created_at }}{% if draft.source_phone %} desde {{ draft.source_phone }}{% endif %}. Los campos de abajo vienen precargados con lo que extrajo la IA de la foto — revísalos y corrígelos antes de aprobar; nada de esto se guarda como gasto hasta que lo hagas.</p>
+{% if draft.caption %}
+<p class="muted" style="margin-top:-8px;">Mensaje adjunto: «{{ draft.caption }}»</p>
+{% endif %}
+
+<div class="form-row" style="align-items:flex-start;">
+  <div class="panel" style="flex:0 0 320px;">
+    <h2 style="margin-top:0;">Foto recibida</h2>
+    <a href="{{ url_for('liquidaciones.whatsapp_draft_image', draft_id=draft.id) }}" target="_blank">
+      <img src="{{ url_for('liquidaciones.whatsapp_draft_image', draft_id=draft.id) }}" alt="Foto de la factura" style="max-width:100%; border-radius:8px; border:1px solid var(--border, #ddd);">
+    </a>
+  </div>
+
+  <form class="form panel" method="post" style="flex:1;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <label>Monto *
+      <input type="number" step="0.01" name="amount" value="{{ form.amount if form else (draft.extracted_amount if draft.extracted_amount is not none else '') }}" required>
+    </label>
+
+    <div class="form-row">
+      <label>Viaje relacionado
+        <select name="trip_id" id="trip_id" onchange="onTripChange()">
+          <option value="">-- Ninguno --</option>
+          {% for t in trips %}
+          <option value="{{ t.id }}" {{ 'selected' if form and (form.trip_id|string) == (t.id|string) }}>{{ t.code }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Unidad relacionada
+        <select name="vehicle_id" id="vehicle_id">
+          <option value="">-- Ninguna --</option>
+          {% for v in vehicles %}
+          <option value="{{ v.id }}" {{ 'selected' if form and (form.vehicle_id|string) == (v.id|string) }}>{{ v.plate }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    <p class="muted" style="margin-top:-8px;">La foto llegó por WhatsApp sin viaje ni unidad asociados — elige a cuál corresponde este gasto.</p>
+
+    <label>Fecha *
+      <input type="date" name="expense_date" value="{{ form.expense_date if form else (draft.extracted_document_date or today) }}" required>
+    </label>
+
+    <label>Descripción
+      <textarea name="description">{{ form.description if form else '' }}</textarea>
+    </label>
+
+    <h2 style="margin-top:20px;">Datos contables</h2>
+    <p class="muted" style="margin-top:-8px;">El concepto es la única clasificación del gasto — al elegirlo se completan solas la cuenta contable y el tipo de comprobante. Si el concepto que necesitas no está en la lista, un Administrador puede agregarlo desde <a href="{{ url_for('liquidaciones.concepts_list') }}" target="_blank">Liquidaciones → Conceptos</a>.</p>
+
+    <div class="form-row">
+      <label>Concepto *
+        <select name="concept_id" id="concept_id" onchange="onConceptChange()" required>
+          <option value="" disabled {{ 'selected' if not form or not form.concept_id }}>-- Elige un concepto --</option>
+          {% for c in concepts %}
+          <option value="{{ c.id }}" {{ 'selected' if form and (form.concept_id|string) == (c.id|string) }}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Cuenta / comprobante
+        <input type="text" id="concept_info" value="" readonly placeholder="Se completa al elegir un concepto" style="background:var(--bg-soft, #f3f5f8);">
+      </label>
+    </div>
+
+    <div class="form-row">
+      <label>N° de documento
+        <input type="text" name="document_number" value="{{ form.document_number if form else (draft.extracted_document_number or '') }}" placeholder="Ej. F001-1234">
+      </label>
+      <label>Moneda
+        <select name="currency">
+          <option value="S" {{ 'selected' if (form.currency if form else (draft.extracted_currency or 'S')) == 'S' }}>Soles (S)</option>
+          <option value="D" {{ 'selected' if (form.currency if form else draft.extracted_currency) == 'D' }}>Dólares (D)</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="form-row">
+      <label>RUC / DNI del proveedor
+        <input type="text" name="provider_ruc" id="provider_ruc" value="{{ form.provider_ruc if form else (draft.extracted_provider_ruc or '') }}" oninput="onRucInput()">
+      </label>
+      <label>Razón social / Nombre del proveedor
+        <div style="display:flex; gap:6px; align-items:center;">
+          <input type="text" name="provider_name" id="provider_name" value="{{ form.provider_name if form else (draft.extracted_provider_name or '') }}" style="flex:1;">
+          <button type="button" id="provider_name_edit_btn" class="btn btn-secondary" style="display:none; padding:6px 10px; font-size:0.85em; white-space:nowrap;" onclick="enableManualNameEdit()">✎ Editar</button>
+        </div>
+      </label>
+    </div>
+    <p class="muted" id="ruc_status" style="margin-top:-8px;"></p>
+    <p class="muted" style="margin-top:-8px;">El tipo de cambio (si el gasto está en dólares) se completa solo con el de SUNAT del día de la fecha elegida arriba.</p>
+
+    <div class="btn-group">
+      <button type="submit" class="btn btn-primary">✓ Aprobar y registrar gasto</button>
+      <a href="{{ url_for('liquidaciones.whatsapp_list') }}" class="btn btn-secondary">Cancelar</a>
+    </div>
+  </form>
+</div>
+
+<div class="panel" style="margin-top:16px;">
+  <h2 style="margin-top:0;">¿La foto no corresponde a un gasto válido?</h2>
+  <form method="post" action="{{ url_for('liquidaciones.whatsapp_reject', draft_id=draft.id) }}" onsubmit="return confirm('¿Rechazar este borrador? No se creará ningún gasto.');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Motivo (opcional)
+      <input type="text" name="rejection_reason" placeholder="Ej. foto duplicada, no es un comprobante, monto ilegible...">
+    </label>
+    <button type="submit" class="btn btn-danger">✕ Rechazar borrador</button>
+  </form>
+</div>
+
+<script>
+  var CONCEPTS = {{ (concepts_json or []) | tojson }};
+  function onConceptChange() {
+    var select = document.getElementById('concept_id');
+    var info = document.getElementById('concept_info');
+    var id = select.value;
+    if (!id) { info.value = ''; return; }
+    for (var i = 0; i < CONCEPTS.length; i++) {
+      if (String(CONCEPTS[i].id) === String(id)) {
+        info.value = 'Cuenta ' + CONCEPTS[i].account_code + ' · ' + CONCEPTS[i].voucher_type_label;
+        return;
+      }
+    }
+    info.value = '';
+  }
+  document.addEventListener('DOMContentLoaded', onConceptChange);
+
+  var TRIPS = {{ (trips_json or []) | tojson }};
+  function onTripChange() {
+    var tripSelect = document.getElementById('trip_id');
+    var vehicleSelect = document.getElementById('vehicle_id');
+    if (!tripSelect || !vehicleSelect) { return; }
+    var tripId = tripSelect.value;
+    if (!tripId) { return; }
+    for (var i = 0; i < TRIPS.length; i++) {
+      if (String(TRIPS[i].id) === String(tripId) && TRIPS[i].vehicle_id) {
+        vehicleSelect.value = String(TRIPS[i].vehicle_id);
+        return;
+      }
+    }
+  }
+
+  // Autocompleta la razón social al escribir un RUC de 11 dígitos (mismo
+  // mecanismo que el formulario normal de gastos — ver expense_form.html).
+  var rucLookupTimer = null;
+  var lastRucLookedUp = '';
+  function onRucInput() {
+    var rucInput = document.getElementById('provider_ruc');
+    var status = document.getElementById('ruc_status');
+    var digits = (rucInput.value || '').replace(/\D/g, '');
+    if (rucLookupTimer) { clearTimeout(rucLookupTimer); }
+    if (digits.length !== 11) { status.textContent = ''; return; }
+    rucLookupTimer = setTimeout(function () { lookupRuc(digits); }, 500);
+  }
+  function lookupRuc(ruc) {
+    if (ruc === lastRucLookedUp) { return; }
+    lastRucLookedUp = ruc;
+    var status = document.getElementById('ruc_status');
+    var nameInput = document.getElementById('provider_name');
+    var editBtn = document.getElementById('provider_name_edit_btn');
+    status.textContent = 'Buscando en SUNAT…';
+    fetch('{{ url_for("liquidaciones.consultar_ruc") }}?ruc=' + ruc)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (ruc !== lastRucLookedUp) { return; }
+        if (!data.found) {
+          status.textContent = 'No se encontró ese RUC — escribe la razón social a mano.';
+          nameInput.readOnly = false;
+          nameInput.style.background = '';
+          editBtn.style.display = 'none';
+          return;
+        }
+        nameInput.value = data.razon_social;
+        nameInput.readOnly = true;
+        nameInput.style.background = 'var(--bg-soft, #f3f5f8)';
+        editBtn.style.display = 'inline-block';
+        status.textContent = data.estado && data.estado !== 'ACTIVO'
+          ? 'Estado SUNAT: ' + data.estado
+          : '';
+      })
+      .catch(function () { status.textContent = ''; });
+  }
+  function enableManualNameEdit() {
+    var nameInput = document.getElementById('provider_name');
+    var editBtn = document.getElementById('provider_name_edit_btn');
+    nameInput.readOnly = false;
+    nameInput.style.background = '';
+    editBtn.style.display = 'none';
+    nameInput.focus();
+    nameInput.select();
+  }
+</script>
+{% endblock %}

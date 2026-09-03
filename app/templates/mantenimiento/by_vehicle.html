@@ -18,7 +18,7 @@
         <td>
           {{ '{:,.0f} km'.format(s.current_km) if s.current_km is not none else 'Sin dato' }}
           {% if s.current_km_updated_at %}<br><span class="muted">Actualizado: {{ s.current_km_updated_at }}</span>{% endif %}
-          {% if can(current_user.role, 'mantenimiento', 'edit') %}
+          {% if can(current_user.roles, 'mantenimiento', 'edit') %}
           <details style="margin-top:4px;">
             <summary class="muted" style="cursor:pointer;">Corregir kilometraje</summary>
             <form method="post" action="{{ url_for('mantenimiento.update_vehicle_km', vehicle_id=s.id) }}" class="form-row" style="margin-top:6px; align-items:center;">

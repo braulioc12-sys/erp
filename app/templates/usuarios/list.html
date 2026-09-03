@@ -10,13 +10,13 @@
 
 <div class="table-wrap">
   <table>
-    <thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th><th></th></tr></thead>
+    <thead><tr><th>Nombre</th><th>Correo</th><th>Roles</th><th>Estado</th><th></th></tr></thead>
     <tbody>
       {% for u in users %}
       <tr>
         <td>{{ u.name }}</td>
         <td>{{ u.email }}</td>
-        <td>{{ role_labels.get(u.role, u.role) }}</td>
+        <td>{{ roles_display.get(u.id, u.role) }}</td>
         <td><span class="badge {{ 'badge-activo' if u.active else 'badge-inactivo' }}">{{ 'Activo' if u.active else 'Inactivo' }}</span></td>
         <td><a class="btn btn-secondary btn-sm" href="{{ url_for('usuarios.edit', user_id=u.id) }}">Editar</a></td>
       </tr>

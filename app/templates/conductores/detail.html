@@ -6,7 +6,7 @@
   <h1>{{ driver.name }} {{ m.badge(driver.status) }}</h1>
   <div class="page-actions">
     <a href="{{ url_for('conductores.list_view') }}" class="btn btn-secondary">← Volver</a>
-    {% if can(current_user.role, 'conductores', 'edit') %}
+    {% if can(current_user.roles, 'conductores', 'edit') %}
     <a href="{{ url_for('conductores.edit_driver', driver_id=driver.id) }}" class="btn btn-primary">Editar</a>
     <form method="post" action="{{ url_for('conductores.delete_driver', driver_id=driver.id) }}" style="display:inline;" onsubmit="return confirm('¿Eliminar este conductor?');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

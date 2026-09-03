@@ -10,7 +10,7 @@
     {% elif inactive_count %}
     <a href="{{ url_for('flota.list_view', ver='inactivas') }}" class="btn btn-secondary">Ver inactivas ({{ inactive_count }})</a>
     {% endif %}
-    {% if can(current_user.role, 'flota', 'edit') %}
+    {% if can(current_user.roles, 'flota', 'edit') %}
     <a href="{{ url_for('flota.import_vehicles') }}" class="btn btn-secondary">Importar desde Excel</a>
     <a href="{{ url_for('flota.new_vehicle') }}" class="btn btn-primary">+ Nueva unidad</a>
     {% endif %}
@@ -44,7 +44,7 @@
         <td>{{ v.technical_review_expiry or '—' }}</td>
         <td onclick="event.stopPropagation();">
           <div class="btn-group">
-            {% if can(current_user.role, 'flota', 'edit') %}
+            {% if can(current_user.roles, 'flota', 'edit') %}
             <a class="btn btn-secondary btn-sm" href="{{ url_for('flota.edit_vehicle', vehicle_id=v.id) }}">Editar</a>
             <form method="post" action="{{ url_for('flota.delete_vehicle', vehicle_id=v.id) }}" onsubmit="return confirm('¿Eliminar esta unidad?');">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

@@ -396,7 +396,7 @@ def purchases_detail(purchase_id):
         total_qty=total_qty, received_qty=received_qty, all_received=all_received,
         display_status_code=display_status_code, display_status_label=display_status_label,
         receptions=receptions, reception_items=reception_items,
-        is_admin=(g.user["role"] == "ADMIN"),
+        is_admin=("ADMIN" in g.user["roles"]),
     )
 
 
@@ -413,7 +413,7 @@ def purchases_authorize(purchase_id):
     puede generar su PDF y empezar a registrar recepciones."""
     if not validate_csrf():
         abort(400)
-    if g.user["role"] != "ADMIN":
+    if "ADMIN" not in g.user["roles"]:
         flash("Solo un Administrador puede autorizar una orden de compra.", "error")
         return redirect(url_for("inventarios.purchases_detail", purchase_id=purchase_id))
     purchase = query_one("SELECT * FROM inventory_purchases WHERE id = ?", (purchase_id,))

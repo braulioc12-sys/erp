@@ -8,7 +8,7 @@
     <a href="{{ url_for('flota.list_view') }}" class="btn btn-secondary">← Volver</a>
     <a href="{{ url_for('neumaticos.diagram', vehicle_id=vehicle.id) }}" class="btn btn-secondary">Neumáticos</a>
     <a href="{{ url_for('mantenimiento.list_view', vehicle_id=vehicle.id) }}" class="btn btn-secondary">Mantenimiento</a>
-    {% if can(current_user.role, 'flota', 'edit') %}
+    {% if can(current_user.roles, 'flota', 'edit') %}
     <a href="{{ url_for('flota.edit_vehicle', vehicle_id=vehicle.id) }}" class="btn btn-primary">Editar</a>
     <form method="post" action="{{ url_for('flota.delete_vehicle', vehicle_id=vehicle.id) }}" style="display:inline;" onsubmit="return confirm('¿Eliminar esta unidad?');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

@@ -8,7 +8,7 @@
     <a href="{{ url_for('inventarios.purchases_list') }}" class="btn btn-secondary">
       Compras{% if pending_purchases %} <span class="badge badge-pendiente">{{ pending_purchases }} pendiente{{ 's' if pending_purchases != 1 }}</span>{% endif %}
     </a>
-    {% if can(current_user.role, 'inventarios', 'edit') %}
+    {% if can(current_user.roles, 'inventarios', 'edit') %}
     <a href="{{ url_for('inventarios.purchases_new') }}" class="btn btn-primary">+ Nueva compra</a>
     {% endif %}
   </div>
@@ -26,7 +26,7 @@
     {% endif %}
   </form>
 
-  {% if can(current_user.role, 'inventarios', 'edit') %}
+  {% if can(current_user.roles, 'inventarios', 'edit') %}
   <form method="post" action="{{ url_for('inventarios.items_add') }}" class="filters" style="margin-bottom:18px;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label style="flex:1;">Nombre del repuesto
@@ -57,7 +57,7 @@
           <td><span class="badge {{ 'badge-activo' if it.active else 'badge-inactivo' }}">{{ 'Activo' if it.active else 'Inactivo' }}</span></td>
           <td style="white-space:nowrap;">
             <a href="{{ url_for('inventarios.item_detail', item_id=it.id) }}" class="btn btn-secondary btn-sm">Historial</a>
-            {% if can(current_user.role, 'inventarios', 'edit') %}
+            {% if can(current_user.roles, 'inventarios', 'edit') %}
             <form method="post" action="{{ url_for('inventarios.items_adjust_stock', item_id=it.id) }}" style="display:inline-flex; gap:4px; align-items:center;">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <input type="number" name="stock_quantity" step="0.01" value="{{ it.stock_quantity }}" style="width:70px;" title="Ajustar stock manualmente">
@@ -76,7 +76,7 @@
       </tbody>
     </table>
   </div>
-  {% if can(current_user.role, 'inventarios', 'edit') %}
+  {% if can(current_user.roles, 'inventarios', 'edit') %}
   <p class="muted" style="margin-top:12px; margin-bottom:0;">"Ajustar" pone el stock directo en el valor indicado (útil para corregir un conteo físico) — para sumar stock por una compra real, usa <a href="{{ url_for('inventarios.purchases_new') }}">+ Nueva compra</a> en vez de ajustarlo a mano. Desactivar un repuesto lo quita de los formularios nuevos, pero no afecta las órdenes de mantenimiento ni compras que ya lo usaron.</p>
   {% endif %}
 </div>

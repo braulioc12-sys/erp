@@ -67,7 +67,7 @@
   <p class="mt-0" style="margin-top:10px;"><strong>Total: {{ total|money }}</strong></p>
 </div>
 
-{% if can(current_user.role, 'inventarios', 'edit') %}
+{% if can(current_user.roles, 'inventarios', 'edit') %}
 <div class="panel">
   {% if not purchase.authorized_at %}
   <form method="post" action="{{ url_for('inventarios.purchases_delete', purchase_id=purchase.id) }}" onsubmit="return confirm('¿Eliminar esta orden de compra?');" style="display:inline;">

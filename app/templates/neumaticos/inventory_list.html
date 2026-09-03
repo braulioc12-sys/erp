@@ -5,7 +5,7 @@
   <h1>Neumáticos — Inventario</h1>
   <div class="page-actions">
     <a href="{{ url_for('neumaticos.list_view') }}" class="btn btn-secondary">Por unidad</a>
-    {% if can(current_user.role, 'neumaticos', 'edit') %}
+    {% if can(current_user.roles, 'neumaticos', 'edit') %}
     <a href="{{ url_for('neumaticos.inventory_new') }}" class="btn btn-primary">+ Registrar llanta</a>
     {% endif %}
   </div>

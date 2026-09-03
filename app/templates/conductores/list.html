@@ -10,7 +10,7 @@
     {% elif inactive_count %}
     <a href="{{ url_for('conductores.list_view', ver='inactivas') }}" class="btn btn-secondary">Ver inactivos ({{ inactive_count }})</a>
     {% endif %}
-    {% if can(current_user.role, 'conductores', 'edit') %}
+    {% if can(current_user.roles, 'conductores', 'edit') %}
     <a href="{{ url_for('conductores.import_drivers') }}" class="btn btn-secondary">Importar desde Excel</a>
     <a href="{{ url_for('conductores.new_driver') }}" class="btn btn-primary">+ Nuevo conductor</a>
     {% endif %}
@@ -54,7 +54,7 @@
           {% endif %}
         </td>
         <td onclick="event.stopPropagation();">
-          {% if can(current_user.role, 'conductores', 'edit') %}
+          {% if can(current_user.roles, 'conductores', 'edit') %}
           <div class="btn-group">
             <a class="btn btn-secondary btn-sm" href="{{ url_for('conductores.edit_driver', driver_id=d.id) }}">Editar</a>
             <form method="post" action="{{ url_for('conductores.delete_driver', driver_id=d.id) }}" onsubmit="return confirm('¿Eliminar este conductor?');">

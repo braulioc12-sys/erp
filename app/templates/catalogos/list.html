@@ -9,7 +9,7 @@
 <div class="panel" style="max-width:560px;">
   <h2>Costo de mano de obra (Mantenimiento)</h2>
   <p class="muted mt-0">Cada tipo de mecánico tiene su propio costo por minuto. Al registrar (o editar) un trabajo dentro de una orden se elige qué tipo de mecánico lo hará, y eso determina el costo sugerido de ese trabajo.</p>
-  {% if can(current_user.role, 'catalogos', 'edit') %}
+  {% if can(current_user.roles, 'catalogos', 'edit') %}
   <form method="post" action="{{ url_for('catalogos.update_labor_cost') }}" class="filters">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     {% for t in mechanic_types %}

@@ -5,7 +5,7 @@
 <div class="page-header">
   <h1>Neumáticos — {{ vehicle.plate }} <span class="muted" style="font-weight:400;font-size:0.9rem;">({{ type_label }})</span></h1>
   <div class="page-actions">
-    {% if active_tire_count >= 2 and can(current_user.role, 'neumaticos', 'edit') %}
+    {% if active_tire_count >= 2 and can(current_user.roles, 'neumaticos', 'edit') %}
     <a href="{{ url_for('neumaticos.rotate_tires', vehicle_id=vehicle.id) }}" class="btn btn-primary">Rotar llantas</a>
     {% endif %}
     <a href="{{ url_for('neumaticos.list_view') }}" class="btn btn-secondary">← Volver a Neumáticos</a>
@@ -82,7 +82,7 @@
           <td colspan="4" class="muted">Posición vacía</td>
           <td></td>
           <td>
-            {% if can(current_user.role, 'neumaticos', 'edit') %}
+            {% if can(current_user.roles, 'neumaticos', 'edit') %}
             <a href="{{ url_for('neumaticos.new_tire', vehicle_id=vehicle.id, position_code=row.position.code) }}" class="btn btn-primary btn-sm">+ Agregar</a>
             {% endif %}
           </td>

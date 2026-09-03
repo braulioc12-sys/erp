@@ -6,7 +6,7 @@
   <h1>Compras de repuestos</h1>
   <div class="page-actions">
     <a href="{{ url_for('inventarios.list_view') }}" class="btn btn-secondary">← Volver a Inventarios</a>
-    {% if can(current_user.role, 'inventarios', 'edit') %}
+    {% if can(current_user.roles, 'inventarios', 'edit') %}
     <a href="{{ url_for('inventarios.purchases_new') }}" class="btn btn-primary">+ Nueva compra</a>
     {% endif %}
   </div>

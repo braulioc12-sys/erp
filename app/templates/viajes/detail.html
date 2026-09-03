@@ -5,7 +5,7 @@
 <div class="page-header">
   <h1>Viaje {{ trip.code }} {{ m.badge(trip.status) }}</h1>
   <div class="page-actions">
-    {% if can(current_user.role, 'viajes', 'edit') %}
+    {% if can(current_user.roles, 'viajes', 'edit') %}
       {% if trip.status in ('PENDIENTE', 'EN_CURSO') %}
       <a href="{{ url_for('viajes.edit', trip_id=trip.id) }}" class="btn btn-secondary">Editar</a>
       {% endif %}
@@ -40,13 +40,13 @@
 </div>
 
 <div class="btn-group" style="margin-bottom:16px;">
-  {% if can(current_user.role, 'guias', 'edit') and trip.status in ('EN_CURSO', 'ENTREGADO') %}
+  {% if can(current_user.roles, 'guias', 'edit') and trip.status in ('EN_CURSO', 'ENTREGADO') %}
   <a href="{{ url_for('guias.new', trip_id=trip.id) }}" class="btn btn-secondary btn-sm">📄 Generar guía de remisión (SUNAT)</a>
   {% endif %}
-  {% if can(current_user.role, 'inspecciones', 'edit') %}
+  {% if can(current_user.roles, 'inspecciones', 'edit') %}
   <a href="{{ url_for('inspecciones.new', trip_id=trip.id) }}" class="btn btn-secondary btn-sm">✅ Registrar inspección</a>
   {% endif %}
-  {% if can(current_user.role, 'liquidaciones', 'edit') %}
+  {% if can(current_user.roles, 'liquidaciones', 'edit') %}
     {% if advance %}
     <a href="{{ url_for('liquidaciones.detail', advance_id=advance.id) }}" class="btn btn-secondary btn-sm">💵 Ver liquidación de este viaje</a>
     {% else %}
@@ -78,7 +78,7 @@
       </tbody>
     </table>
   </div>
-  {% if can(current_user.role, 'liquidaciones', 'edit') %}
+  {% if can(current_user.roles, 'liquidaciones', 'edit') %}
   <p style="margin-top:12px;"><a href="{{ url_for('liquidaciones.new_expense', trip_id=trip.id) }}" class="btn btn-secondary btn-sm">+ Registrar gasto para este viaje</a></p>
   {% endif %}
 </div>

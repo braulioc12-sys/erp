@@ -80,11 +80,17 @@ def create_app(config_object=Config):
 
     @app.context_processor
     def inject_globals():
-        from app.auth import can, get_csrf_token
+        from app.auth import ROLE_LABELS, can, get_csrf_token
 
         return {
             "current_user": g.get("user"),
             "can": can,
+            # 3 sep, multi-rol: para mostrar los roles del usuario logueado
+            # en el sidebar (base.html) sin tener que pasarlo desde cada
+            # vista — ver también usuarios/list.html y form.html, que lo
+            # reciben explícitamente por venir de otra tabla (`users`).
+            "role_labels": ROLE_LABELS,
+            "role_labels_join": lambda roles: " + ".join(ROLE_LABELS.get(r, r) for r in (roles or [])),
             "csrf_token": get_csrf_token,
             "company_name": app.config["COMPANY_NAME"],
         }

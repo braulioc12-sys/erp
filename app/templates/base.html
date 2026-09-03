@@ -34,38 +34,38 @@
       <a href="{{ url_for('conductores.list_view') }}" class="{{ 'active' if request.blueprint == 'conductores' }}">Conductores</a>
       <a href="{{ url_for('liquidaciones.list_view') }}" class="{{ 'active' if request.blueprint == 'liquidaciones' }}">Liquidaciones</a>
       <a href="{{ url_for('mantenimiento.list_view') }}" class="{{ 'active' if request.blueprint == 'mantenimiento' }}">Mantenimiento</a>
-      {% if can(current_user.role, 'inventarios', 'view') %}
+      {% if can(current_user.roles, 'inventarios', 'view') %}
       <a href="{{ url_for('inventarios.list_view') }}" class="{{ 'active' if request.blueprint == 'inventarios' }}">Inventarios</a>
       {% endif %}
       <a href="{{ url_for('neumaticos.list_view') }}" class="{{ 'active' if request.blueprint == 'neumaticos' }}">Neumáticos</a>
-      {% if can(current_user.role, 'inspecciones', 'view') %}
+      {% if can(current_user.roles, 'inspecciones', 'view') %}
       <a href="{{ url_for('inspecciones.list_view') }}" class="{{ 'active' if request.blueprint == 'inspecciones' }}">Inspecciones</a>
       {% endif %}
-      {% if can(current_user.role, 'rutas', 'view') %}
+      {% if can(current_user.roles, 'rutas', 'view') %}
       <a href="{{ url_for('rutas.list_view') }}" class="{{ 'active' if request.blueprint == 'rutas' }}">Rutas</a>
       {% endif %}
-      {% if can(current_user.role, 'facturacion', 'view') %}
+      {% if can(current_user.roles, 'facturacion', 'view') %}
       <a href="{{ url_for('facturacion.list_view') }}" class="{{ 'active' if request.blueprint == 'facturacion' }}">Facturación</a>
       {% endif %}
-      {% if can(current_user.role, 'cotizaciones', 'view') %}
+      {% if can(current_user.roles, 'cotizaciones', 'view') %}
       <a href="{{ url_for('cotizaciones.list_view') }}" class="{{ 'active' if request.blueprint == 'cotizaciones' }}">Cotizaciones</a>
       {% endif %}
-      {% if can(current_user.role, 'guias', 'view') %}
+      {% if can(current_user.roles, 'guias', 'view') %}
       <a href="{{ url_for('guias.list_view') }}" class="{{ 'active' if request.blueprint == 'guias' }}">Guías de Remisión</a>
       {% endif %}
-      {% if can(current_user.role, 'usuarios', 'view') %}
+      {% if can(current_user.roles, 'usuarios', 'view') %}
       <a href="{{ url_for('usuarios.list_view') }}" class="{{ 'active' if request.blueprint == 'usuarios' }}">Usuarios</a>
       {% endif %}
-      {% if can(current_user.role, 'integraciones', 'view') %}
+      {% if can(current_user.roles, 'integraciones', 'view') %}
       <a href="{{ url_for('integraciones.index') }}" class="{{ 'active' if request.blueprint == 'integraciones' }}">Ubicación GPS</a>
       {% endif %}
-      {% if can(current_user.role, 'catalogos', 'view') %}
+      {% if can(current_user.roles, 'catalogos', 'view') %}
       <a href="{{ url_for('catalogos.list_view') }}" class="{{ 'active' if request.blueprint == 'catalogos' }}">Catálogos</a>
       {% endif %}
     </nav>
     <div class="sidebar-user">
       <div class="sidebar-user-name">{{ current_user.name }}</div>
-      <div class="sidebar-user-role">{{ current_user.role }}</div>
+      <div class="sidebar-user-role">{{ role_labels_join(current_user.roles) }}</div>
       <a href="{{ url_for('auth.logout') }}" class="logout-link">Cerrar sesión</a>
     </div>
   </aside>

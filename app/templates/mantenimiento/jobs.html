@@ -10,7 +10,7 @@
 <p class="muted mt-0">Estos trabajos aparecen como casillas al registrar un mantenimiento, para calcular el tiempo estimado de mano de obra. Agrega uno nuevo si no encuentras el que buscas.</p>
 
 <div class="panel" style="max-width:560px;">
-  {% if can(current_user.role, 'mantenimiento', 'edit') %}
+  {% if can(current_user.roles, 'mantenimiento', 'edit') %}
   <form method="post" action="{{ url_for('mantenimiento.jobs_add') }}" class="filters" style="margin-bottom:18px;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label style="flex:2;">Nombre del trabajo
@@ -23,7 +23,7 @@
   </form>
   {% endif %}
 
-  {% if can(current_user.role, 'mantenimiento', 'edit') %}
+  {% if can(current_user.roles, 'mantenimiento', 'edit') %}
   <form method="post" action="{{ url_for('mantenimiento.jobs_replace_catalog') }}"
         onsubmit="return confirm('Esto va a borrar los {{ jobs|length }} trabajos actuales y cargar el catálogo actualizado ({{ default_job_types|length }} trabajos). El historial de mantenimientos ya registrado no se ve afectado. ¿Continuar?');"
         style="margin-bottom:18px; padding:12px; background:var(--bg-soft,#f3f5f8); border-radius:8px;">
@@ -43,7 +43,7 @@
           <td>{{ j.estimated_minutes }} min</td>
           <td><span class="badge {{ 'badge-activo' if j.active else 'badge-inactivo' }}">{{ 'Activo' if j.active else 'Inactivo' }}</span></td>
           <td>
-            {% if can(current_user.role, 'mantenimiento', 'edit') %}
+            {% if can(current_user.roles, 'mantenimiento', 'edit') %}
             <form method="post" action="{{ url_for('mantenimiento.jobs_toggle', job_id=j.id) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-secondary btn-sm" type="submit">{{ 'Desactivar' if j.active else 'Reactivar' }}</button>

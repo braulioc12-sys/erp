@@ -10,7 +10,7 @@
 <p class="muted mt-0">Estos mecánicos aparecen en el desplegable de cada trabajo dentro de una orden de mantenimiento, para marcar quién lo está haciendo.</p>
 
 <div class="panel" style="max-width:480px;">
-  {% if can(current_user.role, 'mantenimiento', 'edit') %}
+  {% if can(current_user.roles, 'mantenimiento', 'edit') %}
   <form method="post" action="{{ url_for('mantenimiento.mechanics_add') }}" class="filters" style="margin-bottom:18px;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label style="flex:1;">Nombre del mecánico
@@ -35,7 +35,7 @@
         <tr>
           <td>{{ mech.name }}</td>
           <td>
-            {% if can(current_user.role, 'mantenimiento', 'edit') %}
+            {% if can(current_user.roles, 'mantenimiento', 'edit') %}
             <form method="post" action="{{ url_for('mantenimiento.mechanics_set_type', mechanic_id=mech.id) }}" style="display:inline;">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <select name="mechanic_type" onchange="this.form.submit()">
@@ -50,7 +50,7 @@
           </td>
           <td><span class="badge {{ 'badge-activo' if mech.active else 'badge-inactivo' }}">{{ 'Activo' if mech.active else 'Inactivo' }}</span></td>
           <td>
-            {% if can(current_user.role, 'mantenimiento', 'edit') %}
+            {% if can(current_user.roles, 'mantenimiento', 'edit') %}
             <form method="post" action="{{ url_for('mantenimiento.mechanics_toggle', mechanic_id=mech.id) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-secondary btn-sm" type="submit">{{ 'Desactivar' if mech.active else 'Reactivar' }}</button>

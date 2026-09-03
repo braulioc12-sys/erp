@@ -19,19 +19,19 @@
   </label>
   {% endif %}
 
-  <div class="form-row">
-    <label>Rol
-      <select name="role">
-        {% set current_role = user.role if user else 'OPERADOR' %}
-        {% for value, label in role_choices %}
-        <option value="{{ value }}" {{ 'selected' if current_role == value }}>{{ label }}</option>
-        {% endfor %}
-      </select>
+  <label>Roles * <span class="muted" style="font-weight:400;">(puede tener más de uno — ej. Almacén y Mecánico)</span></label>
+  <div style="display:flex; flex-wrap:wrap; gap:8px 20px; margin:-8px 0 16px;">
+    {% for value, label in role_choices %}
+    <label style="flex-direction: row; align-items: center; gap: 8px; width:auto;">
+      <input type="checkbox" name="roles" value="{{ value }}" {{ 'checked' if value in selected_roles }} style="width:auto;">
+      {{ label }}
     </label>
-    <label>{{ 'Nueva contraseña (dejar vacío para no cambiar)' if mode == 'edit' else 'Contraseña *' }}
-      <input type="text" name="password" placeholder="{{ suggested_password if mode == 'new' else '' }}" {{ 'required' if mode == 'new' }}>
-    </label>
+    {% endfor %}
   </div>
+
+  <label>{{ 'Nueva contraseña (dejar vacío para no cambiar)' if mode == 'edit' else 'Contraseña *' }}
+    <input type="text" name="password" placeholder="{{ suggested_password if mode == 'new' else '' }}" {{ 'required' if mode == 'new' }}>
+  </label>
 
   {% if mode == 'edit' %}
   <label style="flex-direction: row; align-items: center; gap: 8px;">

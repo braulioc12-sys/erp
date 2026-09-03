@@ -6,7 +6,7 @@
   <div class="page-actions">
     <a href="{{ url_for('liquidaciones.export_excel', type=type_filter, from_date=from_date, to_date=to_date) }}" class="btn btn-secondary">⬇ Exportar a Excel</a>
     <a href="{{ url_for('liquidaciones.list_view') }}" class="btn btn-secondary">← Volver a Liquidaciones</a>
-    {% if can(current_user.role, 'liquidaciones', 'edit') %}
+    {% if can(current_user.roles, 'liquidaciones', 'edit') %}
     <a href="{{ url_for('liquidaciones.new_expense') }}" class="btn btn-primary">+ Registrar gasto</a>
     {% endif %}
   </div>
@@ -46,7 +46,7 @@
         <td>{% if e.receipt_filename %}<a href="{{ url_for('liquidaciones.receipt', expense_id=e.id) }}" target="_blank">Ver</a>{% else %}—{% endif %}</td>
         <td class="text-right">{{ e.amount|money }}</td>
         <td>
-          {% if can(current_user.role, 'liquidaciones', 'edit') %}
+          {% if can(current_user.roles, 'liquidaciones', 'edit') %}
           <div style="display:flex; gap:6px;">
             <a href="{{ url_for('liquidaciones.edit_expense', expense_id=e.id) }}" class="btn btn-secondary btn-sm">Editar</a>
             <form method="post" action="{{ url_for('liquidaciones.delete_expense', expense_id=e.id) }}" onsubmit="return confirm('¿Eliminar este gasto?');">

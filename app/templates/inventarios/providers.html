@@ -10,7 +10,7 @@
 <p class="muted mt-0">Estos proveedores aparecen al registrar una nueva compra de repuestos.</p>
 
 <div class="panel" style="max-width:640px;">
-  {% if can(current_user.role, 'inventarios', 'edit') %}
+  {% if can(current_user.roles, 'inventarios', 'edit') %}
   <form method="post" action="{{ url_for('inventarios.providers_add') }}" class="filters" style="margin-bottom:18px;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label style="flex:1;">Nombre del proveedor
@@ -37,7 +37,7 @@
           <td>{{ p.phone or '—' }}</td>
           <td><span class="badge {{ 'badge-activo' if p.active else 'badge-inactivo' }}">{{ 'Activo' if p.active else 'Inactivo' }}</span></td>
           <td>
-            {% if can(current_user.role, 'inventarios', 'edit') %}
+            {% if can(current_user.roles, 'inventarios', 'edit') %}
             <form method="post" action="{{ url_for('inventarios.providers_toggle', provider_id=p.id) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-secondary btn-sm" type="submit">{{ 'Desactivar' if p.active else 'Reactivar' }}</button>

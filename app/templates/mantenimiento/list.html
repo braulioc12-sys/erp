@@ -8,10 +8,10 @@
     <a href="{{ url_for('mantenimiento.by_vehicle') }}" class="btn btn-secondary">Historial y costos por unidad</a>
     <a href="{{ url_for('mantenimiento.jobs_list') }}" class="btn btn-secondary">Trabajos y tiempos</a>
     <a href="{{ url_for('mantenimiento.mechanics_list') }}" class="btn btn-secondary">Mecánicos</a>
-    {% if can(current_user.role, 'inventarios', 'view') %}
+    {% if can(current_user.roles, 'inventarios', 'view') %}
     <a href="{{ url_for('inventarios.list_view') }}" class="btn btn-secondary">Repuestos e Inventario</a>
     {% endif %}
-    {% if can(current_user.role, 'mantenimiento', 'edit') %}
+    {% if can(current_user.roles, 'mantenimiento', 'edit') %}
     <a href="{{ url_for('mantenimiento.new') }}" class="btn btn-primary">+ Registrar mantenimiento</a>
     {% endif %}
   </div>
@@ -25,7 +25,7 @@
       <strong style="font-size:1.2em;">{{ '{:,.0f} km'.format(filtered_vehicle.current_km) if filtered_vehicle.current_km is not none else 'Sin dato' }}</strong>
       {% if filtered_vehicle.current_km_updated_at %}<span class="muted"> — actualizado: {{ filtered_vehicle.current_km_updated_at }}</span>{% endif %}
     </div>
-    {% if can(current_user.role, 'mantenimiento', 'edit') %}
+    {% if can(current_user.roles, 'mantenimiento', 'edit') %}
     <form method="post" action="{{ url_for('mantenimiento.update_vehicle_km', vehicle_id=filtered_vehicle.id) }}" class="form-row" style="align-items:center; margin-bottom:0;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="next" value="{{ url_for('mantenimiento.list_view', vehicle_id=filtered_vehicle.id) }}">
@@ -58,7 +58,7 @@
         <td class="wrap">{{ r.description or '—' }}</td>
         <td style="white-space:nowrap;">
           <a href="{{ url_for('mantenimiento.detail', record_id=r.id) }}" class="btn btn-secondary btn-sm">Ver orden</a>
-          {% if can(current_user.role, 'mantenimiento', 'edit') %}
+          {% if can(current_user.roles, 'mantenimiento', 'edit') %}
           <form method="post" action="{{ url_for('mantenimiento.delete', record_id=r.id) }}" onsubmit="return confirm('¿Eliminar este registro?');" style="display:inline;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="btn btn-danger btn-sm" type="submit">Eliminar</button>

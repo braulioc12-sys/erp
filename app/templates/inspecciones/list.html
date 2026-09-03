@@ -4,7 +4,7 @@
 <div class="page-header">
   <h1>Inspecciones de unidades</h1>
   <div class="page-actions">
-    {% if can(current_user.role, 'inspecciones', 'edit') %}
+    {% if can(current_user.roles, 'inspecciones', 'edit') %}
     <a href="{{ url_for('inspecciones.new') }}" class="btn btn-primary">+ Nueva inspección</a>
     {% endif %}
   </div>

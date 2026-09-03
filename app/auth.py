@@ -5,7 +5,7 @@ import secrets
 from flask import Blueprint, current_app, flash, g, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
 
-from app.db import query_one
+from app.db import query_all, query_one
 
 bp = Blueprint("auth", __name__, url_prefix="/auth")
 
@@ -151,11 +151,24 @@ ROLE_LABELS = {
 }
 
 
-def can(role, module, action):
-    role_perms = PERMISSIONS.get(role, {})
-    if "*" in role_perms:
-        return action in role_perms["*"]
-    return action in role_perms.get(module, set())
+def can(roles, module, action):
+    """`roles` es normalmente `current_user.roles`/`g.user["roles"]` — una
+    lista, porque desde el 3 sep un usuario puede tener más de un rol
+    (pedido de Braulio: "alguien puede ser almacen y mecanico"). Sus
+    permisos son la UNIÓN de lo que permite cada rol asignado (si CUALQUIERA
+    de sus roles da acceso, puede). Se acepta también un string suelto (un
+    solo rol) por compatibilidad — algún llamado directo, o código viejo que
+    no se haya migrado a la lista."""
+    if isinstance(roles, str):
+        roles = (roles,)
+    for role in roles or ():
+        role_perms = PERMISSIONS.get(role, {})
+        if "*" in role_perms:
+            if action in role_perms["*"]:
+                return True
+        elif action in role_perms.get(module, set()):
+            return True
+    return False
 
 
 @bp.before_app_request
@@ -164,12 +177,31 @@ def load_logged_in_user():
     if user_id is None:
         g.user = None
     else:
-        g.user = query_one(
+        user = query_one(
             "SELECT id, name, email, role, active FROM users WHERE id = ?", (user_id,)
         )
-        if g.user is not None and not g.user["active"]:
+        if user is not None and not user["active"]:
             session.clear()
             g.user = None
+        elif user is None:
+            g.user = None
+        else:
+            # 3 sep: los permisos reales vienen de user_roles (múltiples
+            # roles por usuario), no de la columna "role" (que se sigue
+            # llenando, pero ahora es solo el rol "principal"/de respaldo —
+            # ver el comentario en schema.sql). g.user pasa de una
+            # sqlite3.Row a un dict mutable para poder agregarle "roles" —
+            # el resto del código (current_user.name, g.user["email"], etc.)
+            # sigue funcionando igual, un dict soporta lo mismo que una Row.
+            roles = [r["role"] for r in query_all("SELECT role FROM user_roles WHERE user_id = ? ORDER BY role", (user_id,))]
+            if not roles:
+                # No debería pasar tras el backfill de _backfill_user_roles_*
+                # (app/db.py), pero por si acaso: sin esto, un usuario sin
+                # ninguna fila en user_roles se quedaría sin ningún permiso.
+                roles = [user["role"]]
+            user_dict = dict(user)
+            user_dict["roles"] = roles
+            g.user = user_dict
 
 
 def login_required(view):
@@ -187,7 +219,7 @@ def permission_required(module, action="view"):
         @functools.wraps(view)
         @login_required
         def wrapped_view(**kwargs):
-            if not can(g.user["role"], module, action):
+            if not can(g.user["roles"], module, action):
                 flash("No tienes permiso para acceder a esta sección.", "error")
                 return redirect(url_for("dashboard.index"))
             return view(**kwargs)

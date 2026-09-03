@@ -418,6 +418,32 @@ def _apply_role_check_migration_postgres(conn):
     cur.execute(f"ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN {USER_ROLES!r})")
 
 
+# 3 sep, mismo día, ronda siguiente (pedido de Braulio: un usuario puede
+# tener más de 1 rol a la vez, ej. Almacén y Mecánico) — user_roles es una
+# tabla NUEVA (ver schema.sql), así que no hace falta migrar ningún CHECK
+# existente para crearla; lo único que hace falta es completarla sola para
+# los usuarios que ya existían ANTES de este cambio, tomando su users.role
+# de siempre como su único rol inicial, para que nadie quede sin roles (y
+# por lo tanto sin ningún permiso) apenas se despliegue esto. Idempotente:
+# el WHERE de abajo solo toca usuarios que todavía no tienen ninguna fila
+# en user_roles, así que un usuario al que ya se le asignaron roles a mano
+# nunca se pisa en un arranque posterior.
+def _backfill_user_roles_sqlite(conn):
+    conn.execute(
+        """INSERT INTO user_roles (user_id, role)
+           SELECT id, role FROM users WHERE id NOT IN (SELECT DISTINCT user_id FROM user_roles)"""
+    )
+
+
+def _backfill_user_roles_postgres(conn):
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO user_roles (user_id, role)
+           SELECT id, role FROM users WHERE id NOT IN (SELECT DISTINCT user_id FROM user_roles)
+           ON CONFLICT (user_id, role) DO NOTHING"""
+    )
+
+
 _PRAGMA_LINE_RE = re.compile(r"^\s*PRAGMA\s[^\n]*;\s*$", re.MULTILINE | re.IGNORECASE)
 _CREATE_TABLE_START_RE = re.compile(r"CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\(")
 _COL_REFERENCES_RE = re.compile(r"\s+REFERENCES\s+(\w+)\s*\(([^)]+)\)")
@@ -535,6 +561,7 @@ def init_db(app):
             _apply_column_migrations_postgres(conn)
             cur.execute(fk_sql)
             _apply_role_check_migration_postgres(conn)
+            _backfill_user_roles_postgres(conn)
             conn.commit()
         finally:
             conn.close()
@@ -545,6 +572,7 @@ def init_db(app):
         conn.executescript(schema_sql)
         _apply_column_migrations_sqlite(conn)
         _apply_role_check_migration_sqlite(conn)
+        _backfill_user_roles_sqlite(conn)
         conn.commit()
         conn.close()
 

@@ -4,7 +4,7 @@
 <div class="page-header">
   <h1>Rutas frecuentes y viáticos predeterminados</h1>
   <div class="page-actions">
-    {% if can(current_user.role, 'rutas', 'edit') %}
+    {% if can(current_user.roles, 'rutas', 'edit') %}
     <a href="{{ url_for('rutas.import_routes') }}" class="btn btn-secondary">Importar desde Excel</a>
     {% endif %}
   </div>
@@ -12,7 +12,7 @@
 <p class="muted mt-0">Define aquí el monto estándar de viáticos y de comisión del conductor para cada ruta. Al confirmar el anticipo de gastos de un viaje se sugiere el monto de viáticos, y al registrar un viaje se sugiere la comisión — ambos según la ruta que coincida.</p>
 
 <div class="panel" style="max-width:760px;">
-  {% if can(current_user.role, 'rutas', 'edit') %}
+  {% if can(current_user.roles, 'rutas', 'edit') %}
   <form method="post" action="{{ url_for('rutas.add') }}" class="filters" style="margin-bottom:18px;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>Origen
@@ -43,7 +43,7 @@
           <td class="text-right">{{ r.default_commission_amount|money }}</td>
           <td><span class="badge {{ 'badge-activo' if r.active else 'badge-inactivo' }}">{{ 'Activa' if r.active else 'Inactiva' }}</span></td>
           <td>
-            {% if can(current_user.role, 'rutas', 'edit') %}
+            {% if can(current_user.roles, 'rutas', 'edit') %}
             <form method="post" action="{{ url_for('rutas.toggle', route_id=r.id) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-secondary btn-sm" type="submit">{{ 'Desactivar' if r.active else 'Reactivar' }}</button>

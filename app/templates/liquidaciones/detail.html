@@ -23,14 +23,14 @@
   <h2>Anticipos entregados</h2>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Fecha</th><th class="text-right">Monto</th><th>Notas</th>{% if advance.status == 'PENDIENTE' and can(current_user.role, 'liquidaciones', 'edit') %}<th></th>{% endif %}</tr></thead>
+      <thead><tr><th>Fecha</th><th class="text-right">Monto</th><th>Notas</th>{% if advance.status == 'PENDIENTE' and can(current_user.roles, 'liquidaciones', 'edit') %}<th></th>{% endif %}</tr></thead>
       <tbody>
         {% for p in payments %}
         <tr>
           <td>{{ p.payment_date }}</td>
           <td class="text-right">{{ p.amount|money }}</td>
           <td class="wrap">{{ p.notes or '—' }}</td>
-          {% if advance.status == 'PENDIENTE' and can(current_user.role, 'liquidaciones', 'edit') %}
+          {% if advance.status == 'PENDIENTE' and can(current_user.roles, 'liquidaciones', 'edit') %}
           <td>
             {% if payments|length > 1 %}
             <form method="post" action="{{ url_for('liquidaciones.delete_payment', payment_id=p.id) }}" onsubmit="return confirm('¿Eliminar este anticipo?');" style="display:inline;">
@@ -46,7 +46,7 @@
     </table>
   </div>
 
-  {% if advance.status == 'PENDIENTE' and can(current_user.role, 'liquidaciones', 'edit') %}
+  {% if advance.status == 'PENDIENTE' and can(current_user.roles, 'liquidaciones', 'edit') %}
   <form method="post" action="{{ url_for('liquidaciones.add_payment', advance_id=advance.id) }}" style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; margin-top:12px; padding:12px; background:var(--bg-soft,#f3f5f8); border-radius:8px;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label style="margin:0;">Monto (S/) *
@@ -79,7 +79,7 @@
 
 <div class="panel">
   <h2>Gastos de este viaje</h2>
-  {% set can_liquidate = advance.status == 'PENDIENTE' and can(current_user.role, 'liquidaciones', 'edit') %}
+  {% set can_liquidate = advance.status == 'PENDIENTE' and can(current_user.roles, 'liquidaciones', 'edit') %}
   {% if advance.status == 'PENDIENTE' %}
   <p class="muted mt-0">Marca cuáles de estos gastos entran en la liquidación (por defecto se incluyen todos los que no estén ya en otra liquidación). Elige la oficina y presiona "Liquidar" para cerrarla — después ya no se puede editar.</p>
   {% endif %}
@@ -123,7 +123,7 @@
           <td class="text-right">{{ e.amount|money }}</td>
           <td>{% if e.receipt_filename %}<a href="{{ url_for('liquidaciones.receipt', expense_id=e.id) }}" target="_blank">Ver</a>{% else %}—{% endif %}</td>
           <td>
-            {% if can(current_user.role, 'liquidaciones', 'edit') %}
+            {% if can(current_user.roles, 'liquidaciones', 'edit') %}
             <a href="{{ url_for('liquidaciones.edit_expense', expense_id=e.id) }}" class="btn btn-secondary btn-sm">Editar</a>
             {% endif %}
           </td>
@@ -138,7 +138,7 @@
   </form>
   {% endif %}
 
-  {% if can(current_user.role, 'liquidaciones', 'edit') %}
+  {% if can(current_user.roles, 'liquidaciones', 'edit') %}
   <p style="margin-top:12px;"><a href="{{ url_for('liquidaciones.new_expense', trip_id=advance.trip_id) }}" class="btn btn-secondary btn-sm">+ Registrar gasto para este viaje</a></p>
   {% endif %}
 </div>

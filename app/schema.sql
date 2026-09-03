@@ -14,9 +14,37 @@ CREATE TABLE IF NOT EXISTS users (
     -- a diferencia de otros CHECK de este archivo, acá no hay forma de
     -- evitarlo derivando el estado de otra manera: el rol se usa tal
     -- cual como clave de PERMISSIONS.
+    --
+    -- 3 sep, mismo día, ronda siguiente (pedido de Braulio: "quiero poder
+    -- poner mas de 1 rol a un usuario"): esta columna quedó como el rol
+    -- "principal"/de respaldo (se sigue llenando y validando igual, nunca
+    -- vacía) pero YA NO es la fuente de la verdad para permisos — eso pasó
+    -- a la tabla user_roles de abajo (relación muchos-a-muchos). Se dejó a
+    -- propósito en vez de borrarla: users.id es referenciado por 9 tablas
+    -- y no aporta nada tocar esa columna; con user_roles ya alcanza para
+    -- que un usuario tenga 2+ roles a la vez.
     role TEXT NOT NULL CHECK (role IN ('ADMIN', 'OPERADOR', 'DESPACHADOR', 'ALMACEN', 'CONTABILIDAD', 'MECANICO')),
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 3 sep (pedido de Braulio, mismo día que se definieron los roles: "quiero
+-- poder poner mas de 1 rol a un usuario, alguien puede ser almacen y
+-- mecanico y otro solo almacen"): un usuario puede tener 2 o más roles a
+-- la vez — sus permisos son la UNIÓN de lo que permite cada rol asignado
+-- (ver can() en app/auth.py). Tabla nueva (no una migración de columna en
+-- una tabla ya existente), así que no hace falta tocar ningún CHECK
+-- desplegado — CREATE TABLE IF NOT EXISTS alcanza igual en una base nueva
+-- que en una ya desplegada. Los usuarios ya existentes se completan solos
+-- la primera vez que corre init_db() después de este cambio, tomando su
+-- users.role de siempre como su único rol inicial (ver
+-- _backfill_user_roles_sqlite/_postgres en app/db.py) — nadie pierde
+-- acceso por este cambio en particular.
+CREATE TABLE IF NOT EXISTS user_roles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    role TEXT NOT NULL CHECK (role IN ('ADMIN', 'OPERADOR', 'DESPACHADOR', 'ALMACEN', 'CONTABILIDAD', 'MECANICO')),
+    UNIQUE (user_id, role)
 );
 
 CREATE TABLE IF NOT EXISTS clients (
