@@ -3,7 +3,15 @@ from datetime import datetime, timedelta
 from flask import Blueprint, Response, abort, flash, redirect, render_template, request, url_for
 
 from app.auth import permission_required, validate_csrf
-from app.bulk_import import VEHICLE_COLUMNS, VEHICLE_EXAMPLE, XLSX_MIME, build_import_template, read_import_rows
+from app.bulk_import import (
+    OIL_CHANGE_COLUMNS,
+    OIL_CHANGE_EXAMPLE,
+    VEHICLE_COLUMNS,
+    VEHICLE_EXAMPLE,
+    XLSX_MIME,
+    build_import_template,
+    read_import_rows,
+)
 from app.db import execute, get_db, query_all, query_one
 from app.helpers import parse_date, parse_float, today_str
 
@@ -95,8 +103,9 @@ def new_vehicle():
             return render_template("flota/vehicle_form.html", vehicle=request.form, mode="new", owners=_vehicle_owners())
         execute(
             """INSERT INTO vehicles (plate, brand, model, capacity_kg, status, vehicle_type, notes,
-               soat_expiry, technical_review_expiry, current_km, current_km_updated_at, gps_external_id, owner)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               soat_expiry, technical_review_expiry, current_km, current_km_updated_at, gps_external_id, owner,
+               last_oil_change_km, last_oil_change_date, last_oil_change_workshop, last_oil_change_oil)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 plate,
                 request.form.get("brand", "").strip(),
@@ -111,6 +120,10 @@ def new_vehicle():
                 today_str() if request.form.get("current_km") else None,
                 request.form.get("gps_external_id", "").strip() or None,
                 request.form.get("owner", "").strip() or None,
+                parse_float(request.form.get("last_oil_change_km"), None),
+                parse_date(request.form.get("last_oil_change_date")),
+                request.form.get("last_oil_change_workshop", "").strip() or None,
+                request.form.get("last_oil_change_oil", "").strip() or None,
             ),
         )
         flash("Unidad registrada.", "success")
@@ -132,7 +145,8 @@ def edit_vehicle(vehicle_id):
         execute(
             """UPDATE vehicles SET plate=?, brand=?, model=?, capacity_kg=?, status=?, vehicle_type=?, notes=?,
                soat_expiry=?, technical_review_expiry=?,
-               current_km=?, current_km_updated_at=?, gps_external_id=?, owner=?
+               current_km=?, current_km_updated_at=?, gps_external_id=?, owner=?,
+               last_oil_change_km=?, last_oil_change_date=?, last_oil_change_workshop=?, last_oil_change_oil=?
                WHERE id=?""",
             (
                 request.form.get("plate", "").strip().upper(),
@@ -148,6 +162,10 @@ def edit_vehicle(vehicle_id):
                 today_str() if km_changed else vehicle["current_km_updated_at"],
                 request.form.get("gps_external_id", "").strip() or None,
                 request.form.get("owner", "").strip() or None,
+                parse_float(request.form.get("last_oil_change_km"), None),
+                parse_date(request.form.get("last_oil_change_date")),
+                request.form.get("last_oil_change_workshop", "").strip() or None,
+                request.form.get("last_oil_change_oil", "").strip() or None,
                 vehicle_id,
             ),
         )
@@ -296,4 +314,92 @@ def import_vehicles():
         "import_form.html", title="Importar unidades", module_label="las unidades de Flota",
         template_url=url_for("flota.import_template"), upload_url=url_for("flota.import_vehicles"),
         back_url=url_for("flota.list_view"), columns=VEHICLE_COLUMNS,
+    )
+
+
+# --- Importación masiva de últimos cambios de aceite (3 sep, pedido de
+# Braulio) — módulo aparte de la importación general de Flota de arriba en
+# vez de extender _apply_vehicle_import(): esta SOLO actualiza unidades que
+# ya existen (nunca crea una unidad nueva, a diferencia de la importación
+# general) y actualiza 4 campos puntuales sin tocar el resto de la unidad,
+# así que mezclarla con _apply_vehicle_import() habría complicado esa
+# función y además cambiado su comportamiento para otros casos futuros que
+# no tienen que ver con aceite. "Observación" (lo que pidió Braulio agregar
+# junto con esta carga) no es una columna de esta plantilla: es el campo
+# "notes" que ya existe en Flota (se llena a mano, como hasta ahora, desde
+# el formulario de la unidad).
+
+@bp.route("/importar-aceite/plantilla")
+@permission_required("flota", "edit")
+def import_oil_changes_template():
+    buffer = build_import_template("Flota — últimos cambios de aceite", OIL_CHANGE_COLUMNS, OIL_CHANGE_EXAMPLE)
+    return Response(
+        buffer.getvalue(),
+        mimetype=XLSX_MIME,
+        headers={"Content-Disposition": 'attachment; filename="plantilla_cambios_aceite.xlsx"'},
+    )
+
+
+def _apply_oil_change_import(rows, example_skips):
+    updated, errors = 0, []
+    skipped = [
+        {"row": r, "message": "Fila de ejemplo de la plantilla; se omitió automáticamente."}
+        for r in example_skips
+    ]
+    seen_plates = set()
+    for row in rows:
+        n = row["_row_number"]
+        for warn in row["_warnings"]:
+            errors.append({"row": n, "message": warn})
+        plate = (row.get("plate") or "").strip().upper()
+        if not plate:
+            errors.append({"row": n, "message": "Falta la placa; la fila no se importó."})
+            continue
+        if plate in seen_plates:
+            skipped.append({"row": n, "message": f"Placa {plate} repetida dentro del archivo; ya se había importado antes."})
+            continue
+        existing = query_one("SELECT id FROM vehicles WHERE plate = ?", (plate,))
+        if not existing:
+            # Pedido explícito de Braulio: esta importación no crea
+            # unidades nuevas, solo actualiza las que ya existen en Flota.
+            skipped.append({"row": n, "message": f"La placa {plate} no está registrada en Flota; no se creó (esta carga solo actualiza unidades existentes)."})
+            continue
+        seen_plates.add(plate)
+        execute(
+            """UPDATE vehicles SET last_oil_change_km=?, last_oil_change_date=?,
+               last_oil_change_workshop=?, last_oil_change_oil=? WHERE id=?""",
+            (
+                row.get("oil_change_km"),
+                row.get("oil_change_date"),
+                row.get("workshop") or None,
+                row.get("oil_type") or None,
+                existing["id"],
+            ),
+        )
+        updated += 1
+    return {"created": 0, "updated": updated, "skipped": skipped, "errors": errors}
+
+
+@bp.route("/importar-aceite", methods=["GET", "POST"])
+@permission_required("flota", "edit")
+def import_oil_changes():
+    if request.method == "POST":
+        if not validate_csrf():
+            abort(400)
+        rows, file_error, example_skips = read_import_rows(
+            request.files.get("file"), OIL_CHANGE_COLUMNS, OIL_CHANGE_EXAMPLE
+        )
+        if file_error:
+            flash(file_error, "error")
+            return redirect(url_for("flota.import_oil_changes"))
+        result = _apply_oil_change_import(rows, example_skips)
+        return render_template(
+            "import_result.html", result=result,
+            back_url=url_for("flota.list_view"), retry_url=url_for("flota.import_oil_changes"),
+        )
+    return render_template(
+        "import_form.html", title="Importar últimos cambios de aceite",
+        module_label="los últimos cambios de aceite de Flota",
+        template_url=url_for("flota.import_oil_changes_template"), upload_url=url_for("flota.import_oil_changes"),
+        back_url=url_for("flota.list_view"), columns=OIL_CHANGE_COLUMNS,
     )

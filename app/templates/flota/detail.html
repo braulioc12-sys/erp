@@ -47,6 +47,18 @@
   <p class="muted" style="margin-bottom:0;">Se actualiza solo cada 2 minutos vía GPS (Frotcom) cuando la unidad está sincronizada. Para corregirlo a mano (por ejemplo, si el GPS dejó de transmitir), puedes hacerlo desde "Editar" arriba o desde Mantenimiento → Historial y costos por unidad.</p>
 </div>
 
+{% if vehicle.last_oil_change_km is not none or vehicle.last_oil_change_date or vehicle.last_oil_change_workshop or vehicle.last_oil_change_oil %}
+<div class="panel">
+  <h2>Último cambio de aceite</h2>
+  <div class="detail-grid">
+    <div class="detail-item"><div class="label">Kilometraje del último cambio</div><div class="value">{{ '{:,.0f} km'.format(vehicle.last_oil_change_km) if vehicle.last_oil_change_km is not none else '—' }}</div></div>
+    <div class="detail-item"><div class="label">Fecha del último cambio</div><div class="value">{{ vehicle.last_oil_change_date or '—' }}</div></div>
+    <div class="detail-item"><div class="label">Taller donde se realizó</div><div class="value">{{ vehicle.last_oil_change_workshop or '—' }}</div></div>
+    <div class="detail-item"><div class="label">Aceite</div><div class="value">{{ vehicle.last_oil_change_oil or '—' }}</div></div>
+  </div>
+</div>
+{% endif %}
+
 <div class="panel">
   <h2>Documentos obligatorios</h2>
   <div class="detail-grid">

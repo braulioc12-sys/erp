@@ -459,3 +459,29 @@ ROUTE_EXAMPLE = {
     "default_expense_amount": 350,
     "default_commission_amount": 80,
 }
+
+# 3 sep, pedido de Braulio: carga masiva del último cambio de aceite por
+# placa, a partir de un Excel de terceros (ver app/routes/flota.py
+# import_oil_changes()). A diferencia de VEHICLE_COLUMNS, esta importación
+# es SOLO para actualizar unidades que YA existen en Flota — decisión
+# explícita de Braulio ("no crear nada, solo actualizar las que ya
+# existen"), así que no incluye los campos que se necesitarían para crear
+# una unidad nueva (marca, tipo, capacidad, etc.); ver
+# _apply_oil_change_import() para el detalle de placas no encontradas.
+OIL_CHANGE_COLUMNS = [
+    ImportColumn("plate", "Placa", kind="text", required=True, width=14,
+                 note="Debe ser una placa YA registrada en Flota. Si no existe, la fila se omite (esta "
+                      "importación no crea unidades nuevas)."),
+    ImportColumn("oil_change_km", "Kilometraje último cambio", kind="float", width=20),
+    ImportColumn("oil_change_date", "Fecha último cambio", kind="date", width=18),
+    ImportColumn("workshop", "Taller donde se realizó", kind="text", width=24),
+    ImportColumn("oil_type", "Aceite", kind="text", width=18),
+]
+
+OIL_CHANGE_EXAMPLE = {
+    "plate": "EJM-000",
+    "oil_change_km": 120000,
+    "oil_change_date": "2026-07-01",
+    "workshop": "Taller de ejemplo",
+    "oil_type": "15W40",
+}

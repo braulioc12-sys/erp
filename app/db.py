@@ -322,6 +322,15 @@ COLUMN_MIGRATIONS = [
     ("trips", "driver2_id", "INTEGER"),
     ("trips", "double_driver", "INTEGER NOT NULL DEFAULT 0"),
     ("trips", "single_leg", "INTEGER NOT NULL DEFAULT 0"),
+    # 3 sep, pedido de Braulio: carga masiva del último cambio de aceite por
+    # placa (Excel con PLACA/KILOMETRAJE/FECHA/TALLER/ACEITE) — ver
+    # app/bulk_import.py OIL_CHANGE_COLUMNS y app/routes/flota.py
+    # import_oil_changes(). "Observación" reutiliza el "notes" ya existente
+    # de vehicles, no es una columna nueva.
+    ("vehicles", "last_oil_change_km", "REAL"),
+    ("vehicles", "last_oil_change_date", "TEXT"),
+    ("vehicles", "last_oil_change_workshop", "TEXT"),
+    ("vehicles", "last_oil_change_oil", "TEXT"),
 ]
 
 

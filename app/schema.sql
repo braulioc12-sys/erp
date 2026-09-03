@@ -78,6 +78,17 @@ CREATE TABLE IF NOT EXISTS vehicles (
     notes TEXT,
     current_km REAL,
     current_km_updated_at TEXT,
+    -- Último cambio de aceite (3 sep, pedido de Braulio: carga masiva desde
+    -- un Excel con el historial de cambios de varias placas — ver
+    -- app/bulk_import.py OIL_CHANGE_COLUMNS y app/routes/flota.py
+    -- import_oil_changes()). "Observación" (lo que pidió Braulio agregar)
+    -- no es un campo nuevo: reutiliza el "notes" ya existente arriba, por
+    -- decisión explícita de Braulio ("un campo de notas general de la
+    -- unidad").
+    last_oil_change_km REAL,
+    last_oil_change_date TEXT,
+    last_oil_change_workshop TEXT,
+    last_oil_change_oil TEXT,
     gps_external_id TEXT,
     -- Propietario de la unidad (texto libre, tomado del catálogo
     -- "vehicle_owner" en Catálogos — ver app/routes/catalogos.py). Copia el

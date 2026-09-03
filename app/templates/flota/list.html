@@ -12,6 +12,7 @@
     {% endif %}
     {% if can(current_user.roles, 'flota', 'edit') %}
     <a href="{{ url_for('flota.import_vehicles') }}" class="btn btn-secondary">Importar desde Excel</a>
+    <a href="{{ url_for('flota.import_oil_changes') }}" class="btn btn-secondary">Importar cambios de aceite</a>
     <a href="{{ url_for('flota.new_vehicle') }}" class="btn btn-primary">+ Nueva unidad</a>
     {% endif %}
   </div>

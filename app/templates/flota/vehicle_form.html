@@ -76,6 +76,24 @@
   <p class="muted" style="margin-top:-8px;">Última actualización de kilometraje: {{ vehicle.current_km_updated_at }}</p>
   {% endif %}
 
+  <div class="section-title">Último cambio de aceite</div>
+  <div class="form-row">
+    <label>Kilometraje del último cambio
+      <input type="number" step="1" name="last_oil_change_km" value="{{ vehicle.last_oil_change_km if vehicle and vehicle.last_oil_change_km is not none else '' }}">
+    </label>
+    <label>Fecha del último cambio
+      <input type="date" name="last_oil_change_date" value="{{ vehicle.last_oil_change_date if vehicle else '' }}">
+    </label>
+  </div>
+  <div class="form-row">
+    <label>Taller donde se realizó
+      <input type="text" name="last_oil_change_workshop" value="{{ vehicle.last_oil_change_workshop if vehicle else '' }}">
+    </label>
+    <label>Aceite
+      <input type="text" name="last_oil_change_oil" value="{{ vehicle.last_oil_change_oil if vehicle else '' }}">
+    </label>
+  </div>
+
   <label>Notas
     <textarea name="notes">{{ vehicle.notes if vehicle else '' }}</textarea>
   </label>
