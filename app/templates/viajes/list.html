@@ -40,7 +40,7 @@
         <td>{{ t.client_name }}</td>
         <td>{{ t.origin }} → {{ t.destination }}</td>
         <td>{{ t.vehicle_plate or '—' }}</td>
-        <td>{{ t.driver_name or '—' }}</td>
+        <td>{{ t.driver_name or '—' }}{% if t.double_driver and t.driver2_name %} + {{ t.driver2_name }}{% endif %}</td>
         <td>{{ m.badge(t.status) }}</td>
         <td>{{ t.rate|money }}</td>
         <td>{{ t.driver_commission|money }}</td>

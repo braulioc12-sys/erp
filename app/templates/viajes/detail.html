@@ -27,11 +27,15 @@
   <div class="detail-item"><div class="label">Ruta</div><div class="value">{{ trip.origin }} → {{ trip.destination }}</div></div>
   <div class="detail-item"><div class="label">Unidad</div><div class="value">{{ trip.vehicle_plate or '—' }}</div></div>
   <div class="detail-item"><div class="label">Conductor</div><div class="value">{{ trip.driver_name or '—' }}</div></div>
+  {% if trip.double_driver %}
+  <div class="detail-item"><div class="label">Conductor 2</div><div class="value">{{ trip.driver2_name or '—' }}</div></div>
+  {% endif %}
   <div class="detail-item"><div class="label">Carga</div><div class="value">{{ trip.cargo_description or '—' }} {% if trip.cargo_weight_kg %}({{ trip.cargo_weight_kg }} kg){% endif %}</div></div>
   <div class="detail-item"><div class="label">Fecha programada</div><div class="value">{{ trip.scheduled_date }}</div></div>
   <div class="detail-item"><div class="label">Fecha entrega</div><div class="value">{{ trip.delivered_date or '—' }}</div></div>
   <div class="detail-item"><div class="label">Tarifa</div><div class="value">{{ trip.rate|money }}</div></div>
-  <div class="detail-item"><div class="label">Comisión del conductor</div><div class="value">{{ trip.driver_commission|money }}</div></div>
+  <div class="detail-item"><div class="label">Tipo de viaje</div><div class="value">{% if trip.double_driver and trip.single_leg %}Doble conductor · Solo 1 tramo{% elif trip.double_driver %}Doble conductor{% elif trip.single_leg %}Solo 1 tramo{% else %}Normal{% endif %}</div></div>
+  <div class="detail-item"><div class="label">Comisión {{ 'de cada conductor' if trip.double_driver else 'del conductor' }}</div><div class="value">{{ trip.driver_commission|money }}</div></div>
   <div class="detail-item"><div class="label">Facturado</div><div class="value">{{ 'Sí' if trip.invoiced else 'No' }}</div></div>
 </div>
 

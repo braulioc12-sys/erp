@@ -21,11 +21,13 @@ def list_view():
     status = request.args.get("status", "")
     q = request.args.get("q", "").strip()
 
-    sql = """SELECT t.*, c.name as client_name, v.plate as vehicle_plate, d.name as driver_name
+    sql = """SELECT t.*, c.name as client_name, v.plate as vehicle_plate, d.name as driver_name,
+                     d2.name as driver2_name
               FROM trips t
               JOIN clients c ON c.id = t.client_id
               LEFT JOIN vehicles v ON v.id = t.vehicle_id
               LEFT JOIN drivers d ON d.id = t.driver_id
+              LEFT JOIN drivers d2 ON d2.id = t.driver2_id
               WHERE 1=1"""
     params = []
     if status:
@@ -72,16 +74,27 @@ def _resolve_route_selection(form, current_trip=None):
     return route["origin"], route["destination"], route, None
 
 
-def _resolve_commission(form, origin, destination, route=None):
+def _resolve_commission(form, origin, destination, route=None, double_driver=False, single_leg=False):
     """Si el usuario dejó vacío el campo de comisión, se usa el monto
     predeterminado de la ruta elegida (o, si no se resolvió una ruta
-    directamente — caso "__current__" —, se busca por origen/destino)."""
+    directamente — caso "__current__" —, se busca por origen/destino),
+    ajustado según "doble conductor" (x0.6) y "solo 1 tramo" (x0.5) —
+    pedido de Braulio, 3 sep. Si ambos están marcados se combinan
+    multiplicando (60% x 50% = 30%). Cuando hay doble conductor, este
+    mismo monto (completo, sin repartir) se le asigna a cada uno de los
+    2 conductores — ver INSERT/UPDATE en new()/edit()."""
     raw = (form.get("driver_commission") or "").strip()
     if raw:
         return parse_float(raw, 0)
     if route is None:
         route = find_route(origin, destination)
-    return route["default_commission_amount"] if route else 0
+    base = route["default_commission_amount"] if route else 0
+    factor = 1.0
+    if double_driver:
+        factor *= 0.6
+    if single_leg:
+        factor *= 0.5
+    return base * factor
 
 
 def _selected_route_id_for_edit(trip):
@@ -106,6 +119,10 @@ def new():
         client_id = request.form.get("client_id")
         origin, destination, route, route_error = _resolve_route_selection(request.form)
         scheduled_date = parse_date(request.form.get("scheduled_date"))
+        double_driver = bool(request.form.get("double_driver"))
+        single_leg = bool(request.form.get("single_leg"))
+        driver_id = request.form.get("driver_id") or None
+        driver2_id = (request.form.get("driver2_id") or None) if double_driver else None
         errors = []
         if not client_id:
             errors.append("Selecciona un cliente.")
@@ -113,6 +130,11 @@ def new():
             errors.append(route_error)
         if not scheduled_date:
             errors.append("La fecha programada no es válida.")
+        if double_driver:
+            if not driver2_id:
+                errors.append("Selecciona el segundo conductor (viaje de doble conductor).")
+            elif driver_id and driver2_id == driver_id:
+                errors.append("El segundo conductor debe ser distinto del primero.")
 
         if errors:
             for e in errors:
@@ -125,17 +147,21 @@ def new():
 
         code = next_code("V", "trips")
         vehicle_id = request.form.get("vehicle_id") or None
-        driver_id = request.form.get("driver_id") or None
-        driver_commission = _resolve_commission(request.form, origin, destination, route)
+        driver_commission = _resolve_commission(
+            request.form, origin, destination, route,
+            double_driver=double_driver, single_leg=single_leg,
+        )
         trip_id = execute(
-            """INSERT INTO trips (code, client_id, vehicle_id, driver_id, origin, destination,
-               cargo_description, cargo_weight_kg, scheduled_date, rate, driver_commission, notes, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO trips (code, client_id, vehicle_id, driver_id, driver2_id, origin, destination,
+               cargo_description, cargo_weight_kg, scheduled_date, rate, driver_commission,
+               double_driver, single_leg, notes, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 code,
                 client_id,
                 vehicle_id,
                 driver_id,
+                driver2_id,
                 origin,
                 destination,
                 request.form.get("cargo_description", "").strip(),
@@ -143,6 +169,8 @@ def new():
                 scheduled_date,
                 parse_float(request.form.get("rate")),
                 driver_commission,
+                int(double_driver),
+                int(single_leg),
                 request.form.get("notes", "").strip(),
                 None,
             ),
@@ -165,7 +193,10 @@ def edit(trip_id):
         abort(404)
     clients = query_all("SELECT * FROM clients WHERE active = 1 ORDER BY name")
     vehicles = query_all("SELECT * FROM vehicles WHERE status = 'ACTIVO' OR id = ? ORDER BY plate", (trip["vehicle_id"],))
-    drivers = query_all("SELECT * FROM drivers WHERE status = 'ACTIVO' OR id = ? ORDER BY name", (trip["driver_id"],))
+    drivers = query_all(
+        "SELECT * FROM drivers WHERE status = 'ACTIVO' OR id = ? OR id = ? ORDER BY name",
+        (trip["driver_id"], trip["driver2_id"]),
+    )
     routes = _active_routes()
 
     if request.method == "POST":
@@ -173,22 +204,40 @@ def edit(trip_id):
             abort(400)
         scheduled_date = parse_date(request.form.get("scheduled_date")) or trip["scheduled_date"]
         origin, destination, route, route_error = _resolve_route_selection(request.form, current_trip=trip)
+        double_driver = bool(request.form.get("double_driver"))
+        single_leg = bool(request.form.get("single_leg"))
+        driver_id = request.form.get("driver_id") or None
+        driver2_id = (request.form.get("driver2_id") or None) if double_driver else None
+        errors = []
         if route_error:
-            flash(route_error, "error")
+            errors.append(route_error)
+        if double_driver:
+            if not driver2_id:
+                errors.append("Selecciona el segundo conductor (viaje de doble conductor).")
+            elif driver_id and driver2_id == driver_id:
+                errors.append("El segundo conductor debe ser distinto del primero.")
+        if errors:
+            for e in errors:
+                flash(e, "error")
             return render_template(
                 "viajes/form.html", trip=trip, mode="edit", trip_id=trip_id,
                 clients=clients, vehicles=vehicles, drivers=drivers, routes=routes,
                 selected_route_id=request.form.get("route_id", ""),
             )
-        driver_commission = _resolve_commission(request.form, origin, destination, route)
+        driver_commission = _resolve_commission(
+            request.form, origin, destination, route,
+            double_driver=double_driver, single_leg=single_leg,
+        )
         execute(
-            """UPDATE trips SET client_id=?, vehicle_id=?, driver_id=?, origin=?, destination=?,
-               cargo_description=?, cargo_weight_kg=?, scheduled_date=?, rate=?, driver_commission=?, notes=?
+            """UPDATE trips SET client_id=?, vehicle_id=?, driver_id=?, driver2_id=?, origin=?, destination=?,
+               cargo_description=?, cargo_weight_kg=?, scheduled_date=?, rate=?, driver_commission=?,
+               double_driver=?, single_leg=?, notes=?
                WHERE id=?""",
             (
                 request.form.get("client_id"),
                 request.form.get("vehicle_id") or None,
-                request.form.get("driver_id") or None,
+                driver_id,
+                driver2_id,
                 origin,
                 destination,
                 request.form.get("cargo_description", "").strip(),
@@ -196,6 +245,8 @@ def edit(trip_id):
                 scheduled_date,
                 parse_float(request.form.get("rate")),
                 driver_commission,
+                int(double_driver),
+                int(single_leg),
                 request.form.get("notes", "").strip(),
                 trip_id,
             ),
@@ -214,11 +265,13 @@ def edit(trip_id):
 @permission_required("viajes", "view")
 def detail(trip_id):
     trip = query_one(
-        """SELECT t.*, c.name as client_name, v.plate as vehicle_plate, d.name as driver_name
+        """SELECT t.*, c.name as client_name, v.plate as vehicle_plate, d.name as driver_name,
+                  d2.name as driver2_name
            FROM trips t
            JOIN clients c ON c.id = t.client_id
            LEFT JOIN vehicles v ON v.id = t.vehicle_id
            LEFT JOIN drivers d ON d.id = t.driver_id
+           LEFT JOIN drivers d2 ON d2.id = t.driver2_id
            WHERE t.id = ?""",
         (trip_id,),
     )
@@ -271,16 +324,32 @@ def change_status(trip_id):
 
 def _commissions_by_driver(month):
     """Agrupa, para un mes (YYYY-MM), cuántos viajes hizo cada conductor a
-    cada ruta y cuál fue su comisión total. Excluye viajes cancelados."""
+    cada ruta y cuál fue su comisión total. Excluye viajes cancelados.
+
+    En un viaje de "doble conductor" (double_driver=1), driver_commission ya
+    trae el monto completo que le corresponde a CADA conductor (pedido de
+    Braulio, 3 sep: "cada conductor recibe el 60% completo", no se reparte) —
+    por eso el segundo conductor se agrega con un UNION ALL que suma ese
+    mismo monto otra vez, no la mitad."""
     rows = query_all(
-        """SELECT d.id as driver_id, d.name as driver_name, t.origin, t.destination,
-                  COUNT(*) as trip_count, SUM(t.driver_commission) as route_commission
-           FROM trips t
-           JOIN drivers d ON d.id = t.driver_id
-           WHERE strftime('%Y-%m', t.scheduled_date) = ? AND t.status != 'CANCELADO'
-           GROUP BY d.id, t.origin, t.destination
-           ORDER BY d.name, t.origin, t.destination""",
-        (month,),
+        """SELECT driver_id, driver_name, origin, destination,
+                  COUNT(*) as trip_count, SUM(driver_commission) as route_commission
+           FROM (
+               SELECT d.id as driver_id, d.name as driver_name, t.origin, t.destination,
+                      t.driver_commission as driver_commission
+               FROM trips t
+               JOIN drivers d ON d.id = t.driver_id
+               WHERE strftime('%Y-%m', t.scheduled_date) = ? AND t.status != 'CANCELADO'
+               UNION ALL
+               SELECT d2.id as driver_id, d2.name as driver_name, t.origin, t.destination,
+                      t.driver_commission as driver_commission
+               FROM trips t
+               JOIN drivers d2 ON d2.id = t.driver2_id
+               WHERE t.double_driver = 1 AND strftime('%Y-%m', t.scheduled_date) = ? AND t.status != 'CANCELADO'
+           ) combined
+           GROUP BY driver_id, origin, destination
+           ORDER BY driver_name, origin, destination""",
+        (month, month),
     )
     by_driver = {}
     for r in rows:

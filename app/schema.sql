@@ -87,6 +87,8 @@ CREATE TABLE IF NOT EXISTS trips (
     client_id INTEGER NOT NULL REFERENCES clients(id),
     vehicle_id INTEGER REFERENCES vehicles(id),
     driver_id INTEGER REFERENCES drivers(id),
+    -- Segundo conductor, solo cuando double_driver = 1 (viaje "doble conductor").
+    driver2_id INTEGER REFERENCES drivers(id),
     origin TEXT NOT NULL,
     destination TEXT NOT NULL,
     cargo_description TEXT,
@@ -95,10 +97,20 @@ CREATE TABLE IF NOT EXISTS trips (
     delivered_date TEXT,
     status TEXT NOT NULL DEFAULT 'PENDIENTE' CHECK (status IN ('PENDIENTE', 'EN_CURSO', 'ENTREGADO', 'CANCELADO')),
     rate REAL NOT NULL DEFAULT 0,
-    -- Comisión que le corresponde al conductor por este viaje. Se sugiere
+    -- Comisión que le corresponde a cada conductor por este viaje. Se sugiere
     -- automáticamente según el monto configurado para la ruta (origen-destino)
-    -- en el catálogo de Rutas, pero se puede editar por viaje.
+    -- en el catálogo de Rutas, ajustado por double_driver (x0.6) y single_leg
+    -- (x0.5) cuando aplican, pero se puede editar por viaje. Si double_driver
+    -- está activo, driver_id y driver2_id reciben cada uno este mismo monto
+    -- completo (no se reparte).
     driver_commission REAL NOT NULL DEFAULT 0,
+    -- Viaje con doble conductor: comisión sugerida = 60% de la comisión normal
+    -- de la ruta, y se le asigna ese mismo monto a CADA uno de los 2 conductores.
+    double_driver INTEGER NOT NULL DEFAULT 0,
+    -- Viaje de un solo tramo (no ida y vuelta / no varias etapas): comisión
+    -- sugerida = 50% de la comisión normal de la ruta. Se puede combinar con
+    -- double_driver (los porcentajes se multiplican: 60% x 50% = 30% c/u).
+    single_leg INTEGER NOT NULL DEFAULT 0,
     notes TEXT,
     invoiced INTEGER NOT NULL DEFAULT 0,
     created_by INTEGER REFERENCES users(id),

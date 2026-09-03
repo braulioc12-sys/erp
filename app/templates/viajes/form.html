@@ -49,6 +49,28 @@
   </div>
 
   <div class="form-row">
+    <label style="flex-direction: row; align-items: center; gap: 8px;">
+      <input type="checkbox" id="trip-double-driver" name="double_driver" value="1" {{ 'checked' if trip and trip.double_driver }} style="width:auto;">
+      Doble conductor (comisión al 60%, se registran los 2 conductores)
+    </label>
+    <label style="flex-direction: row; align-items: center; gap: 8px;">
+      <input type="checkbox" id="trip-single-leg" name="single_leg" value="1" {{ 'checked' if trip and trip.single_leg }} style="width:auto;">
+      Solo 1 tramo (comisión al 50%)
+    </label>
+  </div>
+
+  <div class="form-row" id="trip-driver2-row" style="display:none;">
+    <label>Conductor 2 *
+      <select name="driver2_id" id="trip-driver2">
+        <option value="">-- Selecciona el segundo conductor --</option>
+        {% for d in drivers %}
+        <option value="{{ d.id }}" {{ 'selected' if trip and (trip.driver2_id|string) == (d.id|string) }}>{{ d.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+
+  <div class="form-row">
     <label>Descripción de la carga
       <input type="text" name="cargo_description" value="{{ trip.cargo_description if trip else '' }}">
     </label>
@@ -89,22 +111,43 @@
     var routeSelect = document.getElementById('trip-route');
     var commission = document.getElementById('trip-commission');
     var hint = document.getElementById('commission-hint');
+    var doubleDriver = document.getElementById('trip-double-driver');
+    var singleLeg = document.getElementById('trip-single-leg');
+    var driver2Row = document.getElementById('trip-driver2-row');
     var lastSuggested = null;
 
+    // Comisión base de la ruta elegida, ajustada por doble conductor (x0.6)
+    // y solo 1 tramo (x0.5) — se combinan multiplicando cuando ambas están
+    // marcadas (60% x 50% = 30% cada conductor). Pedido de Braulio, 3 sep.
     function suggest() {
       var id = routeSelect.value;
       if (!id || id === '__current__') { hint.textContent = ''; return; }
       var match = routes.find(function (r) { return String(r.id) === String(id); });
       if (!match) { hint.textContent = ''; return; }
-      hint.textContent = 'Comisión sugerida según la ruta: S/ ' + Number(match.default_commission_amount).toFixed(2);
+      var factor = 1;
+      var notes = [];
+      if (doubleDriver.checked) { factor *= 0.6; notes.push('doble conductor 60%'); }
+      if (singleLeg.checked) { factor *= 0.5; notes.push('1 tramo 50%'); }
+      var amount = Number(match.default_commission_amount) * factor;
+      var suffix = notes.length ? ' (' + notes.join(' × ') + ')' : '';
+      var label = doubleDriver.checked
+        ? 'Comisión sugerida para CADA conductor' : 'Comisión sugerida según la ruta';
+      hint.textContent = label + suffix + ': S/ ' + amount.toFixed(2);
       // Solo autocompletar si el campo está vacío o todavía tiene el último valor sugerido (no lo tocó el usuario).
       if (!commission.value || Number(commission.value) === lastSuggested) {
-        commission.value = match.default_commission_amount;
-        lastSuggested = match.default_commission_amount;
+        commission.value = amount;
+        lastSuggested = amount;
       }
     }
 
+    function toggleDriver2Row() {
+      driver2Row.style.display = doubleDriver.checked ? '' : 'none';
+    }
+
     routeSelect.addEventListener('change', suggest);
+    doubleDriver.addEventListener('change', function () { toggleDriver2Row(); suggest(); });
+    singleLeg.addEventListener('change', suggest);
+    toggleDriver2Row();
     if (routeSelect.value) { suggest(); }
   })();
 </script>

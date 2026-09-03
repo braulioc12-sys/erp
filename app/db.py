@@ -312,6 +312,16 @@ COLUMN_MIGRATIONS = [
     # motivo que mechanic_id/moved_to_tire_id más arriba: la FK la agrega el
     # paso dedicado de init_db() (Postgres) una vez que la columna ya existe.
     ("tires", "tire_inventory_id", "INTEGER"),
+    # 3 sep, pedido de Braulio: viajes con "doble conductor" (comisión al
+    # 60%, un segundo conductor) y "solo 1 tramo" (comisión al 50%,
+    # combinable con doble conductor: 30% c/u). driver2_id sin "REFERENCES"
+    # aquí a propósito — mismo motivo que tire_inventory_id/mechanic_id más
+    # arriba: la FK la agrega el paso dedicado de init_db() (Postgres) una
+    # vez que la columna ya existe, tomándola del "REFERENCES drivers(id)"
+    # que sí sigue declarado en schema.sql.
+    ("trips", "driver2_id", "INTEGER"),
+    ("trips", "double_driver", "INTEGER NOT NULL DEFAULT 0"),
+    ("trips", "single_leg", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 
