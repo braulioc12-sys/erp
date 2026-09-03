@@ -16,7 +16,7 @@
       <tr>
         <td>{{ u.name }}</td>
         <td>{{ u.email }}</td>
-        <td>{{ u.role }}</td>
+        <td>{{ role_labels.get(u.role, u.role) }}</td>
         <td><span class="badge {{ 'badge-activo' if u.active else 'badge-inactivo' }}">{{ 'Activo' if u.active else 'Inactivo' }}</span></td>
         <td><a class="btn btn-secondary btn-sm" href="{{ url_for('usuarios.edit', user_id=u.id) }}">Editar</a></td>
       </tr>

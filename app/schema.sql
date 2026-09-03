@@ -6,7 +6,15 @@ CREATE TABLE IF NOT EXISTS users (
     name TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
-    role TEXT NOT NULL CHECK (role IN ('ADMIN', 'OPERADOR')),
+    -- Roles agregados el 3 sep (pedido de Braulio: definir roles de
+    -- usuario) — ver PERMISSIONS en app/auth.py para el detalle de qué
+    -- puede ver/editar cada uno. Ampliar esta lista en una base YA
+    -- desplegada requiere además migrar el CHECK constraint ya creado
+    -- (ver _apply_role_check_migration_sqlite/_postgres en app/db.py) —
+    -- a diferencia de otros CHECK de este archivo, acá no hay forma de
+    -- evitarlo derivando el estado de otra manera: el rol se usa tal
+    -- cual como clave de PERMISSIONS.
+    role TEXT NOT NULL CHECK (role IN ('ADMIN', 'OPERADOR', 'DESPACHADOR', 'ALMACEN', 'CONTABILIDAD', 'MECANICO')),
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

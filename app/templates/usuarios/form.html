@@ -23,8 +23,9 @@
     <label>Rol
       <select name="role">
         {% set current_role = user.role if user else 'OPERADOR' %}
-        <option value="ADMIN" {{ 'selected' if current_role == 'ADMIN' }}>Administrador</option>
-        <option value="OPERADOR" {{ 'selected' if current_role == 'OPERADOR' }}>Operador</option>
+        {% for value, label in role_choices %}
+        <option value="{{ value }}" {{ 'selected' if current_role == value }}>{{ label }}</option>
+        {% endfor %}
       </select>
     </label>
     <label>{{ 'Nueva contraseña (dejar vacío para no cambiar)' if mode == 'edit' else 'Contraseña *' }}

@@ -340,6 +340,84 @@ def _apply_column_migrations_postgres(conn):
         cur.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {ddl}")
 
 
+# Roles de usuario nuevos (3 sep, pedido de Braulio: "definamos los roles de
+# usuario") — DESPACHADOR/ALMACEN/CONTABILIDAD/MECANICO, además de los ya
+# existentes ADMIN/OPERADOR. Ver PERMISSIONS en app/auth.py para el permiso
+# de cada uno. A diferencia de los demás CHECK de schema.sql (ver el
+# comentario en inventory_purchases.status), acá no hay forma de evitar
+# tocar el CHECK de una base ya desplegada derivando el estado de otra
+# forma: el rol se guarda y se usa tal cual como clave de PERMISSIONS, así
+# que las funciones de abajo migran el CHECK constraint existente en vez de
+# solo agregar una columna.
+USER_ROLES = ("ADMIN", "OPERADOR", "DESPACHADOR", "ALMACEN", "CONTABILIDAD", "MECANICO")
+
+
+def _apply_role_check_migration_sqlite(conn):
+    """SQLite no soporta ALTER TABLE para modificar un CHECK constraint ya
+    creado — hay que recrear la tabla. El truco es 'PRAGMA legacy_alter_table
+    = ON' durante el RENAME: sin él, SQLite reescribe automáticamente el
+    texto de "REFERENCES users(id)" en las 9 tablas que apuntan a "users"
+    (trips, expenses, inventory_purchases, etc.) para que apunten al nombre
+    temporal en vez de a "users". PERO ese auto-reescrito solo se suprime de
+    verdad si además "PRAGMA foreign_keys" está OFF durante el RENAME —
+    confirmado probándolo: con foreign_keys=ON (como lo deja
+    "PRAGMA foreign_keys = ON;" al inicio de schema.sql, ya ejecutado antes
+    de llegar acá), SQLite reescribe las referencias de todos modos aunque
+    legacy_alter_table esté en ON, porque si no lo hiciera terminaría con
+    una FK "colgada" mientras la enforcement está activa. Con las dos
+    pragmas en el estado correcto, la tabla nueva solo necesita seguir
+    llamándose "users" para que esas 9 FK sigan apuntando bien, sin tener
+    que tocar ninguna de esas otras tablas."""
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").fetchone()
+    if not row or not row[0] or "DESPACHADOR" in row[0]:
+        return  # ya migrada, o todavía no existe (base nueva: schema.sql ya trae el CHECK actualizado)
+    fk_was_on = conn.execute("PRAGMA foreign_keys").fetchone()[0]
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute("PRAGMA legacy_alter_table = ON")
+    try:
+        conn.execute("ALTER TABLE users RENAME TO users_role_check_old")
+        conn.execute(
+            f"""CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                email TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL CHECK (role IN {USER_ROLES!r}),
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )"""
+        )
+        conn.execute(
+            """INSERT INTO users (id, name, email, password_hash, role, active, created_at)
+               SELECT id, name, email, password_hash, role, active, created_at FROM users_role_check_old"""
+        )
+        conn.execute("DROP TABLE users_role_check_old")
+    finally:
+        conn.execute("PRAGMA legacy_alter_table = OFF")
+        conn.execute(f"PRAGMA foreign_keys = {'ON' if fk_was_on else 'OFF'}")
+
+
+def _apply_role_check_migration_postgres(conn):
+    """Equivalente para Postgres/RDS: Postgres sí soporta ALTER TABLE ...
+    DROP/ADD CONSTRAINT directamente, pero hay que encontrar el nombre real
+    del CHECK ya creado en vez de asumir el nombre autogenerado
+    "users_role_check" — si el nombre real fuera otro, un ADD CONSTRAINT con
+    ese nombre fijo dejaría el CHECK viejo (restrictivo) conviviendo con el
+    nuevo, y los dos se exigen a la vez (el viejo seguiría bloqueando los
+    roles nuevos). Se corre en cada arranque; siempre termina en el mismo
+    estado (drop + add), así que es seguro repetirlo."""
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT con.conname FROM pg_constraint con
+           JOIN pg_class rel ON rel.oid = con.conrelid
+           WHERE rel.relname = 'users' AND con.contype = 'c'
+             AND pg_get_constraintdef(con.oid) ILIKE '%role%'"""
+    )
+    for (conname,) in cur.fetchall():
+        cur.execute(f'ALTER TABLE users DROP CONSTRAINT "{conname}"')
+    cur.execute(f"ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN {USER_ROLES!r})")
+
+
 _PRAGMA_LINE_RE = re.compile(r"^\s*PRAGMA\s[^\n]*;\s*$", re.MULTILINE | re.IGNORECASE)
 _CREATE_TABLE_START_RE = re.compile(r"CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\(")
 _COL_REFERENCES_RE = re.compile(r"\s+REFERENCES\s+(\w+)\s*\(([^)]+)\)")
@@ -456,6 +534,7 @@ def init_db(app):
             cur.execute(create_sql)
             _apply_column_migrations_postgres(conn)
             cur.execute(fk_sql)
+            _apply_role_check_migration_postgres(conn)
             conn.commit()
         finally:
             conn.close()
@@ -465,6 +544,7 @@ def init_db(app):
         conn = sqlite3.connect(db_path)
         conn.executescript(schema_sql)
         _apply_column_migrations_sqlite(conn)
+        _apply_role_check_migration_sqlite(conn)
         conn.commit()
         conn.close()
 

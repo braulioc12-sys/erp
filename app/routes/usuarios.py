@@ -3,17 +3,23 @@ import secrets
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 from werkzeug.security import generate_password_hash
 
-from app.auth import permission_required, validate_csrf
-from app.db import execute, query_all, query_one
+from app.auth import ROLE_LABELS, permission_required, validate_csrf
+from app.db import USER_ROLES, execute, query_all, query_one
 
 bp = Blueprint("usuarios", __name__, url_prefix="/usuarios")
+
+# Lista (rol, etiqueta) en el mismo orden que USER_ROLES (app/db.py, fuente
+# única de qué roles acepta la base de datos), para el desplegable del
+# formulario — ver app/auth.py ROLE_LABELS/PERMISSIONS para el detalle de
+# qué puede ver/editar cada uno.
+ROLE_CHOICES = [(r, ROLE_LABELS.get(r, r)) for r in USER_ROLES]
 
 
 @bp.route("")
 @permission_required("usuarios", "view")
 def list_view():
     users = query_all("SELECT * FROM users ORDER BY name")
-    return render_template("usuarios/list.html", users=users)
+    return render_template("usuarios/list.html", users=users, role_labels=ROLE_LABELS)
 
 
 @bp.route("/nuevo", methods=["GET", "POST"])
@@ -30,7 +36,7 @@ def new():
         errors = []
         if not name or not email:
             errors.append("Nombre y correo son obligatorios.")
-        if role not in ("ADMIN", "OPERADOR"):
+        if role not in USER_ROLES:
             errors.append("Rol inválido.")
         if len(password) < 6:
             errors.append("La contraseña debe tener al menos 6 caracteres.")
@@ -40,7 +46,7 @@ def new():
         if errors:
             for e in errors:
                 flash(e, "error")
-            return render_template("usuarios/form.html", user=request.form, mode="new")
+            return render_template("usuarios/form.html", user=request.form, mode="new", role_choices=ROLE_CHOICES)
 
         execute(
             "INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)",
@@ -49,7 +55,10 @@ def new():
         flash("Usuario creado.", "success")
         return redirect(url_for("usuarios.list_view"))
 
-    return render_template("usuarios/form.html", user=None, mode="new", suggested_password=secrets.token_urlsafe(6))
+    return render_template(
+        "usuarios/form.html", user=None, mode="new",
+        suggested_password=secrets.token_urlsafe(6), role_choices=ROLE_CHOICES,
+    )
 
 
 @bp.route("/<int:user_id>/editar", methods=["GET", "POST"])
@@ -67,9 +76,13 @@ def edit(user_id):
         active = 1 if request.form.get("active") else 0
         new_password = request.form.get("password", "")
 
+        if role not in USER_ROLES:
+            flash("Rol inválido.", "error")
+            return render_template("usuarios/form.html", user=user, mode="edit", user_id=user_id, role_choices=ROLE_CHOICES)
+
         if new_password and len(new_password) < 6:
             flash("La nueva contraseña debe tener al menos 6 caracteres.", "error")
-            return render_template("usuarios/form.html", user=user, mode="edit", user_id=user_id)
+            return render_template("usuarios/form.html", user=user, mode="edit", user_id=user_id, role_choices=ROLE_CHOICES)
 
         if new_password:
             execute(
@@ -82,4 +95,4 @@ def edit(user_id):
         flash("Usuario actualizado.", "success")
         return redirect(url_for("usuarios.list_view"))
 
-    return render_template("usuarios/form.html", user=user, mode="edit", user_id=user_id)
+    return render_template("usuarios/form.html", user=user, mode="edit", user_id=user_id, role_choices=ROLE_CHOICES)

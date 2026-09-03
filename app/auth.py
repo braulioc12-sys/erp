@@ -10,39 +10,144 @@ from app.db import query_one
 bp = Blueprint("auth", __name__, url_prefix="/auth")
 
 # Permisos por módulo. 'view' = puede ver, 'edit' = puede crear/editar/eliminar.
+#
+# 3 sep (pedido de Braulio: "definamos los roles de usuario") — se agregaron
+# 4 roles especializados (DESPACHADOR/ALMACEN/CONTABILIDAD/MECANICO) y se
+# redujo OPERADOR a lo básico del día a día, ahora que esos roles cubren lo
+# que antes hacía Operador con Inventarios/Liquidaciones/Facturación. OJO:
+# cualquier usuario real que ya tenga rol OPERADOR en producción pierde el
+# acceso a Liquidaciones/Inventarios apenas se despliegue esto — hay que
+# reasignarlo a Contabilidad/Almacén (o al rol que corresponda) desde
+# Usuarios para que no pierda acceso a su trabajo diario.
 PERMISSIONS = {
     "ADMIN": {"*": {"view", "edit"}},
     "OPERADOR": {
+        # Reducido (3 sep) a lo básico de operación diaria: viajes, clientes
+        # y los documentos que salen directo de un viaje (guía, inspección).
+        # Flota/Conductores/Rutas/Mantenimiento/Neumáticos se dejan en solo
+        # "ver" (como ya estaba) para poder consultarlos al armar un viaje,
+        # sin poder editarlos — eso ahora es de Despachador/Mecánico.
         "dashboard": {"view"},
         "clientes": {"view", "edit"},
-        "flota": {"view"},
-        "conductores": {"view"},
         "viajes": {"view", "edit"},
-        "liquidaciones": {"view", "edit"},
-        "mantenimiento": {"view"},
-        # 1 sep: Operador (ej. personal de almacén) ahora puede crear
-        # órdenes de compra y confirmar la recepción de repuestos — pero
-        # AUTORIZARLAS sigue siendo exclusivo de Administrador, chequeado
-        # por rol directamente en purchases_authorize() (no por este
-        # permiso de módulo, que es el mismo "edit" de siempre). Como
-        # efecto secundario, Operador también puede administrar el
-        # catálogo de repuestos/proveedores y ajustar stock a mano — el
-        # permiso es por módulo completo, igual que en el resto del
-        # proyecto (no hay un permiso más fino solo para compras).
-        "inventarios": {"view", "edit"},
-        "neumaticos": {"view"},
-        "facturacion": set(),
-        # Cotizaciones (1 sep): mismo criterio de acceso que Facturación,
-        # por ser también un documento comercial con montos — Operador no
-        # entra a este módulo.
-        "cotizaciones": set(),
         "guias": {"view", "edit"},
         "inspecciones": {"view", "edit"},
+        "flota": {"view"},
+        "conductores": {"view"},
         "rutas": {"view"},
+        "mantenimiento": {"view"},
+        "neumaticos": {"view"},
+        # Liquidaciones/Facturación/Cotizaciones/Inventarios/Usuarios ahora
+        # son de los roles especializados (Contabilidad/Almacén/Admin) —
+        # antes de esto, Operador sí tenía Liquidaciones e Inventarios.
+        "liquidaciones": set(),
+        "facturacion": set(),
+        "cotizaciones": set(),
+        "inventarios": set(),
         "usuarios": set(),
         "catalogos": set(),
         "integraciones": set(),
     },
+    # Programa unidades/conductores y da seguimiento a los viajes del día a
+    # día — sin acceso a montos de Facturación/Liquidaciones/Cotizaciones ni
+    # a Inventarios (eso es de Contabilidad/Almacén).
+    "DESPACHADOR": {
+        "dashboard": {"view"},
+        "viajes": {"view", "edit"},
+        "flota": {"view", "edit"},
+        "conductores": {"view", "edit"},
+        "rutas": {"view", "edit"},
+        "clientes": {"view"},
+        "mantenimiento": {"view"},
+        "neumaticos": {"view"},
+        "liquidaciones": set(),
+        "facturacion": set(),
+        "cotizaciones": set(),
+        "inventarios": set(),
+        "guias": set(),
+        "inspecciones": set(),
+        "usuarios": set(),
+        "catalogos": set(),
+        "integraciones": set(),
+    },
+    # Solo el módulo de Inventarios (repuestos, proveedores, compras) — la
+    # AUTORIZACIÓN de una orden de compra sigue siendo exclusiva de
+    # Administrador (chequeado por rol directamente en
+    # purchases_authorize(), no por este permiso de módulo).
+    "ALMACEN": {
+        "dashboard": {"view"},
+        "inventarios": {"view", "edit"},
+        "mantenimiento": {"view"},
+        "viajes": set(),
+        "clientes": set(),
+        "flota": set(),
+        "conductores": set(),
+        "rutas": set(),
+        "neumaticos": set(),
+        "liquidaciones": set(),
+        "facturacion": set(),
+        "cotizaciones": set(),
+        "guias": set(),
+        "inspecciones": set(),
+        "usuarios": set(),
+        "catalogos": set(),
+        "integraciones": set(),
+    },
+    # Documentos con montos: Liquidaciones, Facturación, Cotizaciones. Ve
+    # Viajes/Clientes (para ubicar a qué viaje o cliente corresponde cada
+    # documento) e Inventarios en modo solo lectura (para verificar costos
+    # de compras), sin poder editar el stock — Braulio: avísame si prefieres
+    # que Contabilidad SÍ pueda editar Inventarios.
+    "CONTABILIDAD": {
+        "dashboard": {"view"},
+        "liquidaciones": {"view", "edit"},
+        "facturacion": {"view", "edit"},
+        "cotizaciones": {"view", "edit"},
+        "inventarios": {"view"},
+        "viajes": {"view"},
+        "clientes": {"view"},
+        "flota": set(),
+        "conductores": set(),
+        "rutas": set(),
+        "mantenimiento": set(),
+        "neumaticos": set(),
+        "guias": set(),
+        "inspecciones": set(),
+        "usuarios": set(),
+        "catalogos": set(),
+        "integraciones": set(),
+    },
+    # Solo el módulo de Mantenimiento (órdenes, trabajos) y ver Neumáticos.
+    "MECANICO": {
+        "dashboard": {"view"},
+        "mantenimiento": {"view", "edit"},
+        "neumaticos": {"view"},
+        "viajes": set(),
+        "clientes": set(),
+        "flota": set(),
+        "conductores": set(),
+        "rutas": set(),
+        "liquidaciones": set(),
+        "facturacion": set(),
+        "cotizaciones": set(),
+        "inventarios": set(),
+        "guias": set(),
+        "inspecciones": set(),
+        "usuarios": set(),
+        "catalogos": set(),
+        "integraciones": set(),
+    },
+}
+
+# Nombre legible de cada rol, para mostrar en Usuarios (list.html/form.html)
+# en vez del valor crudo guardado en la base.
+ROLE_LABELS = {
+    "ADMIN": "Administrador",
+    "OPERADOR": "Operador",
+    "DESPACHADOR": "Despachador",
+    "ALMACEN": "Almacén",
+    "CONTABILIDAD": "Contabilidad",
+    "MECANICO": "Mecánico",
 }
 
 
