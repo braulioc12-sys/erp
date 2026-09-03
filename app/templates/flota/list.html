@@ -3,15 +3,24 @@
 {% block title %}Flota{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>Flota</h1>
+  <h1>Flota{% if show_inactive %} — Inactivas{% endif %}</h1>
   <div class="page-actions">
+    {% if show_inactive %}
+    <a href="{{ url_for('flota.list_view') }}" class="btn btn-secondary">← Ver activas</a>
+    {% elif inactive_count %}
+    <a href="{{ url_for('flota.list_view', ver='inactivas') }}" class="btn btn-secondary">Ver inactivas ({{ inactive_count }})</a>
+    {% endif %}
     {% if can(current_user.role, 'flota', 'edit') %}
     <a href="{{ url_for('flota.import_vehicles') }}" class="btn btn-secondary">Importar desde Excel</a>
     <a href="{{ url_for('flota.new_vehicle') }}" class="btn btn-primary">+ Nueva unidad</a>
     {% endif %}
   </div>
 </div>
+{% if show_inactive %}
+<p class="muted mt-0">Unidades marcadas como inactivas — normalmente porque tienen viajes en su historial y "Eliminar" no las borra de verdad, para no perder ese historial. Para reactivar una, entra a "Editar" y cambia su Estado a Activo.</p>
+{% else %}
 <p class="muted mt-0">Haz clic en una unidad para ver su detalle completo: marca/modelo, propietario, capacidad y kilometraje actual (vía GPS).</p>
+{% endif %}
 
 <label style="max-width:320px;">Buscar por placa
   <input type="text" id="vehicleSearch" placeholder="Ej. ALZ728" oninput="filterVehicles()" autocomplete="off">
@@ -46,7 +55,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="7" class="table-empty">No hay unidades registradas.</td></tr>
+      <tr><td colspan="7" class="table-empty">{% if show_inactive %}No hay unidades inactivas.{% else %}No hay unidades registradas.{% endif %}</td></tr>
       {% endfor %}
     </tbody>
   </table>

@@ -45,8 +45,23 @@ def _vehicle_owners():
 @bp.route("")
 @permission_required("flota", "view")
 def list_view():
-    vehicles = query_all("SELECT * FROM vehicles ORDER BY plate")
-    return render_template("flota/list.html", vehicles=vehicles)
+    """3 sep, pedido de Braulio: "eliminar" una unidad con viajes asociados
+    no la borra de verdad (se marca INACTIVO para no romper el historial de
+    esos viajes — ver delete_vehicle), pero la lista mostraba TODAS las
+    unidades sin importar su estado, así que esa unidad se quedaba ahí mismo
+    con solo una etiqueta "Inactivo" — daba la sensación de "se eliminó y
+    volvió a aparecer". Ahora la lista principal solo muestra unidades
+    activas/en mantenimiento por defecto; las inactivas quedan aparte, en
+    ?ver=inactivas, con un enlace para ir y volver."""
+    show_inactive = request.args.get("ver") == "inactivas"
+    if show_inactive:
+        vehicles = query_all("SELECT * FROM vehicles WHERE status = 'INACTIVO' ORDER BY plate")
+    else:
+        vehicles = query_all("SELECT * FROM vehicles WHERE status != 'INACTIVO' ORDER BY plate")
+    inactive_count = query_one("SELECT COUNT(*) n FROM vehicles WHERE status = 'INACTIVO'")["n"]
+    return render_template(
+        "flota/list.html", vehicles=vehicles, show_inactive=show_inactive, inactive_count=inactive_count
+    )
 
 
 @bp.route("/<int:vehicle_id>")

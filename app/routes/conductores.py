@@ -127,8 +127,26 @@ def _save_driver_photo(file_storage):
 @bp.route("")
 @permission_required("conductores", "view")
 def list_view():
-    drivers = query_all("SELECT * FROM drivers ORDER BY name")
-    return render_template("conductores/list.html", drivers=drivers, expiring_ids=_expiring_driver_ids())
+    """3 sep, pedido de Braulio: mismo criterio que en Flota (ver
+    flota.list_view) — "eliminar" un conductor con viajes asociados no lo
+    borra de verdad (queda INACTIVO para no romper el historial de esos
+    viajes), pero la lista mostraba a todos sin importar su estado, dando la
+    sensación de que "se eliminó y volvió a aparecer". Ahora la lista
+    principal solo muestra conductores activos por defecto; los inactivos
+    quedan aparte, en ?ver=inactivas."""
+    show_inactive = request.args.get("ver") == "inactivas"
+    if show_inactive:
+        drivers = query_all("SELECT * FROM drivers WHERE status = 'INACTIVO' ORDER BY name")
+    else:
+        drivers = query_all("SELECT * FROM drivers WHERE status != 'INACTIVO' ORDER BY name")
+    inactive_count = query_one("SELECT COUNT(*) n FROM drivers WHERE status = 'INACTIVO'")["n"]
+    return render_template(
+        "conductores/list.html",
+        drivers=drivers,
+        expiring_ids=_expiring_driver_ids(),
+        show_inactive=show_inactive,
+        inactive_count=inactive_count,
+    )
 
 
 @bp.route("/<int:driver_id>")

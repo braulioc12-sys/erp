@@ -3,15 +3,24 @@
 {% block title %}Conductores{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>Conductores</h1>
+  <h1>Conductores{% if show_inactive %} — Inactivos{% endif %}</h1>
   <div class="page-actions">
+    {% if show_inactive %}
+    <a href="{{ url_for('conductores.list_view') }}" class="btn btn-secondary">← Ver activos</a>
+    {% elif inactive_count %}
+    <a href="{{ url_for('conductores.list_view', ver='inactivas') }}" class="btn btn-secondary">Ver inactivos ({{ inactive_count }})</a>
+    {% endif %}
     {% if can(current_user.role, 'conductores', 'edit') %}
     <a href="{{ url_for('conductores.import_drivers') }}" class="btn btn-secondary">Importar desde Excel</a>
     <a href="{{ url_for('conductores.new_driver') }}" class="btn btn-primary">+ Nuevo conductor</a>
     {% endif %}
   </div>
 </div>
+{% if show_inactive %}
+<p class="muted mt-0">Conductores marcados como inactivos — normalmente porque tienen viajes en su historial y "Eliminar" no los borra de verdad, para no perder ese historial. Para reactivar uno, entra a "Editar" y cambia su Estado a Activo.</p>
+{% else %}
 <p class="muted mt-0">Haz clic en un conductor para ver su foto, brevete, examen médico y los requisitos de Backus (examen de manejo, capacitación del plan de tráfico y escuela de conductores).</p>
+{% endif %}
 
 <div class="table-wrap">
   <table>
@@ -57,7 +66,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="5" class="table-empty">No hay conductores registrados.</td></tr>
+      <tr><td colspan="5" class="table-empty">{% if show_inactive %}No hay conductores inactivos.{% else %}No hay conductores registrados.{% endif %}</td></tr>
       {% endfor %}
     </tbody>
   </table>
