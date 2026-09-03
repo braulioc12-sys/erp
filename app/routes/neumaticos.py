@@ -26,30 +26,76 @@ from app.tire_positions import (
 
 bp = Blueprint("neumaticos", __name__, url_prefix="/neumaticos")
 
-# Umbrales de alerta sobre el % de vida útil consumida.
-WARN_THRESHOLD_PCT = 80
-DANGER_THRESHOLD_PCT = 100
-# A partir de qué % se avisa en el Panel (dashboard).
-DASHBOARD_ALERT_PCT = 90
+# Bandas de vida útil (2 sep, pedido de Braulio): en vez de un solo % fijo,
+# cada llanta pasa por 4 estados según su kilometraje acumulado comparado
+# contra SU PROPIA vida útil estimada (expected_life_km, configurable al
+# registrarla — algunas marcas/modelos duran más que otras). Los tercios de
+# esa vida útil son los cortes de cada banda: con el valor por defecto de
+# 60,000 km (DEFAULT_EXPECTED_LIFE_KM) esto da exactamente Bueno 0-20,000 /
+# Regular 20,000-40,000 / Grave 40,000-60,000 / Alerta más de 60,000 —
+# pero una llanta configurada con otra vida útil usa esos mismos tercios
+# sobre SU número.
+LIFE_STAGES = ("BUENO", "REGULAR", "GRAVE", "ALERTA")
+LIFE_STAGE_LABELS = {
+    "BUENO": "Bueno",
+    "REGULAR": "Regular",
+    "GRAVE": "Grave",
+    "ALERTA": "Alerta: debe cambiarse",
+}
+LIFE_STAGE_STATUS_CLASS = {"BUENO": "tire-ok", "REGULAR": "tire-warn", "GRAVE": "tire-grave", "ALERTA": "tire-danger"}
+LIFE_STAGE_BADGE_CLASS = {
+    "BUENO": "badge-activo", "REGULAR": "badge-mantenimiento", "GRAVE": "badge-grave", "ALERTA": "badge-vencida",
+}
+# A partir de qué banda se avisa en el Panel (dashboard) — Grave ya es un
+# aviso temprano de que hay que ir programando el cambio; Alerta es el
+# "ya debe cambiarse" explícito que pidió Braulio.
+DASHBOARD_ALERT_STAGES = ("GRAVE", "ALERTA")
+
+# Inventario de llantas por código (2 sep, pedido de Braulio): registro
+# independiente del de repuestos, obligatorio antes de poder asignar una
+# llanta a una unidad — ver tire_inventory en schema.sql.
+INVENTORY_STATUS_LABELS = {
+    "DISPONIBLE": "Disponible",
+    "ASIGNADA": "Asignada",
+    "RETIRADA": "Retirada",
+}
+INVENTORY_STATUS_BADGE_CLASS = {
+    "DISPONIBLE": "badge-activo",
+    "ASIGNADA": "badge-en_curso",
+    "RETIRADA": "badge-inactivo",
+}
+
+
+def _life_stage(accumulated_km, expected_life_km):
+    if expected_life_km is None or expected_life_km <= 0:
+        return None
+    third = expected_life_km / 3.0
+    if accumulated_km > expected_life_km:
+        return "ALERTA"
+    if accumulated_km > 2 * third:
+        return "GRAVE"
+    if accumulated_km > third:
+        return "REGULAR"
+    return "BUENO"
 
 
 def _tire_metrics(tire, vehicle_current_km):
-    """Devuelve (accumulated_km, percent, status_class, badge_class) para
-    una llanta ACTIVO, según el kilometraje actual de su unidad."""
+    """Devuelve (accumulated_km, percent, stage, status_class, badge_class)
+    para una llanta ACTIVO, según el kilometraje actual de su unidad.
+    `percent` sigue siendo el % de vida útil consumida (para mostrarlo de
+    referencia); `stage` es una de LIFE_STAGES."""
     if vehicle_current_km is None:
-        return None, None, "tire-ok", "badge-activo"
+        return None, None, None, "tire-ok", "badge-activo"
     accumulated = max(vehicle_current_km - tire["km_at_install"], 0)
     expected = tire["expected_life_km"] or DEFAULT_EXPECTED_LIFE_KM
     percent = round(accumulated / expected * 100) if expected else None
-    if percent is None:
+    stage = _life_stage(accumulated, expected)
+    if stage is None:
         status_class, badge_class = "tire-ok", "badge-activo"
-    elif percent >= DANGER_THRESHOLD_PCT:
-        status_class, badge_class = "tire-danger", "badge-vencida"
-    elif percent >= WARN_THRESHOLD_PCT:
-        status_class, badge_class = "tire-warn", "badge-mantenimiento"
     else:
-        status_class, badge_class = "tire-ok", "badge-activo"
-    return accumulated, percent, status_class, badge_class
+        status_class = LIFE_STAGE_STATUS_CLASS[stage]
+        badge_class = LIFE_STAGE_BADGE_CLASS[stage]
+    return accumulated, percent, stage, status_class, badge_class
 
 
 def _get_vehicle_or_404(vehicle_id):
@@ -57,6 +103,23 @@ def _get_vehicle_or_404(vehicle_id):
     if vehicle is None:
         abort(404)
     return vehicle
+
+
+def _inventory_current_assignment(tire_inventory_id):
+    """Si esta llanta de inventario está ASIGNADA, devuelve su fila ACTIVO
+    actual en `tires` (con placa/posición) — o None si está DISPONIBLE o
+    RETIRADA."""
+    row = query_one(
+        """SELECT t.*, v.plate AS vehicle_plate, v.vehicle_type AS vehicle_type
+           FROM tires t JOIN vehicles v ON v.id = t.vehicle_id
+           WHERE t.tire_inventory_id = ? AND t.status = 'ACTIVO'""",
+        (tire_inventory_id,),
+    )
+    return row
+
+
+def _available_inventory_tires():
+    return query_all("SELECT * FROM tire_inventory WHERE status = 'DISPONIBLE' ORDER BY code")
 
 
 def _move_destination_data():
@@ -145,11 +208,18 @@ def _apply_disposition(old_tire, vehicle, removed_date, removed_km, removal_reas
         return False
 
     if disposition == "DESCARTADA":
-        execute(
+        db = get_db()
+        db.execute(
             """UPDATE tires SET status = 'RETIRADO', removed_date = ?, removed_km = ?,
                removal_reason = ?, disposition = 'DESCARTADA' WHERE id = ?""",
             (removed_date, removed_km, removal_reason or None, old_tire["id"]),
         )
+        if old_tire["tire_inventory_id"]:
+            db.execute(
+                "UPDATE tire_inventory SET status = 'RETIRADA' WHERE id = ?",
+                (old_tire["tire_inventory_id"],),
+            )
+        db.commit()
         flash("Llanta retirada y marcada como descartada.", "success")
         return True
 
@@ -185,10 +255,10 @@ def _apply_disposition(old_tire, vehicle, removed_date, removed_km, removal_reas
     db = get_db()
     cur = db.execute(
         """INSERT INTO tires (vehicle_id, position_code, brand, install_date, km_at_install,
-           expected_life_km, notes) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+           expected_life_km, notes, tire_inventory_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             dest_vehicle["id"], dest_position_code, old_tire["brand"], dest_install_date,
-            dest_km_at_install, dest_expected_life_km, dest_notes or None,
+            dest_km_at_install, dest_expected_life_km, dest_notes or None, old_tire["tire_inventory_id"],
         ),
     )
     new_tire_id = cur.lastrowid
@@ -207,8 +277,8 @@ def _apply_disposition(old_tire, vehicle, removed_date, removed_km, removal_reas
 
 
 def tire_alerts():
-    """Llantas activas al DASHBOARD_ALERT_PCT% o más de su vida útil
-    estimada, para mostrar en el Panel."""
+    """Llantas activas en banda Grave o Alerta (ver DASHBOARD_ALERT_STAGES),
+    para mostrar en el Panel."""
     rows = query_all(
         """SELECT t.*, v.plate AS vehicle_plate, v.current_km AS vehicle_current_km,
                   v.vehicle_type AS vehicle_type
@@ -217,16 +287,18 @@ def tire_alerts():
     )
     alerts = []
     for r in rows:
-        accumulated, percent, _, _ = _tire_metrics(r, r["vehicle_current_km"])
-        if percent is not None and percent >= DASHBOARD_ALERT_PCT:
+        accumulated, percent, stage, _, _ = _tire_metrics(r, r["vehicle_current_km"])
+        if stage in DASHBOARD_ALERT_STAGES:
             alerts.append(
                 {
                     "plate": r["vehicle_plate"],
                     "position_label": get_position_label(r["vehicle_type"], r["position_code"]),
                     "percent": percent,
+                    "stage": stage,
+                    "stage_label": LIFE_STAGE_LABELS[stage],
                     "accumulated_km": accumulated,
                     "expected_life_km": r["expected_life_km"],
-                    "overdue": percent >= DANGER_THRESHOLD_PCT,
+                    "overdue": stage == "ALERTA",
                 }
             )
     alerts.sort(key=lambda a: a["percent"], reverse=True)
@@ -243,14 +315,14 @@ def list_view():
         active_tires = query_all(
             "SELECT * FROM tires WHERE vehicle_id = ? AND status = 'ACTIVO'", (v["id"],)
         )
+        # Prioridad de gravedad para mostrar el peor caso de la unidad:
+        # Alerta > Grave > Regular > Bueno.
+        badge_priority = {"badge-vencida": 3, "badge-grave": 2, "badge-mantenimiento": 1, "badge-activo": 0}
         worst_badge = "badge-activo"
         for t in active_tires:
-            _, _, _, badge_class = _tire_metrics(t, v["current_km"])
-            if badge_class == "badge-vencida":
-                worst_badge = "badge-vencida"
-                break
-            if badge_class == "badge-mantenimiento":
-                worst_badge = "badge-mantenimiento"
+            _, _, _, _, badge_class = _tire_metrics(t, v["current_km"])
+            if badge_priority.get(badge_class, 0) > badge_priority.get(worst_badge, 0):
+                worst_badge = badge_class
         summary.append(
             {
                 "vehicle": v,
@@ -261,6 +333,70 @@ def list_view():
             }
         )
     return render_template("neumaticos/list.html", summary=summary)
+
+
+@bp.route("/inventario")
+@permission_required("neumaticos", "view")
+def inventory_list():
+    tires = query_all("SELECT * FROM tire_inventory ORDER BY code")
+    rows = []
+    for t in tires:
+        assignment = None
+        if t["status"] == "ASIGNADA":
+            assignment = _inventory_current_assignment(t["id"])
+        rows.append(
+            {
+                "tire": t,
+                "status_label": INVENTORY_STATUS_LABELS.get(t["status"], t["status"]),
+                "badge_class": INVENTORY_STATUS_BADGE_CLASS.get(t["status"], "badge-activo"),
+                "assignment": assignment,
+                "position_label": (
+                    get_position_label(assignment["vehicle_type"], assignment["position_code"])
+                    if assignment else None
+                ),
+            }
+        )
+    return render_template("neumaticos/inventory_list.html", rows=rows)
+
+
+@bp.route("/inventario/nueva", methods=["GET", "POST"])
+@permission_required("neumaticos", "edit")
+def inventory_new():
+    next_url = request.args.get("next") or request.form.get("next") or ""
+    if request.method == "POST":
+        if not validate_csrf():
+            abort(400)
+        code = request.form.get("code", "").strip()
+        brand = request.form.get("brand", "").strip()
+        expected_life_km = parse_float(request.form.get("expected_life_km"), DEFAULT_EXPECTED_LIFE_KM)
+        notes = request.form.get("notes", "").strip()
+        if not code:
+            flash("Ingresa el código de la llanta.", "error")
+        else:
+            existing = query_one("SELECT id FROM tire_inventory WHERE code = ?", (code,))
+            if existing:
+                flash(f'Ya existe una llanta registrada con el código "{code}".', "error")
+            else:
+                execute(
+                    """INSERT INTO tire_inventory (code, brand, expected_life_km, notes)
+                       VALUES (?, ?, ?, ?)""",
+                    (code, brand or None, expected_life_km, notes or None),
+                )
+                flash(f'Llanta "{code}" registrada en el inventario.', "success")
+                return redirect(next_url or url_for("neumaticos.inventory_list"))
+        return render_template(
+            "neumaticos/inventory_form.html",
+            default_expected_life_km=DEFAULT_EXPECTED_LIFE_KM,
+            next_url=next_url,
+            form=request.form,
+        )
+
+    return render_template(
+        "neumaticos/inventory_form.html",
+        default_expected_life_km=DEFAULT_EXPECTED_LIFE_KM,
+        next_url=next_url,
+        form=None,
+    )
 
 
 @bp.route("/unidad/<int:vehicle_id>")
@@ -278,12 +414,14 @@ def diagram(vehicle_id):
         tire = tires_by_position.get(p["code"])
         row = {"position": p}
         if tire:
-            accumulated, percent, status_class, badge_class = _tire_metrics(tire, vehicle["current_km"])
+            accumulated, percent, stage, status_class, badge_class = _tire_metrics(tire, vehicle["current_km"])
             row.update(
                 {
                     "tire": tire,
                     "accumulated_km": accumulated,
                     "percent": percent,
+                    "stage": stage,
+                    "stage_label": LIFE_STAGE_LABELS.get(stage),
                     "status_class": status_class,
                     "badge_class": badge_class,
                 }
@@ -374,18 +512,42 @@ def new_tire(vehicle_id, position_code):
     if request.method == "POST":
         if not validate_csrf():
             abort(400)
-        brand = request.form.get("brand", "").strip()
+        tire_inventory_id = parse_float(request.form.get("tire_inventory_id"), None)
+        inv_tire = (
+            query_one(
+                "SELECT * FROM tire_inventory WHERE id = ? AND status = 'DISPONIBLE'",
+                (int(tire_inventory_id),),
+            )
+            if tire_inventory_id
+            else None
+        )
         install_date = parse_date(request.form.get("install_date")) or today_str()
         km_at_install = parse_float(request.form.get("km_at_install"), vehicle["current_km"] or 0)
-        expected_life_km = parse_float(request.form.get("expected_life_km"), DEFAULT_EXPECTED_LIFE_KM)
-        notes = request.form.get("notes", "").strip()
-        execute(
-            """INSERT INTO tires (vehicle_id, position_code, brand, install_date, km_at_install,
-               expected_life_km, notes) VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (vehicle_id, position_code, brand or None, install_date, km_at_install, expected_life_km, notes or None),
+        expected_life_km = parse_float(
+            request.form.get("expected_life_km"), inv_tire["expected_life_km"] if inv_tire else DEFAULT_EXPECTED_LIFE_KM
         )
-        flash("Llanta registrada.", "success")
-        return redirect(url_for("neumaticos.diagram", vehicle_id=vehicle_id))
+        notes = request.form.get("notes", "").strip()
+
+        if inv_tire is None:
+            flash(
+                "Selecciona una llanta disponible del inventario — primero debe registrarse "
+                "con su código antes de poder asignarla a una unidad.",
+                "error",
+            )
+        else:
+            db = get_db()
+            db.execute(
+                """INSERT INTO tires (vehicle_id, position_code, brand, install_date, km_at_install,
+                   expected_life_km, notes, tire_inventory_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    vehicle_id, position_code, inv_tire["brand"], install_date, km_at_install,
+                    expected_life_km, notes or None, inv_tire["id"],
+                ),
+            )
+            db.execute("UPDATE tire_inventory SET status = 'ASIGNADA' WHERE id = ?", (inv_tire["id"],))
+            db.commit()
+            flash(f'Llanta "{inv_tire["code"]}" asignada a esta posición.', "success")
+            return redirect(url_for("neumaticos.diagram", vehicle_id=vehicle_id))
 
     return render_template(
         "neumaticos/tire_form.html",
@@ -395,6 +557,7 @@ def new_tire(vehicle_id, position_code):
         tire=None,
         today=today_str(),
         default_expected_life_km=DEFAULT_EXPECTED_LIFE_KM,
+        available_tires=_available_inventory_tires(),
     )
 
 
@@ -405,9 +568,9 @@ def detail(tire_id):
     if tire is None:
         abort(404)
     vehicle = _get_vehicle_or_404(tire["vehicle_id"])
-    accumulated, percent, status_class, badge_class = (None, None, None, None)
+    accumulated, percent, stage, status_class, badge_class = (None, None, None, None, None)
     if tire["status"] == "ACTIVO":
-        accumulated, percent, status_class, badge_class = _tire_metrics(tire, vehicle["current_km"])
+        accumulated, percent, stage, status_class, badge_class = _tire_metrics(tire, vehicle["current_km"])
 
     history = query_all(
         """SELECT * FROM tires WHERE vehicle_id = ? AND position_code = ? AND id != ?
@@ -418,6 +581,12 @@ def detail(tire_id):
     chain = _tire_journey(tire)
     journey = _journey_rows(chain, tire_id) if len(chain) > 1 else []
 
+    inventory_tire = (
+        query_one("SELECT * FROM tire_inventory WHERE id = ?", (tire["tire_inventory_id"],))
+        if tire["tire_inventory_id"]
+        else None
+    )
+
     return render_template(
         "neumaticos/tire_detail.html",
         tire=tire,
@@ -425,9 +594,12 @@ def detail(tire_id):
         position_label=get_position_label(vehicle["vehicle_type"], tire["position_code"]),
         accumulated_km=accumulated,
         percent=percent,
+        stage=stage,
+        stage_label=LIFE_STAGE_LABELS.get(stage),
         badge_class=badge_class,
         history=history,
         journey=journey,
+        inventory_tire=inventory_tire,
     )
 
 
@@ -449,6 +621,41 @@ def replace_tire(tire_id):
         removed_km = parse_float(request.form.get("removed_km"), vehicle["current_km"] or 0)
         removal_reason = request.form.get("removal_reason", "").strip()
 
+        # La llanta nueva que va a esta posición debe existir y estar
+        # DISPONIBLE en el inventario — se valida ANTES de retirar la
+        # llanta vieja (_apply_disposition), para no dejar la posición
+        # vacía si la selección de la nueva falla.
+        new_tire_inventory_id = parse_float(request.form.get("new_tire_inventory_id"), None)
+        new_inv_tire = (
+            query_one(
+                "SELECT * FROM tire_inventory WHERE id = ? AND status = 'DISPONIBLE'",
+                (int(new_tire_inventory_id),),
+            )
+            if new_tire_inventory_id
+            else None
+        )
+        if new_inv_tire is None:
+            flash(
+                "Selecciona la llanta del inventario que se instala en esta posición — "
+                "primero debe estar registrada y disponible.",
+                "error",
+            )
+            vehicles, vehicles_data, positions_by_type = _move_destination_data()
+            return render_template(
+                "neumaticos/tire_form.html",
+                vehicle=vehicle,
+                position_label=get_position_label(vehicle["vehicle_type"], old_tire["position_code"]),
+                mode="replace",
+                tire=old_tire,
+                today=today_str(),
+                default_expected_life_km=DEFAULT_EXPECTED_LIFE_KM,
+                move_vehicles=vehicles,
+                move_vehicles_data=vehicles_data,
+                move_positions_by_type=positions_by_type,
+                available_tires=_available_inventory_tires(),
+                form=request.form,
+            )
+
         if not _apply_disposition(old_tire, vehicle, removed_date, removed_km, removal_reason):
             vehicles, vehicles_data, positions_by_type = _move_destination_data()
             return render_template(
@@ -462,23 +669,26 @@ def replace_tire(tire_id):
                 move_vehicles=vehicles,
                 move_vehicles_data=vehicles_data,
                 move_positions_by_type=positions_by_type,
+                available_tires=_available_inventory_tires(),
                 form=request.form,
             )
 
-        brand = request.form.get("new_brand", "").strip()
         install_date = parse_date(request.form.get("new_install_date")) or today_str()
         km_at_install = parse_float(request.form.get("new_km_at_install"), removed_km)
-        expected_life_km = parse_float(request.form.get("new_expected_life_km"), DEFAULT_EXPECTED_LIFE_KM)
+        expected_life_km = parse_float(request.form.get("new_expected_life_km"), new_inv_tire["expected_life_km"])
         notes = request.form.get("new_notes", "").strip()
-        execute(
+        db = get_db()
+        db.execute(
             """INSERT INTO tires (vehicle_id, position_code, brand, install_date, km_at_install,
-               expected_life_km, notes) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               expected_life_km, notes, tire_inventory_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                old_tire["vehicle_id"], old_tire["position_code"], brand or None, install_date,
-                km_at_install, expected_life_km, notes or None,
+                old_tire["vehicle_id"], old_tire["position_code"], new_inv_tire["brand"], install_date,
+                km_at_install, expected_life_km, notes or None, new_inv_tire["id"],
             ),
         )
-        flash("Llanta nueva instalada en esta posición.", "success")
+        db.execute("UPDATE tire_inventory SET status = 'ASIGNADA' WHERE id = ?", (new_inv_tire["id"],))
+        db.commit()
+        flash(f'Llanta "{new_inv_tire["code"]}" instalada en esta posición.', "success")
         return redirect(url_for("neumaticos.diagram", vehicle_id=old_tire["vehicle_id"]))
 
     vehicles, vehicles_data, positions_by_type = _move_destination_data()
@@ -493,6 +703,7 @@ def replace_tire(tire_id):
         move_vehicles=vehicles,
         move_vehicles_data=vehicles_data,
         move_positions_by_type=positions_by_type,
+        available_tires=_available_inventory_tires(),
         form=None,
     )
 

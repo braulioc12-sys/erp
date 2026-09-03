@@ -14,6 +14,10 @@
   --warning-soft: #fef3e2;
   --danger: #c0392b;
   --danger-soft: #fdecea;
+  /* Banda "Grave" de vida útil de neumáticos (2 sep) — entre el ámbar de
+     "Regular" y el rojo de "Alerta: debe cambiarse", un naranja propio. */
+  --grave: #c2410c;
+  --grave-soft: #fdf0e6;
   --sidebar-bg: #111827;
   --sidebar-text: #d1d5db;
   --radius: 10px;
@@ -110,6 +114,7 @@ td.wrap, th.wrap { white-space: normal; }
 .badge-entregado, .badge-pagada, .badge-activo { background: var(--success-soft); color: var(--success); }
 .badge-cancelado, .badge-vencida, .badge-anulada, .badge-inactivo { background: var(--danger-soft); color: var(--danger); }
 .badge-mantenimiento { background: var(--warning-soft); color: var(--warning); }
+.badge-grave { background: var(--grave-soft); color: var(--grave); }
 .badge-aceptado { background: var(--success-soft); color: var(--success); }
 .badge-rechazado, .badge-error { background: var(--danger-soft); color: var(--danger); }
 .badge-no_enviada { background: var(--warning-soft); color: var(--warning); }
@@ -183,6 +188,7 @@ textarea { resize: vertical; min-height: 70px; }
 .tire-rect { stroke-width: 1.5; cursor: pointer; }
 .tire-rect.tire-ok { fill: var(--success-soft); stroke: var(--success); }
 .tire-rect.tire-warn { fill: var(--warning-soft); stroke: var(--warning); }
+.tire-rect.tire-grave { fill: var(--grave-soft); stroke: var(--grave); }
 .tire-rect.tire-danger { fill: var(--danger-soft); stroke: var(--danger); }
 .tire-rect.tire-empty { fill: #fff; stroke: var(--border); stroke-dasharray: 3 2; }
 

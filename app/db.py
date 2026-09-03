@@ -305,6 +305,13 @@ COLUMN_MIGRATIONS = [
     # de una base nueva) para no arriesgar la sintaxis de ADD COLUMN con
     # CHECK en Postgres/SQLite — se valida igual en app/routes/cotizaciones.py.
     ("quotations", "issuer", "TEXT NOT NULL DEFAULT 'HARRASO'"),
+    # 2 sep, pedido de Braulio: inventario de llantas por código
+    # (tire_inventory, tabla nueva — se crea sola vía CREATE TABLE IF NOT
+    # EXISTS). Esta columna es la que enlaza cada instalación en "tires" con
+    # su registro de inventario. Sin "REFERENCES" aquí a propósito — mismo
+    # motivo que mechanic_id/moved_to_tire_id más arriba: la FK la agrega el
+    # paso dedicado de init_db() (Postgres) una vez que la columna ya existe.
+    ("tires", "tire_inventory_id", "INTEGER"),
 ]
 
 

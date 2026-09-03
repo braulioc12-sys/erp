@@ -32,7 +32,7 @@
   {% else %}
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Trabajo</th><th>Tiempo estimado</th><th>Estado</th><th>Tipo de mecánico</th><th>Cantidad</th><th>Mecánico asignado</th>{% if can(current_user.role, 'mantenimiento', 'edit') %}<th></th>{% endif %}</tr></thead>
+      <thead><tr><th>Trabajo</th><th>Tiempo estimado</th><th>Estado</th><th>Cuadrilla</th><th class="text-right">Costo mano de obra</th><th>Mecánico asignado</th>{% if can(current_user.role, 'mantenimiento', 'edit') %}<th></th>{% endif %}</tr></thead>
       <tbody>
         {% for j in jobs %}
         <tr>
@@ -43,32 +43,35 @@
             {% if j.status == 'TERMINADO' and j.completed_at %}<br><span class="muted" style="font-size:0.8em;">{{ j.completed_at }}</span>{% endif %}
           </td>
           <td>
-            {% if can(current_user.role, 'mantenimiento', 'edit') %}
-            <form method="post" action="{{ url_for('mantenimiento.job_set_mechanic_type', record_id=record.id) }}" style="display:inline;">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <input type="hidden" name="job_name" value="{{ j.job_name }}">
-              <select name="mechanic_type" onchange="this.form.submit()">
-                {% if not j.mechanic_type %}<option value="" disabled selected>-- Elegir --</option>{% endif %}
-                {% for t in mechanic_types %}
-                <option value="{{ t }}" {{ 'selected' if j.mechanic_type == t }}>{{ t }}</option>
-                {% endfor %}
-              </select>
-            </form>
+            {% for crew in crew_by_job.get(j.job_name, []) %}
+            <div style="white-space:nowrap; margin-bottom:2px;">
+              {{ crew.mechanic_count }} × {{ crew.mechanic_type }}
+              {% if can(current_user.role, 'mantenimiento', 'edit') and crew.id %}
+              <form method="post" action="{{ url_for('mantenimiento.job_crew_remove', record_id=record.id, crew_id=crew.id) }}" style="display:inline;" onsubmit="return confirm('¿Quitar esta combinación?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-secondary btn-sm" style="padding:0 6px;">✕</button>
+              </form>
+              {% endif %}
+            </div>
             {% else %}
-            {{ j.mechanic_type or '—' }}
+            <span class="muted">—</span>
+            {% endfor %}
+            {% if can(current_user.role, 'mantenimiento', 'edit') %}
+            <details style="margin-top:4px;">
+              <summary class="muted" style="cursor:pointer; font-size:0.85em;">+ Agregar otro tipo</summary>
+              <form method="post" action="{{ url_for('mantenimiento.job_crew_add', record_id=record.id) }}" style="display:flex; gap:4px; align-items:center; margin-top:4px;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="job_name" value="{{ j.job_name }}">
+                <select name="mechanic_type" style="width:auto;">
+                  {% for t in mechanic_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+                </select>
+                <input type="number" name="mechanic_count" min="1" step="1" value="1" style="width:56px;">
+                <button type="submit" class="btn btn-secondary btn-sm">Agregar</button>
+              </form>
+            </details>
             {% endif %}
           </td>
-          <td>
-            {% if can(current_user.role, 'mantenimiento', 'edit') %}
-            <form method="post" action="{{ url_for('mantenimiento.job_set_mechanic_count', record_id=record.id) }}" style="display:inline;">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <input type="hidden" name="job_name" value="{{ j.job_name }}">
-              <input type="number" name="mechanic_count" min="1" step="1" value="{{ j.mechanic_count }}" style="width:60px;" onchange="this.form.submit()">
-            </form>
-            {% else %}
-            {{ j.mechanic_count }}
-            {% endif %}
-          </td>
+          <td class="text-right">{{ labor_cost_by_job.get(j.job_name, 0)|money }}</td>
           <td>{{ j.mechanic_name or '—' }}</td>
           {% if can(current_user.role, 'mantenimiento', 'edit') %}
           <td style="white-space:nowrap;">
@@ -97,6 +100,7 @@
       </tbody>
     </table>
   </div>
+  <p class="muted" style="margin-top:8px;">Un trabajo puede tener más de una combinación tipo+cantidad de mecánico a la vez (ej. 1 Senior + 2 Junior en el mismo cambio de aceite) — el costo de mano de obra de esa fila es la suma de todas.</p>
   {% if not mechanics %}
   <p class="muted" style="margin-top:12px;">Todavía no hay mecánicos activos en el catálogo. <a href="{{ url_for('mantenimiento.mechanics_list') }}">Agrega uno en Mecánicos</a> para poder asignarlo aquí.</p>
   {% endif %}
@@ -137,16 +141,24 @@
     <label>Trabajos</label>
     <div class="panel" style="background:var(--bg-soft, #f8f9fb); margin-top:-8px;">
       {% for j in available_job_types %}
-      <label style="flex-direction:row; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
-        <input type="checkbox" name="job_type_ids" value="{{ j.id }}" class="add-job-check" data-minutes="{{ j.estimated_minutes }}" data-job-id="{{ j.id }}" style="width:auto;">
-        {{ j.name }} <span class="muted">({{ j.estimated_minutes }} min)</span>
-        <select name="mechanic_type_{{ j.id }}" class="add-job-mechanic-type" data-job-id="{{ j.id }}" style="margin-left:auto;">
-          {% for t in mechanic_types %}
-          <option value="{{ t }}">{{ t }}</option>
-          {% endfor %}
-        </select>
-        <input type="number" name="mechanic_count_{{ j.id }}" class="add-job-mechanic-count" data-job-id="{{ j.id }}" min="1" step="1" value="1" style="width:64px;" title="Cantidad de mecánicos">
-      </label>
+      <div class="job-block" style="margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid var(--border, #e2e5ea);">
+        <label style="flex-direction:row; align-items:center; gap:8px; flex-wrap:wrap;">
+          <input type="checkbox" name="job_type_ids" value="{{ j.id }}" class="add-job-check" data-minutes="{{ j.estimated_minutes }}" data-job-id="{{ j.id }}" style="width:auto;">
+          {{ j.name }} <span class="muted">({{ j.estimated_minutes }} min)</span>
+        </label>
+        <div class="crew-container" data-job-id="{{ j.id }}" style="margin-left:26px; margin-top:4px;">
+          <div class="crew-row" style="display:flex; gap:8px; align-items:center; margin-bottom:4px;">
+            <select name="crew_type_{{ j.id }}" class="crew-type">
+              {% for t in mechanic_types %}
+              <option value="{{ t }}">{{ t }}</option>
+              {% endfor %}
+            </select>
+            <input type="number" name="crew_count_{{ j.id }}" class="crew-count" min="1" step="1" value="1" style="width:64px;" title="Cantidad de mecánicos">
+            <button type="button" class="btn btn-secondary btn-sm remove-crew-row" style="display:none;">✕</button>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm add-crew-row" data-job-id="{{ j.id }}">+ Agregar otro tipo de mecánico</button>
+        </div>
+      </div>
       {% endfor %}
     </div>
     {% endif %}
@@ -176,12 +188,26 @@
     var costInput = document.getElementById('added-cost-input');
     var laborCosts = {{ labor_costs|tojson }};
     var lastSuggestedCost = 0;
-    function typeSelectFor(jobId) {
-      return document.querySelector('.add-job-mechanic-type[data-job-id="' + jobId + '"]');
-    }
-    function countInputFor(jobId) {
-      return document.querySelector('.add-job-mechanic-count[data-job-id="' + jobId + '"]');
-    }
+
+    document.querySelectorAll('.add-crew-row').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var jobId = btn.dataset.jobId;
+        var container = document.querySelector('.crew-container[data-job-id="' + jobId + '"]');
+        var rows = container.querySelectorAll('.crew-row');
+        var newRow = rows[0].cloneNode(true);
+        newRow.querySelector('.crew-count').value = 1;
+        newRow.querySelector('.remove-crew-row').style.display = '';
+        newRow.querySelector('.remove-crew-row').addEventListener('click', function () { newRow.remove(); update(); });
+        newRow.querySelector('.crew-type').addEventListener('change', update);
+        newRow.querySelector('.crew-count').addEventListener('input', update);
+        container.insertBefore(newRow, btn);
+        update();
+      });
+    });
+    document.querySelectorAll('.remove-crew-row').forEach(function (btn) {
+      btn.addEventListener('click', function () { btn.closest('.crew-row').remove(); update(); });
+    });
+
     function qtyInputFor(matId) {
       return document.querySelector('.add-material-qty[data-material-id="' + matId + '"]');
     }
@@ -190,11 +216,14 @@
       checks.forEach(function (c) {
         if (!c.checked) return;
         var minutes = parseInt(c.dataset.minutes || '0', 10);
-        var sel = typeSelectFor(c.dataset.jobId);
-        var rate = parseFloat((sel && laborCosts[sel.value]) || '0');
-        var countInput = countInputFor(c.dataset.jobId);
-        var count = parseInt((countInput && countInput.value) || '1', 10) || 1;
-        suggested += minutes * rate * count;
+        var container = document.querySelector('.crew-container[data-job-id="' + c.dataset.jobId + '"]');
+        container.querySelectorAll('.crew-row').forEach(function (row) {
+          var sel = row.querySelector('.crew-type');
+          var countInput = row.querySelector('.crew-count');
+          var rate = parseFloat(laborCosts[sel.value] || '0');
+          var count = parseInt((countInput && countInput.value) || '1', 10) || 1;
+          suggested += minutes * rate * count;
+        });
       });
       matChecks.forEach(function (c) {
         if (!c.checked) return;
@@ -211,8 +240,8 @@
       }
     }
     checks.forEach(function (c) { c.addEventListener('change', update); });
-    document.querySelectorAll('.add-job-mechanic-type').forEach(function (s) { s.addEventListener('change', update); });
-    document.querySelectorAll('.add-job-mechanic-count').forEach(function (s) { s.addEventListener('input', update); });
+    document.querySelectorAll('.crew-type').forEach(function (s) { s.addEventListener('change', update); });
+    document.querySelectorAll('.crew-count').forEach(function (s) { s.addEventListener('input', update); });
     matChecks.forEach(function (c) { c.addEventListener('change', update); });
     document.querySelectorAll('.add-material-qty').forEach(function (s) { s.addEventListener('input', update); });
     update();

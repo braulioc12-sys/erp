@@ -1,0 +1,60 @@
+{% extends 'base.html' %}
+{% block title %}Inventario de llantas{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Neumáticos — Inventario</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('neumaticos.list_view') }}" class="btn btn-secondary">Por unidad</a>
+    {% if can(current_user.role, 'neumaticos', 'edit') %}
+    <a href="{{ url_for('neumaticos.inventory_new') }}" class="btn btn-primary">+ Registrar llanta</a>
+    {% endif %}
+  </div>
+</div>
+<p class="muted mt-0">
+  Inventario de llantas por código, independiente del de repuestos. Toda llanta debe registrarse aquí
+  antes de poder asignarse a una unidad — desde el diagrama de cada unidad (pestaña "Por unidad"),
+  clic en una posición vacía.
+</p>
+
+<label style="max-width:320px;">Buscar por código o marca
+  <input type="text" id="tireSearch" placeholder="Ej. LL-0042" oninput="filterTires()" autocomplete="off">
+</label>
+
+<div class="table-wrap">
+  <table id="tireTable">
+    <thead><tr><th>Código</th><th>Marca</th><th class="text-right">Vida útil estimada</th><th>Estado</th><th>Asignada a</th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr data-search="{{ (r.tire.code ~ ' ' ~ (r.tire.brand or ''))|lower }}">
+        <td>{{ r.tire.code }}</td>
+        <td>{{ r.tire.brand or '—' }}</td>
+        <td class="text-right">{{ '{:,.0f}'.format(r.tire.expected_life_km) }} km</td>
+        <td><span class="badge {{ r.badge_class }}">{{ r.status_label }}</span></td>
+        <td>
+          {% if r.assignment %}
+          <a href="{{ url_for('neumaticos.detail', tire_id=r.assignment.id) }}">{{ r.assignment.vehicle_plate }} — {{ r.position_label }}</a>
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="table-empty">No hay llantas registradas en el inventario.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p id="tireSearchEmpty" class="table-empty" style="display:none;">Ninguna llanta coincide con la búsqueda.</p>
+</div>
+
+<script>
+function filterTires() {
+  var query = document.getElementById('tireSearch').value.trim().toLowerCase();
+  var rows = document.querySelectorAll('#tireTable tbody tr[data-search]');
+  var visible = 0;
+  rows.forEach(function (row) {
+    var match = row.getAttribute('data-search').indexOf(query) !== -1;
+    row.style.display = match ? '' : 'none';
+    if (match) visible++;
+  });
+  document.getElementById('tireSearchEmpty').style.display = (visible === 0 && rows.length > 0) ? '' : 'none';
+}
+</script>
+{% endblock %}

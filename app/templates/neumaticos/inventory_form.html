@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+{% set f = form or {} %}
+{% block title %}Registrar llanta{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Registrar llanta en el inventario</h1>
+</div>
+<p class="muted mt-0">
+  Registra el código de la llanta antes de poder asignarla a una unidad. Una vez guardada, queda
+  "Disponible" en el inventario hasta que se asigne a una posición desde el diagrama de una unidad.
+</p>
+
+<form class="form panel" method="post" style="max-width:520px;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="next" value="{{ next_url }}">
+  <label>Código <span class="muted">(el grabado en la llanta o el que se le asigna al comprarla)</span>
+    <input type="text" name="code" value="{{ f.get('code', '') }}" placeholder="Ej. LL-0042" required autofocus>
+  </label>
+  <label>Marca
+    <input type="text" name="brand" value="{{ f.get('brand', '') }}" placeholder="Ej. Michelin, Bridgestone, Goodyear">
+  </label>
+  <label>Vida útil estimada (km)
+    <input type="number" step="1" name="expected_life_km" value="{{ f.get('expected_life_km', default_expected_life_km) }}" required>
+  </label>
+  <p class="muted" style="margin-top:-8px;">
+    Define las bandas de desgaste de esta llanta (Bueno / Regular / Grave / Alerta) como tercios de este
+    valor — se puede ajustar más adelante, llanta por llanta, desde su detalle.
+  </p>
+  <label>Notas (opcional)
+    <textarea name="notes">{{ f.get('notes', '') }}</textarea>
+  </label>
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Guardar</button>
+    <a href="{{ next_url or url_for('neumaticos.inventory_list') }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+{% endblock %}

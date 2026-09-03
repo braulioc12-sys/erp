@@ -10,6 +10,7 @@
 </div>
 
 <div class="detail-grid">
+  <div class="detail-item"><div class="label">Código de inventario</div><div class="value">{% if inventory_tire %}<a href="{{ url_for('neumaticos.inventory_list') }}">{{ inventory_tire.code }}</a>{% else %}Sin código (registrada antes del inventario){% endif %}</div></div>
   <div class="detail-item"><div class="label">Posición</div><div class="value">{{ position_label }}</div></div>
   <div class="detail-item"><div class="label">Marca</div><div class="value">{{ tire.brand or 'Sin marca' }}</div></div>
   <div class="detail-item"><div class="label">Estado</div><div class="value">{{ m.badge(tire.status) }}</div></div>
@@ -19,7 +20,7 @@
   {% if tire.status == 'ACTIVO' %}
   <div class="detail-item"><div class="label">Km actual de la unidad</div><div class="value">{{ '{:,.0f} km'.format(vehicle.current_km) if vehicle.current_km is not none else 'Sin registrar' }}</div></div>
   <div class="detail-item"><div class="label">Kilometraje acumulado en esta llanta</div><div class="value">{{ '{:,.0f} km'.format(accumulated_km) if accumulated_km is not none else '—' }}</div></div>
-  <div class="detail-item"><div class="label">% de vida útil consumida</div><div class="value">{% if percent is not none %}<span class="badge {{ badge_class }}">{{ percent }}%</span>{% else %}Sin km de unidad registrado{% endif %}</div></div>
+  <div class="detail-item"><div class="label">Vida útil consumida</div><div class="value">{% if percent is not none %}<span class="badge {{ badge_class }}">{{ stage_label }} ({{ percent }}%)</span>{% else %}Sin km de unidad registrado{% endif %}</div></div>
   {% else %}
   <div class="detail-item"><div class="label">Fecha de retiro</div><div class="value">{{ tire.removed_date or '—' }}</div></div>
   <div class="detail-item"><div class="label">Km al retirar</div><div class="value">{{ '{:,.0f}'.format(tire.removed_km) if tire.removed_km is not none else '—' }} km</div></div>

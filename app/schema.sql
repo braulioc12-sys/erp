@@ -215,6 +215,35 @@ CREATE TABLE IF NOT EXISTS maintenance_record_jobs (
     PRIMARY KEY (maintenance_record_id, job_name)
 );
 
+-- Cuadrilla de un trabajo dentro de una orden (2 sep, pedido de Braulio:
+-- "en el cambio de aceite se pueda elegir 1 mecánico senior y 2 junior" —
+-- antes un trabajo solo admitía UN tipo+cantidad de mecánico, guardado
+-- directo en maintenance_record_jobs.mechanic_type/mechanic_count). Ahora
+-- un trabajo puede tener varias combinaciones tipo+cantidad a la vez; cada
+-- una es una fila acá. El costo de mano de obra de un trabajo es la suma,
+-- por cada fila de su cuadrilla, de minutos_del_trabajo × costo_por_minuto
+-- del tipo × mechanic_count. maintenance_record_jobs.mechanic_type/
+-- mechanic_count se dejan de usar para trabajos nuevos (quedan en NULL/1
+-- por defecto) — se conservan solo por compatibilidad con órdenes ya
+-- creadas antes de este cambio, que se siguen leyendo como una cuadrilla
+-- de una sola fila si no tienen ninguna acá (ver _job_crew() en
+-- app/routes/mantenimiento.py).
+-- Sin FOREIGN KEY declarada a propósito: maintenance_record_jobs usa una
+-- llave primaria compuesta (maintenance_record_id, job_name) y el
+-- mecanismo de _strip_forward_fks/init_db() (app/db.py) que traduce las
+-- foreign keys de una sola columna a Postgres no entiende una FK
+-- compuesta de dos columnas — declararla igual arriesgaba corromper el
+-- esquema traducido en producción. La integridad se mantiene desde el
+-- código (siempre se inserta/borra a través de las rutas de Mantenimiento).
+CREATE TABLE IF NOT EXISTS maintenance_record_job_crew (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    maintenance_record_id INTEGER NOT NULL,
+    job_name TEXT NOT NULL,
+    mechanic_type TEXT NOT NULL DEFAULT 'Otros',
+    mechanic_count INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_maintenance_record_job_crew_job ON maintenance_record_job_crew(maintenance_record_id, job_name);
+
 -- Módulo Inventarios (29 ago — pedido de Braulio: "cada compra de
 -- repuestos debe figurar el proveedor, orden de compra, cantidad y
 -- precio; una vez ingresado al stock, Mantenimiento puede disponer de
@@ -354,6 +383,32 @@ CREATE INDEX IF NOT EXISTS idx_maintenance_record_materials_record ON maintenanc
 -- Cuando se reemplaza una llanta, la fila vieja pasa a status='RETIRADO'
 -- (con fecha/km de retiro) y se crea una fila nueva para esa posición —
 -- esto conserva el historial completo de cada posición en el tiempo.
+-- Inventario de llantas por código (2 sep, pedido de Braulio): un registro
+-- independiente del inventario de repuestos (ver "inventory_items"). Cada
+-- llanta física tiene una fila acá, creada ANTES de poder asignarla a una
+-- unidad — "tires" (más abajo) sigue siendo el historial de instalaciones
+-- (una fila por cada vez que esa llanta estuvo en una posición), enlazado a
+-- su registro de inventario vía tires.tire_inventory_id.
+CREATE TABLE IF NOT EXISTS tire_inventory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- Código físico de la llanta (el que trae grabado / el que se le pone al
+    -- comprarla), único para poder ubicarla rápido.
+    code TEXT NOT NULL,
+    brand TEXT,
+    -- Vida útil estimada en km — se copia a tires.expected_life_km al
+    -- asignar la llanta a una unidad (donde puede ajustarse si hace falta),
+    -- pero queda acá como el valor de referencia de la llanta en sí.
+    expected_life_km REAL NOT NULL DEFAULT 60000,
+    -- 'DISPONIBLE' = en inventario, todavía sin instalar en ninguna unidad.
+    -- 'ASIGNADA' = instalada actualmente en una unidad (ver la fila ACTIVO
+    -- correspondiente en "tires" con este tire_inventory_id).
+    -- 'RETIRADA' = se descartó definitivamente (no se movió a otra unidad).
+    status TEXT NOT NULL DEFAULT 'DISPONIBLE' CHECK (status IN ('DISPONIBLE', 'ASIGNADA', 'RETIRADA')),
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tire_inventory_code ON tire_inventory(code);
+
 CREATE TABLE IF NOT EXISTS tires (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     vehicle_id INTEGER NOT NULL REFERENCES vehicles(id),
@@ -380,6 +435,11 @@ CREATE TABLE IF NOT EXISTS tires (
     -- el id de esta — no hace falta una columna inversa.
     disposition TEXT,
     moved_to_tire_id INTEGER REFERENCES tires(id),
+    -- Llanta de "tire_inventory" que corresponde a esta instalación (2 sep):
+    -- NULL para llantas creadas antes de este cambio (nunca pasaron por el
+    -- inventario por código). Se copia de fila en fila al mover una llanta
+    -- de unidad (misma llanta física, mismo registro de inventario).
+    tire_inventory_id INTEGER REFERENCES tire_inventory(id),
     notes TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

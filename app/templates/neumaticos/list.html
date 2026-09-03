@@ -4,6 +4,9 @@
 {% block content %}
 <div class="page-header">
   <h1>Neumáticos por unidad</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('neumaticos.inventory_list') }}" class="btn btn-secondary">Inventario de llantas</a>
+  </div>
 </div>
 <p class="muted mt-0">Elige una unidad para ver su diagrama de posiciones y controlar la vida útil de cada llanta.</p>
 
@@ -19,7 +22,8 @@
         <td class="text-right">{{ s.installed }} / {{ s.total_positions }}</td>
         <td><span class="badge {{ s.worst_badge }}">
           {% if s.worst_badge == 'badge-vencida' %}Reemplazar
-          {% elif s.worst_badge == 'badge-mantenimiento' %}Por vencer
+          {% elif s.worst_badge == 'badge-grave' %}Grave
+          {% elif s.worst_badge == 'badge-mantenimiento' %}Regular
           {% else %}OK{% endif %}
         </span></td>
         <td><a href="{{ url_for('neumaticos.diagram', vehicle_id=s.vehicle.id) }}" class="btn btn-secondary btn-sm">Ver diagrama</a></td>

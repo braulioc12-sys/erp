@@ -7,7 +7,7 @@
 
   <div class="form-row">
     <label>Unidad *
-      <select name="vehicle_id" required>
+      <select name="vehicle_id" id="vehicle-select" required>
         <option value="">-- Selecciona una unidad --</option>
         {% for v in vehicles %}
         <option value="{{ v.id }}" {{ 'selected' if record and (record.vehicle_id|string) == (v.id|string) }}>{{ v.plate }}</option>
@@ -26,24 +26,38 @@
   </div>
   <p class="muted" style="margin-top:-8px;">Se calcula solo según los trabajos y materiales que marques abajo (trabajos: tipo y cantidad de mecánicos × su costo por minuto; materiales: cantidad × su costo unitario, configurables en Catálogos y en Mantenimiento → Materiales) — puedes ajustarlo a mano si hace falta.</p>
 
-  <label>Kilometraje de la unidad en este momento (opcional)
-    <input type="number" step="1" name="odometer_km" value="{{ record.odometer_km if record else '' }}" placeholder="Ej. 118500">
-  </label>
-  <p class="muted" style="margin-top:-8px;">Si lo indicas, actualiza automáticamente el kilometraje actual de la unidad (usado para las alertas de mantenimiento próximo).</p>
+  <div class="form-row" style="align-items:flex-start;">
+    <div style="flex:1;">
+      <span class="muted">Kilometraje GPS (referencia)</span><br>
+      <strong id="gps-km-display">{{ 'Selecciona una unidad' if not record else '' }}</strong>
+    </div>
+    <label style="flex:1;">Kilometraje Odómetro (opcional)
+      <input type="number" step="1" name="odometer_km" id="odometer-km-input" value="{{ record.odometer_km if record else '' }}" placeholder="Ej. 118500">
+    </label>
+  </div>
+  <p class="muted" style="margin-top:-8px;">Al elegir la unidad, este cuadro se llena solo con el último kilometraje que reportó el GPS. Si el odómetro físico marca otra cosa, corrígelo aquí — lo que quede acá es lo que se guarda como kilometraje actual de la unidad (usado para las alertas de mantenimiento próximo).</p>
 
   <label>Trabajos realizados (opcional, para estimar el tiempo y costo de mano de obra)</label>
   <div class="panel" style="background:var(--bg-soft, #f8f9fb); margin-top:-8px;">
     {% for j in job_types %}
-    <label style="flex-direction:row; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
-      <input type="checkbox" name="job_type_ids" value="{{ j.id }}" class="job-check" data-minutes="{{ j.estimated_minutes }}" data-job-id="{{ j.id }}" style="width:auto;">
-      {{ j.name }} <span class="muted">({{ j.estimated_minutes }} min)</span>
-      <select name="mechanic_type_{{ j.id }}" class="job-mechanic-type" data-job-id="{{ j.id }}" style="margin-left:auto;">
-        {% for t in mechanic_types %}
-        <option value="{{ t }}">{{ t }}</option>
-        {% endfor %}
-      </select>
-      <input type="number" name="mechanic_count_{{ j.id }}" class="job-mechanic-count" data-job-id="{{ j.id }}" min="1" step="1" value="1" style="width:64px;" title="Cantidad de mecánicos">
-    </label>
+    <div class="job-block" style="margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid var(--border, #e2e5ea);">
+      <label style="flex-direction:row; align-items:center; gap:8px; flex-wrap:wrap;">
+        <input type="checkbox" name="job_type_ids" value="{{ j.id }}" class="job-check" data-minutes="{{ j.estimated_minutes }}" data-job-id="{{ j.id }}" style="width:auto;">
+        {{ j.name }} <span class="muted">({{ j.estimated_minutes }} min)</span>
+      </label>
+      <div class="crew-container" data-job-id="{{ j.id }}" style="margin-left:26px; margin-top:4px;">
+        <div class="crew-row" style="display:flex; gap:8px; align-items:center; margin-bottom:4px;">
+          <select name="crew_type_{{ j.id }}" class="crew-type">
+            {% for t in mechanic_types %}
+            <option value="{{ t }}">{{ t }}</option>
+            {% endfor %}
+          </select>
+          <input type="number" name="crew_count_{{ j.id }}" class="crew-count" min="1" step="1" value="1" style="width:64px;" title="Cantidad de mecánicos">
+          <button type="button" class="btn btn-secondary btn-sm remove-crew-row" style="display:none;">✕</button>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm add-crew-row" data-job-id="{{ j.id }}">+ Agregar otro tipo de mecánico</button>
+      </div>
+    </div>
     {% else %}
     <p class="muted mt-0">Todavía no hay trabajos registrados.</p>
     {% endfor %}
@@ -72,12 +86,52 @@
       var costInput = document.getElementById('cost-input');
       var laborCosts = {{ labor_costs|tojson }};
       var lastSuggestedCost = null;
-      function typeSelectFor(jobId) {
-        return document.querySelector('.job-mechanic-type[data-job-id="' + jobId + '"]');
+
+      // --- Cuadrilla por trabajo: agregar/quitar filas tipo+cantidad ---
+      document.querySelectorAll('.add-crew-row').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var jobId = btn.dataset.jobId;
+          var container = document.querySelector('.crew-container[data-job-id="' + jobId + '"]');
+          var rows = container.querySelectorAll('.crew-row');
+          var newRow = rows[0].cloneNode(true);
+          newRow.querySelector('.crew-count').value = 1;
+          newRow.querySelector('.remove-crew-row').style.display = '';
+          newRow.querySelector('.remove-crew-row').addEventListener('click', function () {
+            newRow.remove();
+            update();
+          });
+          newRow.querySelector('.crew-type').addEventListener('change', update);
+          newRow.querySelector('.crew-count').addEventListener('input', update);
+          container.insertBefore(newRow, btn);
+          update();
+        });
+      });
+      document.querySelectorAll('.remove-crew-row').forEach(function (btn) {
+        btn.addEventListener('click', function () { btn.closest('.crew-row').remove(); update(); });
+      });
+
+      // --- Kilometraje GPS: se auto-llena al elegir la unidad ---
+      var vehiclesKm = {{ vehicles_km|tojson }};
+      var vehicleSelect = document.getElementById('vehicle-select');
+      var gpsDisplay = document.getElementById('gps-km-display');
+      var odometerInput = document.getElementById('odometer-km-input');
+      var odometerTouched = !!odometerInput.value;
+      odometerInput.addEventListener('input', function () { odometerTouched = true; });
+      function updateGpsKm() {
+        var info = vehiclesKm[vehicleSelect.value];
+        if (!info) {
+          gpsDisplay.textContent = vehicleSelect.value ? 'Sin dato de GPS todavía' : 'Selecciona una unidad';
+          return;
+        }
+        gpsDisplay.textContent = info.km === null ? 'Sin dato de GPS todavía'
+          : info.km.toLocaleString('es-PE') + ' km' + (info.updated_at ? ' (actualizado ' + info.updated_at + ')' : '');
+        if (!odometerTouched && info.km !== null) {
+          odometerInput.value = info.km;
+        }
       }
-      function countInputFor(jobId) {
-        return document.querySelector('.job-mechanic-count[data-job-id="' + jobId + '"]');
-      }
+      vehicleSelect.addEventListener('change', updateGpsKm);
+      updateGpsKm();
+
       function qtyInputFor(matId) {
         return document.querySelector('.material-qty[data-material-id="' + matId + '"]');
       }
@@ -88,11 +142,14 @@
           if (!c.checked) return;
           var minutes = parseInt(c.dataset.minutes || '0', 10);
           sum += minutes;
-          var sel = typeSelectFor(c.dataset.jobId);
-          var rate = parseFloat((sel && laborCosts[sel.value]) || '0');
-          var countInput = countInputFor(c.dataset.jobId);
-          var count = parseInt((countInput && countInput.value) || '1', 10) || 1;
-          suggested += minutes * rate * count;
+          var container = document.querySelector('.crew-container[data-job-id="' + c.dataset.jobId + '"]');
+          container.querySelectorAll('.crew-row').forEach(function (row) {
+            var sel = row.querySelector('.crew-type');
+            var countInput = row.querySelector('.crew-count');
+            var rate = parseFloat(laborCosts[sel.value] || '0');
+            var count = parseInt((countInput && countInput.value) || '1', 10) || 1;
+            suggested += minutes * rate * count;
+          });
         });
         matChecks.forEach(function (c) {
           if (!c.checked) return;
@@ -113,8 +170,8 @@
         }
       }
       checks.forEach(function (c) { c.addEventListener('change', update); });
-      document.querySelectorAll('.job-mechanic-type').forEach(function (s) { s.addEventListener('change', update); });
-      document.querySelectorAll('.job-mechanic-count').forEach(function (s) { s.addEventListener('input', update); });
+      document.querySelectorAll('.crew-type').forEach(function (s) { s.addEventListener('change', update); });
+      document.querySelectorAll('.crew-count').forEach(function (s) { s.addEventListener('input', update); });
       matChecks.forEach(function (c) { c.addEventListener('change', update); });
       document.querySelectorAll('.material-qty').forEach(function (s) { s.addEventListener('input', update); });
       update();

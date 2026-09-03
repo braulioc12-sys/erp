@@ -38,36 +38,85 @@ ORDER_STATUS_LABELS = {
 }
 
 
-def _mechanic_type_from_form(job_id):
-    mechanic_type = request.form.get(f"mechanic_type_{job_id}", "").strip()
-    return mechanic_type if mechanic_type in MECHANIC_TYPES else "Otros"
-
-
-def _mechanic_count_from_form(job_id):
-    count = parse_float(request.form.get(f"mechanic_count_{job_id}"), 1) or 1
-    return max(1, int(count))
+def _crew_rows_from_form(job_id):
+    """2 sep, pedido de Braulio: un trabajo ya no admite solo un tipo+
+    cantidad de mecánico — puede tener varias combinaciones a la vez (ej.
+    "1 Senior + 2 Junior" en un mismo cambio de aceite). El formulario manda
+    varios campos con el mismo nombre `crew_type_<job_id>`/
+    `crew_count_<job_id>` (uno por fila de cuadrilla agregada en el
+    navegador) — se leen emparejados por posición, igual que ya se hace con
+    `job_type_ids`/`material_ids` (checkboxes repetidos). Filas con
+    cantidad inválida o tipo no reconocido se ignoran; si no llega ninguna
+    fila válida, se usa una sola de "Otros" × 1 como respaldo (nunca se deja
+    un trabajo sin ninguna cuadrilla)."""
+    types = request.form.getlist(f"crew_type_{job_id}")
+    counts = request.form.getlist(f"crew_count_{job_id}")
+    rows = []
+    for t, c in zip(types, counts):
+        t = t.strip()
+        if t not in MECHANIC_TYPES:
+            continue
+        count = parse_float(c, None)
+        if count is None or count < 1:
+            continue
+        rows.append((t, max(1, int(count))))
+    return rows or [("Otros", 1)]
 
 
 def _insert_selected_jobs(db, record_id, selected_jobs):
     """Inserta filas nuevas en maintenance_record_jobs para los trabajos
-    marcados, leyendo el tipo y la cantidad de mecánicos de cada uno desde
-    el formulario (campos mechanic_type_<id> / mechanic_count_<id>).
-    INSERT OR IGNORE por si alguno ya estaba en la orden (evita un error de
-    llave primaria duplicada, ej. dos envíos del mismo formulario). Devuelve
-    la suma de minutos estimados efectivamente agregados."""
+    marcados (sin dueño de cuadrilla propio — ver nota de la tabla en
+    schema.sql), y una fila en maintenance_record_job_crew por cada
+    combinación tipo+cantidad de mecánico que se haya armado para ese
+    trabajo en el formulario (campos `crew_type_<id>`/`crew_count_<id>`).
+    INSERT OR IGNORE en el trabajo por si ya estaba en la orden (evita un
+    error de llave primaria duplicada, ej. dos envíos del mismo formulario)
+    — en ese caso tampoco se duplica su cuadrilla. Devuelve la suma de
+    minutos estimados efectivamente agregados."""
     total_minutes = 0
     for j in selected_jobs:
-        mechanic_type = _mechanic_type_from_form(j["id"])
-        mechanic_count = _mechanic_count_from_form(j["id"])
         cur = db.execute(
             """INSERT OR IGNORE INTO maintenance_record_jobs
-               (maintenance_record_id, job_type_id, job_name, estimated_minutes, mechanic_type, mechanic_count)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (record_id, j["id"], j["name"], j["estimated_minutes"], mechanic_type, mechanic_count),
+               (maintenance_record_id, job_type_id, job_name, estimated_minutes)
+               VALUES (?, ?, ?, ?)""",
+            (record_id, j["id"], j["name"], j["estimated_minutes"]),
         )
         if cur.rowcount:
             total_minutes += j["estimated_minutes"]
+            for mechanic_type, mechanic_count in _crew_rows_from_form(j["id"]):
+                db.execute(
+                    """INSERT INTO maintenance_record_job_crew
+                       (maintenance_record_id, job_name, mechanic_type, mechanic_count)
+                       VALUES (?, ?, ?, ?)""",
+                    (record_id, j["name"], mechanic_type, mechanic_count),
+                )
     return total_minutes
+
+
+def _job_crew(record_id, job_name, fallback_type=None, fallback_count=1):
+    """Cuadrilla de un trabajo (lista de {mechanic_type, mechanic_count}),
+    desde maintenance_record_job_crew. Si el trabajo no tiene ninguna fila
+    ahí (orden creada antes del 2 sep, cuando el tipo/cantidad vivían
+    directo en maintenance_record_jobs), se arma una cuadrilla de una sola
+    fila a partir de esas columnas viejas — así una orden antigua se ve
+    igual de bien sin necesitar ninguna migración de datos."""
+    rows = query_all(
+        "SELECT * FROM maintenance_record_job_crew WHERE maintenance_record_id = ? AND job_name = ? ORDER BY id",
+        (record_id, job_name),
+    )
+    if rows:
+        return rows
+    if fallback_type:
+        return [{"id": None, "mechanic_type": fallback_type, "mechanic_count": fallback_count}]
+    return []
+
+
+def _crew_cost(crew_rows, minutes, labor_costs):
+    total = 0.0
+    for row in crew_rows:
+        rate = float(labor_costs.get(row["mechanic_type"], "0") or 0)
+        total += minutes * rate * (row["mechanic_count"] or 0)
+    return total
 
 
 def _insert_selected_materials(db, record_id, selected_materials):
@@ -146,7 +195,14 @@ def list_view():
 @bp.route("/nuevo", methods=["GET", "POST"])
 @permission_required("mantenimiento", "edit")
 def new():
-    vehicles = query_all("SELECT id, plate, current_km FROM vehicles ORDER BY plate")
+    vehicles = query_all("SELECT id, plate, current_km, current_km_updated_at FROM vehicles ORDER BY plate")
+    # 2 sep, pedido de Braulio: al elegir la unidad en el formulario, el
+    # cuadro de "Kilometraje Odómetro" se auto-llena con el último dato del
+    # GPS (JS, ver form.html) — este mapa se lo entrega listo por id de
+    # unidad, para no tener que ir a buscarlo por AJAX.
+    vehicles_km = {
+        str(v["id"]): {"km": v["current_km"], "updated_at": v["current_km_updated_at"]} for v in vehicles
+    }
     job_types = get_catalog_jobs()
     materials = get_catalog_items()
     labor_costs = {t: get_setting(labor_cost_setting_key(t), "0") for t in MECHANIC_TYPES}
@@ -168,9 +224,9 @@ def new():
             for e in errors:
                 flash(e, "error")
             return render_template(
-                "mantenimiento/form.html", record=request.form, vehicles=vehicles,
+                "mantenimiento/form.html", record=request.form, vehicles=vehicles, vehicles_km=vehicles_km,
                 job_types=job_types, materials=materials, labor_costs=labor_costs,
-                mechanic_types=MECHANIC_TYPES,
+                mechanic_types=MECHANIC_TYPES, today=today_str(),
             )
 
         selected_jobs = [j for j in job_types if j["id"] in job_ids]
@@ -224,7 +280,7 @@ def new():
         return redirect(url_for("mantenimiento.list_view"))
 
     return render_template(
-        "mantenimiento/form.html", record=None, vehicles=vehicles,
+        "mantenimiento/form.html", record=None, vehicles=vehicles, vehicles_km=vehicles_km,
         job_types=job_types, materials=materials, labor_costs=labor_costs,
         mechanic_types=MECHANIC_TYPES, today=today_str(),
     )
@@ -268,12 +324,78 @@ def detail(record_id):
     available_materials = get_catalog_items()
     labor_costs = {t: get_setting(labor_cost_setting_key(t), "0") for t in MECHANIC_TYPES}
     materials_total = sum((mtl["unit_cost"] or 0) * (mtl["quantity"] or 0) for mtl in materials)
+    crew_by_job = {}
+    labor_cost_by_job = {}
+    for j in jobs:
+        crew = _job_crew(record_id, j["job_name"], j["mechanic_type"], j["mechanic_count"])
+        crew_by_job[j["job_name"]] = crew
+        labor_cost_by_job[j["job_name"]] = _crew_cost(crew, j["estimated_minutes"], labor_costs)
     return render_template(
         "mantenimiento/detail.html", record=record, jobs=jobs, materials=materials, mechanics=mechanics,
         order_status=_order_status(jobs), order_status_labels=ORDER_STATUS_LABELS,
         mechanic_types=MECHANIC_TYPES, available_job_types=available_job_types,
         available_materials=available_materials, labor_costs=labor_costs, materials_total=materials_total,
+        crew_by_job=crew_by_job, labor_cost_by_job=labor_cost_by_job,
     )
+
+
+@bp.route("/<int:record_id>/trabajos/cuadrilla/agregar", methods=["POST"])
+@permission_required("mantenimiento", "edit")
+def job_crew_add(record_id):
+    """2 sep, pedido de Braulio: agregar una combinación tipo+cantidad de
+    mecánico más a un trabajo YA en la orden (ej. ya tenía "1 Senior" y se
+    le suma "2 Junior") — sin reemplazar lo que ya tenía."""
+    if not validate_csrf():
+        abort(400)
+    job_name = request.form.get("job_name", "")
+    job = query_one(
+        "SELECT * FROM maintenance_record_jobs WHERE maintenance_record_id = ? AND job_name = ?",
+        (record_id, job_name),
+    )
+    if job is None:
+        abort(404)
+    mechanic_type = request.form.get("mechanic_type", "").strip()
+    if mechanic_type not in MECHANIC_TYPES:
+        flash("Elige un tipo de mecánico válido.", "error")
+        return redirect(url_for("mantenimiento.detail", record_id=record_id))
+    count = parse_float(request.form.get("mechanic_count"), 1) or 1
+    count = max(1, int(count))
+    # Si el trabajo todavía no tenía ninguna fila propia en la cuadrilla
+    # nueva (orden vieja, con el tipo/cantidad guardado directo en
+    # maintenance_record_jobs), primero se traslada esa fila implícita acá
+    # para no perderla al agregar la nueva.
+    if not query_one(
+        "SELECT id FROM maintenance_record_job_crew WHERE maintenance_record_id = ? AND job_name = ?",
+        (record_id, job_name),
+    ) and job["mechanic_type"]:
+        execute(
+            """INSERT INTO maintenance_record_job_crew (maintenance_record_id, job_name, mechanic_type, mechanic_count)
+               VALUES (?, ?, ?, ?)""",
+            (record_id, job_name, job["mechanic_type"], job["mechanic_count"] or 1),
+        )
+    execute(
+        """INSERT INTO maintenance_record_job_crew (maintenance_record_id, job_name, mechanic_type, mechanic_count)
+           VALUES (?, ?, ?, ?)""",
+        (record_id, job_name, mechanic_type, count),
+    )
+    flash(f'Se agregó {count} × {mechanic_type} a "{job_name}".', "success")
+    return redirect(url_for("mantenimiento.detail", record_id=record_id))
+
+
+@bp.route("/<int:record_id>/trabajos/cuadrilla/<int:crew_id>/eliminar", methods=["POST"])
+@permission_required("mantenimiento", "edit")
+def job_crew_remove(record_id, crew_id):
+    if not validate_csrf():
+        abort(400)
+    crew = query_one(
+        "SELECT * FROM maintenance_record_job_crew WHERE id = ? AND maintenance_record_id = ?",
+        (crew_id, record_id),
+    )
+    if crew is None:
+        abort(404)
+    execute("DELETE FROM maintenance_record_job_crew WHERE id = ?", (crew_id,))
+    flash("Se quitó esa combinación de mecánico del trabajo.", "success")
+    return redirect(url_for("mantenimiento.detail", record_id=record_id))
 
 
 @bp.route("/<int:record_id>/agregar", methods=["POST"])

@@ -51,9 +51,10 @@
     </svg>
   </div>
   <div class="tag-list" style="justify-content:center; margin-top:6px;">
-    <span class="badge badge-activo">OK</span>
-    <span class="badge badge-mantenimiento">Por vencer (≥80%)</span>
-    <span class="badge badge-vencida">Reemplazar (≥100%)</span>
+    <span class="badge badge-activo">Bueno</span>
+    <span class="badge badge-mantenimiento">Regular</span>
+    <span class="badge badge-grave">Grave</span>
+    <span class="badge badge-vencida">Alerta: debe cambiarse</span>
   </div>
 </div>
 
@@ -73,7 +74,7 @@
           <td class="text-right">{{ '{:,.0f}'.format(row.accumulated_km) if row.accumulated_km is not none else '—' }}</td>
           <td>
             {% if row.percent is not none %}
-            <span class="badge {{ row.badge_class }}">{{ row.percent }}%</span>
+            <span class="badge {{ row.badge_class }}">{{ row.stage_label }} ({{ row.percent }}%)</span>
             {% else %}<span class="muted">Sin km de unidad</span>{% endif %}
           </td>
           <td><a href="{{ url_for('neumaticos.detail', tire_id=row.tire.id) }}" class="btn btn-secondary btn-sm">Ver detalle</a></td>

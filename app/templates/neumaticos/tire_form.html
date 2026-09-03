@@ -8,7 +8,7 @@
 </div>
 <p class="muted mt-0">Posición: <strong>{{ position_label }}</strong></p>
 
-<form class="form panel" method="post">
+<form class="form panel" method="post" id="tire-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
   {% if mode in ('replace', 'retire') %}
@@ -69,45 +69,66 @@
 
   {% if mode == 'replace' %}
   <div class="section-title">Llanta nueva en esta posición</div>
-  <div class="form-row">
-    <label>Marca
-      <input type="text" name="new_brand" placeholder="Ej. Michelin, Bridgestone, Goodyear">
-    </label>
-    <label>Fecha de instalación
-      <input type="date" name="new_install_date" value="{{ today }}" required>
-    </label>
-  </div>
-  <div class="form-row">
-    <label>Kilometraje de la unidad al instalar
-      <input type="number" step="1" name="new_km_at_install" value="{{ vehicle.current_km|round(0)|int if vehicle.current_km is not none else '' }}" required>
-    </label>
-    <label>Vida útil estimada (km)
-      <input type="number" step="1" name="new_expected_life_km" value="{{ default_expected_life_km }}" required>
-    </label>
-  </div>
-  <label>Notas (opcional)
-    <textarea name="new_notes"></textarea>
+  {% if available_tires %}
+  <label>Llanta del inventario <span class="muted">(debe estar registrada y disponible)</span>
+    <select name="new_tire_inventory_id" required>
+      <option value="">Selecciona un código…</option>
+      {% for t in available_tires %}
+      <option value="{{ t.id }}" {% if f.get('new_tire_inventory_id')|string == t.id|string %}selected{% endif %}>{{ t.code }}{% if t.brand %} — {{ t.brand }}{% endif %}</option>
+      {% endfor %}
+    </select>
   </label>
-  {% elif mode == 'new' %}
   <div class="form-row">
-    <label>Marca
-      <input type="text" name="brand" placeholder="Ej. Michelin, Bridgestone, Goodyear">
+    <label>Fecha de instalación
+      <input type="date" name="new_install_date" value="{{ f.get('new_install_date', today) }}" required>
     </label>
+    <label>Kilometraje de la unidad al instalar
+      <input type="number" step="1" name="new_km_at_install" value="{{ f.get('new_km_at_install', vehicle.current_km|round(0)|int if vehicle.current_km is not none else '') }}" required>
+    </label>
+  </div>
+  <label>Vida útil estimada (km) <span class="muted">(se puede ajustar para esta instalación en particular)</span>
+    <input type="number" step="1" name="new_expected_life_km" value="{{ f.get('new_expected_life_km', '') }}" placeholder="Vacío = usa la del código elegido">
+  </label>
+  <label>Notas (opcional)
+    <textarea name="new_notes">{{ f.get('new_notes', '') }}</textarea>
+  </label>
+  {% else %}
+  <p class="muted">
+    No hay llantas disponibles en el inventario. Primero
+    <a href="{{ url_for('neumaticos.inventory_new', next=request.path) }}">registra una llanta nueva</a> con su código.
+  </p>
+  {% endif %}
+  {% elif mode == 'new' %}
+  {% if available_tires %}
+  <label>Llanta del inventario <span class="muted">(debe estar registrada y disponible)</span>
+    <select name="tire_inventory_id" required>
+      <option value="">Selecciona un código…</option>
+      {% for t in available_tires %}
+      <option value="{{ t.id }}">{{ t.code }}{% if t.brand %} — {{ t.brand }}{% endif %}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <div class="form-row">
     <label>Fecha de instalación
       <input type="date" name="install_date" value="{{ today }}" required>
     </label>
-  </div>
-  <div class="form-row">
     <label>Kilometraje de la unidad al instalar
       <input type="number" step="1" name="km_at_install" value="{{ vehicle.current_km|round(0)|int if vehicle.current_km is not none else '' }}" required>
     </label>
-    <label>Vida útil estimada (km)
-      <input type="number" step="1" name="expected_life_km" value="{{ default_expected_life_km }}" required>
-    </label>
   </div>
+  <label>Vida útil estimada (km) <span class="muted">(se puede ajustar para esta instalación en particular)</span>
+    <input type="number" step="1" name="expected_life_km" placeholder="Vacío = usa la del código elegido">
+  </label>
   <label>Notas (opcional)
     <textarea name="notes"></textarea>
   </label>
+  {% else %}
+  <p class="muted">
+    No hay llantas disponibles en el inventario. Primero
+    <a href="{{ url_for('neumaticos.inventory_new', next=request.path) }}">registra una llanta nueva</a> con su código
+    para poder asignarla aquí.
+  </p>
+  {% endif %}
   {% endif %}
 
   <div class="btn-group">
@@ -170,6 +191,23 @@
       updateDestPositions(preselectPosition);
     }
   });
+
+  // Pedido de Braulio (2 sep): confirmar antes de mover una llanta de una
+  // unidad a otra — al confirmar, la llanta se retira de esta posición y
+  // queda instalada en la unidad/posición de destino.
+  var form = document.getElementById('tire-form');
+  if (form) {
+    form.addEventListener('submit', function (ev) {
+      var moved = document.querySelector('input[name="disposition"][value="MOVIDA"]');
+      if (moved && moved.checked) {
+        var destSelect = document.getElementById('dest_vehicle_id');
+        var destLabel = destSelect && destSelect.selectedOptions.length ? destSelect.selectedOptions[0].textContent : 'la unidad seleccionada';
+        if (!confirm('¿Mover esta llanta a ' + destLabel + '? Se retirará de esta posición y quedará instalada allá.')) {
+          ev.preventDefault();
+        }
+      }
+    });
+  }
 })();
 </script>
 {% endif %}

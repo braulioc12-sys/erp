@@ -19,8 +19,14 @@ VEHICLE_TYPE_LABELS = {
     "CAMION": "Camión (unidad simple)",
 }
 
-# Vida útil por defecto (km) sugerida al registrar una llanta nueva.
-DEFAULT_EXPECTED_LIFE_KM = 80000
+# Vida útil por defecto (km) sugerida al registrar una llanta nueva — 2 sep,
+# pedido de Braulio: "Bueno de 0 a 20,000 km, Regular de 21,000 a 40,000 km,
+# Grave de 40,000 a 60,000 km, y a partir de 60,000 km alerta de cambio."
+# Estas 4 bandas se calculan como tercios de la vida útil de CADA llanta
+# (ver _tire_metrics() en app/routes/neumaticos.py) — con el valor por
+# defecto de 60,000 km dan exactamente esos cortes, pero siguen siendo
+# ajustables llanta por llanta (algunas marcas/modelos duran más o menos).
+DEFAULT_EXPECTED_LIFE_KM = 60000
 
 _TIRE_W = 20
 _TIRE_H = 34
