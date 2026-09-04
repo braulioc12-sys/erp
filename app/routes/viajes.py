@@ -443,6 +443,24 @@ def edit(trip_id):
                 errors.append("Selecciona el segundo conductor (viaje de doble conductor).")
             elif driver_id and driver2_id == driver_id:
                 errors.append("El segundo conductor debe ser distinto del primero.")
+        # 4 sep, pedido de Braulio: los viajes con terceros no registran
+        # liquidación — si este viaje (antes PROPIA) ya tiene una liquidación,
+        # gastos o una inspección registrada, no se deja pasar a TERCERO sin
+        # que Braulio decida primero qué hacer con esos registros (quedarían
+        # ocultos del detalle del viaje, ver viajes/detail.html).
+        if ownership_fields["ownership"] == "TERCERO" and trip["ownership"] != "TERCERO":
+            has_liquidacion_data = query_one(
+                """SELECT
+                       (SELECT COUNT(*) FROM expense_advances WHERE trip_id = ?)
+                     + (SELECT COUNT(*) FROM expenses WHERE trip_id = ?)
+                     + (SELECT COUNT(*) FROM inspections WHERE trip_id = ?) as n""",
+                (trip_id, trip_id, trip_id),
+            )["n"]
+            if has_liquidacion_data:
+                errors.append(
+                    "Este viaje ya tiene liquidación, gastos o una inspección registrada — "
+                    "no se puede pasar a Tercero sin resolver esos registros primero."
+                )
         if errors:
             for e in errors:
                 flash(e, "error")

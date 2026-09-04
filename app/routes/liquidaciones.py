@@ -211,6 +211,16 @@ def new_advance(trip_id):
     trip = query_one("SELECT * FROM trips WHERE id = ?", (trip_id,))
     if trip is None:
         abort(404)
+    # 4 sep, pedido de Braulio: "los viajes con terceros no deben registrar
+    # liquidación, por lo tanto no tienen anticipo de viáticos, inspección
+    # ni gastos de viaje" — el costo de un viaje subcontratado ya es el
+    # flete acordado (third_party_rate), no algo que se liquide con
+    # anticipos/gastos como un viaje de unidad propia. Chequeo en el
+    # servidor (no solo ocultar el botón en viajes/detail.html) para que no
+    # se pueda crear entrando directo por la URL.
+    if trip["ownership"] == "TERCERO":
+        flash("Los viajes con terceros no registran liquidación (el costo es el flete acordado).", "error")
+        return redirect(url_for("viajes.detail", trip_id=trip_id))
     existing = query_one("SELECT id FROM expense_advances WHERE trip_id = ?", (trip_id,))
     if existing:
         flash("Este viaje ya tiene una liquidación (anticipo) registrada.", "error")
@@ -465,8 +475,11 @@ def _expense_form_context(expense=None, preselected_trip=None):
     # al crear el viaje) — se manda al formulario para que la Unidad se
     # auto-complete sola en vez de volver a preguntarla (pedido de Braulio,
     # 28 ago: "si el viaje ya tiene unidad, ¿para qué la vuelve a pedir?").
+    # 4 sep: se excluyen los viajes con terceros — no registran liquidación
+    # ni gastos de viaje (ver new_advance() más arriba).
     trips = query_all(
-        "SELECT id, code, vehicle_id FROM trips WHERE status != 'CANCELADO' ORDER BY scheduled_date DESC"
+        "SELECT id, code, vehicle_id FROM trips WHERE status != 'CANCELADO' AND ownership != 'TERCERO' "
+        "ORDER BY scheduled_date DESC"
     )
     preselected_trip_code = None
     preselected_vehicle_id = None
@@ -536,6 +549,16 @@ def new_expense():
             errors.append("El monto debe ser mayor a cero.")
         if not trip_id and not vehicle_id:
             errors.append("Asocia el gasto a un viaje o a una unidad.")
+        # 4 sep, pedido de Braulio: los viajes con terceros no registran
+        # gastos de viaje — chequeo en el servidor, el desplegable de
+        # _expense_form_context() ya los excluye pero esto cubre un
+        # trip_id mandado a mano (ej. por el campo oculto de "+ Registrar
+        # gasto para este viaje", que ahora tampoco debería mostrarse para
+        # un viaje TERCERO — ver viajes/detail.html).
+        if trip_id:
+            trip_for_expense = query_one("SELECT ownership FROM trips WHERE id = ?", (trip_id,))
+            if trip_for_expense and trip_for_expense["ownership"] == "TERCERO":
+                errors.append("Los viajes con terceros no registran gastos de viaje.")
 
         if errors:
             for e in errors:
@@ -611,6 +634,11 @@ def edit_expense(expense_id):
             errors.append("El monto debe ser mayor a cero.")
         if not trip_id and not vehicle_id:
             errors.append("Asocia el gasto a un viaje o a una unidad.")
+        # 4 sep, pedido de Braulio: ver el mismo chequeo en new_expense().
+        if trip_id:
+            trip_for_expense = query_one("SELECT ownership FROM trips WHERE id = ?", (trip_id,))
+            if trip_for_expense and trip_for_expense["ownership"] == "TERCERO":
+                errors.append("Los viajes con terceros no registran gastos de viaje.")
 
         if errors:
             for e in errors:
@@ -838,8 +866,11 @@ def whatsapp_draft_image(draft_id):
 
 def _whatsapp_review_context(draft):
     concepts = _expense_concepts(exclude_vale=True)
+    # 4 sep: mismo criterio que _expense_form_context() — un gasto no puede
+    # asociarse a un viaje con terceros.
     trips = query_all(
-        "SELECT id, code, vehicle_id FROM trips WHERE status != 'CANCELADO' ORDER BY scheduled_date DESC"
+        "SELECT id, code, vehicle_id FROM trips WHERE status != 'CANCELADO' AND ownership != 'TERCERO' "
+        "ORDER BY scheduled_date DESC"
     )
     return {
         "draft": draft,
@@ -881,6 +912,11 @@ def whatsapp_review(draft_id):
             errors.append("El monto debe ser mayor a cero.")
         if not trip_id and not vehicle_id:
             errors.append("Asocia el gasto a un viaje o a una unidad.")
+        # 4 sep, pedido de Braulio: ver el mismo chequeo en new_expense().
+        if trip_id:
+            trip_for_expense = query_one("SELECT ownership FROM trips WHERE id = ?", (trip_id,))
+            if trip_for_expense and trip_for_expense["ownership"] == "TERCERO":
+                errors.append("Los viajes con terceros no registran gastos de viaje.")
 
         if errors:
             for e in errors:

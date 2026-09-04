@@ -59,6 +59,14 @@ def new(trip_id=None):
         )
         if trip is None:
             abort(404)
+        # 4 sep, pedido de Braulio: "los viajes con terceros no deben
+        # registrar liquidación, por lo tanto no tienen anticipo de
+        # viáticos, inspección ni gastos de viaje" — la unidad de un viaje
+        # con terceros ni siquiera es de Flota (third_party_unit es texto
+        # libre), así que no hay a qué unidad asociar el checklist.
+        if trip["ownership"] == "TERCERO":
+            flash("Los viajes con terceros no registran inspección.", "error")
+            return redirect(url_for("viajes.detail", trip_id=trip_id))
 
     vehicles = query_all("SELECT id, plate, vehicle_type FROM vehicles ORDER BY plate")
     drivers = query_all("SELECT id, name FROM drivers WHERE status = 'ACTIVO' ORDER BY name")

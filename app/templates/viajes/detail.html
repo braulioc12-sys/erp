@@ -72,6 +72,10 @@
   {% if can(current_user.roles, 'guias', 'edit') and trip.status in ('EN_CURSO', 'ENTREGADO') %}
   <a href="{{ url_for('guias.new', trip_id=trip.id) }}" class="btn btn-secondary btn-sm">📄 Generar guía de remisión (SUNAT)</a>
   {% endif %}
+  {# 4 sep, pedido de Braulio: los viajes con terceros no registran
+     liquidación — sin inspección, sin anticipo de viáticos ni gastos de
+     viaje (el costo es el flete acordado). #}
+  {% if trip.ownership != 'TERCERO' %}
   {% if can(current_user.roles, 'inspecciones', 'edit') %}
   <a href="{{ url_for('inspecciones.new', trip_id=trip.id) }}" class="btn btn-secondary btn-sm">✅ Registrar inspección</a>
   {% endif %}
@@ -82,7 +86,11 @@
     <a href="{{ url_for('liquidaciones.new_advance', trip_id=trip.id) }}" class="btn btn-secondary btn-sm">💵 Confirmar anticipo de viáticos</a>
     {% endif %}
   {% endif %}
+  {% endif %}
 </div>
+{% if trip.ownership == 'TERCERO' %}
+<p class="muted" style="margin-top:-8px; margin-bottom:16px;">Los viajes con terceros no registran liquidación (sin anticipo de viáticos, gastos de viaje ni inspección) — el costo de este viaje es el flete acordado.</p>
+{% endif %}
 
 {% if trip.notes %}
 <div class="panel"><h2>Notas</h2><p class="mt-0">{{ trip.notes }}</p></div>
@@ -148,6 +156,7 @@
   {% endif %}
 </div>
 
+{% if trip.ownership != 'TERCERO' %}
 <div class="panel">
   <h2>Gastos asociados a este viaje ({{ total_expenses|money }})</h2>
   <div class="table-wrap">
@@ -171,4 +180,5 @@
   <p style="margin-top:12px;"><a href="{{ url_for('liquidaciones.new_expense', trip_id=trip.id) }}" class="btn btn-secondary btn-sm">+ Registrar gasto para este viaje</a></p>
   {% endif %}
 </div>
+{% endif %}
 {% endblock %}
