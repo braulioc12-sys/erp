@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Viajes con terceros{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Viajes / Órdenes de servicio — Terceros</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('viajes.list_view') }}" class="btn btn-secondary">← Viajes con unidad propia</a>
+    {% if can(current_user.roles, 'viajes', 'edit') %}
+    <a href="{{ url_for('viajes.new') }}" class="btn btn-primary">+ Nuevo viaje</a>
+    {% endif %}
+  </div>
+</div>
+
+<form class="filters" method="get">
+  <label>Estado
+    <select name="status">
+      <option value="">Todos</option>
+      {% for s in ['PENDIENTE', 'EN_CURSO', 'ENTREGADO', 'CANCELADO'] %}
+      <option value="{{ s }}" {{ 'selected' if status == s }}>{{ s.replace('_',' ').title() }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Buscar
+    <input type="text" name="q" value="{{ q }}" placeholder="Código, cliente, tercero, ruta">
+  </label>
+  <button class="btn btn-secondary" type="submit">Filtrar</button>
+</form>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Código</th><th>Fecha de viaje</th><th>Cliente</th><th>Tercero</th><th>Estado</th><th>Periodo de pago</th><th>Flete acordado</th><th>Cancelado</th></tr>
+    </thead>
+    <tbody>
+      {% for t in trips %}
+      <tr onclick="window.location='{{ url_for('viajes.detail', trip_id=t.id) }}'" style="cursor:pointer;">
+        <td><a href="{{ url_for('viajes.detail', trip_id=t.id) }}">{{ t.code }}</a></td>
+        <td>{{ t.scheduled_date }}</td>
+        <td>{{ t.client_name }}</td>
+        <td>{{ t.third_party_name or '—' }}</td>
+        <td>{{ m.badge(t.status) }}</td>
+        <td>{{ payment_term_labels.get(t.third_party_payment_term, '—') }}</td>
+        <td>{{ t.third_party_rate|money if t.third_party_rate is not none else '—' }}</td>
+        <td>{{ 'Sí' if t.status == 'CANCELADO' else 'No' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="table-empty">No se encontraron viajes con terceros.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
