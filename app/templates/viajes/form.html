@@ -29,11 +29,15 @@
   <p class="flash flash-error">Todavía no hay rutas activas en el catálogo. <a href="{{ url_for('rutas.list_view') }}" target="_blank">Agrega una ruta en Rutas</a> y vuelve a esta pantalla para poder elegirla aquí.</p>
   {% endif %}
 
+  {% set current_issuer = trip.issuer if trip else (preset_issuer or 'HARRASO') %}
+  {% set current_ownership = trip.ownership if trip else (preset_ownership or 'PROPIA') %}
+
+  {% if mode == 'edit' %}
   <div class="form-row">
     <label>Empresa que opera el viaje *
       <select name="issuer" required>
-        <option value="HARRASO" {{ 'selected' if (trip.issuer if trip else 'HARRASO') == 'HARRASO' }}>Harraso Transport</option>
-        <option value="BRMS" {{ 'selected' if trip and trip.issuer == 'BRMS' }}>BRMS</option>
+        <option value="HARRASO" {{ 'selected' if current_issuer == 'HARRASO' }}>Harraso Transport</option>
+        <option value="BRMS" {{ 'selected' if current_issuer == 'BRMS' }}>BRMS</option>
       </select>
     </label>
     <label>Tipo de carga *
@@ -49,11 +53,11 @@
   <label>Unidad *</label>
   <div style="display:flex; flex-wrap:wrap; gap:8px 20px; margin:-8px 0 16px;">
     <label style="flex-direction: row; align-items: center; gap: 8px; width:auto;">
-      <input type="radio" name="ownership" id="trip-ownership-propia" value="PROPIA" {{ 'checked' if not trip or trip.ownership != 'TERCERO' }} style="width:auto;">
+      <input type="radio" name="ownership" id="trip-ownership-propia" value="PROPIA" {{ 'checked' if current_ownership != 'TERCERO' }} style="width:auto;">
       Unidad propia
     </label>
     <label style="flex-direction: row; align-items: center; gap: 8px; width:auto;">
-      <input type="radio" name="ownership" id="trip-ownership-tercero" value="TERCERO" {{ 'checked' if trip and trip.ownership == 'TERCERO' }} style="width:auto;">
+      <input type="radio" name="ownership" id="trip-ownership-tercero" value="TERCERO" {{ 'checked' if current_ownership == 'TERCERO' }} style="width:auto;">
       Tercero (subcontratado)
     </label>
   </div>
@@ -105,6 +109,76 @@
       </label>
     </div>
   </div>
+
+  {% else %}
+  {# mode == 'new': empresa/unidad ya se eligieron en el paso 1
+     (viajes/new_step1.html) — acá quedan fijas, con un link para volver a
+     ese paso y cambiarlas si hace falta. Solo se renderiza el bloque de
+     campos que corresponde (propia o tercero), así que no hace falta JS
+     para mostrar/ocultar ni para marcar "required" según el caso. #}
+  <input type="hidden" name="issuer" value="{{ current_issuer }}">
+  <input type="hidden" name="ownership" value="{{ current_ownership }}">
+  <p class="muted" style="margin-top:-4px;">
+    Empresa: <strong>{{ 'BRMS' if current_issuer == 'BRMS' else 'Harraso Transport' }}</strong>
+    · Unidad: <strong>{{ 'Tercero (subcontratado)' if current_ownership == 'TERCERO' else 'Propia' }}</strong>
+    — <a href="{{ url_for('viajes.new', issuer=current_issuer, ownership=current_ownership) }}">Cambiar</a>
+  </p>
+
+  <label>Tipo de carga *
+    <select name="cargo_type" required>
+      <option value="">-- Selecciona --</option>
+      {% for value, label in cargo_types %}
+      <option value="{{ value }}" {{ 'selected' if trip and trip.cargo_type == value }}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  {% if current_ownership == 'TERCERO' %}
+  <div class="form-row">
+    <label>Empresa/tercero *
+      <input type="text" name="third_party_name" value="{{ trip.third_party_name if trip else '' }}" required>
+    </label>
+    <label>Unidad del tercero (placa/descripción)
+      <input type="text" name="third_party_unit" value="{{ trip.third_party_unit if trip else '' }}">
+    </label>
+  </div>
+  <div class="form-row">
+    <label>Flete acordado (S/) *
+      <input type="number" step="0.01" name="third_party_rate" value="{{ trip.third_party_rate if trip and trip.third_party_rate is not none else '' }}" required>
+    </label>
+    <label>Periodo de pago *
+      <select name="third_party_payment_term" required>
+        <option value="">-- Selecciona --</option>
+        {% for value, label in payment_terms %}
+        <option value="{{ value }}" {{ 'selected' if trip and trip.third_party_payment_term == value }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+  {% else %}
+  <div class="form-row">
+    <label>Unidad tracto *
+      <select name="vehicle_id" required>
+        <option value="">-- Selecciona --</option>
+        {% for v in vehicles %}
+        <option value="{{ v.id }}" {{ 'selected' if trip and (trip.vehicle_id|string) == (v.id|string) }}>{{ v.plate }} ({{ v.brand or '' }} {{ v.model or '' }})</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Carreta *
+      <select name="trailer_vehicle_id" required>
+        <option value="">-- Selecciona --</option>
+        {% for v in trailers %}
+        <option value="{{ v.id }}" {{ 'selected' if trip and (trip.trailer_vehicle_id|string) == (v.id|string) }}>{{ v.plate }} ({{ v.brand or '' }} {{ v.model or '' }})</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+  {% if not trailers %}
+  <p class="flash flash-error" style="margin-top:-8px;">No hay carretas activas registradas en Flota. <a href="{{ url_for('flota.new_vehicle') }}" target="_blank">Registra una unidad de tipo Carreta</a> y vuelve a esta pantalla.</p>
+  {% endif %}
+  {% endif %}
+  {% endif %}
 
   <label>Conductor asignado
     <select name="driver_id">
@@ -221,30 +295,35 @@
     // bloque de campos que corresponde, y marca "required" solo en los
     // campos visibles — un campo "required" oculto bloquearía el envío del
     // formulario en la mayoría de navegadores.
+    // Solo existe en modo "editar" — en modo "nuevo" (4 sep) la empresa y la
+    // unidad ya se eligieron en el paso 1 y quedan fijas, así que estos
+    // elementos no están en el DOM (ver form.html, bloque `mode == 'new'`).
     var propiaRadio = document.getElementById('trip-ownership-propia');
     var terceroRadio = document.getElementById('trip-ownership-tercero');
-    var propiaFields = document.getElementById('trip-propia-fields');
-    var terceroFields = document.getElementById('trip-tercero-fields');
-    var vehicleSelect = document.getElementById('trip-vehicle');
-    var trailerSelect = document.getElementById('trip-trailer');
-    var thirdPartyName = document.getElementById('trip-third-party-name');
-    var thirdPartyRate = document.getElementById('trip-third-party-rate');
-    var thirdPartyTerm = document.getElementById('trip-third-party-term');
+    if (propiaRadio && terceroRadio) {
+      var propiaFields = document.getElementById('trip-propia-fields');
+      var terceroFields = document.getElementById('trip-tercero-fields');
+      var vehicleSelect = document.getElementById('trip-vehicle');
+      var trailerSelect = document.getElementById('trip-trailer');
+      var thirdPartyName = document.getElementById('trip-third-party-name');
+      var thirdPartyRate = document.getElementById('trip-third-party-rate');
+      var thirdPartyTerm = document.getElementById('trip-third-party-term');
 
-    function toggleOwnership() {
-      var isTercero = terceroRadio.checked;
-      propiaFields.style.display = isTercero ? 'none' : '';
-      terceroFields.style.display = isTercero ? '' : 'none';
-      vehicleSelect.required = !isTercero;
-      trailerSelect.required = !isTercero;
-      thirdPartyName.required = isTercero;
-      thirdPartyRate.required = isTercero;
-      thirdPartyTerm.required = isTercero;
+      var toggleOwnership = function () {
+        var isTercero = terceroRadio.checked;
+        propiaFields.style.display = isTercero ? 'none' : '';
+        terceroFields.style.display = isTercero ? '' : 'none';
+        vehicleSelect.required = !isTercero;
+        trailerSelect.required = !isTercero;
+        thirdPartyName.required = isTercero;
+        thirdPartyRate.required = isTercero;
+        thirdPartyTerm.required = isTercero;
+      };
+
+      propiaRadio.addEventListener('change', toggleOwnership);
+      terceroRadio.addEventListener('change', toggleOwnership);
+      toggleOwnership();
     }
-
-    propiaRadio.addEventListener('change', toggleOwnership);
-    terceroRadio.addEventListener('change', toggleOwnership);
-    toggleOwnership();
   })();
 </script>
 {% endblock %}

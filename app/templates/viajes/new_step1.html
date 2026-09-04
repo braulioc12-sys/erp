@@ -1,0 +1,32 @@
+{% extends 'base.html' %}
+{% block title %}Nuevo viaje{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Nuevo viaje</h1></div>
+<form class="form panel" method="get" action="{{ url_for('viajes.new') }}" style="max-width:520px;">
+  <input type="hidden" name="step" value="2">
+
+  <label>Empresa que opera el viaje *
+    <select name="issuer" required>
+      <option value="HARRASO" {{ 'selected' if request.args.get('issuer', 'HARRASO') == 'HARRASO' }}>Harraso Transport</option>
+      <option value="BRMS" {{ 'selected' if request.args.get('issuer') == 'BRMS' }}>BRMS</option>
+    </select>
+  </label>
+
+  <label>Unidad *</label>
+  <div style="display:flex; flex-wrap:wrap; gap:8px 20px; margin:-8px 0 16px;">
+    <label style="flex-direction: row; align-items: center; gap: 8px; width:auto;">
+      <input type="radio" name="ownership" value="PROPIA" {{ 'checked' if request.args.get('ownership', 'PROPIA') != 'TERCERO' }} style="width:auto;">
+      Unidad propia
+    </label>
+    <label style="flex-direction: row; align-items: center; gap: 8px; width:auto;">
+      <input type="radio" name="ownership" value="TERCERO" {{ 'checked' if request.args.get('ownership') == 'TERCERO' }} style="width:auto;">
+      Tercero (subcontratado)
+    </label>
+  </div>
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Continuar</button>
+    <a href="{{ url_for('viajes.list_view') }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+{% endblock %}

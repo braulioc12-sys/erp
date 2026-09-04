@@ -187,6 +187,12 @@ CREATE TABLE IF NOT EXISTS trips (
     -- los comprobantes de Liquidaciones, ver app/storage.py).
     carrier_waybill_number TEXT,
     carrier_waybill_filename TEXT,
+    -- Conformidad de entrega (4 sep, pedido de Braulio): foto o PDF del
+    -- comprobante de entrega firmado, adjuntado mientras el viaje está
+    -- EN_CURSO. Adjuntarla es lo que marca el viaje como ENTREGADO (ver
+    -- save_delivery_proof() en app/routes/viajes.py) — no hay forma de
+    -- llegar a ENTREGADO sin este archivo.
+    delivery_proof_filename TEXT,
     -- Pagado: si el cliente ya pagó este viaje. Independiente de "invoiced"
     -- (si ya se facturó) — ambos se pueden marcar/desmarcar a mano desde el
     -- detalle del viaje, además de que "invoiced" se sigue marcando solo al

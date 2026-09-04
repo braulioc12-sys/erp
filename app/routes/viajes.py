@@ -54,11 +54,12 @@ PAYMENT_TERMS = [
     ("60_DIAS", "60 días"),
 ]
 
-# Guía de transportista adjunta a un viaje (3 sep) — mismo criterio de
-# formatos permitidos que los comprobantes de Liquidaciones (ver
-# ALLOWED_RECEIPT_EXTENSIONS en app/routes/liquidaciones.py): foto o PDF.
-ALLOWED_WAYBILL_EXTENSIONS = {".png", ".jpg", ".jpeg", ".pdf", ".webp", ".heic", ".heif"}
-WAYBILL_MIME_TO_EXTENSION = {
+# Archivos adjuntos a un viaje — guía de transportista (3 sep) y, desde el
+# 4 sep, conformidad de entrega: mismo criterio de formatos permitidos que
+# los comprobantes de Liquidaciones (ver ALLOWED_RECEIPT_EXTENSIONS en
+# app/routes/liquidaciones.py): foto o PDF.
+ALLOWED_ATTACHMENT_EXTENSIONS = {".png", ".jpg", ".jpeg", ".pdf", ".webp", ".heic", ".heif"}
+ATTACHMENT_MIME_TO_EXTENSION = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
     "image/webp": ".webp",
@@ -298,6 +299,17 @@ def _ownership_and_third_party_fields(form):
 @bp.route("/nuevo", methods=["GET", "POST"])
 @permission_required("viajes", "edit")
 def new():
+    # 4 sep, pedido de Braulio: "la primera pantalla" al crear un viaje es
+    # elegir Harraso/BRMS y unidad propia (default) o tercera — recién con
+    # eso elegido se muestra el resto del formulario. `step=2` en la query
+    # string es la señal de que el paso 1 ya se completó (viene del propio
+    # <form method="get"> de new_step1.html); sin eso, siempre se muestra el
+    # paso 1, incluso en un POST fallido no debería ocurrir porque el POST
+    # real llega desde el formulario del paso 2, que ya lo incluye como
+    # campos ocultos, no como este parámetro de navegación.
+    if request.method == "GET" and request.args.get("step") != "2":
+        return render_template("viajes/new_step1.html")
+
     clients = query_all("SELECT * FROM clients WHERE active = 1 ORDER BY name")
     vehicles = _active_vehicles()
     trailers = _active_trailers()
@@ -383,10 +395,14 @@ def new():
         flash(f"Viaje {code} creado.", "success")
         return redirect(url_for("viajes.detail", trip_id=trip_id))
 
+    # Llega desde el paso 1 (empresa/unidad ya elegidos en la query string) —
+    # se preseleccionan en el paso 2 y quedan fijos para esta creación (ver
+    # viajes/form.html, bloque `mode == 'new'`).
     return render_template(
         "viajes/form.html", trip=None, mode="new",
         clients=clients, vehicles=vehicles, trailers=trailers, drivers=drivers, routes=routes, today=today_str(),
         selected_route_id="", cargo_types=CARGO_TYPES, payment_terms=PAYMENT_TERMS,
+        preset_issuer=_parse_issuer(request.args), preset_ownership=_parse_ownership(request.args),
     )
 
 
@@ -528,6 +544,14 @@ def change_status(trip_id):
         return redirect(url_for("viajes.detail", trip_id=trip_id))
 
     if new_status == "ENTREGADO":
+        # 4 sep, pedido de Braulio: adjuntar la conformidad de entrega es lo
+        # que habilita marcar el viaje como Entregado — este chequeo evita
+        # llegar a ENTREGADO sin ese archivo, sin importar por dónde se
+        # mande el POST (el flujo normal es save_delivery_proof(), que
+        # adjunta el archivo y hace esta misma transición en un solo paso).
+        if not trip["delivery_proof_filename"]:
+            flash("Antes de marcar el viaje como Entregado, adjunta la conformidad de entrega.", "error")
+            return redirect(url_for("viajes.detail", trip_id=trip_id))
         # 31 ago: además de la fecha (ya existía), se guarda el momento
         # exacto de inicio/fin real del viaje — es lo que necesita el futuro
         # reporte de cumplimiento de hoja de ruta para saber qué tramo del
@@ -558,16 +582,18 @@ def change_status(trip_id):
 # comprobantes de Liquidaciones y las fotos de Conductores (ver
 # app/storage.py).
 
-def _save_waybill_file(file_storage):
-    """Guarda el archivo de la guía de transportista (foto o PDF) y
-    devuelve el nombre guardado, o None si no se subió nada válido. Las
+def _save_binary_attachment(file_storage, save_fn):
+    """Guarda un archivo adjunto (foto o PDF) usando `save_fn(filename,
+    raw_bytes)` y devuelve el nombre guardado, o None si no se subió nada
+    válido. Mismo patrón para la guía de transportista y la conformidad de
+    entrega: detecta la extensión real (por nombre o por mimetype), las
     fotos se recomprimen (mismo criterio que comprobantes/fotos de
-    conductores); los PDF se guardan tal cual."""
+    conductores), los PDF se guardan tal cual."""
     if not file_storage or not file_storage.filename:
         return None
     ext = os.path.splitext(file_storage.filename)[1].lower()
-    if ext not in ALLOWED_WAYBILL_EXTENSIONS:
-        ext = WAYBILL_MIME_TO_EXTENSION.get((file_storage.mimetype or "").lower())
+    if ext not in ALLOWED_ATTACHMENT_EXTENSIONS:
+        ext = ATTACHMENT_MIME_TO_EXTENSION.get((file_storage.mimetype or "").lower())
     if not ext:
         return None
     raw_bytes = file_storage.read()
@@ -575,16 +601,24 @@ def _save_waybill_file(file_storage):
         return None
     if ext == ".pdf":
         filename = f"{uuid.uuid4().hex}.pdf"
-        storage.save_carrier_waybill(filename, raw_bytes)
+        save_fn(filename, raw_bytes)
         return filename
     compressed = compress_photo(raw_bytes)
     if compressed is not None:
         filename = f"{uuid.uuid4().hex}.jpg"
-        storage.save_carrier_waybill(filename, compressed)
+        save_fn(filename, compressed)
         return filename
     filename = f"{uuid.uuid4().hex}{ext}"
-    storage.save_carrier_waybill(filename, raw_bytes)
+    save_fn(filename, raw_bytes)
     return filename
+
+
+def _save_waybill_file(file_storage):
+    return _save_binary_attachment(file_storage, storage.save_carrier_waybill)
+
+
+def _save_delivery_proof_file(file_storage):
+    return _save_binary_attachment(file_storage, storage.save_delivery_proof)
 
 
 @bp.route("/<int:trip_id>/guia", methods=["POST"])
@@ -615,6 +649,49 @@ def waybill_file(trip_id):
     if storage.using_s3():
         return redirect(storage.carrier_waybill_url(trip["carrier_waybill_filename"]))
     return send_from_directory(storage.local_carrier_waybills_dir(), trip["carrier_waybill_filename"])
+
+
+# --- Conformidad de entrega (4 sep, pedido de Braulio) ---------------------
+#
+# "cuando el viaje esté en curso, haya la opción de adjuntar conformidad de
+# entrega para poder marcarlo como entregado" — a diferencia de la guía de
+# transportista (que solo se guarda), adjuntar este archivo y marcar el
+# viaje como ENTREGADO es UNA sola acción: no existe otra forma de llegar a
+# ENTREGADO (ver el chequeo agregado en change_status()).
+
+@bp.route("/<int:trip_id>/conformidad", methods=["POST"])
+@permission_required("viajes", "edit")
+def save_delivery_proof(trip_id):
+    if not validate_csrf():
+        abort(400)
+    trip = query_one("SELECT status, delivery_proof_filename FROM trips WHERE id = ?", (trip_id,))
+    if trip is None:
+        abort(404)
+    if trip["status"] != "EN_CURSO":
+        flash("Solo se puede adjuntar la conformidad de entrega mientras el viaje está en curso.", "error")
+        return redirect(url_for("viajes.detail", trip_id=trip_id))
+    new_filename = _save_delivery_proof_file(request.files.get("delivery_proof_file"))
+    filename = new_filename if new_filename else trip["delivery_proof_filename"]
+    if not filename:
+        flash("Adjunta una foto o PDF de la conformidad de entrega.", "error")
+        return redirect(url_for("viajes.detail", trip_id=trip_id))
+    execute(
+        "UPDATE trips SET delivery_proof_filename=?, status=?, delivered_date=?, actual_end_at=? WHERE id=?",
+        (filename, "ENTREGADO", today_str(), now_str(), trip_id),
+    )
+    flash("Conformidad de entrega adjuntada — viaje marcado como Entregado.", "success")
+    return redirect(url_for("viajes.detail", trip_id=trip_id))
+
+
+@bp.route("/<int:trip_id>/conformidad/archivo")
+@permission_required("viajes", "view")
+def delivery_proof_file(trip_id):
+    trip = query_one("SELECT delivery_proof_filename FROM trips WHERE id = ?", (trip_id,))
+    if trip is None or not trip["delivery_proof_filename"]:
+        abort(404)
+    if storage.using_s3():
+        return redirect(storage.delivery_proof_url(trip["delivery_proof_filename"]))
+    return send_from_directory(storage.local_delivery_proofs_dir(), trip["delivery_proof_filename"])
 
 
 # --- Facturado / Pagado (3 sep, pedido de Braulio) -------------------------

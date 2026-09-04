@@ -10,6 +10,11 @@
       <a href="{{ url_for('viajes.edit', trip_id=trip.id) }}" class="btn btn-secondary">Editar</a>
       {% endif %}
       {% for s in next_statuses %}
+      {# 4 sep: "Entregado" ya no se marca con este botón genérico — hay
+         que adjuntar la conformidad de entrega primero (ver el panel
+         "Conformidad de entrega" más abajo, visible mientras el viaje está
+         en curso), que hace la transición como parte de esa misma acción. #}
+      {% if s != 'ENTREGADO' %}
       <form method="post" action="{{ url_for('viajes.change_status', trip_id=trip.id) }}" style="display:inline;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="status" value="{{ s }}">
@@ -17,6 +22,7 @@
           Marcar {{ s.replace('_', ' ').title() }}
         </button>
       </form>
+      {% endif %}
       {% endfor %}
     {% endif %}
   </div>
@@ -80,6 +86,34 @@
 
 {% if trip.notes %}
 <div class="panel"><h2>Notas</h2><p class="mt-0">{{ trip.notes }}</p></div>
+{% endif %}
+
+{% if trip.status == 'EN_CURSO' or trip.delivery_proof_filename %}
+<div class="panel">
+  <h2>Conformidad de entrega</h2>
+  <div class="detail-grid" style="margin-bottom:12px;">
+    <div class="detail-item">
+      <div class="label">Archivo</div>
+      <div class="value">
+        {% if trip.delivery_proof_filename %}
+        <a href="{{ url_for('viajes.delivery_proof_file', trip_id=trip.id) }}" target="_blank">Ver conformidad adjunta</a>
+        {% else %}— (todavía no se adjunta){% endif %}
+      </div>
+    </div>
+  </div>
+  {% if trip.status == 'EN_CURSO' and can(current_user.roles, 'viajes', 'edit') %}
+  <p class="muted mt-0">Adjunta la foto o el PDF de la conformidad de entrega firmada para poder marcar el viaje como Entregado.</p>
+  <form method="post" action="{{ url_for('viajes.save_delivery_proof', trip_id=trip.id) }}" enctype="multipart/form-data" class="form" style="max-width:520px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Archivo (foto o PDF) *
+      <input type="file" name="delivery_proof_file" accept=".png,.jpg,.jpeg,.pdf,.webp,.heic,.heif" required>
+    </label>
+    <div class="btn-group">
+      <button type="submit" class="btn btn-primary btn-sm">Adjuntar y marcar como Entregado</button>
+    </div>
+  </form>
+  {% endif %}
+</div>
 {% endif %}
 
 <div class="panel">

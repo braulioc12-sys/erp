@@ -55,6 +55,12 @@ def local_carrier_waybills_dir():
     return _local_dir("carrier_waybills")
 
 
+def local_delivery_proofs_dir():
+    """Igual que local_carrier_waybills_dir() pero para la conformidad de
+    entrega adjunta a un viaje (4 sep) — carpeta separada en disco."""
+    return _local_dir("delivery_proofs")
+
+
 def _s3_bucket():
     return current_app.config["AWS_S3_BUCKET"]
 
@@ -72,6 +78,10 @@ def _s3_photos_prefix():
 
 def _s3_carrier_waybills_prefix():
     return (current_app.config.get("AWS_S3_CARRIER_WAYBILLS_PREFIX") or "guias-transportista").strip("/")
+
+
+def _s3_delivery_proofs_prefix():
+    return (current_app.config.get("AWS_S3_DELIVERY_PROOFS_PREFIX") or "conformidad-entrega").strip("/")
 
 
 def _s3_key(filename, prefix):
@@ -205,3 +215,20 @@ def carrier_waybill_url(filename):
     transportista guardada en S3. En disco local, usar
     local_carrier_waybills_dir() + send_from_directory."""
     return _presigned_url(_s3_carrier_waybills_prefix(), filename)
+
+
+def save_delivery_proof(filename, raw_bytes):
+    """Igual que save_carrier_waybill(), pero para la conformidad de entrega
+    adjunta a un viaje (4 sep) — carpeta/prefijo separado."""
+    if using_s3():
+        _put_object(_s3_delivery_proofs_prefix(), filename, raw_bytes)
+    else:
+        with open(os.path.join(local_delivery_proofs_dir(), filename), "wb") as f:
+            f.write(raw_bytes)
+
+
+def delivery_proof_url(filename):
+    """Igual que carrier_waybill_url(), pero para una conformidad de entrega
+    guardada en S3. En disco local, usar local_delivery_proofs_dir() +
+    send_from_directory."""
+    return _presigned_url(_s3_delivery_proofs_prefix(), filename)
