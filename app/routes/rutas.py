@@ -33,6 +33,7 @@ def add():
     destination = request.form.get("destination", "").strip()
     amount = parse_float(request.form.get("default_expense_amount"), 0)
     commission = parse_float(request.form.get("default_commission_amount"), 0)
+    fuel = parse_float(request.form.get("default_fuel_amount"), 0)
     if not origin or not destination:
         flash("Indica origen y destino.", "error")
         return redirect(url_for("rutas.list_view"))
@@ -40,14 +41,14 @@ def add():
     existing = query_one("SELECT id FROM routes WHERE origin = ? AND destination = ?", (origin, destination))
     if existing:
         execute(
-            "UPDATE routes SET default_expense_amount = ?, default_commission_amount = ?, active = 1 WHERE id = ?",
-            (amount, commission, existing["id"]),
+            "UPDATE routes SET default_expense_amount = ?, default_commission_amount = ?, default_fuel_amount = ?, active = 1 WHERE id = ?",
+            (amount, commission, fuel, existing["id"]),
         )
         flash("Ruta actualizada.", "success")
     else:
         execute(
-            "INSERT INTO routes (origin, destination, default_expense_amount, default_commission_amount) VALUES (?, ?, ?, ?)",
-            (origin, destination, amount, commission),
+            "INSERT INTO routes (origin, destination, default_expense_amount, default_commission_amount, default_fuel_amount) VALUES (?, ?, ?, ?, ?)",
+            (origin, destination, amount, commission, fuel),
         )
         flash("Ruta agregada.", "success")
     return redirect(url_for("rutas.list_view"))
@@ -102,17 +103,18 @@ def _apply_route_import(rows, example_skips):
         seen.add(key)
         amount = row.get("default_expense_amount") or 0
         commission = row.get("default_commission_amount") or 0
+        fuel = row.get("default_fuel_amount") or 0
         existing = query_one("SELECT id FROM routes WHERE origin = ? AND destination = ?", (origin, destination))
         if existing:
             execute(
-                "UPDATE routes SET default_expense_amount = ?, default_commission_amount = ?, active = 1 WHERE id = ?",
-                (amount, commission, existing["id"]),
+                "UPDATE routes SET default_expense_amount = ?, default_commission_amount = ?, default_fuel_amount = ?, active = 1 WHERE id = ?",
+                (amount, commission, fuel, existing["id"]),
             )
             updated += 1
         else:
             execute(
-                "INSERT INTO routes (origin, destination, default_expense_amount, default_commission_amount) VALUES (?, ?, ?, ?)",
-                (origin, destination, amount, commission),
+                "INSERT INTO routes (origin, destination, default_expense_amount, default_commission_amount, default_fuel_amount) VALUES (?, ?, ?, ?, ?)",
+                (origin, destination, amount, commission, fuel),
             )
             created += 1
     return {"created": created, "updated": updated, "skipped": skipped, "errors": errors}

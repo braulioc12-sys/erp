@@ -631,6 +631,12 @@ CREATE TABLE IF NOT EXISTS routes (
     destination TEXT NOT NULL,
     default_expense_amount REAL NOT NULL DEFAULT 0,
     default_commission_amount REAL NOT NULL DEFAULT 0,
+    -- 4 sep, pedido de Braulio: "tabla de consumo de combustible" por
+    -- ruta (en galones) — se muestra como referencia al liquidar el
+    -- anticipo de viáticos de un viaje en esa ruta, para compararla contra
+    -- el combustible real que registre el liquidador (ver
+    -- expense_advances.fuel_actual / fuel_excess / fuel_notes abajo).
+    default_fuel_amount REAL NOT NULL DEFAULT 0,
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(origin, destination)
@@ -656,6 +662,16 @@ CREATE TABLE IF NOT EXISTS expense_advances (
     office TEXT,
     voucher_number INTEGER,
     notes TEXT,
+    -- 4 sep, pedido de Braulio: consumo de combustible de este viaje,
+    -- comparado contra la tabla de consumo estimado de la ruta
+    -- (routes.default_fuel_amount). fuel_actual es lo que registra el
+    -- liquidador; fuel_excess es un campo aparte para digitar el exceso
+    -- (no se recalcula solo — el liquidador lo confirma/ajusta), y
+    -- fuel_notes son las observaciones para justificarlo. Los tres NULL
+    -- hasta que se registre combustible para esta liquidación.
+    fuel_actual REAL,
+    fuel_excess REAL,
+    fuel_notes TEXT,
     created_by INTEGER REFERENCES users(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

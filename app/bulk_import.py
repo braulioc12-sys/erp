@@ -451,6 +451,7 @@ ROUTE_COLUMNS = [
                  note="La combinación Origen + Destino debe ser única; si ya existe, se actualizan sus montos."),
     ImportColumn("default_expense_amount", "Viáticos (S/)", kind="float", width=16),
     ImportColumn("default_commission_amount", "Comisión conductor (S/)", kind="float", width=22),
+    ImportColumn("default_fuel_amount", "Combustible estimado (gal)", kind="float", width=22),
 ]
 
 ROUTE_EXAMPLE = {
@@ -458,6 +459,7 @@ ROUTE_EXAMPLE = {
     "destination": "Trujillo (ejemplo)",
     "default_expense_amount": 350,
     "default_commission_amount": 80,
+    "default_fuel_amount": 45,
 }
 
 # 3 sep, pedido de Braulio: carga masiva del último cambio de aceite por

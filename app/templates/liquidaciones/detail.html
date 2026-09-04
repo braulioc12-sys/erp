@@ -63,6 +63,76 @@
   {% endif %}
 </div>
 
+{# 4 sep, pedido de Braulio: tabla de consumo de combustible de la ruta,
+   comparada contra el combustible real que registra el liquidador, con un
+   campo para digitar el exceso y observaciones para justificarlo. #}
+<div class="panel">
+  <h2>Consumo de combustible</h2>
+  {% if route %}
+  <p class="muted mt-0">Consumo estimado para esta ruta, según la <a href="{{ url_for('rutas.list_view') }}">tabla de consumo por ruta</a>: <strong>{{ '%.2f gal'|format(route.default_fuel_amount) }}</strong></p>
+  {% else %}
+  <p class="muted mt-0">Esta ruta todavía no está en la <a href="{{ url_for('rutas.list_view') }}">tabla de consumo por ruta</a>, así que no hay un estimado con qué comparar.</p>
+  {% endif %}
+
+  {% if advance.fuel_actual is not none or advance.fuel_excess is not none or advance.fuel_notes %}
+  <div class="detail-grid" style="margin-bottom:12px;">
+    <div class="detail-item"><div class="label">Combustible real</div><div class="value">{{ '%.2f gal'|format(advance.fuel_actual) if advance.fuel_actual is not none else '—' }}</div></div>
+    <div class="detail-item">
+      <div class="label">Exceso registrado</div>
+      <div class="value" style="{{ 'color:var(--danger);' if advance.fuel_excess }}">{{ '%.2f gal'|format(advance.fuel_excess) if advance.fuel_excess is not none else '—' }}</div>
+    </div>
+  </div>
+  {% if advance.fuel_notes %}
+  <p class="mt-0"><strong>Observaciones:</strong> {{ advance.fuel_notes }}</p>
+  {% endif %}
+  {% endif %}
+
+  {% if advance.status == 'PENDIENTE' and can(current_user.roles, 'liquidaciones', 'edit') %}
+  <form method="post" action="{{ url_for('liquidaciones.save_fuel', advance_id=advance.id) }}" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin-top:12px; padding:12px; background:var(--bg-soft,#f3f5f8); border-radius:8px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label style="margin:0;">Combustible real (gal)
+      <input type="number" step="0.01" min="0" name="fuel_actual" id="fuel-actual" value="{{ advance.fuel_actual if advance.fuel_actual is not none else '' }}">
+    </label>
+    <label style="margin:0;">Exceso (gal)
+      <input type="number" step="0.01" min="0" name="fuel_excess" id="fuel-excess" value="{{ advance.fuel_excess if advance.fuel_excess is not none else '' }}">
+    </label>
+    <label style="margin:0; flex:1; min-width:220px;">Observaciones (para justificar el exceso)
+      <input type="text" name="fuel_notes" placeholder="Ej. Desvío por bloqueo de vía" value="{{ advance.fuel_notes or '' }}">
+    </label>
+    <button type="submit" class="btn btn-secondary">Guardar combustible</button>
+  </form>
+  {% if route and route.default_fuel_amount %}
+  <p class="muted" id="fuel-diff-hint" style="margin-top:8px; min-height:1.2em;"></p>
+  <script>
+    (function () {
+      var expected = {{ route.default_fuel_amount }};
+      var actualInput = document.getElementById('fuel-actual');
+      var excessInput = document.getElementById('fuel-excess');
+      var hint = document.getElementById('fuel-diff-hint');
+      function update() {
+        var actual = parseFloat(actualInput.value);
+        if (isNaN(actual)) { hint.textContent = ''; return; }
+        var diff = actual - expected;
+        if (diff > 0.001) {
+          hint.textContent = 'Exceso sobre lo estimado: ' + diff.toFixed(2) + ' gal.';
+          hint.style.color = 'var(--danger)';
+          if (!excessInput.value) { excessInput.value = diff.toFixed(2); }
+        } else if (diff < -0.001) {
+          hint.textContent = 'Por debajo de lo estimado: ' + Math.abs(diff).toFixed(2) + ' gal.';
+          hint.style.color = 'var(--success)';
+        } else {
+          hint.textContent = 'Igual al consumo estimado.';
+          hint.style.color = '';
+        }
+      }
+      actualInput.addEventListener('input', update);
+      update();
+    })();
+  </script>
+  {% endif %}
+  {% endif %}
+</div>
+
 {% if advance.status == 'LIQUIDADO' %}
 <div class="panel">
   <h2>Liquidación cerrada</h2>

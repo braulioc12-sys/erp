@@ -9,7 +9,7 @@
     {% endif %}
   </div>
 </div>
-<p class="muted mt-0">Define aquí el monto estándar de viáticos y de comisión del conductor para cada ruta. Al confirmar el anticipo de gastos de un viaje se sugiere el monto de viáticos, y al registrar un viaje se sugiere la comisión — ambos según la ruta que coincida.</p>
+<p class="muted mt-0">Define aquí el monto estándar de viáticos, de comisión del conductor y el consumo de combustible estimado (tabla de consumo) para cada ruta. Al confirmar el anticipo de gastos de un viaje se sugiere el monto de viáticos, al registrar un viaje se sugiere la comisión, y al liquidar el viaje se muestra el combustible estimado para compararlo contra el real — todo según la ruta que coincida.</p>
 
 <div class="panel" style="max-width:760px;">
   {% if can(current_user.roles, 'rutas', 'edit') %}
@@ -27,13 +27,16 @@
     <label>Comisión conductor (S/)
       <input type="number" step="0.01" name="default_commission_amount" placeholder="Ej. 80" required>
     </label>
+    <label>Combustible estimado (gal)
+      <input type="number" step="0.01" name="default_fuel_amount" placeholder="Ej. 45">
+    </label>
     <button type="submit" class="btn btn-primary">+ Guardar ruta</button>
   </form>
   {% endif %}
 
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Origen</th><th>Destino</th><th class="text-right">Viáticos</th><th class="text-right">Comisión conductor</th><th>Estado</th><th></th></tr></thead>
+      <thead><tr><th>Origen</th><th>Destino</th><th class="text-right">Viáticos</th><th class="text-right">Comisión conductor</th><th class="text-right">Combustible estimado</th><th>Estado</th><th></th></tr></thead>
       <tbody>
         {% for r in routes %}
         <tr>
@@ -41,6 +44,7 @@
           <td>{{ r.destination }}</td>
           <td class="text-right">{{ r.default_expense_amount|money }}</td>
           <td class="text-right">{{ r.default_commission_amount|money }}</td>
+          <td class="text-right">{{ '%.2f gal'|format(r.default_fuel_amount) if r.default_fuel_amount else '—' }}</td>
           <td><span class="badge {{ 'badge-activo' if r.active else 'badge-inactivo' }}">{{ 'Activa' if r.active else 'Inactiva' }}</span></td>
           <td>
             {% if can(current_user.roles, 'rutas', 'edit') %}
@@ -52,7 +56,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="6" class="table-empty">No hay rutas registradas.</td></tr>
+        <tr><td colspan="7" class="table-empty">No hay rutas registradas.</td></tr>
         {% endfor %}
       </tbody>
     </table>

@@ -346,11 +346,54 @@ def detail(advance_id):
     spent = sum(e["amount"] for e in expenses)
     difference = advance["amount_given"] - spent
     offices = office_choices()
+    # 4 sep, pedido de Braulio: tabla de consumo de combustible de la ruta,
+    # para comparar contra el combustible real que registre el liquidador.
+    # route_id se fija al crear el anticipo (ver new_advance) — si por
+    # alguna razón no quedó fijado (o la ruta se agregó al catálogo
+    # después), se intenta encontrarla igual por origen/destino.
+    route = None
+    if advance["route_id"]:
+        route = query_one("SELECT * FROM routes WHERE id = ?", (advance["route_id"],))
+    if route is None:
+        route = find_route(advance["origin"], advance["destination"])
     return render_template(
         "liquidaciones/detail.html", advance=advance, expenses=expenses, spent=spent, difference=difference,
         payments=payments, offices=offices, office_labels={code: info["label"] for code, info in offices},
-        today=today_str(),
+        route=route, today=today_str(),
     )
+
+
+@bp.route("/<int:advance_id>/combustible", methods=["POST"])
+@permission_required("liquidaciones", "edit")
+def save_fuel(advance_id):
+    """4 sep, pedido de Braulio: registra el combustible real de este viaje
+    contra la tabla de consumo estimado de la ruta (routes.default_fuel_amount).
+    El "exceso" es un campo aparte para digitar — no se recalcula solo a
+    partir de la diferencia, el liquidador lo confirma/ajusta — con su
+    cuadro de observaciones al costado para justificarlo."""
+    if not validate_csrf():
+        abort(400)
+    advance = query_one("SELECT * FROM expense_advances WHERE id = ?", (advance_id,))
+    if advance is None:
+        abort(404)
+    if advance["status"] == "LIQUIDADO":
+        flash("Esta liquidación ya está cerrada — no se puede editar el combustible.", "error")
+        return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
+
+    fuel_actual = parse_float(request.form.get("fuel_actual"))
+    fuel_excess = parse_float(request.form.get("fuel_excess"))
+    fuel_notes = request.form.get("fuel_notes", "").strip()
+
+    if fuel_actual < 0 or fuel_excess < 0:
+        flash("El combustible real y el exceso no pueden ser negativos.", "error")
+        return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
+
+    execute(
+        "UPDATE expense_advances SET fuel_actual = ?, fuel_excess = ?, fuel_notes = ? WHERE id = ?",
+        (fuel_actual or None, fuel_excess or None, fuel_notes or None, advance_id),
+    )
+    flash("Combustible registrado.", "success")
+    return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
 
 
 def _next_voucher_number(office, month):

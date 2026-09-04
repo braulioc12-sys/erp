@@ -356,6 +356,13 @@ COLUMN_MIGRATIONS = [
     # mientras el viaje está EN_CURSO — adjuntarla es lo que marca el viaje
     # como ENTREGADO (ver save_delivery_proof() en app/routes/viajes.py).
     ("trips", "delivery_proof_filename", "TEXT"),
+    # 4 sep, pedido de Braulio: tabla de consumo de combustible por ruta
+    # (galones) y su comparación contra el combustible real al liquidar
+    # (ver app/routes/liquidaciones.py save_fuel() y detail.html).
+    ("routes", "default_fuel_amount", "REAL NOT NULL DEFAULT 0"),
+    ("expense_advances", "fuel_actual", "REAL"),
+    ("expense_advances", "fuel_excess", "REAL"),
+    ("expense_advances", "fuel_notes", "TEXT"),
 ]
 
 
