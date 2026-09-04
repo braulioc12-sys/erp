@@ -1,8 +1,24 @@
-from flask import Blueprint, Response, abort, flash, redirect, render_template, request, url_for
+import functools
+import os
+import uuid
 
-from app.auth import permission_required, validate_csrf
+from flask import (
+    Blueprint,
+    Response,
+    abort,
+    flash,
+    g,
+    redirect,
+    render_template,
+    request,
+    send_from_directory,
+    url_for,
+)
+
+from app import storage
+from app.auth import can, login_required, permission_required, validate_csrf
 from app.db import execute, query_all, query_one
-from app.helpers import next_code, now_str, parse_date, parse_float, today_str
+from app.helpers import compress_photo, next_code, now_str, parse_date, parse_float, today_str
 from app.routes.rutas import find_route
 
 bp = Blueprint("viajes", __name__, url_prefix="/viajes")
@@ -14,21 +30,103 @@ STATUS_FLOW = {
     "CANCELADO": [],
 }
 
+# 3 sep, pedido de Braulio ("cambios en el módulo de viajes") — mismos
+# valores/patrón que quotations.issuer (ver app/routes/cotizaciones.py):
+# empresa que opera el viaje.
+ISSUER_CHOICES = ("HARRASO", "BRMS")
+
+CARGO_TYPES = [
+    ("PLATAFORMA", "Plataforma"),
+    ("CONTENEDOR", "Contenedor"),
+    ("PARIHUELERO", "Parihuelero"),
+    ("FURGON", "Furgón"),
+    ("OTROS", "Otros"),
+]
+
+# "Periodo de pago" de un viaje con terceros: lista cerrada de términos
+# comunes (pedido explícito de Braulio, en vez de texto libre) para poder
+# agrupar/filtrar de forma consistente más adelante.
+PAYMENT_TERMS = [
+    ("CONTADO", "Contado"),
+    ("15_DIAS", "15 días"),
+    ("30_DIAS", "30 días"),
+    ("45_DIAS", "45 días"),
+    ("60_DIAS", "60 días"),
+]
+
+# Guía de transportista adjunta a un viaje (3 sep) — mismo criterio de
+# formatos permitidos que los comprobantes de Liquidaciones (ver
+# ALLOWED_RECEIPT_EXTENSIONS en app/routes/liquidaciones.py): foto o PDF.
+ALLOWED_WAYBILL_EXTENSIONS = {".png", ".jpg", ".jpeg", ".pdf", ".webp", ".heic", ".heif"}
+WAYBILL_MIME_TO_EXTENSION = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/heic": ".heic",
+    "image/heif": ".heif",
+    "application/pdf": ".pdf",
+}
+
+
+def _parse_issuer(form):
+    issuer = (form.get("issuer") or "").strip().upper()
+    return issuer if issuer in ISSUER_CHOICES else "HARRASO"
+
+
+def _parse_cargo_type(form):
+    value = (form.get("cargo_type") or "").strip().upper()
+    valid = {code for code, _ in CARGO_TYPES}
+    return value if value in valid else None
+
+
+def _parse_ownership(form):
+    value = (form.get("ownership") or "").strip().upper()
+    return "TERCERO" if value == "TERCERO" else "PROPIA"
+
+
+def _parse_payment_term(form):
+    value = (form.get("third_party_payment_term") or "").strip().upper()
+    valid = {code for code, _ in PAYMENT_TERMS}
+    return value if value in valid else None
+
+
+def _billing_permission_required(view):
+    """Permiso para marcar Facturado/Pagado (3 sep): además de quien ya
+    puede editar Viajes (Admin/Despachador/Operador), también Contabilidad
+    — que no tiene "editar" en Viajes (solo "ver", ya que su trabajo normal
+    es Liquidaciones/Facturación) pero sí necesita poder marcar estos dos
+    estados de cobranza. Por eso este es un chequeo aparte en vez de
+    @permission_required("viajes", "edit") directo."""
+
+    @functools.wraps(view)
+    @login_required
+    def wrapped_view(**kwargs):
+        if not (can(g.user["roles"], "viajes", "edit") or can(g.user["roles"], "liquidaciones", "edit")):
+            flash("No tienes permiso para acceder a esta sección.", "error")
+            return redirect(url_for("dashboard.index"))
+        return view(**kwargs)
+
+    return wrapped_view
+
 
 @bp.route("")
 @permission_required("viajes", "view")
 def list_view():
+    """3 sep, pedido de Braulio: por defecto el panel general de Viajes solo
+    muestra los de unidad propia — los de terceros tienen su propio listado
+    (ver list_terceros), con otras columnas relevantes para ese caso."""
     status = request.args.get("status", "")
     q = request.args.get("q", "").strip()
 
-    sql = """SELECT t.*, c.name as client_name, v.plate as vehicle_plate, d.name as driver_name,
-                     d2.name as driver2_name
+    sql = """SELECT t.*, c.name as client_name, v.plate as vehicle_plate, tv.plate as trailer_plate,
+                     d.name as driver_name, d2.name as driver2_name
               FROM trips t
               JOIN clients c ON c.id = t.client_id
               LEFT JOIN vehicles v ON v.id = t.vehicle_id
+              LEFT JOIN vehicles tv ON tv.id = t.trailer_vehicle_id
               LEFT JOIN drivers d ON d.id = t.driver_id
               LEFT JOIN drivers d2 ON d2.id = t.driver2_id
-              WHERE 1=1"""
+              WHERE t.ownership = 'PROPIA'"""
     params = []
     if status:
         sql += " AND t.status = ?"
@@ -39,7 +137,39 @@ def list_view():
     sql += " ORDER BY t.scheduled_date DESC, t.id DESC"
 
     trips = query_all(sql, params)
-    return render_template("viajes/list.html", trips=trips, status=status, q=q)
+    terceros_count = query_one("SELECT COUNT(*) n FROM trips WHERE ownership = 'TERCERO'")["n"]
+    return render_template("viajes/list.html", trips=trips, status=status, q=q, terceros_count=terceros_count)
+
+
+@bp.route("/terceros")
+@permission_required("viajes", "view")
+def list_terceros():
+    """3 sep, pedido de Braulio: listado aparte para viajes subcontratados a
+    terceros, con las columnas que pidió — fecha de viaje, estado, periodo
+    de pago y cancelado (sí/no) — además de lo mínimo para identificar cada
+    viaje (código, cliente, tercero)."""
+    status = request.args.get("status", "")
+    q = request.args.get("q", "").strip()
+
+    sql = """SELECT t.*, c.name as client_name
+              FROM trips t
+              JOIN clients c ON c.id = t.client_id
+              WHERE t.ownership = 'TERCERO'"""
+    params = []
+    if status:
+        sql += " AND t.status = ?"
+        params.append(status)
+    if q:
+        sql += """ AND (t.code LIKE ? OR c.name LIKE ? OR t.third_party_name LIKE ?
+                         OR t.origin LIKE ? OR t.destination LIKE ?)"""
+        params += [f"%{q}%"] * 5
+    sql += " ORDER BY t.scheduled_date DESC, t.id DESC"
+
+    trips = query_all(sql, params)
+    payment_term_labels = dict(PAYMENT_TERMS)
+    return render_template(
+        "viajes/list_terceros.html", trips=trips, status=status, q=q, payment_term_labels=payment_term_labels
+    )
 
 
 def _active_routes():
@@ -52,6 +182,28 @@ def _active_routes():
         "SELECT id, origin, destination, default_commission_amount FROM routes WHERE active = 1 ORDER BY origin, destination"
     )
     return [dict(r) for r in rows]
+
+
+def _active_vehicles(current_vehicle_id=None):
+    """Unidades tracto/camión disponibles para el campo "Unidad" del
+    formulario de viajes — excluye las de tipo CARRETA (3 sep: la carreta
+    ahora se elige aparte, ver _active_trailers). Incluye la unidad ya
+    asignada al viaje aunque esté inactiva/sea CARRETA, para no perderla del
+    desplegable al editar un viaje viejo (mismo criterio que ya se usaba)."""
+    return query_all(
+        "SELECT * FROM vehicles WHERE (vehicle_type != 'CARRETA' AND status = 'ACTIVO') OR id = ? ORDER BY plate",
+        (current_vehicle_id,),
+    )
+
+
+def _active_trailers(current_trailer_id=None):
+    """Carretas (semirremolques) disponibles para el campo "Carreta" del
+    formulario de viajes (3 sep, pedido de Braulio: "se debe seleccionar
+    tanto la unidad tracto como la carreta")."""
+    return query_all(
+        "SELECT * FROM vehicles WHERE (vehicle_type = 'CARRETA' AND status = 'ACTIVO') OR id = ? ORDER BY plate",
+        (current_trailer_id,),
+    )
 
 
 def _resolve_route_selection(form, current_trip=None):
@@ -105,11 +257,50 @@ def _selected_route_id_for_edit(trip):
     return str(route["id"]) if route else "__current__"
 
 
+def _ownership_and_third_party_fields(form):
+    """Resuelve, a partir del formulario, los campos de unidad propia vs.
+    tercero (3 sep, pedido de Braulio). Devuelve un dict listo para pasar
+    al INSERT/UPDATE, y una lista de errores de validación. Si es unidad
+    propia, los campos de tercero quedan en None (y viceversa) — nunca se
+    guardan los dos juntos."""
+    ownership = _parse_ownership(form)
+    errors = []
+    fields = {
+        "ownership": ownership,
+        "vehicle_id": None,
+        "trailer_vehicle_id": None,
+        "third_party_name": None,
+        "third_party_unit": None,
+        "third_party_rate": None,
+        "third_party_payment_term": None,
+    }
+    if ownership == "PROPIA":
+        fields["vehicle_id"] = form.get("vehicle_id") or None
+        fields["trailer_vehicle_id"] = form.get("trailer_vehicle_id") or None
+        if not fields["vehicle_id"]:
+            errors.append("Selecciona la unidad tracto.")
+        if not fields["trailer_vehicle_id"]:
+            errors.append("Selecciona la carreta.")
+    else:
+        fields["third_party_name"] = (form.get("third_party_name") or "").strip() or None
+        fields["third_party_unit"] = (form.get("third_party_unit") or "").strip() or None
+        fields["third_party_rate"] = parse_float(form.get("third_party_rate"), None)
+        fields["third_party_payment_term"] = _parse_payment_term(form)
+        if not fields["third_party_name"]:
+            errors.append("Ingresa el nombre de la empresa/tercero que hace el viaje.")
+        if fields["third_party_rate"] is None:
+            errors.append("Ingresa el flete acordado con el tercero.")
+        if not fields["third_party_payment_term"]:
+            errors.append("Selecciona el periodo de pago del tercero.")
+    return fields, errors
+
+
 @bp.route("/nuevo", methods=["GET", "POST"])
 @permission_required("viajes", "edit")
 def new():
     clients = query_all("SELECT * FROM clients WHERE active = 1 ORDER BY name")
-    vehicles = query_all("SELECT * FROM vehicles WHERE status = 'ACTIVO' ORDER BY plate")
+    vehicles = _active_vehicles()
+    trailers = _active_trailers()
     drivers = query_all("SELECT * FROM drivers WHERE status = 'ACTIVO' ORDER BY name")
     routes = _active_routes()
 
@@ -123,13 +314,18 @@ def new():
         single_leg = bool(request.form.get("single_leg"))
         driver_id = request.form.get("driver_id") or None
         driver2_id = (request.form.get("driver2_id") or None) if double_driver else None
-        errors = []
+        issuer = _parse_issuer(request.form)
+        cargo_type = _parse_cargo_type(request.form)
+        ownership_fields, ownership_errors = _ownership_and_third_party_fields(request.form)
+        errors = list(ownership_errors)
         if not client_id:
             errors.append("Selecciona un cliente.")
         if route_error:
             errors.append(route_error)
         if not scheduled_date:
             errors.append("La fecha programada no es válida.")
+        if not cargo_type:
+            errors.append("Selecciona el tipo de carga.")
         if double_driver:
             if not driver2_id:
                 errors.append("Selecciona el segundo conductor (viaje de doble conductor).")
@@ -141,37 +337,46 @@ def new():
                 flash(e, "error")
             return render_template(
                 "viajes/form.html", trip=request.form, mode="new",
-                clients=clients, vehicles=vehicles, drivers=drivers, routes=routes,
+                clients=clients, vehicles=vehicles, trailers=trailers, drivers=drivers, routes=routes,
                 selected_route_id=request.form.get("route_id", ""),
+                cargo_types=CARGO_TYPES, payment_terms=PAYMENT_TERMS,
             )
 
         code = next_code("V", "trips")
-        vehicle_id = request.form.get("vehicle_id") or None
         driver_commission = _resolve_commission(
             request.form, origin, destination, route,
             double_driver=double_driver, single_leg=single_leg,
         )
         trip_id = execute(
-            """INSERT INTO trips (code, client_id, vehicle_id, driver_id, driver2_id, origin, destination,
-               cargo_description, cargo_weight_kg, scheduled_date, rate, driver_commission,
-               double_driver, single_leg, notes, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO trips (code, client_id, vehicle_id, trailer_vehicle_id, driver_id, driver2_id,
+               origin, destination, cargo_description, cargo_weight_kg, cargo_type, scheduled_date, rate,
+               driver_commission, double_driver, single_leg, notes, issuer, ownership,
+               third_party_name, third_party_unit, third_party_rate, third_party_payment_term, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 code,
                 client_id,
-                vehicle_id,
+                ownership_fields["vehicle_id"],
+                ownership_fields["trailer_vehicle_id"],
                 driver_id,
                 driver2_id,
                 origin,
                 destination,
                 request.form.get("cargo_description", "").strip(),
                 parse_float(request.form.get("cargo_weight_kg"), None),
+                cargo_type,
                 scheduled_date,
                 parse_float(request.form.get("rate")),
                 driver_commission,
                 int(double_driver),
                 int(single_leg),
                 request.form.get("notes", "").strip(),
+                issuer,
+                ownership_fields["ownership"],
+                ownership_fields["third_party_name"],
+                ownership_fields["third_party_unit"],
+                ownership_fields["third_party_rate"],
+                ownership_fields["third_party_payment_term"],
                 None,
             ),
         )
@@ -180,8 +385,8 @@ def new():
 
     return render_template(
         "viajes/form.html", trip=None, mode="new",
-        clients=clients, vehicles=vehicles, drivers=drivers, routes=routes, today=today_str(),
-        selected_route_id="",
+        clients=clients, vehicles=vehicles, trailers=trailers, drivers=drivers, routes=routes, today=today_str(),
+        selected_route_id="", cargo_types=CARGO_TYPES, payment_terms=PAYMENT_TERMS,
     )
 
 
@@ -192,7 +397,8 @@ def edit(trip_id):
     if trip is None:
         abort(404)
     clients = query_all("SELECT * FROM clients WHERE active = 1 ORDER BY name")
-    vehicles = query_all("SELECT * FROM vehicles WHERE status = 'ACTIVO' OR id = ? ORDER BY plate", (trip["vehicle_id"],))
+    vehicles = _active_vehicles(trip["vehicle_id"])
+    trailers = _active_trailers(trip["trailer_vehicle_id"])
     drivers = query_all(
         "SELECT * FROM drivers WHERE status = 'ACTIVO' OR id = ? OR id = ? ORDER BY name",
         (trip["driver_id"], trip["driver2_id"]),
@@ -208,9 +414,14 @@ def edit(trip_id):
         single_leg = bool(request.form.get("single_leg"))
         driver_id = request.form.get("driver_id") or None
         driver2_id = (request.form.get("driver2_id") or None) if double_driver else None
-        errors = []
+        issuer = _parse_issuer(request.form)
+        cargo_type = _parse_cargo_type(request.form)
+        ownership_fields, ownership_errors = _ownership_and_third_party_fields(request.form)
+        errors = list(ownership_errors)
         if route_error:
             errors.append(route_error)
+        if not cargo_type:
+            errors.append("Selecciona el tipo de carga.")
         if double_driver:
             if not driver2_id:
                 errors.append("Selecciona el segundo conductor (viaje de doble conductor).")
@@ -221,33 +432,43 @@ def edit(trip_id):
                 flash(e, "error")
             return render_template(
                 "viajes/form.html", trip=trip, mode="edit", trip_id=trip_id,
-                clients=clients, vehicles=vehicles, drivers=drivers, routes=routes,
+                clients=clients, vehicles=vehicles, trailers=trailers, drivers=drivers, routes=routes,
                 selected_route_id=request.form.get("route_id", ""),
+                cargo_types=CARGO_TYPES, payment_terms=PAYMENT_TERMS,
             )
         driver_commission = _resolve_commission(
             request.form, origin, destination, route,
             double_driver=double_driver, single_leg=single_leg,
         )
         execute(
-            """UPDATE trips SET client_id=?, vehicle_id=?, driver_id=?, driver2_id=?, origin=?, destination=?,
-               cargo_description=?, cargo_weight_kg=?, scheduled_date=?, rate=?, driver_commission=?,
-               double_driver=?, single_leg=?, notes=?
+            """UPDATE trips SET client_id=?, vehicle_id=?, trailer_vehicle_id=?, driver_id=?, driver2_id=?,
+               origin=?, destination=?, cargo_description=?, cargo_weight_kg=?, cargo_type=?, scheduled_date=?,
+               rate=?, driver_commission=?, double_driver=?, single_leg=?, notes=?, issuer=?, ownership=?,
+               third_party_name=?, third_party_unit=?, third_party_rate=?, third_party_payment_term=?
                WHERE id=?""",
             (
                 request.form.get("client_id"),
-                request.form.get("vehicle_id") or None,
+                ownership_fields["vehicle_id"],
+                ownership_fields["trailer_vehicle_id"],
                 driver_id,
                 driver2_id,
                 origin,
                 destination,
                 request.form.get("cargo_description", "").strip(),
                 parse_float(request.form.get("cargo_weight_kg"), None),
+                cargo_type,
                 scheduled_date,
                 parse_float(request.form.get("rate")),
                 driver_commission,
                 int(double_driver),
                 int(single_leg),
                 request.form.get("notes", "").strip(),
+                issuer,
+                ownership_fields["ownership"],
+                ownership_fields["third_party_name"],
+                ownership_fields["third_party_unit"],
+                ownership_fields["third_party_rate"],
+                ownership_fields["third_party_payment_term"],
                 trip_id,
             ),
         )
@@ -256,8 +477,9 @@ def edit(trip_id):
 
     return render_template(
         "viajes/form.html", trip=trip, mode="edit", trip_id=trip_id,
-        clients=clients, vehicles=vehicles, drivers=drivers, routes=routes,
+        clients=clients, vehicles=vehicles, trailers=trailers, drivers=drivers, routes=routes,
         selected_route_id=_selected_route_id_for_edit(trip),
+        cargo_types=CARGO_TYPES, payment_terms=PAYMENT_TERMS,
     )
 
 
@@ -265,11 +487,12 @@ def edit(trip_id):
 @permission_required("viajes", "view")
 def detail(trip_id):
     trip = query_one(
-        """SELECT t.*, c.name as client_name, v.plate as vehicle_plate, d.name as driver_name,
-                  d2.name as driver2_name
+        """SELECT t.*, c.name as client_name, v.plate as vehicle_plate, tv.plate as trailer_plate,
+                  d.name as driver_name, d2.name as driver2_name
            FROM trips t
            JOIN clients c ON c.id = t.client_id
            LEFT JOIN vehicles v ON v.id = t.vehicle_id
+           LEFT JOIN vehicles tv ON tv.id = t.trailer_vehicle_id
            LEFT JOIN drivers d ON d.id = t.driver_id
            LEFT JOIN drivers d2 ON d2.id = t.driver2_id
            WHERE t.id = ?""",
@@ -281,9 +504,12 @@ def detail(trip_id):
     total_expenses = sum(e["amount"] for e in expenses)
     next_statuses = STATUS_FLOW.get(trip["status"], [])
     advance = query_one("SELECT id, status FROM expense_advances WHERE trip_id = ?", (trip_id,))
+    payment_term_labels = dict(PAYMENT_TERMS)
+    cargo_type_labels = dict(CARGO_TYPES)
     return render_template(
         "viajes/detail.html", trip=trip, expenses=expenses,
         total_expenses=total_expenses, next_statuses=next_statuses, advance=advance,
+        payment_term_labels=payment_term_labels, cargo_type_labels=cargo_type_labels,
     )
 
 
@@ -319,6 +545,110 @@ def change_status(trip_id):
         execute("UPDATE trips SET status=? WHERE id=?", (new_status, trip_id))
 
     flash(f"Viaje marcado como {new_status.replace('_', ' ').title()}.", "success")
+    return redirect(url_for("viajes.detail", trip_id=trip_id))
+
+
+# --- Guía de transportista (3 sep, pedido de Braulio) ---------------------
+#
+# Documento propio del transportista/tercero que hizo el viaje — distinto
+# de la guía de remisión SUNAT que ya genera el módulo Guías (ver
+# viajes/detail.html, botón "Generar guía de remisión"). Se agrega DESPUÉS
+# de creado el viaje (no en el formulario de alta), con un número a mano
+# y/o un archivo (foto o PDF) — mismo mecanismo de almacenamiento que los
+# comprobantes de Liquidaciones y las fotos de Conductores (ver
+# app/storage.py).
+
+def _save_waybill_file(file_storage):
+    """Guarda el archivo de la guía de transportista (foto o PDF) y
+    devuelve el nombre guardado, o None si no se subió nada válido. Las
+    fotos se recomprimen (mismo criterio que comprobantes/fotos de
+    conductores); los PDF se guardan tal cual."""
+    if not file_storage or not file_storage.filename:
+        return None
+    ext = os.path.splitext(file_storage.filename)[1].lower()
+    if ext not in ALLOWED_WAYBILL_EXTENSIONS:
+        ext = WAYBILL_MIME_TO_EXTENSION.get((file_storage.mimetype or "").lower())
+    if not ext:
+        return None
+    raw_bytes = file_storage.read()
+    if not raw_bytes:
+        return None
+    if ext == ".pdf":
+        filename = f"{uuid.uuid4().hex}.pdf"
+        storage.save_carrier_waybill(filename, raw_bytes)
+        return filename
+    compressed = compress_photo(raw_bytes)
+    if compressed is not None:
+        filename = f"{uuid.uuid4().hex}.jpg"
+        storage.save_carrier_waybill(filename, compressed)
+        return filename
+    filename = f"{uuid.uuid4().hex}{ext}"
+    storage.save_carrier_waybill(filename, raw_bytes)
+    return filename
+
+
+@bp.route("/<int:trip_id>/guia", methods=["POST"])
+@permission_required("viajes", "edit")
+def save_waybill(trip_id):
+    if not validate_csrf():
+        abort(400)
+    trip = query_one("SELECT carrier_waybill_filename FROM trips WHERE id = ?", (trip_id,))
+    if trip is None:
+        abort(404)
+    number = request.form.get("carrier_waybill_number", "").strip() or None
+    new_filename = _save_waybill_file(request.files.get("carrier_waybill_file"))
+    filename = new_filename if new_filename else trip["carrier_waybill_filename"]
+    execute(
+        "UPDATE trips SET carrier_waybill_number=?, carrier_waybill_filename=? WHERE id=?",
+        (number, filename, trip_id),
+    )
+    flash("Guía de transportista guardada.", "success")
+    return redirect(url_for("viajes.detail", trip_id=trip_id))
+
+
+@bp.route("/<int:trip_id>/guia/archivo")
+@permission_required("viajes", "view")
+def waybill_file(trip_id):
+    trip = query_one("SELECT carrier_waybill_filename FROM trips WHERE id = ?", (trip_id,))
+    if trip is None or not trip["carrier_waybill_filename"]:
+        abort(404)
+    if storage.using_s3():
+        return redirect(storage.carrier_waybill_url(trip["carrier_waybill_filename"]))
+    return send_from_directory(storage.local_carrier_waybills_dir(), trip["carrier_waybill_filename"])
+
+
+# --- Facturado / Pagado (3 sep, pedido de Braulio) -------------------------
+#
+# "invoiced" ya existía (se marca solo al generar una factura desde
+# Facturación); ahora también se puede marcar/desmarcar a mano desde el
+# viaje mismo. "paid" es un campo nuevo, independiente de "invoiced" — un
+# viaje puede estar facturado pero no pagado todavía.
+
+@bp.route("/<int:trip_id>/facturado", methods=["POST"])
+@_billing_permission_required
+def toggle_invoiced(trip_id):
+    if not validate_csrf():
+        abort(400)
+    trip = query_one("SELECT invoiced FROM trips WHERE id = ?", (trip_id,))
+    if trip is None:
+        abort(404)
+    new_value = 0 if trip["invoiced"] else 1
+    execute("UPDATE trips SET invoiced=? WHERE id=?", (new_value, trip_id))
+    flash("Viaje marcado como facturado." if new_value else "Viaje desmarcado como facturado.", "success")
+    return redirect(url_for("viajes.detail", trip_id=trip_id))
+
+
+@bp.route("/<int:trip_id>/pagado", methods=["POST"])
+@_billing_permission_required
+def toggle_paid(trip_id):
+    if not validate_csrf():
+        abort(400)
+    trip = query_one("SELECT paid FROM trips WHERE id = ?", (trip_id,))
+    if trip is None:
+        abort(404)
+    new_value = 0 if trip["paid"] else 1
+    execute("UPDATE trips SET paid=? WHERE id=?", (new_value, trip_id))
+    flash("Viaje marcado como pagado." if new_value else "Viaje desmarcado como pagado.", "success")
     return redirect(url_for("viajes.detail", trip_id=trip_id))
 
 

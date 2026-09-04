@@ -160,6 +160,38 @@ CREATE TABLE IF NOT EXISTS trips (
     single_leg INTEGER NOT NULL DEFAULT 0,
     notes TEXT,
     invoiced INTEGER NOT NULL DEFAULT 0,
+    -- 3 sep, pedido de Braulio ("cambios en el módulo de viajes") — empresa
+    -- que opera el viaje, mismo patrón/valores que quotations.issuer.
+    issuer TEXT NOT NULL DEFAULT 'HARRASO' CHECK (issuer IN ('HARRASO', 'BRMS')),
+    -- Carreta (semirremolque) enganchada a la unidad tracto de vehicle_id —
+    -- solo aplica a viajes con unidad propia (ownership='PROPIA'); se elige
+    -- del catálogo de Flota igual que vehicle_id, restringido a
+    -- vehicle_type='CARRETA' en la consulta del formulario (ver
+    -- _active_trailers() en app/routes/viajes.py).
+    trailer_vehicle_id INTEGER REFERENCES vehicles(id),
+    cargo_type TEXT CHECK (cargo_type IN ('PLATAFORMA', 'CONTENEDOR', 'PARIHUELERO', 'FURGON', 'OTROS')),
+    -- Unidad propia (de Flota) vs. subcontratada a un tercero. Si es
+    -- TERCERO, vehicle_id/trailer_vehicle_id no aplican — la unidad del
+    -- tercero se anota en third_party_unit (texto libre, no está en Flota).
+    ownership TEXT NOT NULL DEFAULT 'PROPIA' CHECK (ownership IN ('PROPIA', 'TERCERO')),
+    third_party_name TEXT,
+    third_party_unit TEXT,
+    third_party_rate REAL,
+    third_party_payment_term TEXT CHECK (
+        third_party_payment_term IN ('CONTADO', '15_DIAS', '30_DIAS', '45_DIAS', '60_DIAS')
+    ),
+    -- Guía de transportista: documento propio del tercero/transportista que
+    -- hizo el viaje (distinto de la guía de remisión SUNAT que ya genera el
+    -- módulo Guías) — se agrega DESPUÉS de creado el viaje, con un número a
+    -- mano y/o una foto/PDF adjunta (mismo mecanismo de almacenamiento que
+    -- los comprobantes de Liquidaciones, ver app/storage.py).
+    carrier_waybill_number TEXT,
+    carrier_waybill_filename TEXT,
+    -- Pagado: si el cliente ya pagó este viaje. Independiente de "invoiced"
+    -- (si ya se facturó) — ambos se pueden marcar/desmarcar a mano desde el
+    -- detalle del viaje, además de que "invoiced" se sigue marcando solo al
+    -- generar una factura desde Facturación.
+    paid INTEGER NOT NULL DEFAULT 0,
     created_by INTEGER REFERENCES users(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

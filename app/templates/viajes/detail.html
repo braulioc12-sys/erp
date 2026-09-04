@@ -24,8 +24,17 @@
 
 <div class="detail-grid">
   <div class="detail-item"><div class="label">Cliente</div><div class="value">{{ trip.client_name }}</div></div>
+  <div class="detail-item"><div class="label">Empresa que opera</div><div class="value">{{ 'BRMS' if trip.issuer == 'BRMS' else 'Harraso Transport' }}</div></div>
   <div class="detail-item"><div class="label">Ruta</div><div class="value">{{ trip.origin }} → {{ trip.destination }}</div></div>
-  <div class="detail-item"><div class="label">Unidad</div><div class="value">{{ trip.vehicle_plate or '—' }}</div></div>
+  <div class="detail-item"><div class="label">Tipo de carga</div><div class="value">{{ cargo_type_labels.get(trip.cargo_type, '—') }}</div></div>
+  {% if trip.ownership == 'TERCERO' %}
+  <div class="detail-item"><div class="label">Unidad</div><div class="value">Tercero — {{ trip.third_party_name or '—' }}{% if trip.third_party_unit %} ({{ trip.third_party_unit }}){% endif %}</div></div>
+  <div class="detail-item"><div class="label">Flete acordado</div><div class="value">{{ trip.third_party_rate|money if trip.third_party_rate is not none else '—' }}</div></div>
+  <div class="detail-item"><div class="label">Periodo de pago</div><div class="value">{{ payment_term_labels.get(trip.third_party_payment_term, '—') }}</div></div>
+  {% else %}
+  <div class="detail-item"><div class="label">Unidad (tracto)</div><div class="value">{{ trip.vehicle_plate or '—' }}</div></div>
+  <div class="detail-item"><div class="label">Carreta</div><div class="value">{{ trip.trailer_plate or '—' }}</div></div>
+  {% endif %}
   <div class="detail-item"><div class="label">Conductor</div><div class="value">{{ trip.driver_name or '—' }}</div></div>
   {% if trip.double_driver %}
   <div class="detail-item"><div class="label">Conductor 2</div><div class="value">{{ trip.driver2_name or '—' }}</div></div>
@@ -37,7 +46,21 @@
   <div class="detail-item"><div class="label">Tipo de viaje</div><div class="value">{% if trip.double_driver and trip.single_leg %}Doble conductor · Solo 1 tramo{% elif trip.double_driver %}Doble conductor{% elif trip.single_leg %}Solo 1 tramo{% else %}Normal{% endif %}</div></div>
   <div class="detail-item"><div class="label">Comisión {{ 'de cada conductor' if trip.double_driver else 'del conductor' }}</div><div class="value">{{ trip.driver_commission|money }}</div></div>
   <div class="detail-item"><div class="label">Facturado</div><div class="value">{{ 'Sí' if trip.invoiced else 'No' }}</div></div>
+  <div class="detail-item"><div class="label">Pagado</div><div class="value">{{ 'Sí' if trip.paid else 'No' }}</div></div>
 </div>
+
+{% if can(current_user.roles, 'viajes', 'edit') or can(current_user.roles, 'liquidaciones', 'edit') %}
+<div class="btn-group" style="margin-top:-8px; margin-bottom:16px;">
+  <form method="post" action="{{ url_for('viajes.toggle_invoiced', trip_id=trip.id) }}" style="display:inline;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-secondary btn-sm">{{ 'Desmarcar facturado' if trip.invoiced else 'Marcar como facturado' }}</button>
+  </form>
+  <form method="post" action="{{ url_for('viajes.toggle_paid', trip_id=trip.id) }}" style="display:inline;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-secondary btn-sm">{{ 'Desmarcar pagado' if trip.paid else 'Marcar como pagado' }}</button>
+  </form>
+</div>
+{% endif %}
 
 <div class="btn-group" style="margin-bottom:16px;">
   {% if can(current_user.roles, 'guias', 'edit') and trip.status in ('EN_CURSO', 'ENTREGADO') %}
@@ -58,6 +81,38 @@
 {% if trip.notes %}
 <div class="panel"><h2>Notas</h2><p class="mt-0">{{ trip.notes }}</p></div>
 {% endif %}
+
+<div class="panel">
+  <h2>Guía de transportista</h2>
+  <p class="muted mt-0">Documento propio del transportista (distinto de la guía de remisión SUNAT de arriba) — número y/o foto/PDF adjunta.</p>
+  <div class="detail-grid" style="margin-bottom:12px;">
+    <div class="detail-item"><div class="label">Número de guía</div><div class="value">{{ trip.carrier_waybill_number or '—' }}</div></div>
+    <div class="detail-item">
+      <div class="label">Archivo</div>
+      <div class="value">
+        {% if trip.carrier_waybill_filename %}
+        <a href="{{ url_for('viajes.waybill_file', trip_id=trip.id) }}" target="_blank">Ver guía adjunta</a>
+        {% else %}—{% endif %}
+      </div>
+    </div>
+  </div>
+  {% if can(current_user.roles, 'viajes', 'edit') %}
+  <form method="post" action="{{ url_for('viajes.save_waybill', trip_id=trip.id) }}" enctype="multipart/form-data" class="form" style="max-width:520px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <label>Número de guía
+        <input type="text" name="carrier_waybill_number" value="{{ trip.carrier_waybill_number or '' }}">
+      </label>
+      <label>Archivo (foto o PDF)
+        <input type="file" name="carrier_waybill_file" accept=".png,.jpg,.jpeg,.pdf,.webp,.heic,.heif">
+      </label>
+    </div>
+    <div class="btn-group">
+      <button type="submit" class="btn btn-secondary btn-sm">Guardar guía de transportista</button>
+    </div>
+  </form>
+  {% endif %}
+</div>
 
 <div class="panel">
   <h2>Gastos asociados a este viaje ({{ total_expenses|money }})</h2>

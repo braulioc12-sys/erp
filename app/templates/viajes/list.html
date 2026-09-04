@@ -3,8 +3,9 @@
 {% block title %}Viajes{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>Viajes / Órdenes de servicio</h1>
+  <h1>Viajes / Órdenes de servicio — Unidad propia</h1>
   <div class="page-actions">
+    <a href="{{ url_for('viajes.list_terceros') }}" class="btn btn-secondary">Viajes con terceros{% if terceros_count %} ({{ terceros_count }}){% endif %}</a>
     <a href="{{ url_for('viajes.commissions_report') }}" class="btn btn-secondary">Comisiones por mes</a>
     {% if can(current_user.roles, 'viajes', 'edit') %}
     <a href="{{ url_for('viajes.new') }}" class="btn btn-primary">+ Nuevo viaje</a>
@@ -30,7 +31,7 @@
 <div class="table-wrap">
   <table>
     <thead>
-      <tr><th>Código</th><th>Fecha</th><th>Cliente</th><th>Ruta</th><th>Unidad</th><th>Conductor</th><th>Estado</th><th>Tarifa</th><th>Comisión</th></tr>
+      <tr><th>Código</th><th>Fecha</th><th>Cliente</th><th>Ruta</th><th>Tracto</th><th>Carreta</th><th>Conductor</th><th>Estado</th><th>Tarifa</th><th>Comisión</th></tr>
     </thead>
     <tbody>
       {% for t in trips %}
@@ -40,13 +41,14 @@
         <td>{{ t.client_name }}</td>
         <td>{{ t.origin }} → {{ t.destination }}</td>
         <td>{{ t.vehicle_plate or '—' }}</td>
+        <td>{{ t.trailer_plate or '—' }}</td>
         <td>{{ t.driver_name or '—' }}{% if t.double_driver and t.driver2_name %} + {{ t.driver2_name }}{% endif %}</td>
         <td>{{ m.badge(t.status) }}</td>
         <td>{{ t.rate|money }}</td>
         <td>{{ t.driver_commission|money }}</td>
       </tr>
       {% else %}
-      <tr><td colspan="9" class="table-empty">No se encontraron viajes.</td></tr>
+      <tr><td colspan="10" class="table-empty">No se encontraron viajes con unidad propia.</td></tr>
       {% endfor %}
     </tbody>
   </table>

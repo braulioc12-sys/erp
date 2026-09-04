@@ -48,6 +48,13 @@ def local_photos_dir():
     return _local_dir("driver_photos")
 
 
+def local_carrier_waybills_dir():
+    """Igual que local_receipts_dir()/local_photos_dir() pero para las
+    guías de transportista adjuntas a un viaje (3 sep) — carpeta separada
+    en disco para no mezclarlas con lo demás."""
+    return _local_dir("carrier_waybills")
+
+
 def _s3_bucket():
     return current_app.config["AWS_S3_BUCKET"]
 
@@ -61,6 +68,10 @@ def _s3_prefix():
 
 def _s3_photos_prefix():
     return (current_app.config.get("AWS_S3_PHOTOS_PREFIX") or "fotos-conductores").strip("/")
+
+
+def _s3_carrier_waybills_prefix():
+    return (current_app.config.get("AWS_S3_CARRIER_WAYBILLS_PREFIX") or "guias-transportista").strip("/")
 
 
 def _s3_key(filename, prefix):
@@ -177,3 +188,20 @@ def driver_photo_url(filename):
     """Igual que receipt_url(), pero para una foto de conductor guardada en
     S3. En disco local, usar local_photos_dir() + send_from_directory."""
     return _presigned_url(_s3_photos_prefix(), filename)
+
+
+def save_carrier_waybill(filename, raw_bytes):
+    """Igual que save_receipt()/save_driver_photo(), pero para la guía de
+    transportista adjunta a un viaje (3 sep) — carpeta/prefijo separado."""
+    if using_s3():
+        _put_object(_s3_carrier_waybills_prefix(), filename, raw_bytes)
+    else:
+        with open(os.path.join(local_carrier_waybills_dir(), filename), "wb") as f:
+            f.write(raw_bytes)
+
+
+def carrier_waybill_url(filename):
+    """Igual que receipt_url()/driver_photo_url(), pero para una guía de
+    transportista guardada en S3. En disco local, usar
+    local_carrier_waybills_dir() + send_from_directory."""
+    return _presigned_url(_s3_carrier_waybills_prefix(), filename)

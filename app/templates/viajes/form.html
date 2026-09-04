@@ -30,23 +30,90 @@
   {% endif %}
 
   <div class="form-row">
-    <label>Unidad asignada
-      <select name="vehicle_id">
-        <option value="">-- Sin asignar --</option>
-        {% for v in vehicles %}
-        <option value="{{ v.id }}" {{ 'selected' if trip and (trip.vehicle_id|string) == (v.id|string) }}>{{ v.plate }} ({{ v.brand or '' }} {{ v.model or '' }})</option>
-        {% endfor %}
+    <label>Empresa que opera el viaje *
+      <select name="issuer" required>
+        <option value="HARRASO" {{ 'selected' if (trip.issuer if trip else 'HARRASO') == 'HARRASO' }}>Harraso Transport</option>
+        <option value="BRMS" {{ 'selected' if trip and trip.issuer == 'BRMS' }}>BRMS</option>
       </select>
     </label>
-    <label>Conductor asignado
-      <select name="driver_id">
-        <option value="">-- Sin asignar --</option>
-        {% for d in drivers %}
-        <option value="{{ d.id }}" {{ 'selected' if trip and (trip.driver_id|string) == (d.id|string) }}>{{ d.name }}</option>
+    <label>Tipo de carga *
+      <select name="cargo_type" required>
+        <option value="">-- Selecciona --</option>
+        {% for value, label in cargo_types %}
+        <option value="{{ value }}" {{ 'selected' if trip and trip.cargo_type == value }}>{{ label }}</option>
         {% endfor %}
       </select>
     </label>
   </div>
+
+  <label>Unidad *</label>
+  <div style="display:flex; flex-wrap:wrap; gap:8px 20px; margin:-8px 0 16px;">
+    <label style="flex-direction: row; align-items: center; gap: 8px; width:auto;">
+      <input type="radio" name="ownership" id="trip-ownership-propia" value="PROPIA" {{ 'checked' if not trip or trip.ownership != 'TERCERO' }} style="width:auto;">
+      Unidad propia
+    </label>
+    <label style="flex-direction: row; align-items: center; gap: 8px; width:auto;">
+      <input type="radio" name="ownership" id="trip-ownership-tercero" value="TERCERO" {{ 'checked' if trip and trip.ownership == 'TERCERO' }} style="width:auto;">
+      Tercero (subcontratado)
+    </label>
+  </div>
+
+  <div id="trip-propia-fields">
+    <div class="form-row">
+      <label>Unidad tracto *
+        <select name="vehicle_id" id="trip-vehicle">
+          <option value="">-- Selecciona --</option>
+          {% for v in vehicles %}
+          <option value="{{ v.id }}" {{ 'selected' if trip and (trip.vehicle_id|string) == (v.id|string) }}>{{ v.plate }} ({{ v.brand or '' }} {{ v.model or '' }})</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Carreta *
+        <select name="trailer_vehicle_id" id="trip-trailer">
+          <option value="">-- Selecciona --</option>
+          {% for v in trailers %}
+          <option value="{{ v.id }}" {{ 'selected' if trip and (trip.trailer_vehicle_id|string) == (v.id|string) }}>{{ v.plate }} ({{ v.brand or '' }} {{ v.model or '' }})</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+    {% if not trailers %}
+    <p class="flash flash-error" style="margin-top:-8px;">No hay carretas activas registradas en Flota. <a href="{{ url_for('flota.new_vehicle') }}" target="_blank">Registra una unidad de tipo Carreta</a> y vuelve a esta pantalla.</p>
+    {% endif %}
+  </div>
+
+  <div id="trip-tercero-fields">
+    <div class="form-row">
+      <label>Empresa/tercero *
+        <input type="text" name="third_party_name" id="trip-third-party-name" value="{{ trip.third_party_name if trip else '' }}">
+      </label>
+      <label>Unidad del tercero (placa/descripción)
+        <input type="text" name="third_party_unit" value="{{ trip.third_party_unit if trip else '' }}">
+      </label>
+    </div>
+    <div class="form-row">
+      <label>Flete acordado (S/) *
+        <input type="number" step="0.01" name="third_party_rate" id="trip-third-party-rate" value="{{ trip.third_party_rate if trip and trip.third_party_rate is not none else '' }}">
+      </label>
+      <label>Periodo de pago *
+        <select name="third_party_payment_term" id="trip-third-party-term">
+          <option value="">-- Selecciona --</option>
+          {% for value, label in payment_terms %}
+          <option value="{{ value }}" {{ 'selected' if trip and trip.third_party_payment_term == value }}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+  </div>
+
+  <label>Conductor asignado
+    <select name="driver_id">
+      <option value="">-- Sin asignar --</option>
+      {% for d in drivers %}
+      <option value="{{ d.id }}" {{ 'selected' if trip and (trip.driver_id|string) == (d.id|string) }}>{{ d.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
 
   <div class="form-row">
     <label style="flex-direction: row; align-items: center; gap: 8px;">
@@ -149,6 +216,35 @@
     singleLeg.addEventListener('change', suggest);
     toggleDriver2Row();
     if (routeSelect.value) { suggest(); }
+
+    // Unidad propia vs. tercero (3 sep, pedido de Braulio): muestra solo el
+    // bloque de campos que corresponde, y marca "required" solo en los
+    // campos visibles — un campo "required" oculto bloquearía el envío del
+    // formulario en la mayoría de navegadores.
+    var propiaRadio = document.getElementById('trip-ownership-propia');
+    var terceroRadio = document.getElementById('trip-ownership-tercero');
+    var propiaFields = document.getElementById('trip-propia-fields');
+    var terceroFields = document.getElementById('trip-tercero-fields');
+    var vehicleSelect = document.getElementById('trip-vehicle');
+    var trailerSelect = document.getElementById('trip-trailer');
+    var thirdPartyName = document.getElementById('trip-third-party-name');
+    var thirdPartyRate = document.getElementById('trip-third-party-rate');
+    var thirdPartyTerm = document.getElementById('trip-third-party-term');
+
+    function toggleOwnership() {
+      var isTercero = terceroRadio.checked;
+      propiaFields.style.display = isTercero ? 'none' : '';
+      terceroFields.style.display = isTercero ? '' : 'none';
+      vehicleSelect.required = !isTercero;
+      trailerSelect.required = !isTercero;
+      thirdPartyName.required = isTercero;
+      thirdPartyRate.required = isTercero;
+      thirdPartyTerm.required = isTercero;
+    }
+
+    propiaRadio.addEventListener('change', toggleOwnership);
+    terceroRadio.addEventListener('change', toggleOwnership);
+    toggleOwnership();
   })();
 </script>
 {% endblock %}

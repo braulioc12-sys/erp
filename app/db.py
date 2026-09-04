@@ -331,6 +331,27 @@ COLUMN_MIGRATIONS = [
     ("vehicles", "last_oil_change_date", "TEXT"),
     ("vehicles", "last_oil_change_workshop", "TEXT"),
     ("vehicles", "last_oil_change_oil", "TEXT"),
+    # 3 sep, pedido de Braulio ("cambios en el módulo de viajes"): empresa
+    # operadora (Harraso/BRMS, igual que quotations.issuer), tracto+carreta,
+    # tipo de carga, viajes con terceros (unidad ajena, flete acordado,
+    # periodo de pago), guía de transportista (número + archivo, distinta de
+    # la guía de remisión SUNAT que ya genera el módulo Guías) y el nuevo
+    # "pagado" (independiente de "invoiced", que ya existía). Sin CHECK aquí
+    # (a diferencia del schema.sql de una base nueva) — mismo motivo que
+    # quotations.issuer más arriba: se valida en app/routes/viajes.py.
+    # trailer_vehicle_id sin "REFERENCES" a propósito, mismo motivo que
+    # driver2_id/tire_inventory_id más arriba.
+    ("trips", "issuer", "TEXT NOT NULL DEFAULT 'HARRASO'"),
+    ("trips", "trailer_vehicle_id", "INTEGER"),
+    ("trips", "cargo_type", "TEXT"),
+    ("trips", "ownership", "TEXT NOT NULL DEFAULT 'PROPIA'"),
+    ("trips", "third_party_name", "TEXT"),
+    ("trips", "third_party_unit", "TEXT"),
+    ("trips", "third_party_rate", "REAL"),
+    ("trips", "third_party_payment_term", "TEXT"),
+    ("trips", "carrier_waybill_number", "TEXT"),
+    ("trips", "carrier_waybill_filename", "TEXT"),
+    ("trips", "paid", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 
