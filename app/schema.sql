@@ -672,6 +672,14 @@ CREATE TABLE IF NOT EXISTS expense_advances (
     fuel_actual REAL,
     fuel_excess REAL,
     fuel_notes TEXT,
+    -- 4 sep, pedido de Braulio: código correlativo de la liquidación según
+    -- la empresa operadora del viaje (trips.issuer) — B-0001, B-0002... si
+    -- es BRMS, H-0001, H-0002... si es Harraso. Se asigna al crear el
+    -- anticipo (a diferencia del voucher_number contable, que se asigna
+    -- recién al liquidar) y cada empresa lleva su propio correlativo, que
+    -- nunca se reinicia — ver `_next_liquidation_code` en
+    -- app/routes/liquidaciones.py.
+    code TEXT,
     created_by INTEGER REFERENCES users(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

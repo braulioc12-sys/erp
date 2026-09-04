@@ -3,7 +3,7 @@
 {% block title %}Liquidación — Viaje {{ advance.trip_code }}{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>Liquidación — Viaje {{ advance.trip_code }} {{ m.badge(advance.status) }}</h1>
+  <h1>Liquidación {{ advance.code + ' — ' if advance.code }}Viaje {{ advance.trip_code }} {{ m.badge(advance.status) }}</h1>
   <div class="page-actions">
     <a href="{{ url_for('viajes.detail', trip_id=advance.trip_id) }}" class="btn btn-secondary">← Volver al viaje</a>
   </div>

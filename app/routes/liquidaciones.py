@@ -205,6 +205,26 @@ def list_view():
     return render_template("liquidaciones/list.html", advances=advances, whatsapp_pending_count=whatsapp_pending_count)
 
 
+# 4 sep, pedido de Braulio: "cuando el operador sea BRMS deben empezar
+# como B-0001, y si es harraso como H-0001" — código de la liquidación
+# según la empresa operadora del viaje (trips.issuer), independiente del
+# Num.Voucher contable (que se asigna al liquidar y se reinicia cada mes
+# por oficina — ver _next_voucher_number). Cada empresa lleva su propio
+# correlativo, que nunca se reinicia.
+LIQUIDATION_CODE_PREFIXES = {"BRMS": "B", "HARRASO": "H"}
+
+
+def _next_liquidation_code(issuer):
+    prefix = LIQUIDATION_CODE_PREFIXES.get(issuer, "H")
+    row = query_one(
+        """SELECT COUNT(*) as n FROM expense_advances a
+           JOIN trips t ON t.id = a.trip_id WHERE t.issuer = ?""",
+        (issuer,),
+    )
+    n = (row["n"] if row else 0) + 1
+    return f"{prefix}-{n:04d}"
+
+
 @bp.route("/anticipo/<int:trip_id>", methods=["GET", "POST"])
 @permission_required("liquidaciones", "edit")
 def new_advance(trip_id):
@@ -238,9 +258,10 @@ def new_advance(trip_id):
 
         given_date = parse_date(request.form.get("given_date")) or today_str()
         notes = request.form.get("notes", "").strip()
+        code = _next_liquidation_code(trip["issuer"])
         advance_id = execute(
-            """INSERT INTO expense_advances (trip_id, route_id, amount_given, given_date, notes, created_by)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO expense_advances (trip_id, route_id, amount_given, given_date, notes, created_by, code)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
                 trip_id,
                 route["id"] if route else None,
@@ -248,6 +269,7 @@ def new_advance(trip_id):
                 given_date,
                 notes,
                 None,
+                code,
             ),
         )
         # El monto inicial también queda como el primer registro en

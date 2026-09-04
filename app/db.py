@@ -363,6 +363,9 @@ COLUMN_MIGRATIONS = [
     ("expense_advances", "fuel_actual", "REAL"),
     ("expense_advances", "fuel_excess", "REAL"),
     ("expense_advances", "fuel_notes", "TEXT"),
+    # 4 sep, pedido de Braulio: código de la liquidación según la empresa
+    # operadora del viaje — B-0001... (BRMS) / H-0001... (Harraso).
+    ("expense_advances", "code", "TEXT"),
 ]
 
 

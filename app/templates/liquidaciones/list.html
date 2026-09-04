@@ -20,10 +20,11 @@
 
 <div class="table-wrap">
   <table>
-    <thead><tr><th>Viaje</th><th>Ruta</th><th class="text-right">Entregado</th><th class="text-right">Gastado</th><th>Estado</th><th>Oficina</th><th>Voucher</th></tr></thead>
+    <thead><tr><th>Código</th><th>Viaje</th><th>Ruta</th><th class="text-right">Entregado</th><th class="text-right">Gastado</th><th>Estado</th><th>Oficina</th><th>Voucher</th></tr></thead>
     <tbody>
       {% for a in advances %}
       <tr onclick="window.location='{{ url_for('liquidaciones.detail', advance_id=a.id) }}'" style="cursor:pointer;">
+        <td><a href="{{ url_for('liquidaciones.detail', advance_id=a.id) }}">{{ a.code or '—' }}</a></td>
         <td><a href="{{ url_for('liquidaciones.detail', advance_id=a.id) }}">{{ a.trip_code }}</a></td>
         <td>{{ a.origin }} → {{ a.destination }}</td>
         <td class="text-right">{{ a.amount_given|money }}</td>
@@ -33,7 +34,7 @@
         <td>{{ '%02d'|format(a.voucher_number) if a.voucher_number else '—' }}</td>
       </tr>
       {% else %}
-      <tr><td colspan="7" class="table-empty">No hay liquidaciones registradas todavía.</td></tr>
+      <tr><td colspan="8" class="table-empty">No hay liquidaciones registradas todavía.</td></tr>
       {% endfor %}
     </tbody>
   </table>
