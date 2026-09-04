@@ -18,7 +18,7 @@ from flask import (
 from app import storage
 from app.auth import can, login_required, permission_required, validate_csrf
 from app.db import execute, query_all, query_one
-from app.helpers import compress_photo, next_code, now_str, parse_date, parse_float, today_str
+from app.helpers import compress_photo, now_str, parse_date, parse_float, today_str
 from app.routes.rutas import find_route
 
 bp = Blueprint("viajes", __name__, url_prefix="/viajes")
@@ -72,6 +72,18 @@ ATTACHMENT_MIME_TO_EXTENSION = {
 def _parse_issuer(form):
     issuer = (form.get("issuer") or "").strip().upper()
     return issuer if issuer in ISSUER_CHOICES else "HARRASO"
+
+
+def _next_trip_code(issuer):
+    """4 sep, pedido de Braulio: "el codigo de viaje [debe cambiar] de
+    acuerdo a empresa. Si es BRMS B-0001 y si es Harraso H-0001" — antes
+    todos los viajes compartían un solo correlativo "V-0001" (ver
+    next_code en app/helpers.py); ahora cada empresa operadora lleva el
+    suyo propio, que nunca se reinicia."""
+    prefix = "B" if issuer == "BRMS" else "H"
+    row = query_one("SELECT COUNT(*) as n FROM trips WHERE issuer = ?", (issuer,))
+    n = (row["n"] if row else 0) + 1
+    return f"{prefix}-{n:04d}"
 
 
 def _parse_cargo_type(form):
@@ -354,7 +366,7 @@ def new():
                 cargo_types=CARGO_TYPES, payment_terms=PAYMENT_TERMS,
             )
 
-        code = next_code("V", "trips")
+        code = _next_trip_code(issuer)
         driver_commission = _resolve_commission(
             request.form, origin, destination, route,
             double_driver=double_driver, single_leg=single_leg,
