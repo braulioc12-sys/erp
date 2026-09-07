@@ -187,11 +187,25 @@ def edit_vehicle(vehicle_id):
 # (3 sep, unidad id=4: "Internal Server Error" al eliminar).
 VEHICLE_HISTORY_TABLES = ["trips", "expenses", "maintenance_records", "tires", "tire_rotations", "inspections"]
 
+# "trips" tiene DOS columnas que apuntan a vehicles.id — vehicle_id (el
+# tracto) y trailer_vehicle_id (la carreta, agregada el 3 sep con el
+# rediseño de Viajes) — así que no basta con filtrar por vehicle_id: una
+# carreta que solo aparece como trailer_vehicle_id en algún viaje pasaba
+# _vehicle_has_history() como "sin historial" e intentaba un DELETE directo,
+# violando la foreign key fk_trips_trailer_vehicle_id (500 real en
+# producción, 7 sep, unidad id=57).
+VEHICLE_HISTORY_EXTRA_COLUMNS = [("trips", "trailer_vehicle_id")]
+
 
 def _vehicle_has_history(vehicle_id):
-    return any(
+    if any(
         query_one(f"SELECT COUNT(*) n FROM {table} WHERE vehicle_id = ?", (vehicle_id,))["n"]
         for table in VEHICLE_HISTORY_TABLES
+    ):
+        return True
+    return any(
+        query_one(f"SELECT COUNT(*) n FROM {table} WHERE {column} = ?", (vehicle_id,))["n"]
+        for table, column in VEHICLE_HISTORY_EXTRA_COLUMNS
     )
 
 
