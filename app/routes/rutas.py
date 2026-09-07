@@ -33,7 +33,6 @@ def add():
     destination = request.form.get("destination", "").strip()
     amount = parse_float(request.form.get("default_expense_amount"), 0)
     commission = parse_float(request.form.get("default_commission_amount"), 0)
-    fuel = parse_float(request.form.get("default_fuel_amount"), 0)
     if not origin or not destination:
         flash("Indica origen y destino.", "error")
         return redirect(url_for("rutas.list_view"))
@@ -41,14 +40,14 @@ def add():
     existing = query_one("SELECT id FROM routes WHERE origin = ? AND destination = ?", (origin, destination))
     if existing:
         execute(
-            "UPDATE routes SET default_expense_amount = ?, default_commission_amount = ?, default_fuel_amount = ?, active = 1 WHERE id = ?",
-            (amount, commission, fuel, existing["id"]),
+            "UPDATE routes SET default_expense_amount = ?, default_commission_amount = ?, active = 1 WHERE id = ?",
+            (amount, commission, existing["id"]),
         )
         flash("Ruta actualizada.", "success")
     else:
         execute(
-            "INSERT INTO routes (origin, destination, default_expense_amount, default_commission_amount, default_fuel_amount) VALUES (?, ?, ?, ?, ?)",
-            (origin, destination, amount, commission, fuel),
+            "INSERT INTO routes (origin, destination, default_expense_amount, default_commission_amount) VALUES (?, ?, ?, ?)",
+            (origin, destination, amount, commission),
         )
         flash("Ruta agregada.", "success")
     return redirect(url_for("rutas.list_view"))
@@ -64,6 +63,39 @@ def toggle(route_id):
         abort(404)
     execute("UPDATE routes SET active = ? WHERE id = ?", (0 if route["active"] else 1, route_id))
     flash("Actualizada." if route["active"] else "Reactivada.", "success")
+    return redirect(url_for("rutas.list_view"))
+
+
+@bp.route("/<int:route_id>/eliminar", methods=["POST"])
+@permission_required("rutas", "edit")
+def delete(route_id):
+    # 7 sep, pedido de Braulio ("veo rutas duplicadas que quiero borrar"):
+    # antes solo existía Activar/Desactivar, nunca un borrado real. Los
+    # viajes NO guardan una foreign key hacia routes (route_id solo se usa
+    # para copiar origen/destino al crear el viaje, ver
+    # _resolve_route_selection en app/routes/viajes.py), así que borrar una
+    # ruta nunca puede romper un viaje ya creado. Lo único que sí referencia
+    # routes.id de verdad es expense_advances.route_id — si una ruta ya se
+    # usó para sugerir el monto de un anticipo de viáticos, se desactiva en
+    # vez de borrarla (mismo criterio ya usado en Flota/Conductores).
+    if not validate_csrf():
+        abort(400)
+    route = query_one("SELECT * FROM routes WHERE id = ?", (route_id,))
+    if route is None:
+        abort(404)
+    has_history = query_one(
+        "SELECT COUNT(*) n FROM expense_advances WHERE route_id = ?", (route_id,)
+    )["n"]
+    if has_history:
+        execute("UPDATE routes SET active = 0 WHERE id = ?", (route_id,))
+        flash(
+            "Esta ruta ya se usó en una liquidación de viáticos; se desactivó en vez de "
+            "borrarla, para no perder ese historial.",
+            "success",
+        )
+    else:
+        execute("DELETE FROM routes WHERE id = ?", (route_id,))
+        flash("Ruta eliminada.", "success")
     return redirect(url_for("rutas.list_view"))
 
 
@@ -103,18 +135,17 @@ def _apply_route_import(rows, example_skips):
         seen.add(key)
         amount = row.get("default_expense_amount") or 0
         commission = row.get("default_commission_amount") or 0
-        fuel = row.get("default_fuel_amount") or 0
         existing = query_one("SELECT id FROM routes WHERE origin = ? AND destination = ?", (origin, destination))
         if existing:
             execute(
-                "UPDATE routes SET default_expense_amount = ?, default_commission_amount = ?, default_fuel_amount = ?, active = 1 WHERE id = ?",
-                (amount, commission, fuel, existing["id"]),
+                "UPDATE routes SET default_expense_amount = ?, default_commission_amount = ?, active = 1 WHERE id = ?",
+                (amount, commission, existing["id"]),
             )
             updated += 1
         else:
             execute(
-                "INSERT INTO routes (origin, destination, default_expense_amount, default_commission_amount, default_fuel_amount) VALUES (?, ?, ?, ?, ?)",
-                (origin, destination, amount, commission, fuel),
+                "INSERT INTO routes (origin, destination, default_expense_amount, default_commission_amount) VALUES (?, ?, ?, ?)",
+                (origin, destination, amount, commission),
             )
             created += 1
     return {"created": created, "updated": updated, "skipped": skipped, "errors": errors}
