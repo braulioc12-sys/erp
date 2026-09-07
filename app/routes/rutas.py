@@ -20,8 +20,24 @@ def find_route(origin, destination):
 @bp.route("")
 @permission_required("rutas", "view")
 def list_view():
-    routes = query_all("SELECT * FROM routes ORDER BY origin, destination")
-    return render_template("rutas/list.html", routes=routes)
+    # 7 sep, pedido de Braulio: antes el formulario de "agregar ruta" salía
+    # siempre abierto arriba de la tabla; ahora es un botón aparte
+    # ("+ Agregar nueva ruta", ver new()) y esta pantalla solo filtra/busca.
+    q = request.args.get("q", "").strip()
+    if q:
+        routes = query_all(
+            "SELECT * FROM routes WHERE origin LIKE ? OR destination LIKE ? ORDER BY origin, destination",
+            (f"%{q}%", f"%{q}%"),
+        )
+    else:
+        routes = query_all("SELECT * FROM routes ORDER BY origin, destination")
+    return render_template("rutas/list.html", routes=routes, q=q)
+
+
+@bp.route("/nueva", methods=["GET"])
+@permission_required("rutas", "edit")
+def new():
+    return render_template("rutas/new.html")
 
 
 @bp.route("/agregar", methods=["POST"])
@@ -36,7 +52,7 @@ def add():
     fuel_amount = parse_float(request.form.get("default_fuel_amount"), 0)
     if not origin or not destination:
         flash("Indica origen y destino.", "error")
-        return redirect(url_for("rutas.list_view"))
+        return redirect(url_for("rutas.new"))
 
     existing = query_one("SELECT id FROM routes WHERE origin = ? AND destination = ?", (origin, destination))
     if existing:

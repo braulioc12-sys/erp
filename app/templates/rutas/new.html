@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% block title %}Agregar ruta{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Agregar ruta</h1></div>
+<form class="form panel" method="post" action="{{ url_for('rutas.add') }}" style="max-width: 520px;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <div class="form-row">
+    <label>Origen *
+      <input type="text" name="origin" placeholder="Ej. Lima" required>
+    </label>
+    <label>Destino *
+      <input type="text" name="destination" placeholder="Ej. Trujillo" required>
+    </label>
+  </div>
+
+  <div class="form-row">
+    <label>Viáticos (S/)
+      <input type="number" step="0.01" name="default_expense_amount" placeholder="Ej. 350">
+    </label>
+    <label>Comisión conductor (S/)
+      <input type="number" step="0.01" name="default_commission_amount" placeholder="Ej. 80">
+    </label>
+  </div>
+
+  <label>Combustible estimado (gal)
+    <input type="number" step="0.01" name="default_fuel_amount" placeholder="Ej. 60">
+  </label>
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Guardar ruta</button>
+    <a href="{{ url_for('rutas.list_view') }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+{% endblock %}
