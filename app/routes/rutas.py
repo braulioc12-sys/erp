@@ -33,6 +33,7 @@ def add():
     destination = request.form.get("destination", "").strip()
     amount = parse_float(request.form.get("default_expense_amount"), 0)
     commission = parse_float(request.form.get("default_commission_amount"), 0)
+    fuel_amount = parse_float(request.form.get("default_fuel_amount"), 0)
     if not origin or not destination:
         flash("Indica origen y destino.", "error")
         return redirect(url_for("rutas.list_view"))
@@ -40,17 +41,60 @@ def add():
     existing = query_one("SELECT id FROM routes WHERE origin = ? AND destination = ?", (origin, destination))
     if existing:
         execute(
-            "UPDATE routes SET default_expense_amount = ?, default_commission_amount = ?, active = 1 WHERE id = ?",
-            (amount, commission, existing["id"]),
+            "UPDATE routes SET default_expense_amount = ?, default_commission_amount = ?, "
+            "default_fuel_amount = ?, active = 1 WHERE id = ?",
+            (amount, commission, fuel_amount, existing["id"]),
         )
         flash("Ruta actualizada.", "success")
     else:
         execute(
-            "INSERT INTO routes (origin, destination, default_expense_amount, default_commission_amount) VALUES (?, ?, ?, ?)",
-            (origin, destination, amount, commission),
+            "INSERT INTO routes (origin, destination, default_expense_amount, "
+            "default_commission_amount, default_fuel_amount) VALUES (?, ?, ?, ?, ?)",
+            (origin, destination, amount, commission, fuel_amount),
         )
         flash("Ruta agregada.", "success")
     return redirect(url_for("rutas.list_view"))
+
+
+@bp.route("/<int:route_id>/editar", methods=["GET", "POST"])
+@permission_required("rutas", "edit")
+def edit(route_id):
+    # 7 sep, pedido de Braulio ("quiero poder editar más adelante galones,
+    # viáticos o comisión"): antes la única forma de "actualizar" una ruta
+    # era volver a escribir EXACTAMENTE el mismo origen/destino en el
+    # formulario de arriba (add()) — fácil de equivocarse (un espacio o una
+    # mayúscula de más crea una ruta nueva en vez de actualizar la existente,
+    # la causa más probable de las "rutas duplicadas" que reportó). Este
+    # formulario edita por id, no por texto, así que no tiene ese riesgo.
+    route = query_one("SELECT * FROM routes WHERE id = ?", (route_id,))
+    if route is None:
+        abort(404)
+    if request.method == "POST":
+        if not validate_csrf():
+            abort(400)
+        origin = request.form.get("origin", "").strip()
+        destination = request.form.get("destination", "").strip()
+        amount = parse_float(request.form.get("default_expense_amount"), 0)
+        commission = parse_float(request.form.get("default_commission_amount"), 0)
+        fuel_amount = parse_float(request.form.get("default_fuel_amount"), 0)
+        if not origin or not destination:
+            flash("Indica origen y destino.", "error")
+            return redirect(url_for("rutas.edit", route_id=route_id))
+        clash = query_one(
+            "SELECT id FROM routes WHERE origin = ? AND destination = ? AND id != ?",
+            (origin, destination, route_id),
+        )
+        if clash:
+            flash(f"Ya existe otra ruta con ese mismo origen y destino ({origin} → {destination}).", "error")
+            return redirect(url_for("rutas.edit", route_id=route_id))
+        execute(
+            "UPDATE routes SET origin = ?, destination = ?, default_expense_amount = ?, "
+            "default_commission_amount = ?, default_fuel_amount = ? WHERE id = ?",
+            (origin, destination, amount, commission, fuel_amount, route_id),
+        )
+        flash("Ruta actualizada.", "success")
+        return redirect(url_for("rutas.list_view"))
+    return render_template("rutas/edit.html", route=route)
 
 
 @bp.route("/<int:route_id>/alternar", methods=["POST"])
@@ -135,17 +179,20 @@ def _apply_route_import(rows, example_skips):
         seen.add(key)
         amount = row.get("default_expense_amount") or 0
         commission = row.get("default_commission_amount") or 0
+        fuel_amount = row.get("default_fuel_amount") or 0
         existing = query_one("SELECT id FROM routes WHERE origin = ? AND destination = ?", (origin, destination))
         if existing:
             execute(
-                "UPDATE routes SET default_expense_amount = ?, default_commission_amount = ?, active = 1 WHERE id = ?",
-                (amount, commission, existing["id"]),
+                "UPDATE routes SET default_expense_amount = ?, default_commission_amount = ?, "
+                "default_fuel_amount = ?, active = 1 WHERE id = ?",
+                (amount, commission, fuel_amount, existing["id"]),
             )
             updated += 1
         else:
             execute(
-                "INSERT INTO routes (origin, destination, default_expense_amount, default_commission_amount) VALUES (?, ?, ?, ?)",
-                (origin, destination, amount, commission),
+                "INSERT INTO routes (origin, destination, default_expense_amount, "
+                "default_commission_amount, default_fuel_amount) VALUES (?, ?, ?, ?, ?)",
+                (origin, destination, amount, commission, fuel_amount),
             )
             created += 1
     return {"created": created, "updated": updated, "skipped": skipped, "errors": errors}

@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% block title %}Editar ruta{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Editar ruta</h1></div>
+<form class="form panel" method="post" style="max-width: 520px;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <div class="form-row">
+    <label>Origen *
+      <input type="text" name="origin" value="{{ route.origin }}" required>
+    </label>
+    <label>Destino *
+      <input type="text" name="destination" value="{{ route.destination }}" required>
+    </label>
+  </div>
+
+  <div class="form-row">
+    <label>Viáticos (S/)
+      <input type="number" step="0.01" name="default_expense_amount" value="{{ route.default_expense_amount }}">
+    </label>
+    <label>Comisión conductor (S/)
+      <input type="number" step="0.01" name="default_commission_amount" value="{{ route.default_commission_amount }}">
+    </label>
+  </div>
+
+  <label>Consumo de combustible (galones)
+    <input type="number" step="0.01" name="default_fuel_amount" value="{{ route.default_fuel_amount }}">
+  </label>
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Guardar cambios</button>
+    <a href="{{ url_for('rutas.list_view') }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+{% endblock %}

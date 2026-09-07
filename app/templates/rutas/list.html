@@ -27,13 +27,16 @@
     <label>Comisión conductor (S/)
       <input type="number" step="0.01" name="default_commission_amount" placeholder="Ej. 80" required>
     </label>
+    <label>Combustible estimado (gal)
+      <input type="number" step="0.01" name="default_fuel_amount" placeholder="Ej. 60">
+    </label>
     <button type="submit" class="btn btn-primary">+ Guardar ruta</button>
   </form>
   {% endif %}
 
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Origen</th><th>Destino</th><th class="text-right">Viáticos</th><th class="text-right">Comisión conductor</th><th>Estado</th><th></th></tr></thead>
+      <thead><tr><th>Origen</th><th>Destino</th><th class="text-right">Viáticos</th><th class="text-right">Comisión conductor</th><th class="text-right">Combustible (gal)</th><th>Estado</th><th></th></tr></thead>
       <tbody>
         {% for r in routes %}
         <tr>
@@ -41,10 +44,12 @@
           <td>{{ r.destination }}</td>
           <td class="text-right">{{ r.default_expense_amount|money }}</td>
           <td class="text-right">{{ r.default_commission_amount|money }}</td>
+          <td class="text-right">{{ r.default_fuel_amount }}</td>
           <td><span class="badge {{ 'badge-activo' if r.active else 'badge-inactivo' }}">{{ 'Activa' if r.active else 'Inactiva' }}</span></td>
           <td>
             {% if can(current_user.roles, 'rutas', 'edit') %}
             <div class="btn-group">
+              <a href="{{ url_for('rutas.edit', route_id=r.id) }}" class="btn btn-secondary btn-sm">Editar</a>
               <form method="post" action="{{ url_for('rutas.toggle', route_id=r.id) }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button class="btn btn-secondary btn-sm" type="submit">{{ 'Desactivar' if r.active else 'Reactivar' }}</button>
@@ -58,7 +63,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="6" class="table-empty">No hay rutas registradas.</td></tr>
+        <tr><td colspan="7" class="table-empty">No hay rutas registradas.</td></tr>
         {% endfor %}
       </tbody>
     </table>
