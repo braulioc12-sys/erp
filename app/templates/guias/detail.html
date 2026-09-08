@@ -21,6 +21,8 @@
   <div class="detail-item"><div class="label">Peso / bultos</div><div class="value">{{ waybill.weight_kg or '—' }} kg / {{ waybill.packages or '—' }}</div></div>
   <div class="detail-item"><div class="label">Vehículo</div><div class="value">{{ waybill.vehicle_plate or '—' }}</div></div>
   <div class="detail-item"><div class="label">Conductor</div><div class="value">{{ waybill.driver_name or '—' }} ({{ waybill.driver_document or 'sin DNI' }})</div></div>
+  <div class="detail-item"><div class="label">Ubigeo partida / llegada</div><div class="value">{{ waybill.origin_ubigeo or '—' }} / {{ waybill.destination_ubigeo or '—' }}</div></div>
+  <div class="detail-item"><div class="label">Motivo de traslado</div><div class="value">{{ waybill.transfer_reason or 'OTROS' }}</div></div>
 </div>
 
 <div class="panel">

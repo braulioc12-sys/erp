@@ -1,4 +1,16 @@
-from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
+import uuid
+
+from flask import (
+    Blueprint,
+    abort,
+    current_app,
+    flash,
+    redirect,
+    render_template,
+    request,
+    send_from_directory,
+    url_for,
+)
 
 from app.auth import permission_required, validate_csrf
 from app.db import execute, get_db, query_all, query_one
@@ -8,6 +20,12 @@ from app.integrations.sunat_ose import (
     build_client_from_config,
     build_invoice_payload,
     parse_ose_response,
+)
+from app.storage import (
+    local_sunat_documents_dir,
+    save_sunat_document,
+    sunat_document_url,
+    using_s3,
 )
 
 bp = Blueprint("facturacion", __name__, url_prefix="/facturacion")
@@ -165,15 +183,30 @@ def send_sunat(invoice_id):
                 "poder emitir facturas electrónicas a su nombre."
             )
         payload = build_invoice_payload(invoice, items, client_row, company)
-        response = ose_client.send(payload)
+        response = ose_client.emit_factura(payload)
         result = parse_ose_response(response)
+
+        pdf_filename = invoice["sunat_pdf_filename"]
+        pdf_url = invoice["sunat_pdf_url"]
+        if result["accepted"]:
+            try:
+                pdf_bytes = ose_client.get_pdf_bytes("01", invoice["series"], invoice["series_number"])
+                pdf_filename = f"factura-{invoice_id}-{uuid.uuid4().hex}.pdf"
+                save_sunat_document(pdf_filename, pdf_bytes)
+                pdf_url = url_for("facturacion.view_sunat_pdf", invoice_id=invoice_id)
+            except SunatOseError as pdf_exc:
+                # La factura SÍ quedó aceptada por SUNAT — no descartar eso
+                # solo porque no se pudo descargar/guardar el PDF.
+                flash(f"La factura se aceptó, pero no se pudo descargar su PDF: {pdf_exc}", "error")
+
         execute(
-            """UPDATE invoices SET sunat_status=?, sunat_message=?, sunat_pdf_url=?,
+            """UPDATE invoices SET sunat_status=?, sunat_message=?, sunat_pdf_url=?, sunat_pdf_filename=?,
                sunat_xml_url=?, sunat_cdr_url=?, sunat_sent_at=datetime('now') WHERE id=?""",
             (
                 "ACEPTADO" if result["accepted"] else "RECHAZADO",
                 result["message"],
-                result["pdf_url"],
+                pdf_url,
+                pdf_filename,
                 result["xml_url"],
                 result["cdr_url"],
                 invoice_id,
@@ -182,7 +215,7 @@ def send_sunat(invoice_id):
         if result["accepted"]:
             flash("Factura enviada y aceptada por SUNAT.", "success")
         else:
-            flash(f"SUNAT/el OSE rechazó la factura: {result['message']}", "error")
+            flash(f"SUNAT/tefacturo.pe rechazó la factura: {result['message']}", "error")
     except SunatOseError as exc:
         execute(
             "UPDATE invoices SET sunat_status='ERROR', sunat_message=?, sunat_sent_at=datetime('now') WHERE id=?",
@@ -191,3 +224,17 @@ def send_sunat(invoice_id):
         flash(f"No se pudo enviar la factura: {exc}", "error")
 
     return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
+
+
+@bp.route("/<int:invoice_id>/pdf-sunat")
+@permission_required("facturacion", "view")
+def view_sunat_pdf(invoice_id):
+    """Sirve el PDF real que devolvió tefacturo.pe al emitir esta factura
+    (7 sep, segunda ronda) — mismo patrón que las demás descargas de
+    archivos del sistema (disco local o redirect a URL firmada en S3)."""
+    invoice = query_one("SELECT sunat_pdf_filename FROM invoices WHERE id = ?", (invoice_id,))
+    if invoice is None or not invoice["sunat_pdf_filename"]:
+        abort(404)
+    if using_s3():
+        return redirect(sunat_document_url(invoice["sunat_pdf_filename"]))
+    return send_from_directory(local_sunat_documents_dir(), invoice["sunat_pdf_filename"])

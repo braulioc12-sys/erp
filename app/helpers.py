@@ -137,24 +137,39 @@ def amount_to_words_pen(amount):
 
 
 def company_info_for_issuer(issuer, cfg):
-    """Datos de la empresa emisora (RUC/nombre/dirección) según sea Harraso
-    o BRMS. Mismo criterio ya usado en Cotizaciones (`quotations.issuer`,
-    `_parse_issuer()` en cotizaciones.py/viajes.py): un documento guarda su
-    empresa emisora al crearse y no se recalcula después. Se usa aquí para
-    armar el comprobante que se manda al OSE (tefacturo.pe u otro) en
-    Facturación y Guías — cada empresa tiene su propio RUC y, por lo tanto,
-    necesita su propia cuenta/credenciales ante el OSE (ver
-    HARRASO_OSE_RUTA/TOKEN y BRMS_OSE_RUTA/TOKEN en config.py)."""
+    """Datos de la empresa emisora según sea Harraso o BRMS. Mismo criterio
+    ya usado en Cotizaciones (`quotations.issuer`, `_parse_issuer()` en
+    cotizaciones.py/viajes.py): un documento guarda su empresa emisora al
+    crearse y no se recalcula después. Se usa aquí para armar el
+    comprobante que se manda a tefacturo.pe en Facturación y Guías — cada
+    empresa tiene su propio RUC y, por lo tanto, necesita su propia cuenta
+    (usuario/clave) ante tefacturo.pe (ver HARRASO_TEFACTURO_EMAIL/PASSWORD
+    y BRMS_TEFACTURO_EMAIL/PASSWORD en config.py).
+
+    `commercial_name`/`legal_name`/`email`/`mtc_registration` se agregaron
+    el 7 sep (segunda ronda) para armar los campos `emisor`/`transportista`
+    que exige el formato real de tefacturo.pe — antes este helper solo
+    tenía ruc/name/address (suficiente para el intento anterior, basado en
+    un manual incompleto)."""
     if issuer == "BRMS":
+        legal_suffix = ""  # razón social legal completa de BRMS aún sin confirmar (ver Cotizaciones)
         return {
             "ruc": cfg.get("BRMS_RUC", ""),
             "name": "BRMS",
             "address": cfg.get("BRMS_ADDRESS", ""),
+            "email": cfg.get("COMPANY_EMAIL", ""),  # BRMS comparte correo con Harraso (confirmado en Cotizaciones)
+            "commercial_name": "BRMS",
+            "legal_name": f"BRMS {legal_suffix}".strip(),
+            "mtc_registration": cfg.get("BRMS_MTC_REGISTRATION", ""),
         }
     return {
         "ruc": cfg.get("COMPANY_RUC", ""),
         "name": cfg.get("COMPANY_NAME", ""),
         "address": cfg.get("COMPANY_ADDRESS", ""),
+        "email": cfg.get("COMPANY_EMAIL", ""),
+        "commercial_name": cfg.get("COMPANY_NAME", ""),
+        "legal_name": f"{cfg.get('COMPANY_NAME', '')} S.A.C.".strip(),
+        "mtc_registration": cfg.get("HARRASO_MTC_REGISTRATION", ""),
     }
 
 

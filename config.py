@@ -40,21 +40,36 @@ class Config:
     # solo el botón manual "Sincronizar") — ver app/scheduler.py.
     FROTCOM_AUTO_SYNC_SECONDS = int(os.environ.get("FROTCOM_AUTO_SYNC_SECONDS", "120"))
 
-    # Facturación electrónica SUNAT vía un OSE — tefacturo.pe (7 sep, pedido
-    # de Braulio) u otro con el mismo formato REST/JSON (NubeFacT, Efact,
-    # etc.). Harraso y BRMS son dos empresas con RUC propio (ver
-    # COMPANY_RUC/BRMS_RUC más abajo), y un OSE emite a nombre de UN RUC por
-    # cuenta — así que cada empresa necesita su propia cuenta/credenciales
-    # ante el OSE, no se puede emitir un comprobante de BRMS con la cuenta
-    # de Harraso ni viceversa (confirmar con tefacturo.pe si en su caso una
-    # sola cuenta puede manejar ambos RUC; mientras tanto se asume que no).
+    # Facturación electrónica SUNAT vía tefacturo.pe (7 sep, pedido de
+    # Braulio: "hagamos el enlace de tefacturo.pe para las guias y
+    # facturas"). Primer intento (mismo día, antes de esta ronda) se basó en
+    # un PDF suelto de 2019, sin autenticación documentada ni endpoint de
+    # guía de remisión — Braulio compartió después el portal REAL de
+    # documentación técnica (https://api.tefacturo.pe/doc/integracion/),
+    # que sí confirma todo esto:
+    # - Login: POST https://jarvis.tefacturo.pe/tokenapi/secure/v2/login/token
+    #   con {ruc, mail, clave} — un usuario/clave POR RUC, no una "ruta" +
+    #   "token" genéricos como se había asumido antes. Harraso y BRMS son
+    #   dos empresas con RUC propio, así que cada una necesita su propia
+    #   cuenta (usuario/clave) en tefacturo.pe — créala en
+    #   https://api.tefacturo.pe/doc/integracion/registro/ (cuenta de
+    #   pruebas) o pídesela a tefacturo.pe para producción.
+    # - El RUC de cada empresa YA está en COMPANY_RUC/BRMS_RUC más abajo —
+    #   no hace falta repetirlo aquí.
     # Ver README, sección "Facturación electrónica (SUNAT)".
-    OSE_RUTA = os.environ.get("OSE_RUTA", "")  # obsoleto — se mantiene como respaldo de HARRASO_OSE_RUTA
-    OSE_TOKEN = os.environ.get("OSE_TOKEN", "")
-    HARRASO_OSE_RUTA = os.environ.get("HARRASO_OSE_RUTA", os.environ.get("OSE_RUTA", ""))
-    HARRASO_OSE_TOKEN = os.environ.get("HARRASO_OSE_TOKEN", os.environ.get("OSE_TOKEN", ""))
-    BRMS_OSE_RUTA = os.environ.get("BRMS_OSE_RUTA", "")
-    BRMS_OSE_TOKEN = os.environ.get("BRMS_OSE_TOKEN", "")
+    TEFACTURO_BASE_URL = os.environ.get("TEFACTURO_BASE_URL", "https://jarvis.tefacturo.pe")
+    HARRASO_TEFACTURO_EMAIL = os.environ.get("HARRASO_TEFACTURO_EMAIL", "")
+    HARRASO_TEFACTURO_PASSWORD = os.environ.get("HARRASO_TEFACTURO_PASSWORD", "")
+    BRMS_TEFACTURO_EMAIL = os.environ.get("BRMS_TEFACTURO_EMAIL", "")
+    BRMS_TEFACTURO_PASSWORD = os.environ.get("BRMS_TEFACTURO_PASSWORD", "")
+    # Guía de remisión — TRANSPORTISTA (Harraso/BRMS es el transportista,
+    # no el remitente — ver app/integrations/sunat_ose.py): además de
+    # RUC/usuario/clave, SUNAT exige el número de registro ante el MTC
+    # (Ministerio de Transportes y Comunicaciones) de la empresa que
+    # transporta la carga. Vacío por defecto — AJUSTAR con el registro MTC
+    # real de Harraso/BRMS antes de poder emitir guías electrónicas.
+    HARRASO_MTC_REGISTRATION = os.environ.get("HARRASO_MTC_REGISTRATION", "")
+    BRMS_MTC_REGISTRATION = os.environ.get("BRMS_MTC_REGISTRATION", "")
     # Datos reales de Harraso Transport S.A.C. (tomados de una cotización
     # real que Braulio compartió, 1 sep) — se usan como default porque
     # antes quedaban vacíos; se pueden sobreescribir por variable de
@@ -66,7 +81,12 @@ class Config:
     COMPANY_EMAIL = os.environ.get("COMPANY_EMAIL", "contacto@harraso.com")
     COMPANY_PHONE = os.environ.get("COMPANY_PHONE", "994185119")
     INVOICE_SERIES = os.environ.get("INVOICE_SERIES", "F001")
-    WAYBILL_SERIES = os.environ.get("WAYBILL_SERIES", "T001")
+    # tefacturo.pe exige que la serie de una guía de remisión - transportista
+    # empiece con "V" (confirmado en su documentación real, 7 sep) — antes
+    # se usaba "T001" por suposición propia. Si ya diste de alta otra serie
+    # ante SUNAT/tefacturo.pe para tus guías, ponla aquí por variable de
+    # entorno.
+    WAYBILL_SERIES = os.environ.get("WAYBILL_SERIES", "V001")
     # Número inicial de Cotizaciones (1 sep) — Braulio pidió seguir la
     # numeración real de sus cotizaciones anteriores (la última que mandó
     # como referencia fue la N° 111), así que el módulo arranca en 112.

@@ -29,6 +29,24 @@
   </div>
 
   <div class="form-row">
+    <label>Ubigeo de partida (código INEI, 6 dígitos)
+      <input type="text" name="origin_ubigeo" pattern="[0-9]{6}" maxlength="6" placeholder="Ej. 150101" title="6 dígitos">
+    </label>
+    <label>Ubigeo de llegada (código INEI, 6 dígitos)
+      <input type="text" name="destination_ubigeo" pattern="[0-9]{6}" maxlength="6" placeholder="Ej. 250101" title="6 dígitos">
+    </label>
+  </div>
+  <p class="muted" style="margin-top:-8px;">SUNAT exige el código de ubigeo (distrito) de partida y llegada para enviar la guía electrónica — puedes dejarlo en blanco y completarlo después, pero "Enviar a SUNAT" lo va a pedir. Búscalo en el listado de ubigeos del INEI/SUNAT si no lo tienes a mano.</p>
+
+  <label>Motivo de traslado
+    <select name="transfer_reason">
+      {% for code, label in transfer_reasons %}
+      <option value="{{ code }}" {{ 'selected' if code == 'OTROS' }}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <div class="form-row">
     <label>Placa del vehículo
       <input type="text" name="vehicle_plate" value="{{ trip.vehicle_plate or '' }}">
     </label>

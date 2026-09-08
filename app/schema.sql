@@ -881,6 +881,10 @@ CREATE TABLE IF NOT EXISTS invoices (
     sunat_status TEXT NOT NULL DEFAULT 'NO_ENVIADA' CHECK (sunat_status IN ('NO_ENVIADA', 'ACEPTADO', 'RECHAZADO', 'ERROR')),
     sunat_message TEXT,
     sunat_pdf_url TEXT,
+    -- Nombre del archivo PDF real devuelto por tefacturo.pe al emitir la
+    -- factura (7 sep, segunda ronda), guardado vía app/storage.py —
+    -- sunat_pdf_url pasa a apuntar a la ruta interna que sirve este archivo.
+    sunat_pdf_filename TEXT,
     sunat_xml_url TEXT,
     sunat_cdr_url TEXT,
     sunat_sent_at TEXT,
@@ -901,7 +905,10 @@ CREATE TABLE IF NOT EXISTS invoice_items (
 CREATE TABLE IF NOT EXISTS waybills (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     trip_id INTEGER NOT NULL REFERENCES trips(id),
-    series TEXT NOT NULL DEFAULT 'T001',
+    -- La serie debe empezar con "V" para tefacturo.pe (guía transportista,
+    -- confirmado 7 sep, segunda ronda) — antes se usaba "T001" por
+    -- suposición propia.
+    series TEXT NOT NULL DEFAULT 'V001',
     series_number INTEGER NOT NULL DEFAULT 0,
     -- 7 sep, integración con tefacturo.pe: empresa emisora (Harraso o BRMS),
     -- copiada del viaje (trips.issuer) al crear la guía — no se recalcula
@@ -912,6 +919,16 @@ CREATE TABLE IF NOT EXISTS waybills (
     packages INTEGER,
     origin_address TEXT,
     destination_address TEXT,
+    -- 7 sep, segunda ronda: ubigeo (código INEI de 6 dígitos) de partida y
+    -- llegada, exigidos por SUNAT en la guía transportista — el sistema no
+    -- tiene un catálogo de ubigeos, se llenan a mano en el formulario.
+    origin_ubigeo TEXT,
+    destination_ubigeo TEXT,
+    -- Motivo de traslado (catálogo SUNAT: VENTA/DEVOLUCION/COMPRA/
+    -- TRASLADO_ESTABLECIMINTOS/CONSIGNACION/EXPORTACION/IMPORTACION/OTROS)
+    -- — exigido por tefacturo.pe, default OTROS porque Harraso/BRMS no
+    -- necesariamente conocen el motivo comercial de la carga del cliente.
+    transfer_reason TEXT NOT NULL DEFAULT 'OTROS',
     vehicle_plate TEXT,
     driver_document TEXT,
     driver_name TEXT,
@@ -920,6 +937,10 @@ CREATE TABLE IF NOT EXISTS waybills (
     sunat_status TEXT NOT NULL DEFAULT 'NO_ENVIADA' CHECK (sunat_status IN ('NO_ENVIADA', 'ACEPTADO', 'RECHAZADO', 'ERROR')),
     sunat_message TEXT,
     sunat_pdf_url TEXT,
+    -- Nombre del archivo PDF real devuelto por tefacturo.pe al emitir la
+    -- guía (7 sep, segunda ronda), guardado vía app/storage.py — sunat_pdf_url
+    -- pasa a apuntar a la ruta interna que sirve este archivo.
+    sunat_pdf_filename TEXT,
     sunat_xml_url TEXT,
     sunat_cdr_url TEXT,
     sunat_sent_at TEXT,

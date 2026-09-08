@@ -372,6 +372,15 @@ COLUMN_MIGRATIONS = [
     # el CHECK completo en instalaciones nuevas).
     ("invoices", "issuer", "TEXT NOT NULL DEFAULT 'HARRASO'"),
     ("waybills", "issuer", "TEXT NOT NULL DEFAULT 'HARRASO'"),
+    # 7 sep, integración con tefacturo.pe (segunda ronda, con la
+    # documentación técnica real): campos que exige el formato real de la
+    # guía transportista (ubigeo, motivo de traslado) y el nombre del PDF
+    # real que devuelve tefacturo.pe al emitir cada comprobante.
+    ("waybills", "origin_ubigeo", "TEXT"),
+    ("waybills", "destination_ubigeo", "TEXT"),
+    ("waybills", "transfer_reason", "TEXT NOT NULL DEFAULT 'OTROS'"),
+    ("waybills", "sunat_pdf_filename", "TEXT"),
+    ("invoices", "sunat_pdf_filename", "TEXT"),
 ]
 
 

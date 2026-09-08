@@ -61,6 +61,13 @@ def local_delivery_proofs_dir():
     return _local_dir("delivery_proofs")
 
 
+def local_sunat_documents_dir():
+    """Igual que las anteriores, pero para el PDF real que devuelve
+    tefacturo.pe al emitir una factura o guía de remisión (7 sep, segunda
+    ronda) — carpeta separada en disco para no mezclarla con lo demás."""
+    return _local_dir("sunat_documents")
+
+
 def _s3_bucket():
     return current_app.config["AWS_S3_BUCKET"]
 
@@ -82,6 +89,10 @@ def _s3_carrier_waybills_prefix():
 
 def _s3_delivery_proofs_prefix():
     return (current_app.config.get("AWS_S3_DELIVERY_PROOFS_PREFIX") or "conformidad-entrega").strip("/")
+
+
+def _s3_sunat_documents_prefix():
+    return (current_app.config.get("AWS_S3_SUNAT_DOCUMENTS_PREFIX") or "comprobantes-sunat").strip("/")
 
 
 def _s3_key(filename, prefix):
@@ -232,3 +243,22 @@ def delivery_proof_url(filename):
     guardada en S3. En disco local, usar local_delivery_proofs_dir() +
     send_from_directory."""
     return _presigned_url(_s3_delivery_proofs_prefix(), filename)
+
+
+def save_sunat_document(filename, raw_bytes):
+    """Igual que save_receipt()/save_carrier_waybill(), pero para el PDF
+    real que devuelve tefacturo.pe al emitir una factura o guía (7 sep,
+    segunda ronda) — ver app/integrations/sunat_ose.py ->
+    TefacturoClient.get_pdf_bytes()."""
+    if using_s3():
+        _put_object(_s3_sunat_documents_prefix(), filename, raw_bytes)
+    else:
+        with open(os.path.join(local_sunat_documents_dir(), filename), "wb") as f:
+            f.write(raw_bytes)
+
+
+def sunat_document_url(filename):
+    """Igual que receipt_url()/carrier_waybill_url(), pero para un PDF de
+    SUNAT guardado en S3. En disco local, usar
+    local_sunat_documents_dir() + send_from_directory."""
+    return _presigned_url(_s3_sunat_documents_prefix(), filename)
