@@ -1,0 +1,1330 @@
+From efe5bd718d8d41abbe061739ca93b65b21b005a4 Mon Sep 17 00:00:00 2001
+From: a <a@a.com>
+Date: Tue, 8 Sep 2026 16:08:04 +0000
+Subject: [PATCH] after
+
+---
+ .env.example                    |  28 +-
+ README.md                       |  35 +-
+ app/db.py                       |   9 +
+ app/helpers.py                  |  31 +-
+ app/integrations/sunat_ose.py   | 555 ++++++++++++++++++++++----------
+ app/routes/facturacion.py       |  57 +++-
+ app/routes/guias.py             |  99 +++++-
+ app/schema.sql                  |  23 +-
+ app/storage.py                  |  30 ++
+ app/templates/guias/detail.html |   2 +
+ app/templates/guias/form.html   |  18 ++
+ config.py                       |  50 ++-
+ 12 files changed, 701 insertions(+), 236 deletions(-)
+
+diff --git a/.env.example b/.env.example
+index 1448057..7afbbf2 100644
+--- a/.env.example
++++ b/.env.example
+@@ -41,14 +41,20 @@ FROTCOM_PASSWORD=
+ # 0 desactiva la sincronización automática (queda solo el botón manual).
+ FROTCOM_AUTO_SYNC_SECONDS=120
+ 
+-# Facturación electrónica SUNAT (facturas y guías de remisión) — opcional.
+-# Ver README, sección "Facturación electrónica (SUNAT)". Harraso y BRMS son
+-# dos empresas con RUC propio, así que cada una necesita su propia
+-# cuenta/credenciales ante el OSE (tefacturo.pe u otro).
+-HARRASO_OSE_RUTA=
+-HARRASO_OSE_TOKEN=
+-BRMS_OSE_RUTA=
+-BRMS_OSE_TOKEN=
++# Facturación electrónica SUNAT vía tefacturo.pe (facturas y guías de
++# remisión — transportista) — opcional. Ver README, sección "Facturación
++# electrónica (SUNAT)". Harraso y BRMS son dos empresas con RUC propio, así
++# que cada una necesita su propia cuenta (usuario/clave) en tefacturo.pe —
++# créala en https://api.tefacturo.pe/doc/integracion/registro/ (cuenta de
++# pruebas) o pídesela a tefacturo.pe para producción.
++HARRASO_TEFACTURO_EMAIL=
++HARRASO_TEFACTURO_PASSWORD=
++BRMS_TEFACTURO_EMAIL=
++BRMS_TEFACTURO_PASSWORD=
++# Registro ante el MTC (Ministerio de Transportes y Comunicaciones) de cada
++# empresa — SUNAT lo exige para la guía de remisión electrónica.
++HARRASO_MTC_REGISTRATION=
++BRMS_MTC_REGISTRATION=
+ # RUC y dirección fiscal de Harraso (el emisor de sus comprobantes).
+ # Vienen precargados con los datos reales de Harraso Transport S.A.C. — si
+ # cambian, sobreescríbelos aquí.
+@@ -59,9 +65,11 @@ COMPANY_EMAIL=contacto@harraso.com
+ # junto a los demás datos de BRMS de Cotizaciones — se reutilizan aquí para
+ # Facturación/Guías, ya que es la misma empresa con el mismo RUC.
+ COMPANY_PHONE=994185119
+-# Series de comprobantes que hayas dado de alta en tu OSE/SUNAT.
++# Series de comprobantes que hayas dado de alta en tu OSE/SUNAT. La guía de
++# remisión (transportista) debe empezar con "V" para tefacturo.pe
++# (confirmado en su documentación real, 7 sep) — antes se usaba "T001".
+ INVOICE_SERIES=F001
+-WAYBILL_SERIES=T001
++WAYBILL_SERIES=V001
+ 
+ # Cotizaciones (1 sep): número inicial (continúa la numeración real de
+ # Harraso) y datos bancarios que aparecen en el PDF de cotización.
+diff --git a/README.md b/README.md
+index 07eee50..b8d1e17 100644
+--- a/README.md
++++ b/README.md
+@@ -249,7 +249,7 @@ El sistema puede emitir **facturas** y **guías de remisión electrónica (modal
+ 
+ **Camino 1 — Conexión directa a SUNAT ("SEE del Contribuyente").** Requiere comprar un certificado digital propio (~S/150–600/año), armar y firmar digitalmente el XML en formato UBL 2.1, y hablar el webservice SOAP de SUNAT. Es una integración pesada, cara de mantener y con un margen de error alto si no se hace con experiencia previa — normalmente solo tiene sentido para empresas grandes con muchísimo volumen de comprobantes.
+ 
+-**Camino 2 — A través de un OSE (Operador de Servicios Electrónicos), como tefacturo.pe, NubeFacT, Efact, BizLinks o Facturalo Perú.** Le mandas un JSON simple por HTTPS con los datos del comprobante, el OSE arma el XML, lo firma con su propio certificado, lo envía a SUNAT y te devuelve el PDF, el XML y la constancia de aceptación (CDR). Es el camino que usa casi cualquier negocio pequeño o mediano, y **es el que implementa este sistema** (`app/integrations/sunat_ose.py`), siguiendo el formato público más extendido entre OSEs peruanos orientados a REST (RUTA + TOKEN + JSON). El OSE cobra por comprobante emitido (consulta tarifas directamente con el proveedor que elijas) — es un costo aparte del hosting del ERP.
++**Camino 2 — A través de un OSE (Operador de Servicios Electrónicos), en este caso tefacturo.pe.** Le mandas un JSON simple por HTTPS con los datos del comprobante, el OSE arma el XML, lo firma con su propio certificado, lo envía a SUNAT y te devuelve el PDF, el XML y la constancia de aceptación (CDR). Es el camino que usa casi cualquier negocio pequeño o mediano, y **es el que implementa este sistema** (`app/integrations/sunat_ose.py`), contra la API real de tefacturo.pe (`https://api.tefacturo.pe/doc/integracion/`, confirmada 7 sep — ver "Aviso importante" más abajo). tefacturo.pe cobra por comprobante emitido (consulta tarifas directamente con ellos) — es un costo aparte del hosting del ERP.
+ 
+ Ten en cuenta también que, según cambios normativos recientes, los negocios que superan cierto nivel de ingresos anuales (un umbral en UIT) están obligados a emitir a través de un OSE en vez de ir directo a SUNAT — confírmalo con tu contador, ya que las cifras y fechas exactas de esta obligación cambian con el tiempo.
+ 
+@@ -259,29 +259,32 @@ El sistema factura y emite guías a nombre de **dos empresas distintas, cada una
+ 
+ ### Cómo activarlo
+ 
+-1. Contrata un OSE autorizado por SUNAT (por ejemplo, tefacturo.pe: [tefacturo.pe](https://tefacturo.pe)) — una cuenta/credenciales por cada RUC que vaya a emitir (Harraso y, si corresponde, BRMS) — y crea primero una cuenta de **pruebas/sandbox**.
+-2. Con las credenciales que te den, define estas variables de entorno:
+-   - `HARRASO_OSE_RUTA` / `HARRASO_OSE_TOKEN`: la URL del endpoint y el token de la cuenta de Harraso.
+-   - `BRMS_OSE_RUTA` / `BRMS_OSE_TOKEN`: lo mismo para la cuenta de BRMS (déjalas vacías si BRMS todavía no emite comprobantes electrónicos propios).
++1. Crea una cuenta en tefacturo.pe para **cada empresa que vaya a emitir** — primero una de pruebas en [api.tefacturo.pe/doc/integracion/registro](https://api.tefacturo.pe/doc/integracion/registro/), y para producción pídesela directamente a tefacturo.pe. El login real es por RUC + correo + clave (no una "ruta"/"token" genéricos) — cada empresa necesita su propia cuenta.
++2. Define estas variables de entorno:
++   - `HARRASO_TEFACTURO_EMAIL` / `HARRASO_TEFACTURO_PASSWORD`: usuario y clave de la cuenta de Harraso en tefacturo.pe.
++   - `BRMS_TEFACTURO_EMAIL` / `BRMS_TEFACTURO_PASSWORD`: lo mismo para la cuenta de BRMS (déjalas vacías si BRMS todavía no emite comprobantes electrónicos propios).
++   - `HARRASO_MTC_REGISTRATION` / `BRMS_MTC_REGISTRATION`: el número de registro de cada empresa ante el MTC (Ministerio de Transportes y Comunicaciones) — SUNAT lo exige para la guía de remisión electrónica.
+    - `COMPANY_RUC` y `COMPANY_ADDRESS`: el RUC y la dirección fiscal de Harraso (el emisor de sus comprobantes).
+    - `BRMS_RUC` y `BRMS_ADDRESS`: lo mismo para BRMS (hoy vacíos — ver sección de Cotizaciones más arriba).
+-   - `INVOICE_SERIES` y `WAYBILL_SERIES`: las series que hayas dado de alta para facturas y guías (por defecto `F001` y `T001` — si BRMS emite con series propias, hoy el sistema usa las mismas para ambas empresas; avisar si hace falta separarlas).
+-3. Registra el RUC de cada cliente (Clientes → editar) — es obligatorio para emitir una factura electrónica.
++   - `INVOICE_SERIES` y `WAYBILL_SERIES`: las series que hayas dado de alta para facturas y guías (por defecto `F001` y `V001` — tefacturo.pe exige que la serie de guía transportista empiece con "V"). Si BRMS emite con series propias, hoy el sistema usa las mismas para ambas empresas; avisar si hace falta separarlas.
++3. Registra el RUC de cada cliente (Clientes → editar) — es obligatorio para emitir una factura o guía electrónica (el cliente hace de "receptor"/"remitente"/"destinatario" del comprobante).
+ 4. Para conductores, registra también su **DNI** (Conductores → editar) — se necesita para las guías de remisión.
+-5. Emite una factura de prueba (Facturación → detalle de una factura → "Enviar a SUNAT") o una guía (Viajes → viaje en curso/entregado → "Generar guía de remisión" → "Enviar a SUNAT") y revisa la respuesta.
++5. Al generar una guía (Viajes → viaje en curso/entregado → "Generar guía de remisión"), completa el **ubigeo de partida y de llegada** (código INEI de 6 dígitos del distrito) — SUNAT lo exige y el sistema no tiene un catálogo propio para autocompletarlo.
++6. Emite una factura de prueba (Facturación → detalle de una factura → "Enviar a SUNAT") o una guía (Guías → detalle → "Enviar a SUNAT") y revisa la respuesta. Si se acepta, el sistema descarga y guarda automáticamente el PDF real que devuelve tefacturo.pe (link "PDF" en el detalle).
+ 
+ ### Aviso importante — léelo antes de emitir comprobantes reales
+ 
+-Esta integración **no ha podido probarse contra una cuenta real de ningún OSE**, porque esta instalación no cuenta con credenciales de tefacturo.pe ni de otro proveedor. Sobre tefacturo.pe en particular: lo único público que se encontró es un manual de 2019 que documenta solo factura/boleta (vía `PUT`, RUC del emisor dentro del JSON) — **no documenta autenticación ni guía de remisión**, así que `app/integrations/sunat_ose.py` sigue el formato público más común entre OSEs peruanos (POST + token) como punto de partida, pero hay que confirmarlo contra el manual real y actualizado que entregue tefacturo.pe al contratar. Varios otros valores son catálogos oficiales de SUNAT que **debes confirmar antes de usarlo en producción** (están marcados con comentarios "AJUSTAR" en el código):
++Esta integración se construyó (7 sep, segunda ronda) contra la **documentación técnica real de tefacturo.pe** (`https://api.tefacturo.pe/doc/integracion/`, compartida por Braulio) — a diferencia de un primer intento el mismo día basado en un manual suelto de 2019 que no documentaba autenticación ni guía de remisión. Con la documentación real confirmada, `app/integrations/sunat_ose.py` implementa: el login (RUC + correo + clave → token JWT de tefacturo.pe), la emisión de facturas, la emisión de **guías de remisión — modalidad Transportista** (Harraso/BRMS es quien transporta la carga, no el dueño de la mercadería), y la descarga automática del PDF real de cada comprobante emitido.
+ 
+-- Tipo de comprobante (factura vs. guía transportista).
+-- Tipo de documento de identidad del cliente/conductor (RUC, DNI).
+-- Unidad de medida de los ítems.
+-- Tipo de IGV.
+-- Motivo de traslado y modalidad de transporte (específicos de la guía de remisión).
+-- El formato exacto de la respuesta del OSE (nombres de campos de éxito/error, enlaces de PDF/XML/CDR).
++Aun así, **no se ha podido probar contra una cuenta real** (esta instalación no tiene usuario/clave de tefacturo.pe) — antes de emitir un comprobante real, ten en cuenta:
+ 
+-**Antes de emitir un solo comprobante a un cliente real, pide a tu contador (o a alguien con experiencia en facturación electrónica peruana) que revise los primeros comprobantes emitidos en modo de pruebas.** Un código de catálogo equivocado puede hacer que SUNAT rechace el comprobante, o que lo acepte mal clasificado — con las implicancias tributarias que eso conlleva. Mientras tanto, el resto del sistema (facturas y guías internas, control de estados, historial) funciona con normalidad sin esta integración; simplemente los comprobantes quedan como "No enviados" hasta que la actives y confirmes.
++- **Guía remitente no implementada a propósito**: tefacturo.pe también documenta un endpoint de guía "Remitente" — no se implementó porque esa guía la debe emitir el DUEÑO de la carga (el cliente de Harraso, con su propia cuenta), no la empresa de transporte. Avisar si tu operación necesita que Harraso/BRMS también la emita.
++- **`destinatario` = mismo dato que `remitente`** en la guía: el sistema solo conoce un cliente por viaje, así que usa el mismo para quien envía y quien recibe la carga. Si en la práctica suelen ser empresas distintas, hay que agregar un campo aparte.
++- **Ubigeo manual**: no hay catálogo de ubigeos en el sistema — se escribe a mano en el formulario de la guía.
++- **Registro MTC**: campo nuevo y obligatorio para la guía transportista, todavía sin completar (`HARRASO_MTC_REGISTRATION`/`BRMS_MTC_REGISTRATION`).
++- **XML/CDR no se descargan todavía** — solo el PDF (tefacturo.pe también documenta `consultarXml`/`consultarCdr`, quedan pendientes si hicieran falta).
++
++**Antes de emitir un solo comprobante a un cliente real, pide a tu contador (o a alguien con experiencia en facturación electrónica peruana) que revise los primeros comprobantes emitidos en modo de pruebas.** Mientras tanto, el resto del sistema (facturas y guías internas, control de estados, historial) funciona con normalidad sin esta integración; simplemente los comprobantes quedan como "No enviados" hasta que la actives y confirmes.
+ 
+ ## Cotizaciones (1 sep)
+ 
+diff --git a/app/db.py b/app/db.py
+index 586c103..64460db 100644
+--- a/app/db.py
++++ b/app/db.py
+@@ -372,6 +372,15 @@ COLUMN_MIGRATIONS = [
+     # el CHECK completo en instalaciones nuevas).
+     ("invoices", "issuer", "TEXT NOT NULL DEFAULT 'HARRASO'"),
+     ("waybills", "issuer", "TEXT NOT NULL DEFAULT 'HARRASO'"),
++    # 7 sep, integración con tefacturo.pe (segunda ronda, con la
++    # documentación técnica real): campos que exige el formato real de la
++    # guía transportista (ubigeo, motivo de traslado) y el nombre del PDF
++    # real que devuelve tefacturo.pe al emitir cada comprobante.
++    ("waybills", "origin_ubigeo", "TEXT"),
++    ("waybills", "destination_ubigeo", "TEXT"),
++    ("waybills", "transfer_reason", "TEXT NOT NULL DEFAULT 'OTROS'"),
++    ("waybills", "sunat_pdf_filename", "TEXT"),
++    ("invoices", "sunat_pdf_filename", "TEXT"),
+ ]
+ 
+ 
+diff --git a/app/helpers.py b/app/helpers.py
+index e302e23..3dcd65c 100644
+--- a/app/helpers.py
++++ b/app/helpers.py
+@@ -137,24 +137,39 @@ def amount_to_words_pen(amount):
+ 
+ 
+ def company_info_for_issuer(issuer, cfg):
+-    """Datos de la empresa emisora (RUC/nombre/dirección) según sea Harraso
+-    o BRMS. Mismo criterio ya usado en Cotizaciones (`quotations.issuer`,
+-    `_parse_issuer()` en cotizaciones.py/viajes.py): un documento guarda su
+-    empresa emisora al crearse y no se recalcula después. Se usa aquí para
+-    armar el comprobante que se manda al OSE (tefacturo.pe u otro) en
+-    Facturación y Guías — cada empresa tiene su propio RUC y, por lo tanto,
+-    necesita su propia cuenta/credenciales ante el OSE (ver
+-    HARRASO_OSE_RUTA/TOKEN y BRMS_OSE_RUTA/TOKEN en config.py)."""
++    """Datos de la empresa emisora según sea Harraso o BRMS. Mismo criterio
++    ya usado en Cotizaciones (`quotations.issuer`, `_parse_issuer()` en
++    cotizaciones.py/viajes.py): un documento guarda su empresa emisora al
++    crearse y no se recalcula después. Se usa aquí para armar el
++    comprobante que se manda a tefacturo.pe en Facturación y Guías — cada
++    empresa tiene su propio RUC y, por lo tanto, necesita su propia cuenta
++    (usuario/clave) ante tefacturo.pe (ver HARRASO_TEFACTURO_EMAIL/PASSWORD
++    y BRMS_TEFACTURO_EMAIL/PASSWORD en config.py).
++
++    `commercial_name`/`legal_name`/`email`/`mtc_registration` se agregaron
++    el 7 sep (segunda ronda) para armar los campos `emisor`/`transportista`
++    que exige el formato real de tefacturo.pe — antes este helper solo
++    tenía ruc/name/address (suficiente para el intento anterior, basado en
++    un manual incompleto)."""
+     if issuer == "BRMS":
++        legal_suffix = ""  # razón social legal completa de BRMS aún sin confirmar (ver Cotizaciones)
+         return {
+             "ruc": cfg.get("BRMS_RUC", ""),
+             "name": "BRMS",
+             "address": cfg.get("BRMS_ADDRESS", ""),
++            "email": cfg.get("COMPANY_EMAIL", ""),  # BRMS comparte correo con Harraso (confirmado en Cotizaciones)
++            "commercial_name": "BRMS",
++            "legal_name": f"BRMS {legal_suffix}".strip(),
++            "mtc_registration": cfg.get("BRMS_MTC_REGISTRATION", ""),
+         }
+     return {
+         "ruc": cfg.get("COMPANY_RUC", ""),
+         "name": cfg.get("COMPANY_NAME", ""),
+         "address": cfg.get("COMPANY_ADDRESS", ""),
++        "email": cfg.get("COMPANY_EMAIL", ""),
++        "commercial_name": cfg.get("COMPANY_NAME", ""),
++        "legal_name": f"{cfg.get('COMPANY_NAME', '')} S.A.C.".strip(),
++        "mtc_registration": cfg.get("HARRASO_MTC_REGISTRATION", ""),
+     }
+ 
+ 
+diff --git a/app/integrations/sunat_ose.py b/app/integrations/sunat_ose.py
+index 326881c..7cc0f16 100644
+--- a/app/integrations/sunat_ose.py
++++ b/app/integrations/sunat_ose.py
+@@ -1,112 +1,241 @@
+ """Cliente para emitir comprobantes electrónicos (facturas y guías de
+-remisión) ante SUNAT a través de un OSE (Operador de Servicios
+-Electrónicos), por ejemplo NubeFacT, Efact, BizLinks, etc.
+-
+-IMPORTANTE — léeme antes de usar en producción
+-================================================
+-Conectarse directamente a SUNAT (sin un OSE) exige un certificado digital
+-propio, firmar XML en formato UBL 2.1 y hablar su webservice SOAP — es una
+-integración pesada y cara de mantener. La ruta que casi todos los negocios
+-pequeños/medianos usan (y la que implementa este archivo) es contratar un
+-OSE: le mandas un JSON simple por HTTPS, el OSE arma el XML, lo firma, lo
+-envía a SUNAT y te devuelve el PDF/XML/CDR. Es la misma idea que planes de
+-GPS: el ERP habla el "idioma común" de este tipo de API, pero **los nombres
+-exactos de campos, catálogos (tipo de comprobante, tipo de documento del
+-cliente, unidad de medida, motivo de traslado, tipo de transporte) y el
+-formato de respuesta pueden variar según el OSE que contrates y se
+-actualizan con el tiempo**. Este cliente sigue el formato público que
+-NubeFacT documenta (RUTA + TOKEN + JSON), que es el más común entre OSEs
+-peruanos orientados a REST/JSON, pero **no ha podido probarse contra una
+-cuenta real** porque esta instalación no tiene credenciales de ningún OSE.
+-
+-tefacturo.pe (7 sep, pedido de Braulio): lo único público que se encontró
+-es un manual de 2019 ("tefacturo-Integracion-con-API-REST-y-UBL-2.1.pdf")
+-que documenta SOLO factura/boleta, vía PUT a
+-https://dev.invoice2u.pe/apiemisor/invoice2u/integracion/{factura|boleta}
+-con el RUC del emisor dentro del JSON — NO documenta autenticación (token,
+-API key, etc.), NI guía de remisión, y no se encontró un portal de
+-documentación técnica más reciente. Este cliente sigue el patrón NubeFacT
+-(POST + header Authorization: Token) como mejor punto de partida, pero hay
+-que confirmarlo contra el manual real y actualizado que entregue
+-tefacturo.pe al contratar (es probable que difiera en el método HTTP, la
+-autenticación, y que tenga un endpoint propio para guías) antes de usarlo
+-en serio.
++remisión) ante SUNAT a través de tefacturo.pe (OSE — Operador de Servicios
++Electrónicos autorizado por SUNAT).
++
++CONFIRMADO contra la documentación técnica real (7 sep, segunda ronda —
++Braulio compartió https://api.tefacturo.pe/doc/integracion/docs/get-started/,
++que reemplaza al primer intento del mismo día basado en un PDF suelto de
++2019 sin autenticación documentada ni guía de remisión):
++
++- Base URL: https://jarvis.tefacturo.pe (configurable, TEFACTURO_BASE_URL).
++- Autenticación: POST /tokenapi/secure/v2/login/token con
++  {"aplicacion": {"codigo": "1"}, "clave", "mail", "ruc"} (ruc como número).
++  Devuelve {"c2uToken": "<JWT>", "fechaExpiracion": "<ISO>", ...} — el JWT
++  vale ~8 horas; se manda como "Authorization: Bearer <token>" en cada
++  llamada siguiente. Es un login POR RUC (cada empresa — Harraso y BRMS —
++  necesita su propia cuenta usuario/clave en tefacturo.pe, no un solo
++  usuario para ambas).
++- Emitir factura: PUT /factura-api/invoice2u/integracion/factura/{ruc}.
++- Emitir guía de remisión (TRANSPORTISTA): POST
++  /guiatransportista-api/invoice2u/integracion/guia-remision/transportista/{ruc}.
++  tefacturo.pe también documenta un endpoint de guía REMITENTE
++  (guiaremitente-api/.../guia-remision/{ruc}) — no se implementó aquí a
++  propósito: la guía remitente la debe emitir el DUEÑO de la carga (el
++  cliente de Harraso, con su propio RUC/cuenta), no la empresa de
++  transporte. Harraso/BRMS, como transportistas, emiten la guía
++  transportista — que es la que evidencia SU servicio de transporte.
++  Avisar si esta interpretación no es la correcta.
++- Consultar PDF ya emitido: PUT /pdfapi/pdfapi/consultarPdf/{ruc} con
++  {"emisor", "numero", "serie", "tipoComprobante"} (01=Factura, 09=Guía) —
++  la respuesta trae el PDF completo codificado en base64. Se usa aquí para
++  guardar una copia del PDF real en el propio ERP apenas se emite un
++  comprobante (mismo mecanismo de almacenamiento que el resto del sistema,
++  ver app/storage.py) — así Braulio no depende de volver a consultarlo en
++  el portal de tefacturo.pe para verlo o mandárselo a un cliente.
++  tefacturo.pe también documenta /consultarXml y /consultarCdr (no
++  implementados todavía — AJUSTAR si hace falta guardarlos también).
++
++SIMPLIFICACIONES pendientes de confirmar con Braulio (quedan documentadas
++para no perder el rastro; ver también README):
++- **`destinatario` = mismo dato que `remitente`** en la guía transportista:
++  el formato de tefacturo.pe distingue quién ENVÍA la carga (remitente) de
++  quién la RECIBE en destino (destinatario) — hoy el ERP solo conoce un
++  cliente por viaje (`trips.client_id`), así que se usa el mismo para
++  ambos. Si en la práctica el destinatario suele ser una empresa distinta
++  (ej. la sucursal de destino del cliente), avisar para agregar un campo
++  aparte en Guías.
++- **Ubigeo de partida/llegada**: SUNAT exige el código INEI de 6 dígitos
++  del distrito de origen/destino en la guía — el ERP no tiene un catálogo
++  de ubigeos, así que se pide como campo de texto manual en el formulario
++  de Guías (`waybills.origin_ubigeo`/`destination_ubigeo`). Sin esto
++  completo, no se puede enviar la guía a SUNAT (ver validación en
++  build_waybill_payload).
++- **Registro MTC**: requerido por SUNAT para la guía transportista, no
++  existía ningún dato parecido en el sistema — ver
++  HARRASO_MTC_REGISTRATION/BRMS_MTC_REGISTRATION en config.py, vacíos por
++  defecto (AJUSTAR).
++- **IGV**: se asume que todos los ítems de una factura son
++  "GRAVADO_OPERACION_ONEROSA" (18%) — igual que el resto del sistema desde
++  el primer intento de esta integración.
+ 
+ Antes de emitir un solo comprobante real:
+-1. Contrata un OSE autorizado por SUNAT (tefacturo.pe, NubeFacT, Efact,
+-   BizLinks, Facturalo Perú, etc.) y crea una cuenta de pruebas (sandbox).
+-2. Con su manual de integración en mano, confirma en este archivo (buscan
+-   los comentarios "AJUSTAR"):
+-   - La URL exacta de la RUTA (suele haber una de pruebas y otra de
+-     producción).
+-   - Los códigos de catálogo SUNAT que uses: tipo de comprobante, tipo de
+-     documento de identidad del cliente, unidad de medida, tipo de IGV,
+-     moneda, y — para guías de remisión — motivo de traslado y modalidad
+-     de transporte.
+-   - El formato exacto de la respuesta (campo de éxito/error, URLs de
+-     PDF/XML/CDR).
+-3. Pide a tu contador que revise los primeros comprobantes de prueba antes
+-   de usarlo con clientes reales — un código de catálogo equivocado puede
+-   hacer que SUNAT rechace el comprobante o, peor, que lo acepte mal
+-   clasificado.
++1. Crea una cuenta de pruebas en tefacturo.pe para Harraso y/o BRMS
++   (https://api.tefacturo.pe/doc/integracion/registro/) y consigue
++   usuario/clave — configúralos en HARRASO_TEFACTURO_EMAIL/PASSWORD y
++   BRMS_TEFACTURO_EMAIL/PASSWORD.
++2. Completa BRMS_RUC/BRMS_ADDRESS (ver Cotizaciones, siguen vacíos) y
++   HARRASO_MTC_REGISTRATION/BRMS_MTC_REGISTRATION.
++3. Prueba primero con una factura/guía de prueba y pide a tu contador que
++   revise el PDF resultante antes de usarlo con clientes reales.
+ 
+ Mientras tanto, el resto del ERP funciona perfectamente sin esto: las
+ facturas y guías se siguen generando y controlando dentro del sistema,
+ simplemente no quedan enviadas a SUNAT hasta que actives y confirmes esta
+ integración.
+ """
+-from datetime import datetime
+-
++import base64
+ import json
+ import urllib.error
+ import urllib.request
++from datetime import datetime, timedelta, timezone
+ 
+ IGV_RATE = 0.18
+ 
++# Token cacheado en memoria del propio proceso, por RUC — evita loguearse
++# de nuevo en cada envío mientras el token siga vigente (~8 horas). Esto es
++# seguro en este proyecto concretamente porque el Procfile corre gunicorn
++# SIN --workers (un solo proceso, ver app/scheduler.py) — si eso cambiara,
++# este caché habría que revisarlo (cada worker tendría su propio caché, sin
++# problema real más allá de logins de más).
++_TOKEN_CACHE = {}
++_TOKEN_SAFETY_BUFFER = timedelta(minutes=15)
++
+ 
+ class SunatOseError(Exception):
+-    """Error al comunicarse con el OSE, o respuesta de rechazo de SUNAT."""
++    """Error al comunicarse con tefacturo.pe, datos incompletos para armar
++    el comprobante, o rechazo de SUNAT."""
+ 
+ 
+-class OseClient:
+-    def __init__(self, ruta, token, timeout=20):
+-        self.ruta = (ruta or "").strip()
+-        self.token = token
++class TefacturoClient:
++    def __init__(self, ruc, email, password, base_url=None, timeout=25):
++        self.ruc = (ruc or "").strip()
++        self.email = (email or "").strip()
++        self.password = password or ""
++        self.base_url = (base_url or "https://jarvis.tefacturo.pe").rstrip("/")
+         self.timeout = timeout
+ 
+     def is_configured(self):
+-        return bool(self.ruta and self.token)
++        return bool(self.ruc and self.email and self.password)
+ 
+-    def send(self, payload):
+-        """Envía un documento (factura o guía) al OSE y devuelve su
+-        respuesta ya parseada como dict. Lanza SunatOseError si no se pudo
+-        conectar o el OSE devolvió un error HTTP."""
++    def _require_configured(self):
+         if not self.is_configured():
+             raise SunatOseError(
+-                "La facturación electrónica no está configurada. Define OSE_RUTA y "
+-                "OSE_TOKEN en las variables de entorno (ver README, sección "
+-                "'Facturación electrónica (SUNAT)')."
++                "La facturación electrónica no está configurada para esta empresa. "
++                "Define su RUC, usuario y clave de tefacturo.pe en las variables de "
++                "entorno correspondientes (ver README, sección 'Facturación "
++                "electrónica (SUNAT)')."
+             )
+-        # AJUSTAR: NubeFacT y OSEs similares usan un solo POST con
+-        # Authorization: Token <token> — confirma el esquema exacto de tu OSE.
+-        headers = {
+-            "Content-Type": "application/json",
+-            "Authorization": f"Token {self.token}",
++
++    def _request(self, method, path, body):
++        url = f"{self.base_url}{path}"
++        data = json.dumps(body).encode("utf-8")
++        headers = {"Content-Type": "application/json"}
++        token = self._get_token()
++        if token:
++            headers["Authorization"] = f"Bearer {token}"
++        req = urllib.request.Request(url, data=data, headers=headers, method=method)
++        try:
++            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
++                raw = resp.read().decode("utf-8")
++                return json.loads(raw) if raw else {}
++        except urllib.error.HTTPError as exc:
++            detail = exc.read().decode("utf-8", "ignore")
++            raise SunatOseError(f"tefacturo.pe respondió {exc.code} en {path}: {detail}")
++        except urllib.error.URLError as exc:
++            raise SunatOseError(f"No se pudo conectar con tefacturo.pe ({url}): {exc.reason}")
++        except (json.JSONDecodeError, ValueError) as exc:
++            raise SunatOseError(f"Respuesta inesperada de tefacturo.pe: {exc}")
++
++    def _login(self):
++        self._require_configured()
++        url = f"{self.base_url}/tokenapi/secure/v2/login/token"
++        body = {
++            "aplicacion": {"codigo": "1"},
++            "clave": self.password,
++            "mail": self.email,
++            "ruc": int(self.ruc),
+         }
+-        data = json.dumps(payload).encode("utf-8")
+-        req = urllib.request.Request(self.ruta, data=data, headers=headers, method="POST")
++        data = json.dumps(body).encode("utf-8")
++        req = urllib.request.Request(
++            url, data=data, headers={"Content-Type": "application/json"}, method="POST"
++        )
+         try:
+             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+-                body = resp.read().decode("utf-8")
+-                return json.loads(body) if body else {}
++                raw = resp.read().decode("utf-8")
++                result = json.loads(raw) if raw else {}
+         except urllib.error.HTTPError as exc:
++            detail = exc.read().decode("utf-8", "ignore")
+             raise SunatOseError(
+-                f"El OSE respondió {exc.code}: {exc.read().decode('utf-8', 'ignore')}"
++                f"tefacturo.pe rechazó el usuario/clave configurado para el RUC "
++                f"{self.ruc} ({exc.code}): {detail}"
+             )
+         except urllib.error.URLError as exc:
+-            raise SunatOseError(f"No se pudo conectar al OSE ({self.ruta}): {exc.reason}")
++            raise SunatOseError(f"No se pudo conectar con tefacturo.pe ({url}): {exc.reason}")
+         except (json.JSONDecodeError, ValueError) as exc:
+-            raise SunatOseError(f"Respuesta inesperada del OSE: {exc}")
++            raise SunatOseError(f"Respuesta inesperada de tefacturo.pe al iniciar sesión: {exc}")
++
++        token = result.get("c2uToken")
++        if not token:
++            raise SunatOseError("tefacturo.pe no devolvió un token de acceso válido.")
++        expires_at = _parse_expiration(result.get("fechaExpiracion")) or (
++            datetime.now(timezone.utc) + timedelta(hours=8)
++        )
++        _TOKEN_CACHE[self.ruc] = (token, expires_at)
++        return token
++
++    def _get_token(self):
++        cached = _TOKEN_CACHE.get(self.ruc)
++        if cached:
++            token, expires_at = cached
++            if datetime.now(timezone.utc) < (expires_at - _TOKEN_SAFETY_BUFFER):
++                return token
++        return self._login()
++
++    def emit_factura(self, payload):
++        self._require_configured()
++        return self._request("PUT", f"/factura-api/invoice2u/integracion/factura/{self.ruc}", payload)
++
++    def emit_guia_transportista(self, payload):
++        self._require_configured()
++        return self._request(
++            "POST",
++            f"/guiatransportista-api/invoice2u/integracion/guia-remision/transportista/{self.ruc}",
++            payload,
++        )
++
++    def get_pdf_bytes(self, tipo_comprobante, serie, numero):
++        """Descarga el PDF de un comprobante ya emitido y devuelve sus
++        bytes (decodificados de base64). tipo_comprobante: '01' = factura,
++        '09' = guía de remisión."""
++        self._require_configured()
++        body = {
++            "emisor": int(self.ruc),
++            "numero": int(numero),
++            "serie": serie,
++            "tipoComprobante": tipo_comprobante,
++        }
++        result = self._request("PUT", f"/pdfapi/pdfapi/consultarPdf/{self.ruc}", body)
++        b64 = _extract_base64_pdf(result)
++        if not b64:
++            raise SunatOseError("tefacturo.pe no devolvió el PDF del comprobante.")
++        return base64.b64decode(b64)
++
++
++def _extract_base64_pdf(result):
++    """El manual de tefacturo.pe describe la respuesta de consultarPdf
++    simplemente como 'el PDF completo en base64', sin especificar si viaja
++    como texto plano o dentro de un campo JSON — se cubren ambos casos."""
++    if isinstance(result, str):
++        return result
++    if isinstance(result, dict):
++        for key in ("pdf", "archivo", "documento", "base64", "contenido", "data"):
++            value = result.get(key)
++            if isinstance(value, str) and value:
++                return value
++    return None
++
++
++def _parse_expiration(value):
++    if not value:
++        return None
++    text = value.replace("Z", "+00:00")
++    try:
++        dt = datetime.fromisoformat(text)
++    except ValueError:
++        return None
++    if dt.tzinfo is None:
++        dt = dt.replace(tzinfo=timezone.utc)
++    return dt
+ 
+ 
+ def _split_igv(total):
+@@ -117,13 +246,13 @@ def _split_igv(total):
+ 
+ 
+ def build_invoice_payload(invoice, items, client, company):
+-    """Arma el JSON de una FACTURA electrónica en el formato tipo
+-    NubeFacT (operación / tipo_de_comprobante / items[]). AJUSTAR los
+-    códigos de catálogo marcados abajo contra el manual real de tu OSE.
++    """Arma el JSON de una FACTURA en el formato real de tefacturo.pe
++    (close2u / datosDocumento / detalleDocumento / emisor / receptor /
++    informacionAdicional — confirmado 7 sep).
+ 
+     invoice: fila de `invoices`. items: filas de `invoice_items`.
+-    client: fila de `clients` (requiere `ruc`). company: dict con
+-    ruc/nombre/dirección propios (ver Config).
++    client: fila de `clients` (requiere `ruc`). company: dict devuelto por
++    `company_info_for_issuer()`.
+     """
+     if not client["ruc"]:
+         raise SunatOseError(
+@@ -131,126 +260,212 @@ def build_invoice_payload(invoice, items, client, company):
+             "electrónica requiere el RUC del cliente. Edita el cliente y agrégalo."
+         )
+ 
+-    gravada_total, igv_total = _split_igv(float(invoice["amount"]))
+-
+-    ose_items = []
++    detalle = []
+     for it in items:
+-        item_gravada, item_igv = _split_igv(float(it["amount"]))
+-        ose_items.append(
++        gravada, _igv = _split_igv(float(it["amount"]))
++        detalle.append(
+             {
+-                "unidad_de_medida": "ZZ",  # AJUSTAR: catálogo 03 SUNAT — ZZ = "Unidad de Servicio"
+-                "codigo": f"SERV-{it['trip_id']}",
++                "codigoProducto": f"SERV-{it['trip_id']}",
+                 "descripcion": it["description"] or "Servicio de transporte de carga",
+-                "cantidad": 1,
+-                "valor_unitario": item_gravada,
+-                "precio_unitario": round(item_gravada + item_igv, 2),
+-                "subtotal": item_gravada,
+-                "tipo_de_igv": 1,  # AJUSTAR: catálogo 07 SUNAT — 1 = Gravado, operación onerosa
+-                "igv": item_igv,
+-                "total": round(item_gravada + item_igv, 2),
++                "tipoAfectacion": "GRAVADO_OPERACION_ONEROSA",
++                "unidadMedida": "SERVICIO",
++                "cantidad": "1",
++                "valorVentaUnitarioItem": gravada,
+             }
+         )
+ 
++    forma_pago = "CREDITO" if invoice["due_date"] else "CONTADO"
++
+     return {
+-        "operacion": "generar_comprobante",
+-        "tipo_de_comprobante": 1,  # AJUSTAR: catálogo 01 SUNAT — 1 = Factura, 2 = Boleta
+-        "serie": invoice["series"],
+-        "numero": invoice["series_number"],
+-        "sunat_transaction": 1,
+-        "cliente_tipo_de_documento": 6,  # AJUSTAR: catálogo 06 SUNAT — 6 = RUC
+-        "cliente_numero_de_documento": client["ruc"],
+-        "cliente_denominacion": client["name"],
+-        "cliente_direccion": client["address"] or "",
+-        "fecha_de_emision": _format_date_ose(invoice["issue_date"]),
+-        "fecha_de_vencimiento": _format_date_ose(invoice["due_date"]) if invoice["due_date"] else None,
+-        "moneda": 1,  # AJUSTAR: catálogo 02 SUNAT — 1 = Soles
+-        "porcentaje_de_igv": IGV_RATE * 100,
+-        "total_gravada": gravada_total,
+-        "total_igv": igv_total,
+-        "total": round(float(invoice["amount"]), 2),
+-        "observaciones": invoice["notes"] or "",
+-        "items": ose_items,
++        "close2u": {
++            "tipoIntegracion": "OFFLINE",
++            "tipoPlantilla": "01",
++            # Los montos de detalleDocumento van SIN IGV (ver _split_igv) —
++            # tefacturo.pe calcula el IGV (18%) y los totales por su cuenta,
++            # evitando descuadres de redondeo entre lo que nosotros
++            # calculamos y lo que SUNAT valida.
++            "tipoRegistro": "PRECIOS_SIN_IGV",
++        },
++        "datosDocumento": {
++            "serie": invoice["series"],
++            "numero": invoice["series_number"],
++            "moneda": "PEN",
++            "fechaEmision": invoice["issue_date"],
++            "horaEmision": None,
++            "formaPago": forma_pago,
++            "ordencompra": None,
++            "glosa": invoice["notes"] or "",
++        },
++        "detalleDocumento": detalle,
++        "emisor": {
++            "correo": company.get("email", ""),
++            "nombreComercial": company.get("commercial_name", ""),
++            "nombreLegal": company.get("legal_name", ""),
++            "numeroDocumentoIdentidad": company.get("ruc", ""),
++            "tipoDocumentoIdentidad": "RUC",
++        },
++        "receptor": {
++            "correo": client["email"] or "",
++            "domicilioFiscal": {
++                "direccion": client["address"] or "",
++            },
++            "nombreComercial": client["name"],
++            "nombreLegal": client["name"],
++            "numeroDocumentoIdentidad": client["ruc"],
++            "tipoDocumentoIdentidad": "RUC",
++        },
++        "informacionAdicional": {
++            "tipoOperacion": "VENTA_INTERNA",
++        },
+     }
+ 
+ 
+-def build_waybill_payload(waybill, trip, company):
+-    """Arma el JSON de una GUÍA DE REMISIÓN ELECTRÓNICA — TRANSPORTISTA
+-    (la empresa de transporte es quien traslada mercancía de terceros).
+-    AJUSTAR los códigos de catálogo marcados abajo: los catálogos de
+-    "motivo de traslado" y "modalidad de transporte" para la guía del
+-    transportista tienen particularidades frente a la guía del remitente;
+-    confírmalos con tu OSE y tu contador antes de emitir en producción.
+-    """
++def build_waybill_payload(waybill, trip, company, client):
++    """Arma el JSON de una GUÍA DE REMISIÓN — TRANSPORTISTA en el formato
++    real de tefacturo.pe (confirmado 7 sep). `company` es quien transporta
++    (Harraso o BRMS, el `transportista`); `client` (fila de `clients`) se
++    usa tanto como `remitente` como `destinatario` — ver la nota de
++    "SIMPLIFICACIONES" al inicio de este archivo."""
++    missing = []
++    if not client["ruc"]:
++        missing.append(f"el cliente '{client['name']}' no tiene RUC registrado")
++    if not company.get("mtc_registration"):
++        missing.append(f"falta el registro MTC de {company.get('name')} (HARRASO_MTC_REGISTRATION/BRMS_MTC_REGISTRATION)")
++    if not waybill["origin_ubigeo"] or not waybill["destination_ubigeo"]:
++        missing.append("falta el ubigeo de partida y/o llegada (SUNAT lo exige, 6 dígitos)")
++    if not waybill["vehicle_plate"]:
++        missing.append("falta la placa del vehículo")
++    if not waybill["driver_document"]:
++        missing.append("falta el DNI del conductor")
++    if not str(waybill["series"]).upper().startswith("V"):
++        missing.append(f"la serie de la guía ('{waybill['series']}') debe empezar con 'V' para tefacturo.pe")
++    if missing:
++        raise SunatOseError(
++            "No se puede enviar la guía a SUNAT todavía: " + "; ".join(missing) + "."
++        )
++
++    party = {
++        "correo": client["email"] or "",
++        "nombreComercial": client["name"],
++        "nombreLegal": client["name"],
++        "numeroDocumentoIdentidad": client["ruc"],
++        "tipoDocumentoIdentidad": "RUC",
++    }
++
+     return {
+-        "operacion": "generar_guia",
+-        "tipo_de_comprobante": 7,  # AJUSTAR: catálogo NubeFacT — 7 suele ser "Guía de Remisión Transportista"
+-        "serie": waybill["series"],
+-        "numero": waybill["series_number"],
+-        "cliente_tipo_de_documento": 6,
+-        "cliente_numero_de_documento": company.get("ruc", ""),
+-        "cliente_denominacion": company.get("name", ""),
+-        "fecha_de_emision": _format_date_ose(waybill["issue_date"]),
+-        "motivo_de_traslado": "04",  # AJUSTAR: catálogo 20 SUNAT — 04 = Traslado de bienes por transporte de servicio prestado a terceros (verificar código vigente)
+-        "peso_bruto_total": waybill["weight_kg"] or 0,
+-        "peso_bruto_unidad_de_medida": "KGM",
+-        "numero_de_bultos": waybill["packages"] or 1,
+-        "tipo_de_transporte": "02",  # AJUSTAR: catálogo 18 SUNAT — 01 = Público, 02 = Privado (confirmar según tu operación)
+-        "fecha_de_inicio_de_traslado": _format_date_ose(waybill["issue_date"]),
+-        "dir_partida_direccion": waybill["origin_address"] or trip["origin"],
+-        "dir_llegada_direccion": waybill["destination_address"] or trip["destination"],
+-        "transportista_tipo_de_documento": 6,
+-        "transportista_numero_de_documento": company.get("ruc", ""),
+-        "transportista_denominacion": company.get("name", ""),
+-        "vehiculo_placa_numero": waybill["vehicle_plate"] or "",
+-        "conductor_tipo_de_documento": 1,  # AJUSTAR: catálogo 06 SUNAT — 1 = DNI
+-        "conductor_numero_de_documento": waybill["driver_document"] or "",
+-        "conductor_nombre": waybill["driver_name"] or "",
+-        "conductor_licencia": waybill["driver_license"] or "",
+-        "observaciones": waybill["notes"] or "",
+-        "items": [
++        "close2u": {
++            "tipoIntegracion": "OFFLINE",
++            "tipoPlantilla": "01",
++        },
++        "datosDocumento": {
++            "serie": waybill["series"],
++            "numero": waybill["series_number"],
++            "fechaEmision": waybill["issue_date"],
++            "glosa": waybill["notes"] or trip["cargo_description"] or "",
++        },
++        "remitente": party,
++        "destinatario": dict(party),
++        "datosEnvio": {
++            "motivoTraslado": waybill["transfer_reason"] or "OTROS",
++            "indicadorVehiculosConductoresTransportista": "False",
++            "indicadorTrasladoVehiculosM1oL": "False",
++            "indicadorTrasladoTotalDAM": "False",
++            # Harraso/BRMS transportan carga de terceros por encargo (nunca
++            # su propia mercadería) — desde la perspectiva del remitente
++            # esto siempre es transporte "PUBLICO" (contratado a un
++            # tercero), no "PRIVADO" (con vehículo propio del remitente).
++            "modalidadTraslado": "PUBLICO",
++            "descripcionTraslado": waybill["notes"] or trip["cargo_description"] or "",
++            "transbordoProgramado": "False",
++            "retornoVehiculoContenedoresVacios": "False",
++            "retornoVehiculoVacio": "False",
++            "unidadMedida": "KILOS",
++            "pesoBruto": str(waybill["weight_kg"] or 0),
++            "numeroBultos": waybill["packages"] or None,
++            "fechaTraslado": waybill["issue_date"],
++            "fechaEntrega": trip["delivered_date"] or waybill["issue_date"],
++            "puntoPartida": {
++                "ubigeo": waybill["origin_ubigeo"],
++                "direccion": waybill["origin_address"] or trip["origin"],
++            },
++            "puntoLlegada": {
++                "ubigeo": waybill["destination_ubigeo"],
++                "direccion": waybill["destination_address"] or trip["destination"],
++            },
++        },
++        "transportista": {
++            "correo": company.get("email", ""),
++            "nombreComercial": company.get("commercial_name", ""),
++            "nombreLegal": company.get("legal_name", ""),
++            "numeroDocumentoIdentidad": company.get("ruc", ""),
++            "tipoDocumentoIdentidad": "RUC",
++            "registroMTC": company.get("mtc_registration", ""),
++        },
++        "conductores": [
+             {
+-                "unidad_de_medida": "KGM",
+-                "codigo": f"CARGA-{trip['id']}",
++                "nombreLegal": waybill["driver_name"] or "",
++                "numeroDocumentoIdentidad": waybill["driver_document"] or "",
++                "tipoDocumentoIdentidad": "DOC_NACIONAL_DE_IDENTIDAD",
++                "liscenciaConducir": waybill["driver_license"] or "",
++            }
++        ],
++        "vehiculos": [
++            {"placa": waybill["vehicle_plate"] or ""},
++        ],
++        "detalleGuia": [
++            {
++                "numeroOrden": 1,
++                "codigoProducto": f"CARGA-{trip['id']}",
+                 "descripcion": trip["cargo_description"] or "Carga general",
++                "unidadMedida": "KILOGRAMO",
++                "unidadNombre": "KILOGRAMO",
+                 "cantidad": waybill["weight_kg"] or 1,
+             }
+         ],
+     }
+ 
+ 
+-def _format_date_ose(date_str):
+-    if not date_str:
+-        return None
+-    dt = datetime.strptime(date_str, "%Y-%m-%d")
+-    return dt.strftime("%d-%m-%Y")
+-
+-
+ def build_client_from_config(app_config, issuer="HARRASO"):
+-    """Devuelve el cliente OSE de la empresa emisora correspondiente
+-    (Harraso o BRMS — 7 sep, integración con tefacturo.pe). Cada una tiene
+-    su propio RUC y, por lo tanto, su propia cuenta/credenciales ante el
+-    OSE — ver HARRASO_OSE_RUTA/TOKEN y BRMS_OSE_RUTA/TOKEN en config.py."""
++    """Devuelve el cliente de tefacturo.pe de la empresa emisora
++    correspondiente (Harraso o BRMS). Cada una tiene su propia
++    cuenta/credenciales (usuario/clave) — ver HARRASO_TEFACTURO_EMAIL/
++    PASSWORD y BRMS_TEFACTURO_EMAIL/PASSWORD en config.py."""
++    base_url = app_config.get("TEFACTURO_BASE_URL")
+     if issuer == "BRMS":
+-        return OseClient(ruta=app_config.get("BRMS_OSE_RUTA"), token=app_config.get("BRMS_OSE_TOKEN"))
+-    return OseClient(ruta=app_config.get("HARRASO_OSE_RUTA"), token=app_config.get("HARRASO_OSE_TOKEN"))
++        return TefacturoClient(
++            ruc=app_config.get("BRMS_RUC"),
++            email=app_config.get("BRMS_TEFACTURO_EMAIL"),
++            password=app_config.get("BRMS_TEFACTURO_PASSWORD"),
++            base_url=base_url,
++        )
++    return TefacturoClient(
++        ruc=app_config.get("COMPANY_RUC"),
++        email=app_config.get("HARRASO_TEFACTURO_EMAIL"),
++        password=app_config.get("HARRASO_TEFACTURO_PASSWORD"),
++        base_url=base_url,
++    )
+ 
+ 
+ def parse_ose_response(response):
+-    """Normaliza la respuesta del OSE a un dict simple. AJUSTAR según el
+-    formato real que devuelva tu OSE (aquí se sigue el patrón NubeFacT:
+-    campo 'errors' si algo falló; si no, trae enlaces y aceptación)."""
+-    if response.get("errors"):
++    """Normaliza la respuesta de tefacturo.pe a un dict simple. Una
++    respuesta HTTP no-2xx ya levanta SunatOseError antes de llegar aquí
++    (ver TefacturoClient._request) — si llegamos hasta acá, el comprobante
++    fue aceptado. pdf_url/xml_url/cdr_url se completan aparte (ver
++    send_sunat() en facturacion.py/guias.py), después de descargar y
++    guardar el PDF con get_pdf_bytes()."""
++    identificador = response.get("identificador")
++    if not identificador:
+         return {
+             "accepted": False,
+-            "message": str(response.get("errors")),
++            "message": f"Respuesta inesperada de tefacturo.pe: {response}",
+             "pdf_url": None,
+             "xml_url": None,
+             "cdr_url": None,
+         }
+     return {
+         "accepted": True,
+-        "message": response.get("sunat_description") or response.get("sunat_note") or "Aceptado",
+-        "pdf_url": response.get("enlace_del_pdf"),
+-        "xml_url": response.get("enlace_del_xml"),
+-        "cdr_url": response.get("enlace_del_cdr"),
++        "message": f"Aceptado por SUNAT (identificador {identificador}).",
++        "pdf_url": None,
++        "xml_url": None,
++        "cdr_url": None,
+     }
+diff --git a/app/routes/facturacion.py b/app/routes/facturacion.py
+index 858c061..3eb9e5c 100644
+--- a/app/routes/facturacion.py
++++ b/app/routes/facturacion.py
+@@ -1,4 +1,16 @@
+-from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
++import uuid
++
++from flask import (
++    Blueprint,
++    abort,
++    current_app,
++    flash,
++    redirect,
++    render_template,
++    request,
++    send_from_directory,
++    url_for,
++)
+ 
+ from app.auth import permission_required, validate_csrf
+ from app.db import execute, get_db, query_all, query_one
+@@ -9,6 +21,12 @@ from app.integrations.sunat_ose import (
+     build_invoice_payload,
+     parse_ose_response,
+ )
++from app.storage import (
++    local_sunat_documents_dir,
++    save_sunat_document,
++    sunat_document_url,
++    using_s3,
++)
+ 
+ bp = Blueprint("facturacion", __name__, url_prefix="/facturacion")
+ 
+@@ -165,15 +183,30 @@ def send_sunat(invoice_id):
+                 "poder emitir facturas electrónicas a su nombre."
+             )
+         payload = build_invoice_payload(invoice, items, client_row, company)
+-        response = ose_client.send(payload)
++        response = ose_client.emit_factura(payload)
+         result = parse_ose_response(response)
++
++        pdf_filename = invoice["sunat_pdf_filename"]
++        pdf_url = invoice["sunat_pdf_url"]
++        if result["accepted"]:
++            try:
++                pdf_bytes = ose_client.get_pdf_bytes("01", invoice["series"], invoice["series_number"])
++                pdf_filename = f"factura-{invoice_id}-{uuid.uuid4().hex}.pdf"
++                save_sunat_document(pdf_filename, pdf_bytes)
++                pdf_url = url_for("facturacion.view_sunat_pdf", invoice_id=invoice_id)
++            except SunatOseError as pdf_exc:
++                # La factura SÍ quedó aceptada por SUNAT — no descartar eso
++                # solo porque no se pudo descargar/guardar el PDF.
++                flash(f"La factura se aceptó, pero no se pudo descargar su PDF: {pdf_exc}", "error")
++
+         execute(
+-            """UPDATE invoices SET sunat_status=?, sunat_message=?, sunat_pdf_url=?,
++            """UPDATE invoices SET sunat_status=?, sunat_message=?, sunat_pdf_url=?, sunat_pdf_filename=?,
+                sunat_xml_url=?, sunat_cdr_url=?, sunat_sent_at=datetime('now') WHERE id=?""",
+             (
+                 "ACEPTADO" if result["accepted"] else "RECHAZADO",
+                 result["message"],
+-                result["pdf_url"],
++                pdf_url,
++                pdf_filename,
+                 result["xml_url"],
+                 result["cdr_url"],
+                 invoice_id,
+@@ -182,7 +215,7 @@ def send_sunat(invoice_id):
+         if result["accepted"]:
+             flash("Factura enviada y aceptada por SUNAT.", "success")
+         else:
+-            flash(f"SUNAT/el OSE rechazó la factura: {result['message']}", "error")
++            flash(f"SUNAT/tefacturo.pe rechazó la factura: {result['message']}", "error")
+     except SunatOseError as exc:
+         execute(
+             "UPDATE invoices SET sunat_status='ERROR', sunat_message=?, sunat_sent_at=datetime('now') WHERE id=?",
+@@ -191,3 +224,17 @@ def send_sunat(invoice_id):
+         flash(f"No se pudo enviar la factura: {exc}", "error")
+ 
+     return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
++
++
++@bp.route("/<int:invoice_id>/pdf-sunat")
++@permission_required("facturacion", "view")
++def view_sunat_pdf(invoice_id):
++    """Sirve el PDF real que devolvió tefacturo.pe al emitir esta factura
++    (7 sep, segunda ronda) — mismo patrón que las demás descargas de
++    archivos del sistema (disco local o redirect a URL firmada en S3)."""
++    invoice = query_one("SELECT sunat_pdf_filename FROM invoices WHERE id = ?", (invoice_id,))
++    if invoice is None or not invoice["sunat_pdf_filename"]:
++        abort(404)
++    if using_s3():
++        return redirect(sunat_document_url(invoice["sunat_pdf_filename"]))
++    return send_from_directory(local_sunat_documents_dir(), invoice["sunat_pdf_filename"])
+diff --git a/app/routes/guias.py b/app/routes/guias.py
+index af8ae49..81513be 100644
+--- a/app/routes/guias.py
++++ b/app/routes/guias.py
+@@ -1,4 +1,16 @@
+-from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
++import uuid
++
++from flask import (
++    Blueprint,
++    abort,
++    current_app,
++    flash,
++    redirect,
++    render_template,
++    request,
++    send_from_directory,
++    url_for,
++)
+ 
+ from app.auth import permission_required, validate_csrf
+ from app.db import execute, query_all, query_one
+@@ -9,9 +21,29 @@ from app.integrations.sunat_ose import (
+     build_waybill_payload,
+     parse_ose_response,
+ )
++from app.storage import (
++    local_sunat_documents_dir,
++    save_sunat_document,
++    sunat_document_url,
++    using_s3,
++)
+ 
+ bp = Blueprint("guias", __name__, url_prefix="/guias")
+ 
++# Catálogo SUNAT de motivo de traslado, confirmado en la documentación real
++# de tefacturo.pe (7 sep, segunda ronda) — se muestra tal cual en el
++# desplegable del formulario.
++TRANSFER_REASONS = [
++    ("VENTA", "Venta"),
++    ("COMPRA", "Compra"),
++    ("DEVOLUCION", "Devolución"),
++    ("CONSIGNACION", "Consignación"),
++    ("TRASLADO_ESTABLECIMINTOS", "Traslado entre establecimientos"),
++    ("EXPORTACION", "Exportación"),
++    ("IMPORTACION", "Importación"),
++    ("OTROS", "Otros"),
++]
++
+ 
+ def _next_series_number(series):
+     row = query_one("SELECT COUNT(*) as n FROM waybills WHERE series = ?", (series,))
+@@ -53,9 +85,9 @@ def new(trip_id):
+         series_number = _next_series_number(series)
+         waybill_id = execute(
+             """INSERT INTO waybills (trip_id, series, series_number, issuer, issue_date, weight_kg, packages,
+-               origin_address, destination_address, vehicle_plate, driver_document, driver_name,
+-               driver_license, notes, created_by)
+-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
++               origin_address, destination_address, origin_ubigeo, destination_ubigeo, transfer_reason,
++               vehicle_plate, driver_document, driver_name, driver_license, notes, created_by)
++               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             (
+                 trip_id,
+                 series,
+@@ -69,6 +101,13 @@ def new(trip_id):
+                 int(parse_float(request.form.get("packages"), 1)),
+                 request.form.get("origin_address", "").strip() or trip["origin"],
+                 request.form.get("destination_address", "").strip() or trip["destination"],
++                # 7 sep, segunda ronda: campos que exige el formato real de
++                # tefacturo.pe (ver app/integrations/sunat_ose.py) — sin
++                # ellos, "Enviar a SUNAT" rechaza la guía con un mensaje
++                # claro, pero la guía se puede crear/guardar igual.
++                request.form.get("origin_ubigeo", "").strip(),
++                request.form.get("destination_ubigeo", "").strip(),
++                request.form.get("transfer_reason") or "OTROS",
+                 request.form.get("vehicle_plate", "").strip() or trip["vehicle_plate"],
+                 request.form.get("driver_document", "").strip() or trip["driver_document"],
+                 request.form.get("driver_name", "").strip() or trip["driver_name"],
+@@ -80,7 +119,9 @@ def new(trip_id):
+         flash(f"Guía {series}-{series_number:06d} creada.", "success")
+         return redirect(url_for("guias.detail", waybill_id=waybill_id))
+ 
+-    return render_template("guias/form.html", trip=trip, today=today_str())
++    return render_template(
++        "guias/form.html", trip=trip, today=today_str(), transfer_reasons=TRANSFER_REASONS
++    )
+ 
+ 
+ @bp.route("/<int:waybill_id>")
+@@ -109,8 +150,12 @@ def send_sunat(waybill_id):
+     if waybill is None:
+         abort(404)
+     trip = query_one("SELECT * FROM trips WHERE id = ?", (waybill["trip_id"],))
++    # El "remitente"/"destinatario" del formato real de tefacturo.pe es el
++    # cliente del viaje (ver la nota de "SIMPLIFICACIONES" en
++    # app/integrations/sunat_ose.py) — se necesita su RUC/correo/dirección.
++    client_row = query_one("SELECT * FROM clients WHERE id = ?", (trip["client_id"],))
+ 
+-    client = build_client_from_config(current_app.config, waybill["issuer"])
++    ose_client = build_client_from_config(current_app.config, waybill["issuer"])
+     company = company_info_for_issuer(waybill["issuer"], current_app.config)
+ 
+     try:
+@@ -120,16 +165,34 @@ def send_sunat(waybill_id):
+                 f"{'BRMS_RUC' if waybill['issuer'] == 'BRMS' else 'COMPANY_RUC'}) antes de "
+                 "poder emitir guías electrónicas a su nombre."
+             )
+-        payload = build_waybill_payload(waybill, trip, company)
+-        response = client.send(payload)
++        payload = build_waybill_payload(waybill, trip, company, client_row)
++        response = ose_client.emit_guia_transportista(payload)
+         result = parse_ose_response(response)
++
++        pdf_filename = waybill["sunat_pdf_filename"]
++        pdf_url = waybill["sunat_pdf_url"]
++        if result["accepted"]:
++            try:
++                pdf_bytes = ose_client.get_pdf_bytes("09", waybill["series"], waybill["series_number"])
++                pdf_filename = f"guia-{waybill_id}-{uuid.uuid4().hex}.pdf"
++                save_sunat_document(pdf_filename, pdf_bytes)
++                pdf_url = url_for("guias.view_sunat_pdf", waybill_id=waybill_id)
++            except SunatOseError as pdf_exc:
++                # La guía SÍ quedó aceptada por SUNAT — no descartar eso
++                # solo porque no se pudo descargar/guardar el PDF. Se avisa
++                # aparte y se puede reintentar la descarga más adelante si
++                # hiciera falta (no implementado todavía: solo se descarga
++                # automáticamente justo después de emitir).
++                flash(f"La guía se aceptó, pero no se pudo descargar su PDF: {pdf_exc}", "error")
++
+         execute(
+-            """UPDATE waybills SET sunat_status=?, sunat_message=?, sunat_pdf_url=?,
++            """UPDATE waybills SET sunat_status=?, sunat_message=?, sunat_pdf_url=?, sunat_pdf_filename=?,
+                sunat_xml_url=?, sunat_cdr_url=?, sunat_sent_at=datetime('now') WHERE id=?""",
+             (
+                 "ACEPTADO" if result["accepted"] else "RECHAZADO",
+                 result["message"],
+-                result["pdf_url"],
++                pdf_url,
++                pdf_filename,
+                 result["xml_url"],
+                 result["cdr_url"],
+                 waybill_id,
+@@ -138,7 +201,7 @@ def send_sunat(waybill_id):
+         if result["accepted"]:
+             flash("Guía enviada y aceptada por SUNAT.", "success")
+         else:
+-            flash(f"SUNAT/el OSE rechazó la guía: {result['message']}", "error")
++            flash(f"SUNAT/tefacturo.pe rechazó la guía: {result['message']}", "error")
+     except SunatOseError as exc:
+         execute(
+             "UPDATE waybills SET sunat_status='ERROR', sunat_message=?, sunat_sent_at=datetime('now') WHERE id=?",
+@@ -147,3 +210,17 @@ def send_sunat(waybill_id):
+         flash(f"No se pudo enviar la guía: {exc}", "error")
+ 
+     return redirect(url_for("guias.detail", waybill_id=waybill_id))
++
++
++@bp.route("/<int:waybill_id>/pdf-sunat")
++@permission_required("guias", "view")
++def view_sunat_pdf(waybill_id):
++    """Sirve el PDF real que devolvió tefacturo.pe al emitir esta guía (7
++    sep, segunda ronda) — mismo patrón que las demás descargas de archivos
++    del sistema (disco local o redirect a URL firmada en S3)."""
++    waybill = query_one("SELECT sunat_pdf_filename FROM waybills WHERE id = ?", (waybill_id,))
++    if waybill is None or not waybill["sunat_pdf_filename"]:
++        abort(404)
++    if using_s3():
++        return redirect(sunat_document_url(waybill["sunat_pdf_filename"]))
++    return send_from_directory(local_sunat_documents_dir(), waybill["sunat_pdf_filename"])
+diff --git a/app/schema.sql b/app/schema.sql
+index 0c7e729..da25391 100644
+--- a/app/schema.sql
++++ b/app/schema.sql
+@@ -881,6 +881,10 @@ CREATE TABLE IF NOT EXISTS invoices (
+     sunat_status TEXT NOT NULL DEFAULT 'NO_ENVIADA' CHECK (sunat_status IN ('NO_ENVIADA', 'ACEPTADO', 'RECHAZADO', 'ERROR')),
+     sunat_message TEXT,
+     sunat_pdf_url TEXT,
++    -- Nombre del archivo PDF real devuelto por tefacturo.pe al emitir la
++    -- factura (7 sep, segunda ronda), guardado vía app/storage.py —
++    -- sunat_pdf_url pasa a apuntar a la ruta interna que sirve este archivo.
++    sunat_pdf_filename TEXT,
+     sunat_xml_url TEXT,
+     sunat_cdr_url TEXT,
+     sunat_sent_at TEXT,
+@@ -901,7 +905,10 @@ CREATE TABLE IF NOT EXISTS invoice_items (
+ CREATE TABLE IF NOT EXISTS waybills (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     trip_id INTEGER NOT NULL REFERENCES trips(id),
+-    series TEXT NOT NULL DEFAULT 'T001',
++    -- La serie debe empezar con "V" para tefacturo.pe (guía transportista,
++    -- confirmado 7 sep, segunda ronda) — antes se usaba "T001" por
++    -- suposición propia.
++    series TEXT NOT NULL DEFAULT 'V001',
+     series_number INTEGER NOT NULL DEFAULT 0,
+     -- 7 sep, integración con tefacturo.pe: empresa emisora (Harraso o BRMS),
+     -- copiada del viaje (trips.issuer) al crear la guía — no se recalcula
+@@ -912,6 +919,16 @@ CREATE TABLE IF NOT EXISTS waybills (
+     packages INTEGER,
+     origin_address TEXT,
+     destination_address TEXT,
++    -- 7 sep, segunda ronda: ubigeo (código INEI de 6 dígitos) de partida y
++    -- llegada, exigidos por SUNAT en la guía transportista — el sistema no
++    -- tiene un catálogo de ubigeos, se llenan a mano en el formulario.
++    origin_ubigeo TEXT,
++    destination_ubigeo TEXT,
++    -- Motivo de traslado (catálogo SUNAT: VENTA/DEVOLUCION/COMPRA/
++    -- TRASLADO_ESTABLECIMINTOS/CONSIGNACION/EXPORTACION/IMPORTACION/OTROS)
++    -- — exigido por tefacturo.pe, default OTROS porque Harraso/BRMS no
++    -- necesariamente conocen el motivo comercial de la carga del cliente.
++    transfer_reason TEXT NOT NULL DEFAULT 'OTROS',
+     vehicle_plate TEXT,
+     driver_document TEXT,
+     driver_name TEXT,
+@@ -920,6 +937,10 @@ CREATE TABLE IF NOT EXISTS waybills (
+     sunat_status TEXT NOT NULL DEFAULT 'NO_ENVIADA' CHECK (sunat_status IN ('NO_ENVIADA', 'ACEPTADO', 'RECHAZADO', 'ERROR')),
+     sunat_message TEXT,
+     sunat_pdf_url TEXT,
++    -- Nombre del archivo PDF real devuelto por tefacturo.pe al emitir la
++    -- guía (7 sep, segunda ronda), guardado vía app/storage.py — sunat_pdf_url
++    -- pasa a apuntar a la ruta interna que sirve este archivo.
++    sunat_pdf_filename TEXT,
+     sunat_xml_url TEXT,
+     sunat_cdr_url TEXT,
+     sunat_sent_at TEXT,
+diff --git a/app/storage.py b/app/storage.py
+index 265bc41..9c69547 100644
+--- a/app/storage.py
++++ b/app/storage.py
+@@ -55,6 +55,13 @@ def local_carrier_waybills_dir():
+     return _local_dir("carrier_waybills")
+ 
+ 
++def local_sunat_documents_dir():
++    """Igual que las anteriores, pero para el PDF real que devuelve
++    tefacturo.pe al emitir una factura o guía de remisión (7 sep, segunda
++    ronda) — carpeta separada en disco para no mezclarla con lo demás."""
++    return _local_dir("sunat_documents")
++
++
+ def _s3_bucket():
+     return current_app.config["AWS_S3_BUCKET"]
+ 
+@@ -74,6 +81,10 @@ def _s3_carrier_waybills_prefix():
+     return (current_app.config.get("AWS_S3_CARRIER_WAYBILLS_PREFIX") or "guias-transportista").strip("/")
+ 
+ 
++def _s3_sunat_documents_prefix():
++    return (current_app.config.get("AWS_S3_SUNAT_DOCUMENTS_PREFIX") or "comprobantes-sunat").strip("/")
++
++
+ def _s3_key(filename, prefix):
+     return f"{prefix}/{filename}"
+ 
+@@ -205,3 +216,22 @@ def carrier_waybill_url(filename):
+     transportista guardada en S3. En disco local, usar
+     local_carrier_waybills_dir() + send_from_directory."""
+     return _presigned_url(_s3_carrier_waybills_prefix(), filename)
++
++
++def save_sunat_document(filename, raw_bytes):
++    """Igual que save_receipt()/save_carrier_waybill(), pero para el PDF
++    real que devuelve tefacturo.pe al emitir una factura o guía (7 sep,
++    segunda ronda) — ver app/integrations/sunat_ose.py ->
++    TefacturoClient.get_pdf_bytes()."""
++    if using_s3():
++        _put_object(_s3_sunat_documents_prefix(), filename, raw_bytes)
++    else:
++        with open(os.path.join(local_sunat_documents_dir(), filename), "wb") as f:
++            f.write(raw_bytes)
++
++
++def sunat_document_url(filename):
++    """Igual que receipt_url()/carrier_waybill_url(), pero para un PDF de
++    SUNAT guardado en S3. En disco local, usar
++    local_sunat_documents_dir() + send_from_directory."""
++    return _presigned_url(_s3_sunat_documents_prefix(), filename)
+diff --git a/app/templates/guias/detail.html b/app/templates/guias/detail.html
+index b00cf76..ed37c7d 100644
+--- a/app/templates/guias/detail.html
++++ b/app/templates/guias/detail.html
+@@ -21,6 +21,8 @@
+   <div class="detail-item"><div class="label">Peso / bultos</div><div class="value">{{ waybill.weight_kg or '—' }} kg / {{ waybill.packages or '—' }}</div></div>
+   <div class="detail-item"><div class="label">Vehículo</div><div class="value">{{ waybill.vehicle_plate or '—' }}</div></div>
+   <div class="detail-item"><div class="label">Conductor</div><div class="value">{{ waybill.driver_name or '—' }} ({{ waybill.driver_document or 'sin DNI' }})</div></div>
++  <div class="detail-item"><div class="label">Ubigeo partida / llegada</div><div class="value">{{ waybill.origin_ubigeo or '—' }} / {{ waybill.destination_ubigeo or '—' }}</div></div>
++  <div class="detail-item"><div class="label">Motivo de traslado</div><div class="value">{{ waybill.transfer_reason or 'OTROS' }}</div></div>
+ </div>
+ 
+ <div class="panel">
+diff --git a/app/templates/guias/form.html b/app/templates/guias/form.html
+index 5e48571..6ccd6fb 100644
+--- a/app/templates/guias/form.html
++++ b/app/templates/guias/form.html
+@@ -28,6 +28,24 @@
+     </label>
+   </div>
+ 
++  <div class="form-row">
++    <label>Ubigeo de partida (código INEI, 6 dígitos)
++      <input type="text" name="origin_ubigeo" pattern="[0-9]{6}" maxlength="6" placeholder="Ej. 150101" title="6 dígitos">
++    </label>
++    <label>Ubigeo de llegada (código INEI, 6 dígitos)
++      <input type="text" name="destination_ubigeo" pattern="[0-9]{6}" maxlength="6" placeholder="Ej. 250101" title="6 dígitos">
++    </label>
++  </div>
++  <p class="muted" style="margin-top:-8px;">SUNAT exige el código de ubigeo (distrito) de partida y llegada para enviar la guía electrónica — puedes dejarlo en blanco y completarlo después, pero "Enviar a SUNAT" lo va a pedir. Búscalo en el listado de ubigeos del INEI/SUNAT si no lo tienes a mano.</p>
++
++  <label>Motivo de traslado
++    <select name="transfer_reason">
++      {% for code, label in transfer_reasons %}
++      <option value="{{ code }}" {{ 'selected' if code == 'OTROS' }}>{{ label }}</option>
++      {% endfor %}
++    </select>
++  </label>
++
+   <div class="form-row">
+     <label>Placa del vehículo
+       <input type="text" name="vehicle_plate" value="{{ trip.vehicle_plate or '' }}">
+diff --git a/config.py b/config.py
+index 2c451cc..ce3d835 100644
+--- a/config.py
++++ b/config.py
+@@ -40,21 +40,36 @@ class Config:
+     # solo el botón manual "Sincronizar") — ver app/scheduler.py.
+     FROTCOM_AUTO_SYNC_SECONDS = int(os.environ.get("FROTCOM_AUTO_SYNC_SECONDS", "120"))
+ 
+-    # Facturación electrónica SUNAT vía un OSE — tefacturo.pe (7 sep, pedido
+-    # de Braulio) u otro con el mismo formato REST/JSON (NubeFacT, Efact,
+-    # etc.). Harraso y BRMS son dos empresas con RUC propio (ver
+-    # COMPANY_RUC/BRMS_RUC más abajo), y un OSE emite a nombre de UN RUC por
+-    # cuenta — así que cada empresa necesita su propia cuenta/credenciales
+-    # ante el OSE, no se puede emitir un comprobante de BRMS con la cuenta
+-    # de Harraso ni viceversa (confirmar con tefacturo.pe si en su caso una
+-    # sola cuenta puede manejar ambos RUC; mientras tanto se asume que no).
++    # Facturación electrónica SUNAT vía tefacturo.pe (7 sep, pedido de
++    # Braulio: "hagamos el enlace de tefacturo.pe para las guias y
++    # facturas"). Primer intento (mismo día, antes de esta ronda) se basó en
++    # un PDF suelto de 2019, sin autenticación documentada ni endpoint de
++    # guía de remisión — Braulio compartió después el portal REAL de
++    # documentación técnica (https://api.tefacturo.pe/doc/integracion/),
++    # que sí confirma todo esto:
++    # - Login: POST https://jarvis.tefacturo.pe/tokenapi/secure/v2/login/token
++    #   con {ruc, mail, clave} — un usuario/clave POR RUC, no una "ruta" +
++    #   "token" genéricos como se había asumido antes. Harraso y BRMS son
++    #   dos empresas con RUC propio, así que cada una necesita su propia
++    #   cuenta (usuario/clave) en tefacturo.pe — créala en
++    #   https://api.tefacturo.pe/doc/integracion/registro/ (cuenta de
++    #   pruebas) o pídesela a tefacturo.pe para producción.
++    # - El RUC de cada empresa YA está en COMPANY_RUC/BRMS_RUC más abajo —
++    #   no hace falta repetirlo aquí.
+     # Ver README, sección "Facturación electrónica (SUNAT)".
+-    OSE_RUTA = os.environ.get("OSE_RUTA", "")  # obsoleto — se mantiene como respaldo de HARRASO_OSE_RUTA
+-    OSE_TOKEN = os.environ.get("OSE_TOKEN", "")
+-    HARRASO_OSE_RUTA = os.environ.get("HARRASO_OSE_RUTA", os.environ.get("OSE_RUTA", ""))
+-    HARRASO_OSE_TOKEN = os.environ.get("HARRASO_OSE_TOKEN", os.environ.get("OSE_TOKEN", ""))
+-    BRMS_OSE_RUTA = os.environ.get("BRMS_OSE_RUTA", "")
+-    BRMS_OSE_TOKEN = os.environ.get("BRMS_OSE_TOKEN", "")
++    TEFACTURO_BASE_URL = os.environ.get("TEFACTURO_BASE_URL", "https://jarvis.tefacturo.pe")
++    HARRASO_TEFACTURO_EMAIL = os.environ.get("HARRASO_TEFACTURO_EMAIL", "")
++    HARRASO_TEFACTURO_PASSWORD = os.environ.get("HARRASO_TEFACTURO_PASSWORD", "")
++    BRMS_TEFACTURO_EMAIL = os.environ.get("BRMS_TEFACTURO_EMAIL", "")
++    BRMS_TEFACTURO_PASSWORD = os.environ.get("BRMS_TEFACTURO_PASSWORD", "")
++    # Guía de remisión — TRANSPORTISTA (Harraso/BRMS es el transportista,
++    # no el remitente — ver app/integrations/sunat_ose.py): además de
++    # RUC/usuario/clave, SUNAT exige el número de registro ante el MTC
++    # (Ministerio de Transportes y Comunicaciones) de la empresa que
++    # transporta la carga. Vacío por defecto — AJUSTAR con el registro MTC
++    # real de Harraso/BRMS antes de poder emitir guías electrónicas.
++    HARRASO_MTC_REGISTRATION = os.environ.get("HARRASO_MTC_REGISTRATION", "")
++    BRMS_MTC_REGISTRATION = os.environ.get("BRMS_MTC_REGISTRATION", "")
+     # Datos reales de Harraso Transport S.A.C. (tomados de una cotización
+     # real que Braulio compartió, 1 sep) — se usan como default porque
+     # antes quedaban vacíos; se pueden sobreescribir por variable de
+@@ -66,7 +81,12 @@ class Config:
+     COMPANY_EMAIL = os.environ.get("COMPANY_EMAIL", "contacto@harraso.com")
+     COMPANY_PHONE = os.environ.get("COMPANY_PHONE", "994185119")
+     INVOICE_SERIES = os.environ.get("INVOICE_SERIES", "F001")
+-    WAYBILL_SERIES = os.environ.get("WAYBILL_SERIES", "T001")
++    # tefacturo.pe exige que la serie de una guía de remisión - transportista
++    # empiece con "V" (confirmado en su documentación real, 7 sep) — antes
++    # se usaba "T001" por suposición propia. Si ya diste de alta otra serie
++    # ante SUNAT/tefacturo.pe para tus guías, ponla aquí por variable de
++    # entorno.
++    WAYBILL_SERIES = os.environ.get("WAYBILL_SERIES", "V001")
+     # Número inicial de Cotizaciones (1 sep) — Braulio pidió seguir la
+     # numeración real de sus cotizaciones anteriores (la última que mandó
+     # como referencia fue la N° 111), así que el módulo arranca en 112.
+-- 
+2.43.0
+
