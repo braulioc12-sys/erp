@@ -1,0 +1,371 @@
+{
+  "name": "WhatsApp → ERP: borrador de gasto desde foto de factura",
+  "nodes": [
+    {
+      "id": "sticky-overview",
+      "name": "Nota - Cómo funciona",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-380, -260],
+      "parameters": {
+        "width": 460,
+        "height": 420,
+        "content": "## Cómo funciona este workflow\n\n1. Llega un mensaje de WhatsApp con una foto.\n2. Se descarga la foto desde Meta.\n3. Se manda la foto a un modelo de IA con visión (Anthropic) pidiéndole que extraiga proveedor, RUC, monto, N° de documento y fecha, en JSON.\n4. Se manda esa foto + los datos extraídos al ERP (`POST /liquidaciones/whatsapp/intake`), que crea un **borrador pendiente de revisión** — nunca un gasto real automático.\n5. Se responde por WhatsApp confirmando que se recibió (o avisando si algo falló).\n\n**Antes de activarlo, configura:**\n- El nodo **Configuración** (URL de tu ERP y el ID de tu número de WhatsApp).\n- Las 3 credenciales que usan los nodos HTTP Request (ver n8n/README-n8n.md).\n\nSi al importar ves nodos con un ícono de advertencia (⚠), ábrelos y guárdalos — normalmente basta para que n8n los actualice a la versión de tu instalación."
+      }
+    },
+    {
+      "id": "sticky-adjust",
+      "name": "Nota - Puntos a revisar",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [560, -260],
+      "parameters": {
+        "width": 460,
+        "height": 420,
+        "content": "## Puntos que probablemente necesites ajustar\n\nEstos 3 nodos dependen de la versión exacta de n8n / de la API de Meta y WhatsApp que tengas, así que revísalos con un mensaje de prueba real antes de confiar en el workflow:\n\n- **WhatsApp Trigger**: el nombre exacto de los campos del mensaje (`$json.type`, `$json.image.id`, etc.) puede variar según la versión del nodo. Si tu WhatsApp Trigger tiene una opción \"Download Attachments\"/\"Descargar adjuntos\", actívala — te ahorras los 2 nodos de descarga manual de abajo.\n- **Convertir a base64** (nodo Code): usa la API interna de n8n para leer datos binarios — si tu versión de n8n da un error ahí, revisa la nota dentro del propio nodo.\n- **Extraer datos con IA**: el nombre del modelo de Anthropic puede haber cambiado — revisa https://docs.claude.com/en/docs/about-claude/models antes de usarlo en producción."
+      }
+    },
+    {
+      "id": "trigger-whatsapp",
+      "name": "WhatsApp Trigger",
+      "type": "n8n-nodes-base.whatsAppTrigger",
+      "typeVersion": 1,
+      "position": [-380, 200],
+      "webhookId": "whatsapp-factura-intake",
+      "parameters": {
+        "updates": ["messages"]
+      },
+      "credentials": {
+        "whatsAppTriggerApi": {
+          "name": "WhatsApp OAuth (Harraso)"
+        }
+      }
+    },
+    {
+      "id": "if-is-image",
+      "name": "¿Es una foto?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [-140, 200],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-type-image",
+              "leftValue": "={{ $json.messages ? $json.messages[0].type : $json.type }}",
+              "rightValue": "image",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "set-config",
+      "name": "Configuración",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [120, 120],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "erp_base_url",
+              "type": "string",
+              "value": "https://harraso-erp.onrender.com"
+            },
+            {
+              "id": "a2",
+              "name": "whatsapp_phone_number_id",
+              "type": "string",
+              "value": "PON_AQUI_TU_PHONE_NUMBER_ID"
+            },
+            {
+              "id": "a3",
+              "name": "wa_message_id",
+              "type": "string",
+              "value": "={{ $json.messages ? $json.messages[0].id : $json.id }}"
+            },
+            {
+              "id": "a4",
+              "name": "from_phone",
+              "type": "string",
+              "value": "={{ $json.messages ? $json.messages[0].from : $json.from }}"
+            },
+            {
+              "id": "a5",
+              "name": "caption",
+              "type": "string",
+              "value": "={{ ($json.messages ? $json.messages[0].image.caption : $json.image?.caption) || '' }}"
+            },
+            {
+              "id": "a6",
+              "name": "media_id",
+              "type": "string",
+              "value": "={{ $json.messages ? $json.messages[0].image.id : $json.image.id }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "http-get-media-url",
+      "name": "Obtener URL de la foto",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [340, 120],
+      "parameters": {
+        "url": "=https://graph.facebook.com/v19.0/{{ $json.media_id }}",
+        "method": "GET",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "WhatsApp Access Token (Header)"
+        }
+      }
+    },
+    {
+      "id": "http-download-media",
+      "name": "Descargar foto",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [560, 120],
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "method": "GET",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "WhatsApp Access Token (Header)"
+        }
+      }
+    },
+    {
+      "id": "code-to-base64",
+      "name": "Convertir a base64",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [780, 120],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// La foto descargada llega como dato binario (propiedad 'data').\n// Anthropic necesita la imagen en base64 dentro del JSON del mensaje, así\n// que la convertimos aquí. Si tu versión de n8n da un error en la línea de\n// abajo, prueba con: items[0].binary.data.data (algunas versiones ya\n// exponen el base64 directo ahí en vez de necesitar el helper).\nconst buffer = await this.helpers.getBinaryDataBuffer(0, 'data');\nconst base64 = buffer.toString('base64');\n\nreturn [{\n  json: {\n    ...$('Configuración').item.json,\n    image_base64: base64,\n    image_media_type: items[0].binary.data.mimeType || 'image/jpeg'\n  },\n  binary: items[0].binary\n}];"
+      }
+    },
+    {
+      "id": "http-anthropic",
+      "name": "Extraer datos con IA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1000, 120],
+      "parameters": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "anthropic-version", "value": "2023-06-01"},
+            {"name": "content-type", "value": "application/json"}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"model\": \"claude-sonnet-4-5-20250929\",\n  \"max_tokens\": 1024,\n  \"messages\": [{\n    \"role\": \"user\",\n    \"content\": [\n      { \"type\": \"image\", \"source\": { \"type\": \"base64\", \"media_type\": $json.image_media_type, \"data\": $json.image_base64 } },\n      { \"type\": \"text\", \"text\": \"Esta es una foto de una factura o boleta peruana. Devuelve SOLO un objeto JSON (sin texto adicional, sin markdown) con estas claves exactas: provider_ruc (RUC de 11 dígitos del proveedor que emite el documento, o null si no se ve), provider_name (razón social del proveedor, o null), amount (monto total como número, sin símbolo de moneda, o null), currency ('S' para soles o 'D' para dólares, o null si no está claro), document_number (serie y número del comprobante, ej. F001-1234, o null), document_date (fecha de emisión en formato YYYY-MM-DD, o null). Si algún dato no se puede leer con confianza en la foto, usa null en esa clave en vez de adivinar.\" }\n    ]\n  }]\n} }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Anthropic API Key (Header)"
+        }
+      }
+    },
+    {
+      "id": "code-parse-ai",
+      "name": "Parsear JSON de la IA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1220, 120],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// La respuesta de Anthropic trae el texto del modelo en content[0].text.\n// Se pidió JSON puro en el prompt, pero por las dudas se limpian posibles\n// bloques ```json ... ``` antes de parsear. Si el parseo falla (el modelo\n// no devolvió JSON válido), se sigue igual: el borrador queda creado en el\n// ERP con los campos extraídos vacíos, para revisar/completar a mano — la\n// foto y el mensaje original NUNCA se pierden.\nconst prev = $('Convertir a base64').item.json;\nconst aiResponse = items[0].json;\nlet extracted = {};\nlet rawText = '';\ntry {\n  rawText = aiResponse.content[0].text;\n  const cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();\n  extracted = JSON.parse(cleaned);\n} catch (err) {\n  extracted = {};\n}\n\nreturn [{\n  json: {\n    ...prev,\n    provider_ruc: extracted.provider_ruc || '',\n    provider_name: extracted.provider_name || '',\n    amount: extracted.amount != null ? String(extracted.amount) : '',\n    currency: extracted.currency || '',\n    document_number: extracted.document_number || '',\n    document_date: extracted.document_date || '',\n    raw_extraction: rawText || JSON.stringify(aiResponse)\n  },\n  binary: prev.binary || items[0].binary\n}];"
+      }
+    },
+    {
+      "id": "http-erp-intake",
+      "name": "Guardar borrador en el ERP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 120],
+      "parameters": {
+        "url": "={{ $json.erp_base_url }}/liquidaciones/whatsapp/intake",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {"name": "image", "parameterType": "formBinaryData", "inputDataFieldName": "data"},
+            {"name": "wa_message_id", "value": "={{ $json.wa_message_id }}"},
+            {"name": "phone", "value": "={{ $json.from_phone }}"},
+            {"name": "caption", "value": "={{ $json.caption }}"},
+            {"name": "provider_ruc", "value": "={{ $json.provider_ruc }}"},
+            {"name": "provider_name", "value": "={{ $json.provider_name }}"},
+            {"name": "amount", "value": "={{ $json.amount }}"},
+            {"name": "currency", "value": "={{ $json.currency }}"},
+            {"name": "document_number", "value": "={{ $json.document_number }}"},
+            {"name": "document_date", "value": "={{ $json.document_date }}"},
+            {"name": "raw_extraction", "value": "={{ $json.raw_extraction }}"}
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "ERP Webhook Token (Header)"
+        }
+      }
+    },
+    {
+      "id": "if-erp-ok",
+      "name": "¿Se guardó bien?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1660, 120],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "http-confirm-ok",
+      "name": "Confirmar por WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1880, 20],
+      "parameters": {
+        "url": "=https://graph.facebook.com/v19.0/{{ $('Configuración').item.json.whatsapp_phone_number_id }}/messages",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"messaging_product\": \"whatsapp\",\n  \"to\": $json.from_phone,\n  \"type\": \"text\",\n  \"text\": { \"body\": \"✅ Recibido. Borrador #\" + $json.draft_id + \" pendiente de revisión en el ERP.\" }\n} }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "WhatsApp Access Token (Header)"
+        }
+      }
+    },
+    {
+      "id": "http-confirm-error",
+      "name": "Avisar error por WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1880, 220],
+      "parameters": {
+        "url": "=https://graph.facebook.com/v19.0/{{ $('Configuración').item.json.whatsapp_phone_number_id }}/messages",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"messaging_product\": \"whatsapp\",\n  \"to\": $json.from_phone,\n  \"type\": \"text\",\n  \"text\": { \"body\": \"⚠️ No se pudo guardar la foto en el ERP. Avisa al administrador.\" }\n} }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "WhatsApp Access Token (Header)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "WhatsApp Trigger": {
+      "main": [[{"node": "¿Es una foto?", "type": "main", "index": 0}]]
+    },
+    "¿Es una foto?": {
+      "main": [
+        [{"node": "Configuración", "type": "main", "index": 0}],
+        []
+      ]
+    },
+    "Configuración": {
+      "main": [[{"node": "Obtener URL de la foto", "type": "main", "index": 0}]]
+    },
+    "Obtener URL de la foto": {
+      "main": [[{"node": "Descargar foto", "type": "main", "index": 0}]]
+    },
+    "Descargar foto": {
+      "main": [[{"node": "Convertir a base64", "type": "main", "index": 0}]]
+    },
+    "Convertir a base64": {
+      "main": [[{"node": "Extraer datos con IA", "type": "main", "index": 0}]]
+    },
+    "Extraer datos con IA": {
+      "main": [[{"node": "Parsear JSON de la IA", "type": "main", "index": 0}]]
+    },
+    "Parsear JSON de la IA": {
+      "main": [[{"node": "Guardar borrador en el ERP", "type": "main", "index": 0}]]
+    },
+    "Guardar borrador en el ERP": {
+      "main": [[{"node": "¿Se guardó bien?", "type": "main", "index": 0}]]
+    },
+    "¿Se guardó bien?": {
+      "main": [
+        [{"node": "Confirmar por WhatsApp", "type": "main", "index": 0}],
+        [{"node": "Avisar error por WhatsApp", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

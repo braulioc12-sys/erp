@@ -10,19 +10,20 @@
 <div class="panel">
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Serie-número</th><th>Viaje</th><th>Cliente</th><th>Ruta</th><th>Emisión</th><th>Estado SUNAT</th></tr></thead>
+      <thead><tr><th>Serie-número</th><th>Viaje</th><th>Cliente</th><th>Empresa</th><th>Ruta</th><th>Emisión</th><th>Estado SUNAT</th></tr></thead>
       <tbody>
         {% for w in waybills %}
         <tr>
           <td><a href="{{ url_for('guias.detail', waybill_id=w.id) }}">{{ w.series }}-{{ '%06d'|format(w.series_number) }}</a></td>
           <td><a href="{{ url_for('viajes.detail', trip_id=w.trip_id) }}">{{ w.trip_code }}</a></td>
           <td>{{ w.client_name }}</td>
+          <td>{{ 'BRMS' if w.issuer == 'BRMS' else 'Harraso' }}</td>
           <td>{{ w.origin }} → {{ w.destination }}</td>
           <td>{{ w.issue_date }}</td>
           <td>{{ m.badge(w.sunat_status) }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="6" class="table-empty">Todavía no se han generado guías de remisión.</td></tr>
+        <tr><td colspan="7" class="table-empty">Todavía no se han generado guías de remisión.</td></tr>
         {% endfor %}
       </tbody>
     </table>

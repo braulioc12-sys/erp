@@ -249,25 +249,30 @@ El sistema puede emitir **facturas** y **guías de remisión electrónica (modal
 
 **Camino 1 — Conexión directa a SUNAT ("SEE del Contribuyente").** Requiere comprar un certificado digital propio (~S/150–600/año), armar y firmar digitalmente el XML en formato UBL 2.1, y hablar el webservice SOAP de SUNAT. Es una integración pesada, cara de mantener y con un margen de error alto si no se hace con experiencia previa — normalmente solo tiene sentido para empresas grandes con muchísimo volumen de comprobantes.
 
-**Camino 2 — A través de un OSE (Operador de Servicios Electrónicos), como NubeFacT, Efact, BizLinks o Facturalo Perú.** Le mandas un JSON simple por HTTPS con los datos del comprobante, el OSE arma el XML, lo firma con su propio certificado, lo envía a SUNAT y te devuelve el PDF, el XML y la constancia de aceptación (CDR). Es el camino que usa casi cualquier negocio pequeño o mediano, y **es el que implementa este sistema** (`app/integrations/sunat_ose.py`), siguiendo el formato público que documenta NubeFacT (RUTA + TOKEN + JSON), que es el más extendido entre OSEs peruanos orientados a REST. El OSE cobra por comprobante emitido (consulta tarifas directamente con el proveedor que elijas) — es un costo aparte del hosting del ERP.
+**Camino 2 — A través de un OSE (Operador de Servicios Electrónicos), como tefacturo.pe, NubeFacT, Efact, BizLinks o Facturalo Perú.** Le mandas un JSON simple por HTTPS con los datos del comprobante, el OSE arma el XML, lo firma con su propio certificado, lo envía a SUNAT y te devuelve el PDF, el XML y la constancia de aceptación (CDR). Es el camino que usa casi cualquier negocio pequeño o mediano, y **es el que implementa este sistema** (`app/integrations/sunat_ose.py`), siguiendo el formato público más extendido entre OSEs peruanos orientados a REST (RUTA + TOKEN + JSON). El OSE cobra por comprobante emitido (consulta tarifas directamente con el proveedor que elijas) — es un costo aparte del hosting del ERP.
 
 Ten en cuenta también que, según cambios normativos recientes, los negocios que superan cierto nivel de ingresos anuales (un umbral en UIT) están obligados a emitir a través de un OSE en vez de ir directo a SUNAT — confírmalo con tu contador, ya que las cifras y fechas exactas de esta obligación cambian con el tiempo.
 
+### Dos empresas emisoras: Harraso y BRMS
+
+El sistema factura y emite guías a nombre de **dos empresas distintas, cada una con su propio RUC** — Harraso Transport y BRMS (mismo concepto que ya existe en Cotizaciones). Una factura se emite a nombre de la empresa de los viajes que incluye (todos deben ser de la misma — el sistema no deja mezclar Harraso y BRMS en un mismo comprobante); una guía de remisión se emite a nombre de la empresa del viaje del que se generó. Como un comprobante electrónico se emite a nombre de UN RUC, **cada empresa necesita su propia cuenta/credenciales ante el OSE** — no se puede emitir un comprobante de BRMS con la cuenta de Harraso ni viceversa (confirma con tu OSE si en su caso una sola cuenta puede manejar ambos RUC; mientras tanto el sistema asume que no y pide credenciales separadas).
+
 ### Cómo activarlo
 
-1. Contrata un OSE autorizado por SUNAT (por ejemplo, NubeFacT: [nubefact.com](https://www.nubefact.com)) y crea primero una cuenta de **pruebas/sandbox**.
+1. Contrata un OSE autorizado por SUNAT (por ejemplo, tefacturo.pe: [tefacturo.pe](https://tefacturo.pe)) — una cuenta/credenciales por cada RUC que vaya a emitir (Harraso y, si corresponde, BRMS) — y crea primero una cuenta de **pruebas/sandbox**.
 2. Con las credenciales que te den, define estas variables de entorno:
-   - `OSE_RUTA`: la URL del endpoint que te indique tu OSE.
-   - `OSE_TOKEN`: el token de autenticación de tu cuenta.
-   - `COMPANY_RUC` y `COMPANY_ADDRESS`: el RUC y la dirección fiscal de tu propia empresa (el emisor de los comprobantes).
-   - `INVOICE_SERIES` y `WAYBILL_SERIES`: las series que hayas dado de alta para facturas y guías (por defecto `F001` y `T001`).
+   - `HARRASO_OSE_RUTA` / `HARRASO_OSE_TOKEN`: la URL del endpoint y el token de la cuenta de Harraso.
+   - `BRMS_OSE_RUTA` / `BRMS_OSE_TOKEN`: lo mismo para la cuenta de BRMS (déjalas vacías si BRMS todavía no emite comprobantes electrónicos propios).
+   - `COMPANY_RUC` y `COMPANY_ADDRESS`: el RUC y la dirección fiscal de Harraso (el emisor de sus comprobantes).
+   - `BRMS_RUC` y `BRMS_ADDRESS`: lo mismo para BRMS (hoy vacíos — ver sección de Cotizaciones más arriba).
+   - `INVOICE_SERIES` y `WAYBILL_SERIES`: las series que hayas dado de alta para facturas y guías (por defecto `F001` y `T001` — si BRMS emite con series propias, hoy el sistema usa las mismas para ambas empresas; avisar si hace falta separarlas).
 3. Registra el RUC de cada cliente (Clientes → editar) — es obligatorio para emitir una factura electrónica.
 4. Para conductores, registra también su **DNI** (Conductores → editar) — se necesita para las guías de remisión.
 5. Emite una factura de prueba (Facturación → detalle de una factura → "Enviar a SUNAT") o una guía (Viajes → viaje en curso/entregado → "Generar guía de remisión" → "Enviar a SUNAT") y revisa la respuesta.
 
 ### Aviso importante — léelo antes de emitir comprobantes reales
 
-Esta integración **no ha podido probarse contra una cuenta real de ningún OSE**, porque esta instalación no cuenta con credenciales de NubeFacT ni de otro proveedor. El archivo `app/integrations/sunat_ose.py` sigue el formato público que NubeFacT documenta en su web, pero varios valores son catálogos oficiales de SUNAT que **debes confirmar antes de usarlo en producción** (están marcados con comentarios "AJUSTAR" en el código):
+Esta integración **no ha podido probarse contra una cuenta real de ningún OSE**, porque esta instalación no cuenta con credenciales de tefacturo.pe ni de otro proveedor. Sobre tefacturo.pe en particular: lo único público que se encontró es un manual de 2019 que documenta solo factura/boleta (vía `PUT`, RUC del emisor dentro del JSON) — **no documenta autenticación ni guía de remisión**, así que `app/integrations/sunat_ose.py` sigue el formato público más común entre OSEs peruanos (POST + token) como punto de partida, pero hay que confirmarlo contra el manual real y actualizado que entregue tefacturo.pe al contratar. Varios otros valores son catálogos oficiales de SUNAT que **debes confirmar antes de usarlo en producción** (están marcados con comentarios "AJUSTAR" en el código):
 
 - Tipo de comprobante (factura vs. guía transportista).
 - Tipo de documento de identidad del cliente/conductor (RUC, DNI).

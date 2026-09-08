@@ -2,7 +2,7 @@
 {% block title %}Generar guía de remisión — Viaje {{ trip.code }}{% endblock %}
 {% block content %}
 <div class="page-header"><h1>Generar guía de remisión — Viaje {{ trip.code }}</h1></div>
-<p class="muted mt-0">Se completa con los datos del viaje; puedes ajustarlos antes de guardar. Después de guardar podrás enviarla a SUNAT (si la facturación electrónica ya está configurada).</p>
+<p class="muted mt-0">Se completa con los datos del viaje; puedes ajustarlos antes de guardar. Después de guardar podrás enviarla a SUNAT (si la facturación electrónica ya está configurada). Se emitirá a nombre de <strong>{{ 'BRMS' if trip.issuer == 'BRMS' else 'Harraso Transport' }}</strong>, la misma empresa de este viaje.</p>
 
 <form class="form panel" method="post">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

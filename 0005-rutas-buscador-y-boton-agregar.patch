@@ -1,0 +1,153 @@
+From 4c4bee4d562ca1289b7023fea8ac56ccdc6cce2b Mon Sep 17 00:00:00 2001
+From: a <a@a.com>
+Date: Mon, 7 Sep 2026 17:44:33 +0000
+Subject: [PATCH] after
+
+---
+ app/routes/rutas.py           | 22 +++++++++++++++++++---
+ app/templates/rutas/list.html | 32 +++++++++-----------------------
+ app/templates/rutas/new.html  | 35 +++++++++++++++++++++++++++++++++++
+ 3 files changed, 63 insertions(+), 26 deletions(-)
+ create mode 100644 app/templates/rutas/new.html
+
+diff --git a/app/routes/rutas.py b/app/routes/rutas.py
+index eb60a9f..63fd2db 100644
+--- a/app/routes/rutas.py
++++ b/app/routes/rutas.py
+@@ -20,8 +20,24 @@ def find_route(origin, destination):
+ @bp.route("")
+ @permission_required("rutas", "view")
+ def list_view():
+-    routes = query_all("SELECT * FROM routes ORDER BY origin, destination")
+-    return render_template("rutas/list.html", routes=routes)
++    # 7 sep, pedido de Braulio: antes el formulario de "agregar ruta" salía
++    # siempre abierto arriba de la tabla; ahora es un botón aparte
++    # ("+ Agregar nueva ruta", ver new()) y esta pantalla solo filtra/busca.
++    q = request.args.get("q", "").strip()
++    if q:
++        routes = query_all(
++            "SELECT * FROM routes WHERE origin LIKE ? OR destination LIKE ? ORDER BY origin, destination",
++            (f"%{q}%", f"%{q}%"),
++        )
++    else:
++        routes = query_all("SELECT * FROM routes ORDER BY origin, destination")
++    return render_template("rutas/list.html", routes=routes, q=q)
++
++
++@bp.route("/nueva", methods=["GET"])
++@permission_required("rutas", "edit")
++def new():
++    return render_template("rutas/new.html")
+ 
+ 
+ @bp.route("/agregar", methods=["POST"])
+@@ -36,7 +52,7 @@ def add():
+     fuel_amount = parse_float(request.form.get("default_fuel_amount"), 0)
+     if not origin or not destination:
+         flash("Indica origen y destino.", "error")
+-        return redirect(url_for("rutas.list_view"))
++        return redirect(url_for("rutas.new"))
+ 
+     existing = query_one("SELECT id FROM routes WHERE origin = ? AND destination = ?", (origin, destination))
+     if existing:
+diff --git a/app/templates/rutas/list.html b/app/templates/rutas/list.html
+index d55f355..e9ca029 100644
+--- a/app/templates/rutas/list.html
++++ b/app/templates/rutas/list.html
+@@ -5,35 +5,21 @@
+   <h1>Rutas frecuentes y viáticos predeterminados</h1>
+   <div class="page-actions">
+     {% if can(current_user.roles, 'rutas', 'edit') %}
++    <a href="{{ url_for('rutas.new') }}" class="btn btn-primary">+ Agregar nueva ruta</a>
+     <a href="{{ url_for('rutas.import_routes') }}" class="btn btn-secondary">Importar desde Excel</a>
+     {% endif %}
+   </div>
+ </div>
+ <p class="muted mt-0">Define aquí el monto estándar de viáticos y de comisión del conductor para cada ruta. Al confirmar el anticipo de gastos de un viaje se sugiere el monto de viáticos, y al registrar un viaje se sugiere la comisión — ambos según la ruta que coincida.</p>
+ 
+-<div class="panel">
+-  {% if can(current_user.roles, 'rutas', 'edit') %}
+-  <form method="post" action="{{ url_for('rutas.add') }}" class="filters" style="margin-bottom:18px;">
+-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+-    <label>Origen
+-      <input type="text" name="origin" placeholder="Ej. Lima" required>
+-    </label>
+-    <label>Destino
+-      <input type="text" name="destination" placeholder="Ej. Trujillo" required>
+-    </label>
+-    <label>Viáticos (S/)
+-      <input type="number" step="0.01" name="default_expense_amount" placeholder="Ej. 350" required>
+-    </label>
+-    <label>Comisión conductor (S/)
+-      <input type="number" step="0.01" name="default_commission_amount" placeholder="Ej. 80" required>
+-    </label>
+-    <label>Combustible estimado (gal)
+-      <input type="number" step="0.01" name="default_fuel_amount" placeholder="Ej. 60">
+-    </label>
+-    <button type="submit" class="btn btn-primary">+ Guardar ruta</button>
+-  </form>
+-  {% endif %}
++<form class="filters" method="get">
++  <label>Buscar
++    <input type="text" name="q" value="{{ q }}" placeholder="Origen o destino">
++  </label>
++  <button class="btn btn-secondary" type="submit">Filtrar</button>
++</form>
+ 
++<div class="panel">
+   <div class="table-wrap">
+     <table>
+       <thead><tr><th>Origen</th><th>Destino</th><th class="text-right">Viáticos</th><th class="text-right">Comisión conductor</th><th class="text-right">Combustible (gal)</th><th>Estado</th><th></th></tr></thead>
+@@ -63,7 +49,7 @@
+           </td>
+         </tr>
+         {% else %}
+-        <tr><td colspan="7" class="table-empty">No hay rutas registradas.</td></tr>
++        <tr><td colspan="7" class="table-empty">{{ 'No hay rutas que coincidan con la búsqueda.' if q else 'No hay rutas registradas.' }}</td></tr>
+         {% endfor %}
+       </tbody>
+     </table>
+diff --git a/app/templates/rutas/new.html b/app/templates/rutas/new.html
+new file mode 100644
+index 0000000..adf236f
+--- /dev/null
++++ b/app/templates/rutas/new.html
+@@ -0,0 +1,35 @@
++{% extends 'base.html' %}
++{% block title %}Agregar ruta{% endblock %}
++{% block content %}
++<div class="page-header"><h1>Agregar ruta</h1></div>
++<form class="form panel" method="post" action="{{ url_for('rutas.add') }}" style="max-width: 520px;">
++  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
++
++  <div class="form-row">
++    <label>Origen *
++      <input type="text" name="origin" placeholder="Ej. Lima" required>
++    </label>
++    <label>Destino *
++      <input type="text" name="destination" placeholder="Ej. Trujillo" required>
++    </label>
++  </div>
++
++  <div class="form-row">
++    <label>Viáticos (S/)
++      <input type="number" step="0.01" name="default_expense_amount" placeholder="Ej. 350">
++    </label>
++    <label>Comisión conductor (S/)
++      <input type="number" step="0.01" name="default_commission_amount" placeholder="Ej. 80">
++    </label>
++  </div>
++
++  <label>Combustible estimado (gal)
++    <input type="number" step="0.01" name="default_fuel_amount" placeholder="Ej. 60">
++  </label>
++
++  <div class="btn-group">
++    <button type="submit" class="btn btn-primary">Guardar ruta</button>
++    <a href="{{ url_for('rutas.list_view') }}" class="btn btn-secondary">Cancelar</a>
++  </div>
++</form>
++{% endblock %}
+-- 
+2.43.0
+

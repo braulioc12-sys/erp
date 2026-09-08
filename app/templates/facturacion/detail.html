@@ -32,6 +32,7 @@
 <div class="detail-grid">
   <div class="detail-item"><div class="label">Cliente</div><div class="value">{{ invoice.client_name }}</div></div>
   <div class="detail-item"><div class="label">RUC</div><div class="value">{{ invoice.client_ruc or '—' }}</div></div>
+  <div class="detail-item"><div class="label">Empresa que factura</div><div class="value">{{ 'BRMS' if invoice.issuer == 'BRMS' else 'Harraso Transport' }}</div></div>
   <div class="detail-item"><div class="label">Serie / número SUNAT</div><div class="value">{{ invoice.series }}-{{ '%06d'|format(invoice.series_number) }}</div></div>
   <div class="detail-item"><div class="label">Fecha de emisión</div><div class="value">{{ invoice.issue_date }}</div></div>
   <div class="detail-item"><div class="label">Vencimiento</div><div class="value">{{ invoice.due_date or '—' }}</div></div>

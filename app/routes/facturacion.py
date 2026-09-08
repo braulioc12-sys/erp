@@ -2,7 +2,7 @@ from flask import Blueprint, abort, current_app, flash, redirect, render_templat
 
 from app.auth import permission_required, validate_csrf
 from app.db import execute, get_db, query_all, query_one
-from app.helpers import next_code, parse_date, today_str
+from app.helpers import company_info_for_issuer, next_code, parse_date, today_str
 from app.integrations.sunat_ose import (
     SunatOseError,
     build_client_from_config,
@@ -59,6 +59,22 @@ def new():
             flash("Los viajes seleccionados ya no están disponibles para facturar.", "error")
             return redirect(url_for("facturacion.new", client_id=client_id))
 
+        # 7 sep, integración con tefacturo.pe: un comprobante electrónico se
+        # emite a nombre de UN RUC, así que todos los viajes de una misma
+        # factura deben ser de la misma empresa (Harraso o BRMS, ver
+        # trips.issuer). Se valida aquí en vez de solo en el checkbox del
+        # formulario, por si llegan viajes de ambas empresas manipulando el
+        # POST a mano.
+        issuers = {t["issuer"] for t in trips}
+        if len(issuers) > 1:
+            flash(
+                "Los viajes seleccionados son de empresas distintas (Harraso y BRMS); "
+                "una factura solo puede emitirse a nombre de una. Factúralos por separado.",
+                "error",
+            )
+            return redirect(url_for("facturacion.new", client_id=client_id))
+        issuer = issuers.pop()
+
         total = sum(t["rate"] for t in trips)
         number = next_code("F", "invoices")
         series = current_app.config["INVOICE_SERIES"]
@@ -66,9 +82,9 @@ def new():
 
         db = get_db()
         cur = db.execute(
-            """INSERT INTO invoices (number, client_id, issue_date, due_date, amount, notes, series, series_number)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (number, client_id, issue_date, due_date, total, request.form.get("notes", "").strip(), series, series_number),
+            """INSERT INTO invoices (number, client_id, issue_date, due_date, amount, notes, series, series_number, issuer)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (number, client_id, issue_date, due_date, total, request.form.get("notes", "").strip(), series, series_number, issuer),
         )
         invoice_id = cur.lastrowid
         for t in trips:
@@ -138,14 +154,16 @@ def send_sunat(invoice_id):
     client_row = query_one("SELECT * FROM clients WHERE id = ?", (invoice["client_id"],))
     items = query_all("SELECT * FROM invoice_items WHERE invoice_id = ?", (invoice_id,))
 
-    ose_client = build_client_from_config(current_app.config)
-    company = {
-        "ruc": current_app.config["COMPANY_RUC"],
-        "name": current_app.config["COMPANY_NAME"],
-        "address": current_app.config["COMPANY_ADDRESS"],
-    }
+    ose_client = build_client_from_config(current_app.config, invoice["issuer"])
+    company = company_info_for_issuer(invoice["issuer"], current_app.config)
 
     try:
+        if not company["ruc"]:
+            raise SunatOseError(
+                f"Falta configurar el RUC de {company['name']} (variable de entorno "
+                f"{'BRMS_RUC' if invoice['issuer'] == 'BRMS' else 'COMPANY_RUC'}) antes de "
+                "poder emitir facturas electrónicas a su nombre."
+            )
         payload = build_invoice_payload(invoice, items, client_row, company)
         response = ose_client.send(payload)
         result = parse_ose_response(response)

@@ -352,26 +352,6 @@ COLUMN_MIGRATIONS = [
     ("trips", "carrier_waybill_number", "TEXT"),
     ("trips", "carrier_waybill_filename", "TEXT"),
     ("trips", "paid", "INTEGER NOT NULL DEFAULT 0"),
-    # 4 sep, pedido de Braulio: conformidad de entrega (foto/PDF) adjuntada
-    # mientras el viaje está EN_CURSO — adjuntarla es lo que marca el viaje
-    # como ENTREGADO (ver save_delivery_proof() en app/routes/viajes.py).
-    ("trips", "delivery_proof_filename", "TEXT"),
-    # 4 sep, pedido de Braulio: tabla de consumo de combustible por ruta
-    # (galones) y su comparación contra el combustible real al liquidar
-    # (ver app/routes/liquidaciones.py save_fuel() y detail.html).
-    ("routes", "default_fuel_amount", "REAL NOT NULL DEFAULT 0"),
-    ("expense_advances", "fuel_actual", "REAL"),
-    ("expense_advances", "fuel_excess", "REAL"),
-    ("expense_advances", "fuel_notes", "TEXT"),
-    # 4 sep, pedido de Braulio: código de la liquidación según la empresa
-    # operadora del viaje — B-0001... (BRMS) / H-0001... (Harraso).
-    ("expense_advances", "code", "TEXT"),
-    # 7 sep, integración con tefacturo.pe: empresa emisora (Harraso/BRMS) de
-    # cada factura/guía — sin CHECK aquí, mismo criterio ya usado para las
-    # columnas de arriba sobre tablas ya desplegadas (ver schema.sql para
-    # el CHECK completo en instalaciones nuevas).
-    ("invoices", "issuer", "TEXT NOT NULL DEFAULT 'HARRASO'"),
-    ("waybills", "issuer", "TEXT NOT NULL DEFAULT 'HARRASO'"),
 ]
 
 

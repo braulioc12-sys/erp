@@ -40,10 +40,21 @@ class Config:
     # solo el botón manual "Sincronizar") — ver app/scheduler.py.
     FROTCOM_AUTO_SYNC_SECONDS = int(os.environ.get("FROTCOM_AUTO_SYNC_SECONDS", "120"))
 
-    # Facturación electrónica SUNAT vía un OSE (NubeFacT, Efact, etc.). Ver
-    # README, sección "Facturación electrónica (SUNAT)".
-    OSE_RUTA = os.environ.get("OSE_RUTA", "")
+    # Facturación electrónica SUNAT vía un OSE — tefacturo.pe (7 sep, pedido
+    # de Braulio) u otro con el mismo formato REST/JSON (NubeFacT, Efact,
+    # etc.). Harraso y BRMS son dos empresas con RUC propio (ver
+    # COMPANY_RUC/BRMS_RUC más abajo), y un OSE emite a nombre de UN RUC por
+    # cuenta — así que cada empresa necesita su propia cuenta/credenciales
+    # ante el OSE, no se puede emitir un comprobante de BRMS con la cuenta
+    # de Harraso ni viceversa (confirmar con tefacturo.pe si en su caso una
+    # sola cuenta puede manejar ambos RUC; mientras tanto se asume que no).
+    # Ver README, sección "Facturación electrónica (SUNAT)".
+    OSE_RUTA = os.environ.get("OSE_RUTA", "")  # obsoleto — se mantiene como respaldo de HARRASO_OSE_RUTA
     OSE_TOKEN = os.environ.get("OSE_TOKEN", "")
+    HARRASO_OSE_RUTA = os.environ.get("HARRASO_OSE_RUTA", os.environ.get("OSE_RUTA", ""))
+    HARRASO_OSE_TOKEN = os.environ.get("HARRASO_OSE_TOKEN", os.environ.get("OSE_TOKEN", ""))
+    BRMS_OSE_RUTA = os.environ.get("BRMS_OSE_RUTA", "")
+    BRMS_OSE_TOKEN = os.environ.get("BRMS_OSE_TOKEN", "")
     # Datos reales de Harraso Transport S.A.C. (tomados de una cotización
     # real que Braulio compartió, 1 sep) — se usan como default porque
     # antes quedaban vacíos; se pueden sobreescribir por variable de
@@ -107,3 +118,16 @@ class Config:
     DECOLECTA_BASE_URL = os.environ.get("DECOLECTA_BASE_URL", "")
     DECOLECTA_RUC_BASE_URL = os.environ.get("DECOLECTA_RUC_BASE_URL", "")
     DECOLECTA_TOKEN = os.environ.get("DECOLECTA_TOKEN", "")
+
+    # Integración WhatsApp -> n8n -> Liquidaciones (1 sep, pedido de
+    # Braulio: "quiero usar n8n para integrar Whatsapp... que tomando una
+    # foto a la factura se llene automaticamente los campos"). Secreto
+    # compartido que autentica al workflow de n8n contra
+    # POST /liquidaciones/whatsapp/intake (ver app/routes/liquidaciones.py)
+    # — ese endpoint lo llama un servicio externo, no un usuario con sesión
+    # iniciada, así que no usa login ni el csrf_token normal: en su lugar
+    # exige este token en la cabecera "X-Webhook-Token". Vacío por defecto
+    # a propósito: mientras esté vacío, el endpoint rechaza TODAS las
+    # peticiones (nunca queda abierto sin querer). Ver n8n/README-n8n.md
+    # para cómo configurarlo en el workflow.
+    N8N_WEBHOOK_TOKEN = os.environ.get("N8N_WEBHOOK_TOKEN", "")

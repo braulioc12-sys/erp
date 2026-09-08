@@ -1,0 +1,497 @@
+From 6389d7705b9021c7616ee7b74424eda1d301ca63 Mon Sep 17 00:00:00 2001
+From: a <a@a.com>
+Date: Mon, 7 Sep 2026 18:06:56 +0000
+Subject: [PATCH] after
+
+---
+ .env.example                          | 16 +++++++----
+ README.md                             | 19 +++++++++-----
+ app/db.py                             |  6 +++++
+ app/helpers.py                        | 22 ++++++++++++++++
+ app/integrations/sunat_ose.py         | 27 ++++++++++++++++---
+ app/routes/facturacion.py             | 38 ++++++++++++++++++++-------
+ app/routes/guias.py                   | 23 ++++++++--------
+ app/schema.sql                        | 10 +++++++
+ app/templates/facturacion/detail.html |  1 +
+ app/templates/facturacion/form.html   |  4 ++-
+ app/templates/facturacion/list.html   |  5 ++--
+ app/templates/guias/detail.html       |  1 +
+ app/templates/guias/form.html         |  2 +-
+ app/templates/guias/list.html         |  5 ++--
+ config.py                             | 17 +++++++++---
+ 15 files changed, 150 insertions(+), 46 deletions(-)
+
+diff --git a/.env.example b/.env.example
+index 2cfdebc..1448057 100644
+--- a/.env.example
++++ b/.env.example
+@@ -42,16 +42,22 @@ FROTCOM_PASSWORD=
+ FROTCOM_AUTO_SYNC_SECONDS=120
+ 
+ # Facturación electrónica SUNAT (facturas y guías de remisión) — opcional.
+-# Ver README, sección "Facturación electrónica (SUNAT)".
+-# RUTA y TOKEN los entrega tu OSE (NubeFacT, Efact, etc.) al crear tu cuenta.
+-OSE_RUTA=
+-OSE_TOKEN=
+-# RUC y dirección fiscal de TU empresa (el emisor de los comprobantes).
++# Ver README, sección "Facturación electrónica (SUNAT)". Harraso y BRMS son
++# dos empresas con RUC propio, así que cada una necesita su propia
++# cuenta/credenciales ante el OSE (tefacturo.pe u otro).
++HARRASO_OSE_RUTA=
++HARRASO_OSE_TOKEN=
++BRMS_OSE_RUTA=
++BRMS_OSE_TOKEN=
++# RUC y dirección fiscal de Harraso (el emisor de sus comprobantes).
+ # Vienen precargados con los datos reales de Harraso Transport S.A.C. — si
+ # cambian, sobreescríbelos aquí.
+ COMPANY_RUC=20610357726
+ COMPANY_ADDRESS=AV. MANUEL DEL VALLE LT. 15 MZ. X - LIMA LIMA LURIN
+ COMPANY_EMAIL=contacto@harraso.com
++# El RUC/dirección de BRMS (BRMS_RUC/BRMS_ADDRESS) se definen más abajo,
++# junto a los demás datos de BRMS de Cotizaciones — se reutilizan aquí para
++# Facturación/Guías, ya que es la misma empresa con el mismo RUC.
+ COMPANY_PHONE=994185119
+ # Series de comprobantes que hayas dado de alta en tu OSE/SUNAT.
+ INVOICE_SERIES=F001
+diff --git a/README.md b/README.md
+index c6394df..07eee50 100644
+--- a/README.md
++++ b/README.md
+@@ -249,25 +249,30 @@ El sistema puede emitir **facturas** y **guías de remisión electrónica (modal
+ 
+ **Camino 1 — Conexión directa a SUNAT ("SEE del Contribuyente").** Requiere comprar un certificado digital propio (~S/150–600/año), armar y firmar digitalmente el XML en formato UBL 2.1, y hablar el webservice SOAP de SUNAT. Es una integración pesada, cara de mantener y con un margen de error alto si no se hace con experiencia previa — normalmente solo tiene sentido para empresas grandes con muchísimo volumen de comprobantes.
+ 
+-**Camino 2 — A través de un OSE (Operador de Servicios Electrónicos), como NubeFacT, Efact, BizLinks o Facturalo Perú.** Le mandas un JSON simple por HTTPS con los datos del comprobante, el OSE arma el XML, lo firma con su propio certificado, lo envía a SUNAT y te devuelve el PDF, el XML y la constancia de aceptación (CDR). Es el camino que usa casi cualquier negocio pequeño o mediano, y **es el que implementa este sistema** (`app/integrations/sunat_ose.py`), siguiendo el formato público que documenta NubeFacT (RUTA + TOKEN + JSON), que es el más extendido entre OSEs peruanos orientados a REST. El OSE cobra por comprobante emitido (consulta tarifas directamente con el proveedor que elijas) — es un costo aparte del hosting del ERP.
++**Camino 2 — A través de un OSE (Operador de Servicios Electrónicos), como tefacturo.pe, NubeFacT, Efact, BizLinks o Facturalo Perú.** Le mandas un JSON simple por HTTPS con los datos del comprobante, el OSE arma el XML, lo firma con su propio certificado, lo envía a SUNAT y te devuelve el PDF, el XML y la constancia de aceptación (CDR). Es el camino que usa casi cualquier negocio pequeño o mediano, y **es el que implementa este sistema** (`app/integrations/sunat_ose.py`), siguiendo el formato público más extendido entre OSEs peruanos orientados a REST (RUTA + TOKEN + JSON). El OSE cobra por comprobante emitido (consulta tarifas directamente con el proveedor que elijas) — es un costo aparte del hosting del ERP.
+ 
+ Ten en cuenta también que, según cambios normativos recientes, los negocios que superan cierto nivel de ingresos anuales (un umbral en UIT) están obligados a emitir a través de un OSE en vez de ir directo a SUNAT — confírmalo con tu contador, ya que las cifras y fechas exactas de esta obligación cambian con el tiempo.
+ 
++### Dos empresas emisoras: Harraso y BRMS
++
++El sistema factura y emite guías a nombre de **dos empresas distintas, cada una con su propio RUC** — Harraso Transport y BRMS (mismo concepto que ya existe en Cotizaciones). Una factura se emite a nombre de la empresa de los viajes que incluye (todos deben ser de la misma — el sistema no deja mezclar Harraso y BRMS en un mismo comprobante); una guía de remisión se emite a nombre de la empresa del viaje del que se generó. Como un comprobante electrónico se emite a nombre de UN RUC, **cada empresa necesita su propia cuenta/credenciales ante el OSE** — no se puede emitir un comprobante de BRMS con la cuenta de Harraso ni viceversa (confirma con tu OSE si en su caso una sola cuenta puede manejar ambos RUC; mientras tanto el sistema asume que no y pide credenciales separadas).
++
+ ### Cómo activarlo
+ 
+-1. Contrata un OSE autorizado por SUNAT (por ejemplo, NubeFacT: [nubefact.com](https://www.nubefact.com)) y crea primero una cuenta de **pruebas/sandbox**.
++1. Contrata un OSE autorizado por SUNAT (por ejemplo, tefacturo.pe: [tefacturo.pe](https://tefacturo.pe)) — una cuenta/credenciales por cada RUC que vaya a emitir (Harraso y, si corresponde, BRMS) — y crea primero una cuenta de **pruebas/sandbox**.
+ 2. Con las credenciales que te den, define estas variables de entorno:
+-   - `OSE_RUTA`: la URL del endpoint que te indique tu OSE.
+-   - `OSE_TOKEN`: el token de autenticación de tu cuenta.
+-   - `COMPANY_RUC` y `COMPANY_ADDRESS`: el RUC y la dirección fiscal de tu propia empresa (el emisor de los comprobantes).
+-   - `INVOICE_SERIES` y `WAYBILL_SERIES`: las series que hayas dado de alta para facturas y guías (por defecto `F001` y `T001`).
++   - `HARRASO_OSE_RUTA` / `HARRASO_OSE_TOKEN`: la URL del endpoint y el token de la cuenta de Harraso.
++   - `BRMS_OSE_RUTA` / `BRMS_OSE_TOKEN`: lo mismo para la cuenta de BRMS (déjalas vacías si BRMS todavía no emite comprobantes electrónicos propios).
++   - `COMPANY_RUC` y `COMPANY_ADDRESS`: el RUC y la dirección fiscal de Harraso (el emisor de sus comprobantes).
++   - `BRMS_RUC` y `BRMS_ADDRESS`: lo mismo para BRMS (hoy vacíos — ver sección de Cotizaciones más arriba).
++   - `INVOICE_SERIES` y `WAYBILL_SERIES`: las series que hayas dado de alta para facturas y guías (por defecto `F001` y `T001` — si BRMS emite con series propias, hoy el sistema usa las mismas para ambas empresas; avisar si hace falta separarlas).
+ 3. Registra el RUC de cada cliente (Clientes → editar) — es obligatorio para emitir una factura electrónica.
+ 4. Para conductores, registra también su **DNI** (Conductores → editar) — se necesita para las guías de remisión.
+ 5. Emite una factura de prueba (Facturación → detalle de una factura → "Enviar a SUNAT") o una guía (Viajes → viaje en curso/entregado → "Generar guía de remisión" → "Enviar a SUNAT") y revisa la respuesta.
+ 
+ ### Aviso importante — léelo antes de emitir comprobantes reales
+ 
+-Esta integración **no ha podido probarse contra una cuenta real de ningún OSE**, porque esta instalación no cuenta con credenciales de NubeFacT ni de otro proveedor. El archivo `app/integrations/sunat_ose.py` sigue el formato público que NubeFacT documenta en su web, pero varios valores son catálogos oficiales de SUNAT que **debes confirmar antes de usarlo en producción** (están marcados con comentarios "AJUSTAR" en el código):
++Esta integración **no ha podido probarse contra una cuenta real de ningún OSE**, porque esta instalación no cuenta con credenciales de tefacturo.pe ni de otro proveedor. Sobre tefacturo.pe en particular: lo único público que se encontró es un manual de 2019 que documenta solo factura/boleta (vía `PUT`, RUC del emisor dentro del JSON) — **no documenta autenticación ni guía de remisión**, así que `app/integrations/sunat_ose.py` sigue el formato público más común entre OSEs peruanos (POST + token) como punto de partida, pero hay que confirmarlo contra el manual real y actualizado que entregue tefacturo.pe al contratar. Varios otros valores son catálogos oficiales de SUNAT que **debes confirmar antes de usarlo en producción** (están marcados con comentarios "AJUSTAR" en el código):
+ 
+ - Tipo de comprobante (factura vs. guía transportista).
+ - Tipo de documento de identidad del cliente/conductor (RUC, DNI).
+diff --git a/app/db.py b/app/db.py
+index f61d51c..586c103 100644
+--- a/app/db.py
++++ b/app/db.py
+@@ -366,6 +366,12 @@ COLUMN_MIGRATIONS = [
+     # 4 sep, pedido de Braulio: código de la liquidación según la empresa
+     # operadora del viaje — B-0001... (BRMS) / H-0001... (Harraso).
+     ("expense_advances", "code", "TEXT"),
++    # 7 sep, integración con tefacturo.pe: empresa emisora (Harraso/BRMS) de
++    # cada factura/guía — sin CHECK aquí, mismo criterio ya usado para las
++    # columnas de arriba sobre tablas ya desplegadas (ver schema.sql para
++    # el CHECK completo en instalaciones nuevas).
++    ("invoices", "issuer", "TEXT NOT NULL DEFAULT 'HARRASO'"),
++    ("waybills", "issuer", "TEXT NOT NULL DEFAULT 'HARRASO'"),
+ ]
+ 
+ 
+diff --git a/app/helpers.py b/app/helpers.py
+index ff8fcb6..e302e23 100644
+--- a/app/helpers.py
++++ b/app/helpers.py
+@@ -136,6 +136,28 @@ def amount_to_words_pen(amount):
+     return f"{palabras} Y {centavos:02d}/100 SOLES"
+ 
+ 
++def company_info_for_issuer(issuer, cfg):
++    """Datos de la empresa emisora (RUC/nombre/dirección) según sea Harraso
++    o BRMS. Mismo criterio ya usado en Cotizaciones (`quotations.issuer`,
++    `_parse_issuer()` en cotizaciones.py/viajes.py): un documento guarda su
++    empresa emisora al crearse y no se recalcula después. Se usa aquí para
++    armar el comprobante que se manda al OSE (tefacturo.pe u otro) en
++    Facturación y Guías — cada empresa tiene su propio RUC y, por lo tanto,
++    necesita su propia cuenta/credenciales ante el OSE (ver
++    HARRASO_OSE_RUTA/TOKEN y BRMS_OSE_RUTA/TOKEN en config.py)."""
++    if issuer == "BRMS":
++        return {
++            "ruc": cfg.get("BRMS_RUC", ""),
++            "name": "BRMS",
++            "address": cfg.get("BRMS_ADDRESS", ""),
++        }
++    return {
++        "ruc": cfg.get("COMPANY_RUC", ""),
++        "name": cfg.get("COMPANY_NAME", ""),
++        "address": cfg.get("COMPANY_ADDRESS", ""),
++    }
++
++
+ def pretty_label(value):
+     """Convierte códigos tipo 'COMBUSTIBLE' o 'en_curso' en texto legible
+     ('Combustible', 'En Curso'). Si el valor ya viene con formato humano
+diff --git a/app/integrations/sunat_ose.py b/app/integrations/sunat_ose.py
+index 1efbc02..326881c 100644
+--- a/app/integrations/sunat_ose.py
++++ b/app/integrations/sunat_ose.py
+@@ -19,9 +19,22 @@ NubeFacT documenta (RUTA + TOKEN + JSON), que es el más común entre OSEs
+ peruanos orientados a REST/JSON, pero **no ha podido probarse contra una
+ cuenta real** porque esta instalación no tiene credenciales de ningún OSE.
+ 
++tefacturo.pe (7 sep, pedido de Braulio): lo único público que se encontró
++es un manual de 2019 ("tefacturo-Integracion-con-API-REST-y-UBL-2.1.pdf")
++que documenta SOLO factura/boleta, vía PUT a
++https://dev.invoice2u.pe/apiemisor/invoice2u/integracion/{factura|boleta}
++con el RUC del emisor dentro del JSON — NO documenta autenticación (token,
++API key, etc.), NI guía de remisión, y no se encontró un portal de
++documentación técnica más reciente. Este cliente sigue el patrón NubeFacT
++(POST + header Authorization: Token) como mejor punto de partida, pero hay
++que confirmarlo contra el manual real y actualizado que entregue
++tefacturo.pe al contratar (es probable que difiera en el método HTTP, la
++autenticación, y que tenga un endpoint propio para guías) antes de usarlo
++en serio.
++
+ Antes de emitir un solo comprobante real:
+-1. Contrata un OSE autorizado por SUNAT (NubeFacT, Efact, BizLinks,
+-   Facturalo Perú, etc.) y crea una cuenta de pruebas (sandbox).
++1. Contrata un OSE autorizado por SUNAT (tefacturo.pe, NubeFacT, Efact,
++   BizLinks, Facturalo Perú, etc.) y crea una cuenta de pruebas (sandbox).
+ 2. Con su manual de integración en mano, confirma en este archivo (buscan
+    los comentarios "AJUSTAR"):
+    - La URL exacta de la RUTA (suele haber una de pruebas y otra de
+@@ -212,8 +225,14 @@ def _format_date_ose(date_str):
+     return dt.strftime("%d-%m-%Y")
+ 
+ 
+-def build_client_from_config(app_config):
+-    return OseClient(ruta=app_config.get("OSE_RUTA"), token=app_config.get("OSE_TOKEN"))
++def build_client_from_config(app_config, issuer="HARRASO"):
++    """Devuelve el cliente OSE de la empresa emisora correspondiente
++    (Harraso o BRMS — 7 sep, integración con tefacturo.pe). Cada una tiene
++    su propio RUC y, por lo tanto, su propia cuenta/credenciales ante el
++    OSE — ver HARRASO_OSE_RUTA/TOKEN y BRMS_OSE_RUTA/TOKEN en config.py."""
++    if issuer == "BRMS":
++        return OseClient(ruta=app_config.get("BRMS_OSE_RUTA"), token=app_config.get("BRMS_OSE_TOKEN"))
++    return OseClient(ruta=app_config.get("HARRASO_OSE_RUTA"), token=app_config.get("HARRASO_OSE_TOKEN"))
+ 
+ 
+ def parse_ose_response(response):
+diff --git a/app/routes/facturacion.py b/app/routes/facturacion.py
+index 01fba5d..858c061 100644
+--- a/app/routes/facturacion.py
++++ b/app/routes/facturacion.py
+@@ -2,7 +2,7 @@ from flask import Blueprint, abort, current_app, flash, redirect, render_templat
+ 
+ from app.auth import permission_required, validate_csrf
+ from app.db import execute, get_db, query_all, query_one
+-from app.helpers import next_code, parse_date, today_str
++from app.helpers import company_info_for_issuer, next_code, parse_date, today_str
+ from app.integrations.sunat_ose import (
+     SunatOseError,
+     build_client_from_config,
+@@ -59,6 +59,22 @@ def new():
+             flash("Los viajes seleccionados ya no están disponibles para facturar.", "error")
+             return redirect(url_for("facturacion.new", client_id=client_id))
+ 
++        # 7 sep, integración con tefacturo.pe: un comprobante electrónico se
++        # emite a nombre de UN RUC, así que todos los viajes de una misma
++        # factura deben ser de la misma empresa (Harraso o BRMS, ver
++        # trips.issuer). Se valida aquí en vez de solo en el checkbox del
++        # formulario, por si llegan viajes de ambas empresas manipulando el
++        # POST a mano.
++        issuers = {t["issuer"] for t in trips}
++        if len(issuers) > 1:
++            flash(
++                "Los viajes seleccionados son de empresas distintas (Harraso y BRMS); "
++                "una factura solo puede emitirse a nombre de una. Factúralos por separado.",
++                "error",
++            )
++            return redirect(url_for("facturacion.new", client_id=client_id))
++        issuer = issuers.pop()
++
+         total = sum(t["rate"] for t in trips)
+         number = next_code("F", "invoices")
+         series = current_app.config["INVOICE_SERIES"]
+@@ -66,9 +82,9 @@ def new():
+ 
+         db = get_db()
+         cur = db.execute(
+-            """INSERT INTO invoices (number, client_id, issue_date, due_date, amount, notes, series, series_number)
+-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+-            (number, client_id, issue_date, due_date, total, request.form.get("notes", "").strip(), series, series_number),
++            """INSERT INTO invoices (number, client_id, issue_date, due_date, amount, notes, series, series_number, issuer)
++               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
++            (number, client_id, issue_date, due_date, total, request.form.get("notes", "").strip(), series, series_number, issuer),
+         )
+         invoice_id = cur.lastrowid
+         for t in trips:
+@@ -138,14 +154,16 @@ def send_sunat(invoice_id):
+     client_row = query_one("SELECT * FROM clients WHERE id = ?", (invoice["client_id"],))
+     items = query_all("SELECT * FROM invoice_items WHERE invoice_id = ?", (invoice_id,))
+ 
+-    ose_client = build_client_from_config(current_app.config)
+-    company = {
+-        "ruc": current_app.config["COMPANY_RUC"],
+-        "name": current_app.config["COMPANY_NAME"],
+-        "address": current_app.config["COMPANY_ADDRESS"],
+-    }
++    ose_client = build_client_from_config(current_app.config, invoice["issuer"])
++    company = company_info_for_issuer(invoice["issuer"], current_app.config)
+ 
+     try:
++        if not company["ruc"]:
++            raise SunatOseError(
++                f"Falta configurar el RUC de {company['name']} (variable de entorno "
++                f"{'BRMS_RUC' if invoice['issuer'] == 'BRMS' else 'COMPANY_RUC'}) antes de "
++                "poder emitir facturas electrónicas a su nombre."
++            )
+         payload = build_invoice_payload(invoice, items, client_row, company)
+         response = ose_client.send(payload)
+         result = parse_ose_response(response)
+diff --git a/app/routes/guias.py b/app/routes/guias.py
+index b4aac60..af8ae49 100644
+--- a/app/routes/guias.py
++++ b/app/routes/guias.py
+@@ -2,7 +2,7 @@ from flask import Blueprint, abort, current_app, flash, redirect, render_templat
+ 
+ from app.auth import permission_required, validate_csrf
+ from app.db import execute, query_all, query_one
+-from app.helpers import parse_date, parse_float, today_str
++from app.helpers import company_info_for_issuer, parse_date, parse_float, today_str
+ from app.integrations.sunat_ose import (
+     SunatOseError,
+     build_client_from_config,
+@@ -52,14 +52,18 @@ def new(trip_id):
+         series = current_app.config["WAYBILL_SERIES"]
+         series_number = _next_series_number(series)
+         waybill_id = execute(
+-            """INSERT INTO waybills (trip_id, series, series_number, issue_date, weight_kg, packages,
++            """INSERT INTO waybills (trip_id, series, series_number, issuer, issue_date, weight_kg, packages,
+                origin_address, destination_address, vehicle_plate, driver_document, driver_name,
+                driver_license, notes, created_by)
+-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
++               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             (
+                 trip_id,
+                 series,
+                 series_number,
++                # 7 sep, integración con tefacturo.pe: la guía se emite a
++                # nombre de la misma empresa que el viaje (trips.issuer,
++                # Harraso o BRMS) — se copia aquí y no se recalcula después.
++                trip["issuer"],
+                 parse_date(request.form.get("issue_date")) or today_str(),
+                 parse_float(request.form.get("weight_kg"), None),
+                 int(parse_float(request.form.get("packages"), 1)),
+@@ -106,18 +110,15 @@ def send_sunat(waybill_id):
+         abort(404)
+     trip = query_one("SELECT * FROM trips WHERE id = ?", (waybill["trip_id"],))
+ 
+-    client = build_client_from_config(current_app.config)
+-    company = {
+-        "ruc": current_app.config["COMPANY_RUC"],
+-        "name": current_app.config["COMPANY_NAME"],
+-        "address": current_app.config["COMPANY_ADDRESS"],
+-    }
++    client = build_client_from_config(current_app.config, waybill["issuer"])
++    company = company_info_for_issuer(waybill["issuer"], current_app.config)
+ 
+     try:
+         if not company["ruc"]:
+             raise SunatOseError(
+-                "Falta configurar el RUC de tu empresa (variable de entorno COMPANY_RUC) "
+-                "antes de poder emitir guías electrónicas."
++                f"Falta configurar el RUC de {company['name']} (variable de entorno "
++                f"{'BRMS_RUC' if waybill['issuer'] == 'BRMS' else 'COMPANY_RUC'}) antes de "
++                "poder emitir guías electrónicas a su nombre."
+             )
+         payload = build_waybill_payload(waybill, trip, company)
+         response = client.send(payload)
+diff --git a/app/schema.sql b/app/schema.sql
+index 2cc0c07..0c7e729 100644
+--- a/app/schema.sql
++++ b/app/schema.sql
+@@ -867,6 +867,12 @@ CREATE TABLE IF NOT EXISTS invoices (
+     due_date TEXT,
+     amount REAL NOT NULL DEFAULT 0,
+     status TEXT NOT NULL DEFAULT 'PENDIENTE' CHECK (status IN ('PENDIENTE', 'PAGADA', 'VENCIDA', 'ANULADA')),
++    -- 7 sep, integración con tefacturo.pe: empresa emisora (Harraso o BRMS,
++    -- cada una con su propio RUC) — se guarda al crear la factura a partir
++    -- de los viajes elegidos (todos deben tener el mismo issuer, ver
++    -- app/routes/facturacion.py) y no se recalcula después, mismo criterio
++    -- que quotations.issuer/trips.issuer.
++    issuer TEXT NOT NULL DEFAULT 'HARRASO' CHECK (issuer IN ('HARRASO', 'BRMS')),
+     notes TEXT,
+     -- Serie/número correlativo exigido por SUNAT para el comprobante
+     -- electrónico (distinto del código interno "number" de arriba).
+@@ -897,6 +903,10 @@ CREATE TABLE IF NOT EXISTS waybills (
+     trip_id INTEGER NOT NULL REFERENCES trips(id),
+     series TEXT NOT NULL DEFAULT 'T001',
+     series_number INTEGER NOT NULL DEFAULT 0,
++    -- 7 sep, integración con tefacturo.pe: empresa emisora (Harraso o BRMS),
++    -- copiada del viaje (trips.issuer) al crear la guía — no se recalcula
++    -- después, mismo criterio que invoices.issuer arriba.
++    issuer TEXT NOT NULL DEFAULT 'HARRASO' CHECK (issuer IN ('HARRASO', 'BRMS')),
+     issue_date TEXT NOT NULL,
+     weight_kg REAL,
+     packages INTEGER,
+diff --git a/app/templates/facturacion/detail.html b/app/templates/facturacion/detail.html
+index 55dd61c..ea5714f 100644
+--- a/app/templates/facturacion/detail.html
++++ b/app/templates/facturacion/detail.html
+@@ -32,6 +32,7 @@
+ <div class="detail-grid">
+   <div class="detail-item"><div class="label">Cliente</div><div class="value">{{ invoice.client_name }}</div></div>
+   <div class="detail-item"><div class="label">RUC</div><div class="value">{{ invoice.client_ruc or '—' }}</div></div>
++  <div class="detail-item"><div class="label">Empresa que factura</div><div class="value">{{ 'BRMS' if invoice.issuer == 'BRMS' else 'Harraso Transport' }}</div></div>
+   <div class="detail-item"><div class="label">Serie / número SUNAT</div><div class="value">{{ invoice.series }}-{{ '%06d'|format(invoice.series_number) }}</div></div>
+   <div class="detail-item"><div class="label">Fecha de emisión</div><div class="value">{{ invoice.issue_date }}</div></div>
+   <div class="detail-item"><div class="label">Vencimiento</div><div class="value">{{ invoice.due_date or '—' }}</div></div>
+diff --git a/app/templates/facturacion/form.html b/app/templates/facturacion/form.html
+index caf0f22..c849bda 100644
+--- a/app/templates/facturacion/form.html
++++ b/app/templates/facturacion/form.html
+@@ -23,14 +23,16 @@
+ 
+   <h2>Viajes entregados pendientes de facturar</h2>
+   {% if pending_trips %}
++  <p class="muted mt-0">Una factura electrónica se emite a nombre de una sola empresa — si hay viajes de Harraso y de BRMS, márcalos por separado (uno u otro grupo a la vez).</p>
+   <div class="table-wrap" style="margin-bottom:16px;">
+     <table>
+-      <thead><tr><th></th><th>Código</th><th>Fecha entrega</th><th>Ruta</th><th class="text-right">Tarifa</th></tr></thead>
++      <thead><tr><th></th><th>Código</th><th>Empresa</th><th>Fecha entrega</th><th>Ruta</th><th class="text-right">Tarifa</th></tr></thead>
+       <tbody>
+         {% for t in pending_trips %}
+         <tr>
+           <td><input type="checkbox" name="trip_ids" value="{{ t.id }}" checked style="width:auto;"></td>
+           <td>{{ t.code }}</td>
++          <td>{{ 'BRMS' if t.issuer == 'BRMS' else 'Harraso' }}</td>
+           <td>{{ t.delivered_date }}</td>
+           <td>{{ t.origin }} → {{ t.destination }}</td>
+           <td class="text-right">{{ t.rate|money }}</td>
+diff --git a/app/templates/facturacion/list.html b/app/templates/facturacion/list.html
+index c5b6a57..ef34658 100644
+--- a/app/templates/facturacion/list.html
++++ b/app/templates/facturacion/list.html
+@@ -23,12 +23,13 @@
+ 
+ <div class="table-wrap">
+   <table>
+-    <thead><tr><th>N°</th><th>Cliente</th><th>Emisión</th><th>Vencimiento</th><th class="text-right">Monto</th><th>Estado</th><th>SUNAT</th></tr></thead>
++    <thead><tr><th>N°</th><th>Cliente</th><th>Empresa</th><th>Emisión</th><th>Vencimiento</th><th class="text-right">Monto</th><th>Estado</th><th>SUNAT</th></tr></thead>
+     <tbody>
+       {% for i in invoices %}
+       <tr onclick="window.location='{{ url_for('facturacion.detail', invoice_id=i.id) }}'" style="cursor:pointer;">
+         <td><a href="{{ url_for('facturacion.detail', invoice_id=i.id) }}">{{ i.number }}</a></td>
+         <td>{{ i.client_name }}</td>
++        <td>{{ 'BRMS' if i.issuer == 'BRMS' else 'Harraso' }}</td>
+         <td>{{ i.issue_date }}</td>
+         <td>{{ i.due_date or '—' }}</td>
+         <td class="text-right">{{ i.amount|money }}</td>
+@@ -36,7 +37,7 @@
+         <td>{{ m.badge(i.sunat_status) }}</td>
+       </tr>
+       {% else %}
+-      <tr><td colspan="7" class="table-empty">No hay facturas generadas.</td></tr>
++      <tr><td colspan="8" class="table-empty">No hay facturas generadas.</td></tr>
+       {% endfor %}
+     </tbody>
+   </table>
+diff --git a/app/templates/guias/detail.html b/app/templates/guias/detail.html
+index f22f85c..b00cf76 100644
+--- a/app/templates/guias/detail.html
++++ b/app/templates/guias/detail.html
+@@ -15,6 +15,7 @@
+ <div class="detail-grid">
+   <div class="detail-item"><div class="label">Viaje</div><div class="value"><a href="{{ url_for('viajes.detail', trip_id=waybill.trip_id) }}">{{ waybill.trip_code }}</a></div></div>
+   <div class="detail-item"><div class="label">Cliente</div><div class="value">{{ waybill.client_name }}</div></div>
++  <div class="detail-item"><div class="label">Empresa que emite</div><div class="value">{{ 'BRMS' if waybill.issuer == 'BRMS' else 'Harraso Transport' }}</div></div>
+   <div class="detail-item"><div class="label">Ruta</div><div class="value">{{ waybill.origin_address }} → {{ waybill.destination_address }}</div></div>
+   <div class="detail-item"><div class="label">Fecha de emisión</div><div class="value">{{ waybill.issue_date }}</div></div>
+   <div class="detail-item"><div class="label">Peso / bultos</div><div class="value">{{ waybill.weight_kg or '—' }} kg / {{ waybill.packages or '—' }}</div></div>
+diff --git a/app/templates/guias/form.html b/app/templates/guias/form.html
+index 706bb4d..5e48571 100644
+--- a/app/templates/guias/form.html
++++ b/app/templates/guias/form.html
+@@ -2,7 +2,7 @@
+ {% block title %}Generar guía de remisión — Viaje {{ trip.code }}{% endblock %}
+ {% block content %}
+ <div class="page-header"><h1>Generar guía de remisión — Viaje {{ trip.code }}</h1></div>
+-<p class="muted mt-0">Se completa con los datos del viaje; puedes ajustarlos antes de guardar. Después de guardar podrás enviarla a SUNAT (si la facturación electrónica ya está configurada).</p>
++<p class="muted mt-0">Se completa con los datos del viaje; puedes ajustarlos antes de guardar. Después de guardar podrás enviarla a SUNAT (si la facturación electrónica ya está configurada). Se emitirá a nombre de <strong>{{ 'BRMS' if trip.issuer == 'BRMS' else 'Harraso Transport' }}</strong>, la misma empresa de este viaje.</p>
+ 
+ <form class="form panel" method="post">
+   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+diff --git a/app/templates/guias/list.html b/app/templates/guias/list.html
+index fcc951b..ce3c116 100644
+--- a/app/templates/guias/list.html
++++ b/app/templates/guias/list.html
+@@ -10,19 +10,20 @@
+ <div class="panel">
+   <div class="table-wrap">
+     <table>
+-      <thead><tr><th>Serie-número</th><th>Viaje</th><th>Cliente</th><th>Ruta</th><th>Emisión</th><th>Estado SUNAT</th></tr></thead>
++      <thead><tr><th>Serie-número</th><th>Viaje</th><th>Cliente</th><th>Empresa</th><th>Ruta</th><th>Emisión</th><th>Estado SUNAT</th></tr></thead>
+       <tbody>
+         {% for w in waybills %}
+         <tr>
+           <td><a href="{{ url_for('guias.detail', waybill_id=w.id) }}">{{ w.series }}-{{ '%06d'|format(w.series_number) }}</a></td>
+           <td><a href="{{ url_for('viajes.detail', trip_id=w.trip_id) }}">{{ w.trip_code }}</a></td>
+           <td>{{ w.client_name }}</td>
++          <td>{{ 'BRMS' if w.issuer == 'BRMS' else 'Harraso' }}</td>
+           <td>{{ w.origin }} → {{ w.destination }}</td>
+           <td>{{ w.issue_date }}</td>
+           <td>{{ m.badge(w.sunat_status) }}</td>
+         </tr>
+         {% else %}
+-        <tr><td colspan="6" class="table-empty">Todavía no se han generado guías de remisión.</td></tr>
++        <tr><td colspan="7" class="table-empty">Todavía no se han generado guías de remisión.</td></tr>
+         {% endfor %}
+       </tbody>
+     </table>
+diff --git a/config.py b/config.py
+index 41ac885..2c451cc 100644
+--- a/config.py
++++ b/config.py
+@@ -40,10 +40,21 @@ class Config:
+     # solo el botón manual "Sincronizar") — ver app/scheduler.py.
+     FROTCOM_AUTO_SYNC_SECONDS = int(os.environ.get("FROTCOM_AUTO_SYNC_SECONDS", "120"))
+ 
+-    # Facturación electrónica SUNAT vía un OSE (NubeFacT, Efact, etc.). Ver
+-    # README, sección "Facturación electrónica (SUNAT)".
+-    OSE_RUTA = os.environ.get("OSE_RUTA", "")
++    # Facturación electrónica SUNAT vía un OSE — tefacturo.pe (7 sep, pedido
++    # de Braulio) u otro con el mismo formato REST/JSON (NubeFacT, Efact,
++    # etc.). Harraso y BRMS son dos empresas con RUC propio (ver
++    # COMPANY_RUC/BRMS_RUC más abajo), y un OSE emite a nombre de UN RUC por
++    # cuenta — así que cada empresa necesita su propia cuenta/credenciales
++    # ante el OSE, no se puede emitir un comprobante de BRMS con la cuenta
++    # de Harraso ni viceversa (confirmar con tefacturo.pe si en su caso una
++    # sola cuenta puede manejar ambos RUC; mientras tanto se asume que no).
++    # Ver README, sección "Facturación electrónica (SUNAT)".
++    OSE_RUTA = os.environ.get("OSE_RUTA", "")  # obsoleto — se mantiene como respaldo de HARRASO_OSE_RUTA
+     OSE_TOKEN = os.environ.get("OSE_TOKEN", "")
++    HARRASO_OSE_RUTA = os.environ.get("HARRASO_OSE_RUTA", os.environ.get("OSE_RUTA", ""))
++    HARRASO_OSE_TOKEN = os.environ.get("HARRASO_OSE_TOKEN", os.environ.get("OSE_TOKEN", ""))
++    BRMS_OSE_RUTA = os.environ.get("BRMS_OSE_RUTA", "")
++    BRMS_OSE_TOKEN = os.environ.get("BRMS_OSE_TOKEN", "")
+     # Datos reales de Harraso Transport S.A.C. (tomados de una cotización
+     # real que Braulio compartió, 1 sep) — se usan como default porque
+     # antes quedaban vacíos; se pueden sobreescribir por variable de
+-- 
+2.43.0
+

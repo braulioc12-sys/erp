@@ -136,6 +136,28 @@ def amount_to_words_pen(amount):
     return f"{palabras} Y {centavos:02d}/100 SOLES"
 
 
+def company_info_for_issuer(issuer, cfg):
+    """Datos de la empresa emisora (RUC/nombre/dirección) según sea Harraso
+    o BRMS. Mismo criterio ya usado en Cotizaciones (`quotations.issuer`,
+    `_parse_issuer()` en cotizaciones.py/viajes.py): un documento guarda su
+    empresa emisora al crearse y no se recalcula después. Se usa aquí para
+    armar el comprobante que se manda al OSE (tefacturo.pe u otro) en
+    Facturación y Guías — cada empresa tiene su propio RUC y, por lo tanto,
+    necesita su propia cuenta/credenciales ante el OSE (ver
+    HARRASO_OSE_RUTA/TOKEN y BRMS_OSE_RUTA/TOKEN en config.py)."""
+    if issuer == "BRMS":
+        return {
+            "ruc": cfg.get("BRMS_RUC", ""),
+            "name": "BRMS",
+            "address": cfg.get("BRMS_ADDRESS", ""),
+        }
+    return {
+        "ruc": cfg.get("COMPANY_RUC", ""),
+        "name": cfg.get("COMPANY_NAME", ""),
+        "address": cfg.get("COMPANY_ADDRESS", ""),
+    }
+
+
 def pretty_label(value):
     """Convierte códigos tipo 'COMBUSTIBLE' o 'en_curso' en texto legible
     ('Combustible', 'En Curso'). Si el valor ya viene con formato humano

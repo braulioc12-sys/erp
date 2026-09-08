@@ -2,7 +2,7 @@ from flask import Blueprint, abort, current_app, flash, redirect, render_templat
 
 from app.auth import permission_required, validate_csrf
 from app.db import execute, query_all, query_one
-from app.helpers import parse_date, parse_float, today_str
+from app.helpers import company_info_for_issuer, parse_date, parse_float, today_str
 from app.integrations.sunat_ose import (
     SunatOseError,
     build_client_from_config,
@@ -52,14 +52,18 @@ def new(trip_id):
         series = current_app.config["WAYBILL_SERIES"]
         series_number = _next_series_number(series)
         waybill_id = execute(
-            """INSERT INTO waybills (trip_id, series, series_number, issue_date, weight_kg, packages,
+            """INSERT INTO waybills (trip_id, series, series_number, issuer, issue_date, weight_kg, packages,
                origin_address, destination_address, vehicle_plate, driver_document, driver_name,
                driver_license, notes, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 trip_id,
                 series,
                 series_number,
+                # 7 sep, integración con tefacturo.pe: la guía se emite a
+                # nombre de la misma empresa que el viaje (trips.issuer,
+                # Harraso o BRMS) — se copia aquí y no se recalcula después.
+                trip["issuer"],
                 parse_date(request.form.get("issue_date")) or today_str(),
                 parse_float(request.form.get("weight_kg"), None),
                 int(parse_float(request.form.get("packages"), 1)),
@@ -106,18 +110,15 @@ def send_sunat(waybill_id):
         abort(404)
     trip = query_one("SELECT * FROM trips WHERE id = ?", (waybill["trip_id"],))
 
-    client = build_client_from_config(current_app.config)
-    company = {
-        "ruc": current_app.config["COMPANY_RUC"],
-        "name": current_app.config["COMPANY_NAME"],
-        "address": current_app.config["COMPANY_ADDRESS"],
-    }
+    client = build_client_from_config(current_app.config, waybill["issuer"])
+    company = company_info_for_issuer(waybill["issuer"], current_app.config)
 
     try:
         if not company["ruc"]:
             raise SunatOseError(
-                "Falta configurar el RUC de tu empresa (variable de entorno COMPANY_RUC) "
-                "antes de poder emitir guías electrónicas."
+                f"Falta configurar el RUC de {company['name']} (variable de entorno "
+                f"{'BRMS_RUC' if waybill['issuer'] == 'BRMS' else 'COMPANY_RUC'}) antes de "
+                "poder emitir guías electrónicas a su nombre."
             )
         payload = build_waybill_payload(waybill, trip, company)
         response = client.send(payload)

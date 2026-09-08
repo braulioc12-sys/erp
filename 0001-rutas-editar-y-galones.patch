@@ -1,0 +1,258 @@
+From 7dab733faae1fccd86f86382237dcab4bc8b17f3 Mon Sep 17 00:00:00 2001
+From: ERP Harraso <erp@harraso.local>
+Date: Mon, 7 Sep 2026 17:12:37 +0000
+Subject: [PATCH] Editar rutas por id + campo de consumo de combustible
+ (galones)
+
+---
+ app/bulk_import.py            |  2 ++
+ app/db.py                     |  3 ++
+ app/routes/rutas.py           | 63 ++++++++++++++++++++++++++++++-----
+ app/schema.sql                |  5 +++
+ app/templates/rutas/edit.html | 35 +++++++++++++++++++
+ app/templates/rutas/list.html |  9 +++--
+ 6 files changed, 107 insertions(+), 10 deletions(-)
+ create mode 100644 app/templates/rutas/edit.html
+
+diff --git a/app/bulk_import.py b/app/bulk_import.py
+index 2580557..57e3627 100644
+--- a/app/bulk_import.py
++++ b/app/bulk_import.py
+@@ -451,6 +451,7 @@ ROUTE_COLUMNS = [
+                  note="La combinación Origen + Destino debe ser única; si ya existe, se actualizan sus montos."),
+     ImportColumn("default_expense_amount", "Viáticos (S/)", kind="float", width=16),
+     ImportColumn("default_commission_amount", "Comisión conductor (S/)", kind="float", width=22),
++    ImportColumn("default_fuel_gallons", "Consumo de combustible (galones)", kind="float", width=26),
+ ]
+ 
+ ROUTE_EXAMPLE = {
+@@ -458,6 +459,7 @@ ROUTE_EXAMPLE = {
+     "destination": "Trujillo (ejemplo)",
+     "default_expense_amount": 350,
+     "default_commission_amount": 80,
++    "default_fuel_gallons": 60,
+ }
+ 
+ # 3 sep, pedido de Braulio: carga masiva del último cambio de aceite por
+diff --git a/app/db.py b/app/db.py
+index 68dbb8f..06de984 100644
+--- a/app/db.py
++++ b/app/db.py
+@@ -352,6 +352,9 @@ COLUMN_MIGRATIONS = [
+     ("trips", "carrier_waybill_number", "TEXT"),
+     ("trips", "carrier_waybill_filename", "TEXT"),
+     ("trips", "paid", "INTEGER NOT NULL DEFAULT 0"),
++    # 7 sep, pedido de Braulio junto con el botón Editar de Rutas — sin
++    # CHECK ni FK de por medio, migración simple de un solo ADD COLUMN.
++    ("routes", "default_fuel_gallons", "REAL NOT NULL DEFAULT 0"),
+ ]
+ 
+ 
+diff --git a/app/routes/rutas.py b/app/routes/rutas.py
+index b764049..ed54ee4 100644
+--- a/app/routes/rutas.py
++++ b/app/routes/rutas.py
+@@ -33,6 +33,7 @@ def add():
+     destination = request.form.get("destination", "").strip()
+     amount = parse_float(request.form.get("default_expense_amount"), 0)
+     commission = parse_float(request.form.get("default_commission_amount"), 0)
++    gallons = parse_float(request.form.get("default_fuel_gallons"), 0)
+     if not origin or not destination:
+         flash("Indica origen y destino.", "error")
+         return redirect(url_for("rutas.list_view"))
+@@ -40,19 +41,62 @@ def add():
+     existing = query_one("SELECT id FROM routes WHERE origin = ? AND destination = ?", (origin, destination))
+     if existing:
+         execute(
+-            "UPDATE routes SET default_expense_amount = ?, default_commission_amount = ?, active = 1 WHERE id = ?",
+-            (amount, commission, existing["id"]),
++            "UPDATE routes SET default_expense_amount = ?, default_commission_amount = ?, "
++            "default_fuel_gallons = ?, active = 1 WHERE id = ?",
++            (amount, commission, gallons, existing["id"]),
+         )
+         flash("Ruta actualizada.", "success")
+     else:
+         execute(
+-            "INSERT INTO routes (origin, destination, default_expense_amount, default_commission_amount) VALUES (?, ?, ?, ?)",
+-            (origin, destination, amount, commission),
++            "INSERT INTO routes (origin, destination, default_expense_amount, "
++            "default_commission_amount, default_fuel_gallons) VALUES (?, ?, ?, ?, ?)",
++            (origin, destination, amount, commission, gallons),
+         )
+         flash("Ruta agregada.", "success")
+     return redirect(url_for("rutas.list_view"))
+ 
+ 
++@bp.route("/<int:route_id>/editar", methods=["GET", "POST"])
++@permission_required("rutas", "edit")
++def edit(route_id):
++    # 7 sep, pedido de Braulio ("quiero poder editar más adelante galones,
++    # viáticos o comisión"): antes la única forma de "actualizar" una ruta
++    # era volver a escribir EXACTAMENTE el mismo origen/destino en el
++    # formulario de arriba (add()) — fácil de equivocarse (un espacio o una
++    # mayúscula de más crea una ruta nueva en vez de actualizar la existente,
++    # la causa más probable de las "rutas duplicadas" que reportó). Este
++    # formulario edita por id, no por texto, así que no tiene ese riesgo.
++    route = query_one("SELECT * FROM routes WHERE id = ?", (route_id,))
++    if route is None:
++        abort(404)
++    if request.method == "POST":
++        if not validate_csrf():
++            abort(400)
++        origin = request.form.get("origin", "").strip()
++        destination = request.form.get("destination", "").strip()
++        amount = parse_float(request.form.get("default_expense_amount"), 0)
++        commission = parse_float(request.form.get("default_commission_amount"), 0)
++        gallons = parse_float(request.form.get("default_fuel_gallons"), 0)
++        if not origin or not destination:
++            flash("Indica origen y destino.", "error")
++            return redirect(url_for("rutas.edit", route_id=route_id))
++        clash = query_one(
++            "SELECT id FROM routes WHERE origin = ? AND destination = ? AND id != ?",
++            (origin, destination, route_id),
++        )
++        if clash:
++            flash(f"Ya existe otra ruta con ese mismo origen y destino ({origin} → {destination}).", "error")
++            return redirect(url_for("rutas.edit", route_id=route_id))
++        execute(
++            "UPDATE routes SET origin = ?, destination = ?, default_expense_amount = ?, "
++            "default_commission_amount = ?, default_fuel_gallons = ? WHERE id = ?",
++            (origin, destination, amount, commission, gallons, route_id),
++        )
++        flash("Ruta actualizada.", "success")
++        return redirect(url_for("rutas.list_view"))
++    return render_template("rutas/edit.html", route=route)
++
++
+ @bp.route("/<int:route_id>/alternar", methods=["POST"])
+ @permission_required("rutas", "edit")
+ def toggle(route_id):
+@@ -135,17 +179,20 @@ def _apply_route_import(rows, example_skips):
+         seen.add(key)
+         amount = row.get("default_expense_amount") or 0
+         commission = row.get("default_commission_amount") or 0
++        gallons = row.get("default_fuel_gallons") or 0
+         existing = query_one("SELECT id FROM routes WHERE origin = ? AND destination = ?", (origin, destination))
+         if existing:
+             execute(
+-                "UPDATE routes SET default_expense_amount = ?, default_commission_amount = ?, active = 1 WHERE id = ?",
+-                (amount, commission, existing["id"]),
++                "UPDATE routes SET default_expense_amount = ?, default_commission_amount = ?, "
++                "default_fuel_gallons = ?, active = 1 WHERE id = ?",
++                (amount, commission, gallons, existing["id"]),
+             )
+             updated += 1
+         else:
+             execute(
+-                "INSERT INTO routes (origin, destination, default_expense_amount, default_commission_amount) VALUES (?, ?, ?, ?)",
+-                (origin, destination, amount, commission),
++                "INSERT INTO routes (origin, destination, default_expense_amount, "
++                "default_commission_amount, default_fuel_gallons) VALUES (?, ?, ?, ?, ?)",
++                (origin, destination, amount, commission, gallons),
+             )
+             created += 1
+     return {"created": created, "updated": updated, "skipped": skipped, "errors": errors}
+diff --git a/app/schema.sql b/app/schema.sql
+index 9b4f746..dadbd06 100644
+--- a/app/schema.sql
++++ b/app/schema.sql
+@@ -625,6 +625,11 @@ CREATE TABLE IF NOT EXISTS routes (
+     destination TEXT NOT NULL,
+     default_expense_amount REAL NOT NULL DEFAULT 0,
+     default_commission_amount REAL NOT NULL DEFAULT 0,
++    -- Consumo de combustible estimado para esta ruta, en galones (7 sep,
++    -- pedido de Braulio junto con el botón Editar) — de referencia, no se
++    -- usa todavía en ningún cálculo automático (a diferencia de viáticos y
++    -- comisión, que sí se sugieren solos al crear un viaje/anticipo).
++    default_fuel_gallons REAL NOT NULL DEFAULT 0,
+     active INTEGER NOT NULL DEFAULT 1,
+     created_at TEXT NOT NULL DEFAULT (datetime('now')),
+     UNIQUE(origin, destination)
+diff --git a/app/templates/rutas/edit.html b/app/templates/rutas/edit.html
+new file mode 100644
+index 0000000..1eff66d
+--- /dev/null
++++ b/app/templates/rutas/edit.html
+@@ -0,0 +1,35 @@
++{% extends 'base.html' %}
++{% block title %}Editar ruta{% endblock %}
++{% block content %}
++<div class="page-header"><h1>Editar ruta</h1></div>
++<form class="form panel" method="post" style="max-width: 520px;">
++  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
++
++  <div class="form-row">
++    <label>Origen *
++      <input type="text" name="origin" value="{{ route.origin }}" required>
++    </label>
++    <label>Destino *
++      <input type="text" name="destination" value="{{ route.destination }}" required>
++    </label>
++  </div>
++
++  <div class="form-row">
++    <label>Viáticos (S/)
++      <input type="number" step="0.01" name="default_expense_amount" value="{{ route.default_expense_amount }}">
++    </label>
++    <label>Comisión conductor (S/)
++      <input type="number" step="0.01" name="default_commission_amount" value="{{ route.default_commission_amount }}">
++    </label>
++  </div>
++
++  <label>Consumo de combustible (galones)
++    <input type="number" step="0.01" name="default_fuel_gallons" value="{{ route.default_fuel_gallons }}">
++  </label>
++
++  <div class="btn-group">
++    <button type="submit" class="btn btn-primary">Guardar cambios</button>
++    <a href="{{ url_for('rutas.list_view') }}" class="btn btn-secondary">Cancelar</a>
++  </div>
++</form>
++{% endblock %}
+diff --git a/app/templates/rutas/list.html b/app/templates/rutas/list.html
+index e1d0ef4..6bb7554 100644
+--- a/app/templates/rutas/list.html
++++ b/app/templates/rutas/list.html
+@@ -27,13 +27,16 @@
+     <label>Comisión conductor (S/)
+       <input type="number" step="0.01" name="default_commission_amount" placeholder="Ej. 80" required>
+     </label>
++    <label>Consumo de combustible (galones)
++      <input type="number" step="0.01" name="default_fuel_gallons" placeholder="Ej. 60">
++    </label>
+     <button type="submit" class="btn btn-primary">+ Guardar ruta</button>
+   </form>
+   {% endif %}
+ 
+   <div class="table-wrap">
+     <table>
+-      <thead><tr><th>Origen</th><th>Destino</th><th class="text-right">Viáticos</th><th class="text-right">Comisión conductor</th><th>Estado</th><th></th></tr></thead>
++      <thead><tr><th>Origen</th><th>Destino</th><th class="text-right">Viáticos</th><th class="text-right">Comisión conductor</th><th class="text-right">Galones</th><th>Estado</th><th></th></tr></thead>
+       <tbody>
+         {% for r in routes %}
+         <tr>
+@@ -41,10 +44,12 @@
+           <td>{{ r.destination }}</td>
+           <td class="text-right">{{ r.default_expense_amount|money }}</td>
+           <td class="text-right">{{ r.default_commission_amount|money }}</td>
++          <td class="text-right">{{ r.default_fuel_gallons }}</td>
+           <td><span class="badge {{ 'badge-activo' if r.active else 'badge-inactivo' }}">{{ 'Activa' if r.active else 'Inactiva' }}</span></td>
+           <td>
+             {% if can(current_user.roles, 'rutas', 'edit') %}
+             <div class="btn-group">
++              <a href="{{ url_for('rutas.edit', route_id=r.id) }}" class="btn btn-secondary btn-sm">Editar</a>
+               <form method="post" action="{{ url_for('rutas.toggle', route_id=r.id) }}">
+                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                 <button class="btn btn-secondary btn-sm" type="submit">{{ 'Desactivar' if r.active else 'Reactivar' }}</button>
+@@ -58,7 +63,7 @@
+           </td>
+         </tr>
+         {% else %}
+-        <tr><td colspan="6" class="table-empty">No hay rutas registradas.</td></tr>
++        <tr><td colspan="7" class="table-empty">No hay rutas registradas.</td></tr>
+         {% endfor %}
+       </tbody>
+     </table>
+-- 
+2.43.0
+

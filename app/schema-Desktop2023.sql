@@ -187,12 +187,6 @@ CREATE TABLE IF NOT EXISTS trips (
     -- los comprobantes de Liquidaciones, ver app/storage.py).
     carrier_waybill_number TEXT,
     carrier_waybill_filename TEXT,
-    -- Conformidad de entrega (4 sep, pedido de Braulio): foto o PDF del
-    -- comprobante de entrega firmado, adjuntado mientras el viaje está
-    -- EN_CURSO. Adjuntarla es lo que marca el viaje como ENTREGADO (ver
-    -- save_delivery_proof() en app/routes/viajes.py) — no hay forma de
-    -- llegar a ENTREGADO sin este archivo.
-    delivery_proof_filename TEXT,
     -- Pagado: si el cliente ya pagó este viaje. Independiente de "invoiced"
     -- (si ya se facturó) — ambos se pueden marcar/desmarcar a mano desde el
     -- detalle del viaje, además de que "invoiced" se sigue marcando solo al
@@ -631,12 +625,6 @@ CREATE TABLE IF NOT EXISTS routes (
     destination TEXT NOT NULL,
     default_expense_amount REAL NOT NULL DEFAULT 0,
     default_commission_amount REAL NOT NULL DEFAULT 0,
-    -- 4 sep, pedido de Braulio: "tabla de consumo de combustible" por
-    -- ruta (en galones) — se muestra como referencia al liquidar el
-    -- anticipo de viáticos de un viaje en esa ruta, para compararla contra
-    -- el combustible real que registre el liquidador (ver
-    -- expense_advances.fuel_actual / fuel_excess / fuel_notes abajo).
-    default_fuel_amount REAL NOT NULL DEFAULT 0,
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(origin, destination)
@@ -662,24 +650,6 @@ CREATE TABLE IF NOT EXISTS expense_advances (
     office TEXT,
     voucher_number INTEGER,
     notes TEXT,
-    -- 4 sep, pedido de Braulio: consumo de combustible de este viaje,
-    -- comparado contra la tabla de consumo estimado de la ruta
-    -- (routes.default_fuel_amount). fuel_actual es lo que registra el
-    -- liquidador; fuel_excess es un campo aparte para digitar el exceso
-    -- (no se recalcula solo — el liquidador lo confirma/ajusta), y
-    -- fuel_notes son las observaciones para justificarlo. Los tres NULL
-    -- hasta que se registre combustible para esta liquidación.
-    fuel_actual REAL,
-    fuel_excess REAL,
-    fuel_notes TEXT,
-    -- 4 sep, pedido de Braulio: código correlativo de la liquidación según
-    -- la empresa operadora del viaje (trips.issuer) — B-0001, B-0002... si
-    -- es BRMS, H-0001, H-0002... si es Harraso. Se asigna al crear el
-    -- anticipo (a diferencia del voucher_number contable, que se asigna
-    -- recién al liquidar) y cada empresa lleva su propio correlativo, que
-    -- nunca se reinicia — ver `_next_liquidation_code` en
-    -- app/routes/liquidaciones.py.
-    code TEXT,
     created_by INTEGER REFERENCES users(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -867,12 +837,6 @@ CREATE TABLE IF NOT EXISTS invoices (
     due_date TEXT,
     amount REAL NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'PENDIENTE' CHECK (status IN ('PENDIENTE', 'PAGADA', 'VENCIDA', 'ANULADA')),
-    -- 7 sep, integración con tefacturo.pe: empresa emisora (Harraso o BRMS,
-    -- cada una con su propio RUC) — se guarda al crear la factura a partir
-    -- de los viajes elegidos (todos deben tener el mismo issuer, ver
-    -- app/routes/facturacion.py) y no se recalcula después, mismo criterio
-    -- que quotations.issuer/trips.issuer.
-    issuer TEXT NOT NULL DEFAULT 'HARRASO' CHECK (issuer IN ('HARRASO', 'BRMS')),
     notes TEXT,
     -- Serie/número correlativo exigido por SUNAT para el comprobante
     -- electrónico (distinto del código interno "number" de arriba).
@@ -903,10 +867,6 @@ CREATE TABLE IF NOT EXISTS waybills (
     trip_id INTEGER NOT NULL REFERENCES trips(id),
     series TEXT NOT NULL DEFAULT 'T001',
     series_number INTEGER NOT NULL DEFAULT 0,
-    -- 7 sep, integración con tefacturo.pe: empresa emisora (Harraso o BRMS),
-    -- copiada del viaje (trips.issuer) al crear la guía — no se recalcula
-    -- después, mismo criterio que invoices.issuer arriba.
-    issuer TEXT NOT NULL DEFAULT 'HARRASO' CHECK (issuer IN ('HARRASO', 'BRMS')),
     issue_date TEXT NOT NULL,
     weight_kg REAL,
     packages INTEGER,

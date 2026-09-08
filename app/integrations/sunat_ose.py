@@ -19,9 +19,22 @@ NubeFacT documenta (RUTA + TOKEN + JSON), que es el más común entre OSEs
 peruanos orientados a REST/JSON, pero **no ha podido probarse contra una
 cuenta real** porque esta instalación no tiene credenciales de ningún OSE.
 
+tefacturo.pe (7 sep, pedido de Braulio): lo único público que se encontró
+es un manual de 2019 ("tefacturo-Integracion-con-API-REST-y-UBL-2.1.pdf")
+que documenta SOLO factura/boleta, vía PUT a
+https://dev.invoice2u.pe/apiemisor/invoice2u/integracion/{factura|boleta}
+con el RUC del emisor dentro del JSON — NO documenta autenticación (token,
+API key, etc.), NI guía de remisión, y no se encontró un portal de
+documentación técnica más reciente. Este cliente sigue el patrón NubeFacT
+(POST + header Authorization: Token) como mejor punto de partida, pero hay
+que confirmarlo contra el manual real y actualizado que entregue
+tefacturo.pe al contratar (es probable que difiera en el método HTTP, la
+autenticación, y que tenga un endpoint propio para guías) antes de usarlo
+en serio.
+
 Antes de emitir un solo comprobante real:
-1. Contrata un OSE autorizado por SUNAT (NubeFacT, Efact, BizLinks,
-   Facturalo Perú, etc.) y crea una cuenta de pruebas (sandbox).
+1. Contrata un OSE autorizado por SUNAT (tefacturo.pe, NubeFacT, Efact,
+   BizLinks, Facturalo Perú, etc.) y crea una cuenta de pruebas (sandbox).
 2. Con su manual de integración en mano, confirma en este archivo (buscan
    los comentarios "AJUSTAR"):
    - La URL exacta de la RUTA (suele haber una de pruebas y otra de
@@ -212,8 +225,14 @@ def _format_date_ose(date_str):
     return dt.strftime("%d-%m-%Y")
 
 
-def build_client_from_config(app_config):
-    return OseClient(ruta=app_config.get("OSE_RUTA"), token=app_config.get("OSE_TOKEN"))
+def build_client_from_config(app_config, issuer="HARRASO"):
+    """Devuelve el cliente OSE de la empresa emisora correspondiente
+    (Harraso o BRMS — 7 sep, integración con tefacturo.pe). Cada una tiene
+    su propio RUC y, por lo tanto, su propia cuenta/credenciales ante el
+    OSE — ver HARRASO_OSE_RUTA/TOKEN y BRMS_OSE_RUTA/TOKEN en config.py."""
+    if issuer == "BRMS":
+        return OseClient(ruta=app_config.get("BRMS_OSE_RUTA"), token=app_config.get("BRMS_OSE_TOKEN"))
+    return OseClient(ruta=app_config.get("HARRASO_OSE_RUTA"), token=app_config.get("HARRASO_OSE_TOKEN"))
 
 
 def parse_ose_response(response):

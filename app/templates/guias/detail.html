@@ -15,6 +15,7 @@
 <div class="detail-grid">
   <div class="detail-item"><div class="label">Viaje</div><div class="value"><a href="{{ url_for('viajes.detail', trip_id=waybill.trip_id) }}">{{ waybill.trip_code }}</a></div></div>
   <div class="detail-item"><div class="label">Cliente</div><div class="value">{{ waybill.client_name }}</div></div>
+  <div class="detail-item"><div class="label">Empresa que emite</div><div class="value">{{ 'BRMS' if waybill.issuer == 'BRMS' else 'Harraso Transport' }}</div></div>
   <div class="detail-item"><div class="label">Ruta</div><div class="value">{{ waybill.origin_address }} → {{ waybill.destination_address }}</div></div>
   <div class="detail-item"><div class="label">Fecha de emisión</div><div class="value">{{ waybill.issue_date }}</div></div>
   <div class="detail-item"><div class="label">Peso / bultos</div><div class="value">{{ waybill.weight_kg or '—' }} kg / {{ waybill.packages or '—' }}</div></div>
