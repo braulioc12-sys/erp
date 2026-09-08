@@ -1,0 +1,31 @@
+From 850ad498f33ab06122e851bbc6a8f71447220ac4 Mon Sep 17 00:00:00 2001
+From: Harraso ERP <dev@harraso.local>
+Date: Tue, 8 Sep 2026 17:12:27 +0000
+Subject: [PATCH] tefacturo.pe: unidadMedida SERVICIO -> UNIDAD_SERVICIOS (8
+ sep)
+
+---
+ app/integrations/sunat_ose.py | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/app/integrations/sunat_ose.py b/app/integrations/sunat_ose.py
+index 7f6b688..bccb538 100644
+--- a/app/integrations/sunat_ose.py
++++ b/app/integrations/sunat_ose.py
+@@ -268,7 +268,12 @@ def build_invoice_payload(invoice, items, client, company):
+                 "codigoProducto": f"SERV-{it['trip_id']}",
+                 "descripcion": it["description"] or "Servicio de transporte de carga",
+                 "tipoAfectacion": "GRAVADO_OPERACION_ONEROSA",
+-                "unidadMedida": "SERVICIO",
++                # Confirmado contra la API real (8 sep, primer envío real de
++                # Braulio): "SERVICIO" no es un valor aceptado — el propio
++                # error 400 de tefacturo.pe listó el catálogo completo del
++                # enum UnidadMedida, y "UNIDAD_SERVICIOS" es el que
++                # corresponde a un servicio (no un bien físico).
++                "unidadMedida": "UNIDAD_SERVICIOS",
+                 "cantidad": "1",
+                 "valorVentaUnitarioItem": gravada,
+             }
+-- 
+2.43.0
+

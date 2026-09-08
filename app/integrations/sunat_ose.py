@@ -268,7 +268,12 @@ def build_invoice_payload(invoice, items, client, company):
                 "codigoProducto": f"SERV-{it['trip_id']}",
                 "descripcion": it["description"] or "Servicio de transporte de carga",
                 "tipoAfectacion": "GRAVADO_OPERACION_ONEROSA",
-                "unidadMedida": "SERVICIO",
+                # Confirmado contra la API real (8 sep, primer envío real de
+                # Braulio): "SERVICIO" no es un valor aceptado — el propio
+                # error 400 de tefacturo.pe listó el catálogo completo del
+                # enum UnidadMedida, y "UNIDAD_SERVICIOS" es el que
+                # corresponde a un servicio (no un bien físico).
+                "unidadMedida": "UNIDAD_SERVICIOS",
                 "cantidad": "1",
                 "valorVentaUnitarioItem": gravada,
             }
