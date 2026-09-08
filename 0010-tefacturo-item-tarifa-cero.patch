@@ -1,0 +1,48 @@
+From 3cfda8266ad902d48125890422f2ad4a677e539a Mon Sep 17 00:00:00 2001
+From: Harraso ERP <dev@harraso.local>
+Date: Tue, 8 Sep 2026 17:20:08 +0000
+Subject: [PATCH] tefacturo.pe: rechaza items de factura con tarifa 0 antes de
+ enviar (8 sep)
+
+---
+ app/integrations/sunat_ose.py | 24 ++++++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/app/integrations/sunat_ose.py b/app/integrations/sunat_ose.py
+index bccb538..e086d3f 100644
+--- a/app/integrations/sunat_ose.py
++++ b/app/integrations/sunat_ose.py
+@@ -260,6 +260,30 @@ def build_invoice_payload(invoice, items, client, company):
+             "electrónica requiere el RUC del cliente. Edita el cliente y agrégalo."
+         )
+ 
++    # Confirmado contra la API real (8 sep, segundo envío real de Braulio):
++    # un ítem con valorVentaUnitarioItem = 0 hace que tefacturo.pe rechace
++    # TODA la factura ("Al menos debe ingresar un precio de venta
++    # referencial" / "El descuento no puede ser mayor o igual al valor de
++    # item") — SUNAT no admite un ítem "GRAVADO_OPERACION_ONEROSA" (venta
++    # con contraprestación) con valor cero; sería una contradicción legal.
++    # Se valida ACÁ, antes de llamar a tefacturo.pe, para dar un mensaje
++    # claro señalando qué viaje tiene tarifa en 0 en vez de dejar que el
++    # error genérico y confuso de la API llegue tal cual al usuario.
++    sin_tarifa = [it for it in items if not float(it["amount"] or 0) > 0]
++    if sin_tarifa:
++        # `items` no siempre trae `trip_code` (algunas consultas solo hacen
++        # SELECT * FROM invoice_items, sin JOIN con trips) — se usa si está
++        # disponible, y si no, se cae al id del viaje.
++        codigos = ", ".join(
++            (it["trip_code"] if "trip_code" in it.keys() and it["trip_code"] else f"viaje #{it['trip_id']}")
++            for it in sin_tarifa
++        )
++        raise SunatOseError(
++            f"El viaje {codigos} tiene tarifa S/ 0.00 en esta factura — SUNAT no permite "
++            "un ítem de venta con valor cero. Corrige la tarifa de ese viaje (o quítalo de "
++            "esta factura y factúralo aparte, si de verdad no tiene costo) antes de enviar."
++        )
++
+     detalle = []
+     for it in items:
+         gravada, _igv = _split_igv(float(it["amount"]))
+-- 
+2.43.0
+
