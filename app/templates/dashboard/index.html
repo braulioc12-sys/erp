@@ -33,33 +33,72 @@
 {% if driver_document_alerts or vehicle_document_alerts or maintenance_alerts or km_alerts or budget_alerts or tire_alerts %}
 <div class="panel">
   <h2>Alertas próximas</h2>
-  <div class="alert-list">
-    {% for a in driver_document_alerts %}
-    <div class="alert-item"><span>{{ a.document }} de <strong>{{ a.name }}</strong> {{ 'ya venció' if a.overdue else 'vence' }}</span><span>{{ a.expiry }}</span></div>
-    {% endfor %}
-    {% for a in vehicle_document_alerts %}
-    <div class="alert-item"><span>{{ a.document }} de la unidad <strong>{{ a.plate }}</strong> {{ 'ya venció' if a.overdue else 'vence' }}</span><span>{{ a.expiry }}</span></div>
-    {% endfor %}
-    {% for a in maintenance_alerts %}
-    <div class="alert-item"><span>Mantenimiento programado — unidad <strong>{{ a.plate }}</strong></span><span>{{ a.next_due_date }}</span></div>
-    {% endfor %}
-    {% for a in km_alerts %}
-    <div class="alert-item">
-      <span>Unidad <strong>{{ a.plate }}</strong> {{ 'ya superó' if a.overdue else 'se acerca a' }} su próximo mantenimiento por kilometraje</span>
-      <span>{{ '{:,.0f}'.format(a.current_km) }} / {{ '{:,.0f}'.format(a.next_due_km) }} km{% if not a.overdue %} (faltan {{ '{:,.0f}'.format(a.remaining_km) }} km){% endif %}</span>
-    </div>
-    {% endfor %}
-    {% for a in budget_alerts %}
-    <div class="alert-item">
-      <span>{{ a.label }} {{ 'superó' if a.over else 'se acerca a' }} su presupuesto mensual de gastos</span>
-      <span>{{ a.spent|money }} / {{ a.budget|money }} ({{ (a.ratio * 100)|round|int }}%)</span>
-    </div>
-    {% endfor %}
-    {% for a in tire_alerts %}
-    <div class="alert-item">
-      <span>Neumático en <strong>{{ a.position_label }}</strong> de la unidad <strong>{{ a.plate }}</strong> {{ 'ya superó' if a.overdue else 'se acerca a' }} su vida útil</span>
-      <span>{{ '{:,.0f}'.format(a.accumulated_km) }} / {{ '{:,.0f}'.format(a.expected_life_km) }} km ({{ a.percent }}%)</span>
-    </div>
+  {# 9 sep, pedido de Braulio: "agrupar las alertas por tipo, para que no
+     se vea un listado tan largo" — antes todas las alertas (documentos de
+     conductores/unidades, mantenimiento por fecha y por kilometraje,
+     presupuestos, neumáticos) salían en una sola lista plana, que con
+     varias decenas de alertas se volvía interminable. Ahora cada tipo va
+     en su propio grupo colapsable (<details>), con el total entre
+     paréntesis en el título — así se ve de un vistazo cuántas hay de cada
+     tipo sin tener que desplazarse por todas. Un grupo con al menos una
+     alerta YA VENCIDA se abre expandido de entrada (y su título se marca
+     en rojo) para que lo urgente no quede escondido; el resto arranca
+     colapsado. #}
+  {% set alert_groups = [
+    ('Documentos de conductores', driver_document_alerts),
+    ('Documentos de unidades', vehicle_document_alerts),
+    ('Mantenimiento programado', maintenance_alerts),
+    ('Mantenimiento por kilometraje', km_alerts),
+    ('Presupuestos de gastos', budget_alerts),
+    ('Neumáticos', tire_alerts),
+  ] %}
+  <div class="alert-groups">
+    {% for group_label, group_alerts in alert_groups %}
+      {% if group_alerts %}
+      {% set group_overdue = group_alerts|selectattr('overdue')|list|length if group_label != 'Presupuestos de gastos' else group_alerts|selectattr('over')|list|length %}
+      <details class="alert-group" {% if group_overdue %}open{% endif %}>
+        <summary class="{{ 'alert-group-overdue' if group_overdue else '' }}">
+          <span>{{ group_label }}</span>
+          <span class="alert-count">{{ group_alerts|length }}{% if group_overdue %} · {{ group_overdue }} vencida(s){% endif %}</span>
+        </summary>
+        <div class="alert-list">
+          {% if group_label == 'Documentos de conductores' %}
+            {% for a in group_alerts %}
+            <div class="alert-item"><span>{{ a.document }} de <strong>{{ a.name }}</strong> {{ 'ya venció' if a.overdue else 'vence' }}</span><span>{{ a.expiry }}</span></div>
+            {% endfor %}
+          {% elif group_label == 'Documentos de unidades' %}
+            {% for a in group_alerts %}
+            <div class="alert-item"><span>{{ a.document }} de la unidad <strong>{{ a.plate }}</strong> {{ 'ya venció' if a.overdue else 'vence' }}</span><span>{{ a.expiry }}</span></div>
+            {% endfor %}
+          {% elif group_label == 'Mantenimiento programado' %}
+            {% for a in group_alerts %}
+            <div class="alert-item"><span>Mantenimiento programado — unidad <strong>{{ a.plate }}</strong></span><span>{{ a.next_due_date }}</span></div>
+            {% endfor %}
+          {% elif group_label == 'Mantenimiento por kilometraje' %}
+            {% for a in group_alerts %}
+            <div class="alert-item">
+              <span>Unidad <strong>{{ a.plate }}</strong> {{ 'ya superó' if a.overdue else 'se acerca a' }} su próximo mantenimiento por kilometraje</span>
+              <span>{{ '{:,.0f}'.format(a.current_km) }} / {{ '{:,.0f}'.format(a.next_due_km) }} km{% if not a.overdue %} (faltan {{ '{:,.0f}'.format(a.remaining_km) }} km){% endif %}</span>
+            </div>
+            {% endfor %}
+          {% elif group_label == 'Presupuestos de gastos' %}
+            {% for a in group_alerts %}
+            <div class="alert-item">
+              <span>{{ a.label }} {{ 'superó' if a.over else 'se acerca a' }} su presupuesto mensual de gastos</span>
+              <span>{{ a.spent|money }} / {{ a.budget|money }} ({{ (a.ratio * 100)|round|int }}%)</span>
+            </div>
+            {% endfor %}
+          {% elif group_label == 'Neumáticos' %}
+            {% for a in group_alerts %}
+            <div class="alert-item">
+              <span>Neumático en <strong>{{ a.position_label }}</strong> de la unidad <strong>{{ a.plate }}</strong> {{ 'ya superó' if a.overdue else 'se acerca a' }} su vida útil</span>
+              <span>{{ '{:,.0f}'.format(a.accumulated_km) }} / {{ '{:,.0f}'.format(a.expected_life_km) }} km ({{ a.percent }}%)</span>
+            </div>
+            {% endfor %}
+          {% endif %}
+        </div>
+      </details>
+      {% endif %}
     {% endfor %}
   </div>
 </div>

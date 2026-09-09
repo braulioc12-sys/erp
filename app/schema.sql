@@ -110,6 +110,12 @@ CREATE TABLE IF NOT EXISTS vehicles (
     property_card_filename TEXT,
     soat_filename TEXT,
     technical_review_filename TEXT,
+    -- 9 sep, pedido de Braulio: "revisión técnica especial", opcional para
+    -- cualquier tipo de unidad — a diferencia de los demás documentos de
+    -- esta tabla, no se resalta como faltante en ningún lado (ver
+    -- VEHICLE_DOCUMENT_TYPES en app/routes/flota.py, único con
+    -- `opcional=True`).
+    special_technical_review_filename TEXT,
     mtc_filename TEXT,
     civil_liability_policy_filename TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -697,6 +703,20 @@ CREATE TABLE IF NOT EXISTS expense_advances (
     -- nunca se reinicia — ver `_next_liquidation_code` en
     -- app/routes/liquidaciones.py.
     code TEXT,
+    -- 9 sep, pedido de Braulio: "una vez que se cierren [las liquidaciones]
+    -- tienen que estar listas para ser enviadas a RRHH, pero para esto
+    -- solo el administrador puede dar el OK final luego de ver el consumo
+    -- de combustible para los casos de excesos". Es una aprobación
+    -- SEPARADA del cierre (status = 'LIQUIDADO') — mismo patrón que
+    -- inventory_purchases.authorized_at/authorized_by_* (autorización de
+    -- una orden de compra, exclusiva de Administrador, chequeada por ROL
+    -- directamente en el código y no por el permiso "edit" del módulo, ya
+    -- que Contabilidad también tiene "edit" sobre Liquidaciones pero no
+    -- debe poder dar este OK). NULL hasta que un Administrador la apruebe;
+    -- ver rrhh_approve() en app/routes/liquidaciones.py.
+    rrhh_approved_at TEXT,
+    rrhh_approved_by_name TEXT,
+    rrhh_approved_by_user_id INTEGER REFERENCES users(id),
     created_by INTEGER REFERENCES users(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

@@ -39,19 +39,29 @@ VEHICLE_DOCUMENT_FIELDS = [
 # de tracto ... Tarjeta de propiedad, SOat, revision tecnica, MTC y poliza
 # de responsabilidad civil. En el caso de las carretas tarjeta de
 # propiedad, revision tecnica y mtc"). Cada tupla es
-# (clave_en_url, columna_en_bd, campo_del_formulario, etiqueta, tipos_que_lo_necesitan).
-# CAMION se trata igual que TRACTO (unidad completa que circula sola) —
-# Braulio no lo mencionó explícitamente, pero no tiene sentido excluirlo de
-# documentos que exige SUNAT/MTC a cualquier vehículo que no sea un
-# remolque. Mismo criterio de formatos permitidos que la guía de
-# transportista de un viaje (ver ALLOWED_WAYBILL_EXTENSIONS en
-# app/routes/viajes.py): foto o PDF.
+# (clave_en_url, columna_en_bd, campo_del_formulario, etiqueta,
+# tipos_que_lo_necesitan, opcional). CAMION se trata igual que TRACTO
+# (unidad completa que circula sola) — Braulio no lo mencionó
+# explícitamente, pero no tiene sentido excluirlo de documentos que exige
+# SUNAT/MTC a cualquier vehículo que no sea un remolque. Mismo criterio de
+# formatos permitidos que la guía de transportista de un viaje (ver
+# ALLOWED_WAYBILL_EXTENSIONS en app/routes/viajes.py): foto o PDF.
+#
+# "Revisión técnica especial" (9 sep, pedido de Braulio) se agregó como un
+# documento APARTE de la Revisión técnica normal — no todas las unidades la
+# tramitan (aplica a casos particulares, ej. conversión a GLP/GNV o
+# transporte de mercancías especiales), así que es el único documento
+# marcado `opcional=True`: no se resalta como faltante en ningún lado ni
+# bloquea nada, simplemente está disponible para subirla si corresponde.
+# Se dejó disponible para los 3 tipos de unidad (igual que Revisión
+# técnica) — avisar si en la práctica solo debe aplicar a algunos.
 VEHICLE_DOCUMENT_TYPES = [
-    ("tarjeta-propiedad", "property_card_filename", "property_card_file", "Tarjeta de propiedad", {"CAMION", "TRACTO", "CARRETA"}),
-    ("soat", "soat_filename", "soat_file", "SOAT", {"CAMION", "TRACTO"}),
-    ("revision-tecnica", "technical_review_filename", "technical_review_file", "Revisión técnica", {"CAMION", "TRACTO", "CARRETA"}),
-    ("mtc", "mtc_filename", "mtc_file", "MTC", {"CAMION", "TRACTO", "CARRETA"}),
-    ("poliza-responsabilidad-civil", "civil_liability_policy_filename", "civil_liability_policy_file", "Póliza de responsabilidad civil", {"CAMION", "TRACTO"}),
+    ("tarjeta-propiedad", "property_card_filename", "property_card_file", "Tarjeta de propiedad", {"CAMION", "TRACTO", "CARRETA"}, False),
+    ("soat", "soat_filename", "soat_file", "SOAT", {"CAMION", "TRACTO"}, False),
+    ("revision-tecnica", "technical_review_filename", "technical_review_file", "Revisión técnica", {"CAMION", "TRACTO", "CARRETA"}, False),
+    ("revision-tecnica-especial", "special_technical_review_filename", "special_technical_review_file", "Revisión técnica especial", {"CAMION", "TRACTO", "CARRETA"}, True),
+    ("mtc", "mtc_filename", "mtc_file", "MTC", {"CAMION", "TRACTO", "CARRETA"}, False),
+    ("poliza-responsabilidad-civil", "civil_liability_policy_filename", "civil_liability_policy_file", "Póliza de responsabilidad civil", {"CAMION", "TRACTO"}, False),
 ]
 VEHICLE_DOCUMENT_TYPES_BY_KEY = {key: t for t in VEHICLE_DOCUMENT_TYPES for key in [t[0]]}
 
@@ -197,7 +207,7 @@ def save_vehicle_documents(vehicle_id):
     updates = []
     params = []
     any_file_sent = False
-    for key, column, form_field, label, applies_to in VEHICLE_DOCUMENT_TYPES:
+    for key, column, form_field, label, applies_to, optional in VEHICLE_DOCUMENT_TYPES:
         if vehicle["vehicle_type"] not in applies_to:
             continue
         file_storage = request.files.get(form_field)
@@ -224,7 +234,7 @@ def vehicle_document_file(vehicle_id, doc_key):
     doc_type = VEHICLE_DOCUMENT_TYPES_BY_KEY.get(doc_key)
     if doc_type is None:
         abort(404)
-    _, column, _, _, _ = doc_type
+    _, column, _, _, _, _ = doc_type
     vehicle = query_one(f"SELECT {column} AS filename FROM vehicles WHERE id = ?", (vehicle_id,))
     if vehicle is None or not vehicle["filename"]:
         abort(404)

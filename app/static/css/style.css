@@ -180,6 +180,20 @@ textarea { resize: vertical; min-height: 70px; }
 .alert-list { display: flex; flex-direction: column; gap: 8px; }
 .alert-item { padding: 10px 14px; border-radius: 8px; background: var(--warning-soft); color: var(--warning); font-size: 0.88rem; display: flex; justify-content: space-between; gap: 10px; }
 
+/* Alertas del Panel agrupadas por tipo (9 sep) — cada tipo en su propio
+   <details> colapsable, para que el panel no se vea como un listado
+   interminable con decenas de alertas mezcladas. */
+.alert-groups { display: flex; flex-direction: column; gap: 10px; }
+.alert-group { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.alert-group summary { cursor: pointer; padding: 12px 14px; font-weight: 600; font-size: 0.92rem; background: var(--bg); display: flex; justify-content: space-between; gap: 10px; list-style: none; }
+.alert-group summary::-webkit-details-marker { display: none; }
+.alert-group summary::before { content: '▸'; margin-right: 8px; color: var(--text-muted); font-size: 0.75rem; }
+.alert-group[open] summary::before { content: '▾'; }
+.alert-group summary.alert-group-overdue { color: var(--danger); background: var(--danger-soft); }
+.alert-count { font-weight: 500; color: var(--text-muted); font-size: 0.85rem; }
+.alert-group summary.alert-group-overdue .alert-count { color: var(--danger); }
+.alert-group .alert-list { padding: 10px 14px 14px; }
+
 /* Diagrama de neumáticos */
 .tire-body { fill: var(--surface); stroke: var(--border); stroke-width: 2; }
 .tire-axle { stroke: var(--border); stroke-width: 4; }

@@ -381,7 +381,7 @@ def detail(advance_id):
     return render_template(
         "liquidaciones/detail.html", advance=advance, expenses=expenses, spent=spent, difference=difference,
         payments=payments, offices=offices, office_labels={code: info["label"] for code, info in offices},
-        route=route, today=today_str(),
+        route=route, today=today_str(), is_admin=("ADMIN" in g.user["roles"]),
     )
 
 
@@ -474,6 +474,44 @@ def liquidate(advance_id):
         (spent, office, voucher_number, advance_id),
     )
     flash("Liquidación cerrada.", "success")
+    return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
+
+
+@bp.route("/<int:advance_id>/aprobar-rrhh", methods=["POST"])
+@permission_required("liquidaciones", "edit")
+def rrhh_approve(advance_id):
+    """9 sep, pedido de Braulio: "una vez que se cierren [las liquidaciones]
+    tienen que estar listas para ser enviadas a RRHH, pero para esto solo
+    el administrador puede dar el OK final luego de ver el consumo de
+    combustible para los casos de excesos". Exclusivo de Administrador,
+    chequeado por ROL directamente aquí y no solo por el permiso "edit" del
+    módulo (que también tiene Contabilidad) — mismo criterio que
+    inventarios.purchases_authorize(). Solo se puede dar el OK sobre una
+    liquidación ya cerrada (status = 'LIQUIDADO'); no se exige haber
+    registrado combustible primero (no todas las rutas lo tienen cargado
+    todavía), pero el detalle muestra el combustible/exceso de forma
+    prominente para que el administrador lo revise antes de aprobar."""
+    if not validate_csrf():
+        abort(400)
+    if "ADMIN" not in g.user["roles"]:
+        flash("Solo un Administrador puede dar el OK final para enviar una liquidación a RRHH.", "error")
+        return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
+    advance = query_one("SELECT * FROM expense_advances WHERE id = ?", (advance_id,))
+    if advance is None:
+        abort(404)
+    if advance["status"] != "LIQUIDADO":
+        flash("Primero hay que cerrar la liquidación antes de poder aprobarla para RRHH.", "error")
+        return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
+    if advance["rrhh_approved_at"]:
+        flash("Esta liquidación ya estaba aprobada para RRHH.", "error")
+        return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
+    execute(
+        """UPDATE expense_advances
+           SET rrhh_approved_at = datetime('now'), rrhh_approved_by_name = ?, rrhh_approved_by_user_id = ?
+           WHERE id = ?""",
+        (g.user["name"], g.user["id"], advance_id),
+    )
+    flash("Liquidación aprobada — ya está lista para enviarse a RRHH.", "success")
     return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
 
 

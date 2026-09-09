@@ -141,6 +141,34 @@
     Voucher: <strong>{{ '%02d'|format(advance.voucher_number) if advance.voucher_number else '—' }}</strong>.
     Aparece en <a href="{{ url_for('liquidaciones.resumen_view', month=advance.liquidated_at[:7], office=advance.office) }}">Liquidaciones → Resumen contable</a>.</p>
 </div>
+
+{# 9 sep, pedido de Braulio: "una vez que se cierren estas tienen que
+   estar listas para ser enviadas a RRHH, pero para esto solo el
+   administrador puede dar el OK final luego de ver el consumo de
+   combustible para los casos de excesos". Aprobación separada del cierre
+   — ver rrhh_approve() en app/routes/liquidaciones.py. #}
+<div class="panel">
+  <h2>Envío a RRHH</h2>
+  {% if advance.rrhh_approved_at %}
+  <p class="mt-0" style="color:var(--success);">✓ Aprobada para RRHH el {{ advance.rrhh_approved_at }} por <strong>{{ advance.rrhh_approved_by_name }}</strong> — ya está lista para enviarse.</p>
+  {% else %}
+    {% if advance.fuel_excess %}
+    <p class="mt-0" style="color:var(--danger);">Esta liquidación registra un exceso de combustible de <strong>{{ '%.2f gal'|format(advance.fuel_excess) }}</strong> (ver "Consumo de combustible" arriba) — revísalo antes de aprobar.</p>
+    {% elif advance.fuel_actual is none %}
+    <p class="muted mt-0">Todavía no se registró el combustible real de este viaje (ver "Consumo de combustible" arriba).</p>
+    {% else %}
+    <p class="muted mt-0">Sin exceso de combustible registrado.</p>
+    {% endif %}
+    {% if is_admin %}
+    <form method="post" action="{{ url_for('liquidaciones.rrhh_approve', advance_id=advance.id) }}" onsubmit="return confirm('¿Dar el OK final y marcar esta liquidación como lista para enviarse a RRHH?');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-primary">Dar OK y marcar lista para RRHH</button>
+    </form>
+    {% else %}
+    <p class="muted mt-0">Pendiente de la aprobación de un Administrador antes de poder enviarse a RRHH.</p>
+    {% endif %}
+  {% endif %}
+</div>
 {% endif %}
 
 {% if advance.notes %}

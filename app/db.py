@@ -395,6 +395,16 @@ COLUMN_MIGRATIONS = [
     ("vehicles", "technical_review_filename", "TEXT"),
     ("vehicles", "mtc_filename", "TEXT"),
     ("vehicles", "civil_liability_policy_filename", "TEXT"),
+    # "Revisión técnica especial" (9 sep, pedido de Braulio) — opcional,
+    # ver VEHICLE_DOCUMENT_TYPES en app/routes/flota.py.
+    ("vehicles", "special_technical_review_filename", "TEXT"),
+    # Aprobación de RRHH de una liquidación cerrada (9 sep, pedido de
+    # Braulio) — exclusiva de Administrador, ver el comentario de estas
+    # columnas en schema.sql (CREATE TABLE expense_advances) y
+    # rrhh_approve() en app/routes/liquidaciones.py.
+    ("expense_advances", "rrhh_approved_at", "TEXT"),
+    ("expense_advances", "rrhh_approved_by_name", "TEXT"),
+    ("expense_advances", "rrhh_approved_by_user_id", "INTEGER REFERENCES users(id)"),
 ]
 
 
