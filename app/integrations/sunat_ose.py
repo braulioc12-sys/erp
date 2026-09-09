@@ -103,6 +103,23 @@ mandes con este cambio, revisa bien el resultado (aceptada/rechazada y el
 PDF) antes de asumir que quedó resuelto del todo, y si sigue fallando
 mándame el error exacto de nuevo.**
 
+**Segunda corrección, ya confirmada contra el servidor real (9 sep, mismo
+día — Braulio mandó el primer envío real con el fix anterior y compartió
+la respuesta 400 completa de tefacturo.pe)**: la estructura general (sin
+`codigoAlmacen`/`datosEnvio`) quedó validada — el servidor llegó a
+procesar el JSON completo — pero rechazó `conductores[].tipoDocumentoIdentidad:
+"DNI"` (el valor que trae el ejemplo de la colección Postman) con un 400
+que además trae, en el mensaje de error, la lista completa de valores que
+sí acepta ese enum: `RUC, PERMISO_TEMPORAL_PERMANENCIA,
+DOC_NACIONAL_DE_IDENTIDAD, CED_DIPLOMATICA_IDENTIDAD, CARNET_DE_EXTRANJERIA,
+DOC_TRIB_NO_DOM_SIN_RUC_GUION, DOC_TRIB_NO_DOM_SIN_RUC, PASAPORTE`. Es
+decir, "DNI" corresponde a `DOC_NACIONAL_DE_IDENTIDAD` (el valor largo que
+ya se usaba en la versión del 8 sep) — la colección Postman tenía un error
+puntual en ese único campo. Corregido: `conductores[].tipoDocumentoIdentidad`
+vuelve a `"DOC_NACIONAL_DE_IDENTIDAD"`. Esta vez sí hay evidencia directa
+del servidor real (no solo documentación) de que el resto de la estructura
+es correcta — este es el primer ajuste de esta integración confirmado así.
+
 Antes de emitir un solo comprobante real:
 1. Crea una cuenta de pruebas en tefacturo.pe para Harraso y/o BRMS
    (https://api.tefacturo.pe/doc/integracion/registro/) y consigue
@@ -463,8 +480,19 @@ def build_waybill_payload(waybill, trip, company, client):
     `modalidadTransporte`, `fechaInicioTraslado`, `pesoBrutoTotal`,
     `unidadPeso`, `numeroBultos`, `puntoPartida`/`puntoLlegada` van sueltos
     al nivel raíz; `conductores`/`vehiculos` usan `nombreCompleto`/
-    `licenciaConducir`/`tipoDocumentoIdentidad: "DNI"` y un flag
-    `principal`; el detalle se llama `detalleDocumento`."""
+    `licenciaConducir` y un flag `principal`; el detalle se llama
+    `detalleDocumento`.
+
+    `conductores[].tipoDocumentoIdentidad` CONFIRMADO contra el servidor
+    real (9 sep, primer envío real con este código): el ejemplo de la
+    colección Postman usa "DNI", pero tefacturo.pe respondió 400 rechazando
+    ese valor exacto y devolviendo el enum real aceptado — DNI corresponde
+    a "DOC_NACIONAL_DE_IDENTIDAD" (el mismo valor largo que ya se usaba
+    antes del 9 sep). Es decir, la colección Postman también tenía un error
+    en este campo puntual — el resto de la estructura (sin `codigoAlmacen`/
+    `datosEnvio`, con `motivoTraslado`/`modalidadTransporte` sueltos) sí
+    quedó validada por el servidor real, que llegó a procesar el JSON hasta
+    este punto."""
     missing = []
     if not client["ruc"]:
         missing.append(f"el cliente '{client['name']}' no tiene RUC registrado")
@@ -533,7 +561,7 @@ def build_waybill_payload(waybill, trip, company, client):
             {
                 "nombreCompleto": waybill["driver_name"] or "",
                 "numeroDocumentoIdentidad": waybill["driver_document"] or "",
-                "tipoDocumentoIdentidad": "DNI",
+                "tipoDocumentoIdentidad": "DOC_NACIONAL_DE_IDENTIDAD",
                 "licenciaConducir": waybill["driver_license"] or "",
                 # Un solo conductor por guía en este sistema — ver nota al
                 # inicio del archivo — se manda como el "principal".
