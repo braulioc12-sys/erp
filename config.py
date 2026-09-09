@@ -70,6 +70,16 @@ class Config:
     # real de Harraso/BRMS antes de poder emitir guías electrónicas.
     HARRASO_MTC_REGISTRATION = os.environ.get("HARRASO_MTC_REGISTRATION", "")
     BRMS_MTC_REGISTRATION = os.environ.get("BRMS_MTC_REGISTRATION", "")
+    # Código de almacén ante tefacturo.pe (8 sep, confirmado contra el JSON
+    # de ejemplo real de la guía transportista — "codigoAlmacen" es
+    # obligatorio y no estaba en la tabla de campos documentada, solo en el
+    # ejemplo real). No hay ningún dato parecido en el sistema — probable
+    # que lo asigne tefacturo.pe al dar de alta la cuenta/almacén de cada
+    # empresa. AJUSTAR con el código real de Harraso/BRMS antes de poder
+    # emitir una guía electrónica de verdad — mientras tanto queda vacío y
+    # el envío se rechaza con un mensaje claro (ver build_waybill_payload).
+    HARRASO_WAREHOUSE_CODE = os.environ.get("HARRASO_WAREHOUSE_CODE", "")
+    BRMS_WAREHOUSE_CODE = os.environ.get("BRMS_WAREHOUSE_CODE", "")
     # Datos reales de Harraso Transport S.A.C. (tomados de una cotización
     # real que Braulio compartió, 1 sep) — se usan como default porque
     # antes quedaban vacíos; se pueden sobreescribir por variable de

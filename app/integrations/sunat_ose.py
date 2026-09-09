@@ -54,6 +54,25 @@ para no perder el rastro; ver también README):
   existía ningún dato parecido en el sistema — ver
   HARRASO_MTC_REGISTRATION/BRMS_MTC_REGISTRATION en config.py, vacíos por
   defecto (AJUSTAR).
+- **Código de almacén (`codigoAlmacen`)**: descubierto el 8 sep, tras el
+  primer envío real de una guía — es obligatorio en `datosDocumento` y no
+  estaba documentado en ninguna tabla de campos, solo en el JSON de
+  ejemplo. No hay ningún dato parecido en el sistema — ver
+  HARRASO_WAREHOUSE_CODE/BRMS_WAREHOUSE_CODE en config.py, vacíos por
+  defecto (AJUSTAR).
+- **`numeroPallet`/`transporteSubcontratado`/`trasladoTotalBienes`**:
+  también descubiertos el 8 sep en el JSON de ejemplo real, sin ninguna
+  explicación en la documentación de qué significan exactamente. Se manda
+  `numeroPallet="0"` (no se lleva conteo de pallets en el sistema) y se
+  asume el caso normal de Harraso/BRMS: transporte NO subcontratado
+  (`transporteSubcontratado=false`) y traslado de toda la mercadería del
+  viaje (`trasladoTotalBienes=true`).
+- **`motivoTraslado`/`modalidadTraslado` NO se mandan en la guía
+  transportista**: el 7 sep se había asumido que sí, pero el ejemplo JSON
+  real de la guía transportista no los incluye (puede que sean propios de
+  la guía REMITENTE, que Harraso/BRMS no emite — ver arriba). El campo
+  `waybills.transfer_reason` (formulario "Motivo de traslado") se deja en
+  el sistema por si hace falta más adelante, pero deja de enviarse acá.
 - **IGV**: se asume que todos los ítems de una factura son
   "GRAVADO_OPERACION_ONEROSA" (18%) — igual que el resto del sistema desde
   el primer intento de esta integración.
@@ -196,7 +215,18 @@ class TefacturoClient:
     def get_pdf_bytes(self, tipo_comprobante, serie, numero):
         """Descarga el PDF de un comprobante ya emitido y devuelve sus
         bytes (decodificados de base64). tipo_comprobante: '01' = factura,
-        '09' = guía de remisión."""
+        '09' = guía de remisión.
+
+        Confirmado en real (8 sep, Factura F-0003 — quedó ACEPTADA por
+        SUNAT, pero la descarga del PDF falló con "Respuesta inesperada de
+        tefacturo.pe: Expecting value: line 1 column 1 (char 0)"):
+        `consultarPdf` NO envuelve la respuesta en JSON como el resto de
+        endpoints — devuelve el base64 del PDF como texto plano directo
+        (sin comillas ni llaves), así que `_request()` (que siempre hace
+        `json.loads`) fallaba antes de llegar siquiera a `_extract_base64_pdf`.
+        Por eso esta llamada se arma a mano en vez de reusar `_request()`:
+        intenta interpretar la respuesta como JSON (por si en algún caso sí
+        viene envuelta) y, si eso falla, usa el texto tal cual."""
         self._require_configured()
         body = {
             "emisor": int(self.ruc),
@@ -204,11 +234,38 @@ class TefacturoClient:
             "serie": serie,
             "tipoComprobante": tipo_comprobante,
         }
-        result = self._request("PUT", f"/pdfapi/pdfapi/consultarPdf/{self.ruc}", body)
+        url = f"{self.base_url}/pdfapi/pdfapi/consultarPdf/{self.ruc}"
+        data = json.dumps(body).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        token = self._get_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        req = urllib.request.Request(url, data=data, headers=headers, method="PUT")
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                raw = resp.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", "ignore")
+            raise SunatOseError(f"tefacturo.pe respondió {exc.code} al consultar el PDF: {detail}")
+        except urllib.error.URLError as exc:
+            raise SunatOseError(f"No se pudo conectar con tefacturo.pe ({url}): {exc.reason}")
+
+        raw = raw.strip()
+        if not raw:
+            raise SunatOseError("tefacturo.pe no devolvió el PDF del comprobante.")
+
+        try:
+            result = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            result = raw
+
         b64 = _extract_base64_pdf(result)
         if not b64:
             raise SunatOseError("tefacturo.pe no devolvió el PDF del comprobante.")
-        return base64.b64decode(b64)
+        try:
+            return base64.b64decode(b64.strip(), validate=False)
+        except (ValueError, TypeError) as exc:
+            raise SunatOseError(f"El PDF devuelto por tefacturo.pe no se pudo decodificar: {exc}")
 
 
 def _extract_base64_pdf(result):
@@ -351,15 +408,31 @@ def build_invoice_payload(invoice, items, client, company):
 
 def build_waybill_payload(waybill, trip, company, client):
     """Arma el JSON de una GUÍA DE REMISIÓN — TRANSPORTISTA en el formato
-    real de tefacturo.pe (confirmado 7 sep). `company` es quien transporta
-    (Harraso o BRMS, el `transportista`); `client` (fila de `clients`) se
-    usa tanto como `remitente` como `destinatario` — ver la nota de
-    "SIMPLIFICACIONES" al inicio de este archivo."""
+    real de tefacturo.pe. `company` es quien transporta (Harraso o BRMS, el
+    `transportista`); `client` (fila de `clients`) se usa tanto como
+    `remitente` como `destinatario` — ver la nota de "SIMPLIFICACIONES" al
+    inicio de este archivo.
+
+    Reescrito el 8 sep (tras el primer envío real de una guía de Braulio)
+    contra el ejemplo JSON real de
+    https://api.tefacturo.pe/doc/integracion/docs/api/guia-transportista/ —
+    verificado con DOS lecturas independientes de esa página (una tabla de
+    campos y el JSON de ejemplo completo, citado verbatim) que coinciden en
+    que este endpoint NO usa `motivoTraslado`/`modalidadTraslado`/los
+    indicadores `indicador*`/`descripcionTraslado` (se quitaron — puede que
+    sean propios de la guía REMITENTE, no de la transportista), y SÍ exige
+    tres campos que la ronda anterior no tenía: `datosDocumento.codigoAlmacen`,
+    y en `datosEnvio` — `numeroPallet`, `transporteSubcontratado`,
+    `trasladoTotalBienes`. `waybills.transfer_reason` (el desplegable
+    "Motivo de traslado" del formulario) queda en el sistema por si hace
+    falta para una futura guía remitente, pero ya NO se manda en este JSON."""
     missing = []
     if not client["ruc"]:
         missing.append(f"el cliente '{client['name']}' no tiene RUC registrado")
     if not company.get("mtc_registration"):
         missing.append(f"falta el registro MTC de {company.get('name')} (HARRASO_MTC_REGISTRATION/BRMS_MTC_REGISTRATION)")
+    if not company.get("warehouse_code"):
+        missing.append(f"falta el código de almacén de {company.get('name')} ante tefacturo.pe (HARRASO_WAREHOUSE_CODE/BRMS_WAREHOUSE_CODE)")
     if not waybill["origin_ubigeo"] or not waybill["destination_ubigeo"]:
         missing.append("falta el ubigeo de partida y/o llegada (SUNAT lo exige, 6 dígitos)")
     if not waybill["vehicle_plate"]:
@@ -390,27 +463,22 @@ def build_waybill_payload(waybill, trip, company, client):
             "serie": waybill["series"],
             "numero": waybill["series_number"],
             "fechaEmision": waybill["issue_date"],
+            "codigoAlmacen": company.get("warehouse_code", ""),
             "glosa": waybill["notes"] or trip["cargo_description"] or "",
         },
         "remitente": party,
         "destinatario": dict(party),
         "datosEnvio": {
-            "motivoTraslado": waybill["transfer_reason"] or "OTROS",
-            "indicadorVehiculosConductoresTransportista": "False",
-            "indicadorTrasladoVehiculosM1oL": "False",
-            "indicadorTrasladoTotalDAM": "False",
-            # Harraso/BRMS transportan carga de terceros por encargo (nunca
-            # su propia mercadería) — desde la perspectiva del remitente
-            # esto siempre es transporte "PUBLICO" (contratado a un
-            # tercero), no "PRIVADO" (con vehículo propio del remitente).
-            "modalidadTraslado": "PUBLICO",
-            "descripcionTraslado": waybill["notes"] or trip["cargo_description"] or "",
             "transbordoProgramado": "False",
             "retornoVehiculoContenedoresVacios": "False",
             "retornoVehiculoVacio": "False",
             "unidadMedida": "KILOS",
             "pesoBruto": str(waybill["weight_kg"] or 0),
-            "numeroBultos": waybill["packages"] or None,
+            "numeroBultos": waybill["packages"] or 0,
+            # No se lleva un conteo de pallets en el sistema — se manda "0"
+            # (el campo es obligatorio en el esquema real, pero no se
+            # encontró ninguna explicación de su uso en la documentación).
+            "numeroPallet": str(0),
             "fechaTraslado": waybill["issue_date"],
             "fechaEntrega": trip["delivered_date"] or waybill["issue_date"],
             "puntoPartida": {
@@ -421,6 +489,11 @@ def build_waybill_payload(waybill, trip, company, client):
                 "ubigeo": waybill["destination_ubigeo"],
                 "direccion": waybill["destination_address"] or trip["destination"],
             },
+            # Harraso/BRMS transportan la carga completa del viaje (no
+            # subcontratan el tramo a otro transportista, ni la guía cubre
+            # solo una parte de la mercadería) — se asume el caso normal.
+            "transporteSubcontratado": False,
+            "trasladoTotalBienes": True,
         },
         "transportista": {
             "correo": company.get("email", ""),
@@ -473,6 +546,20 @@ def build_client_from_config(app_config, issuer="HARRASO"):
         password=app_config.get("HARRASO_TEFACTURO_PASSWORD"),
         base_url=base_url,
     )
+
+
+def is_duplicate_comprobante_error(exc):
+    """True si el SunatOseError viene de reenviar un comprobante que
+    tefacturo.pe ya tiene registrado. Confirmado en real (8 sep, Factura
+    F-0003): al reintentar "Enviar a SUNAT" sobre una factura que ya había
+    quedado ACEPTADO (se reintentó solo para volver a descargar el PDF,
+    tras el bug corregido en get_pdf_bytes()), tefacturo.pe respondió 400
+    con `{"message": "El comprobante <ruc>-<tipo>-<serie>-<numero> ya
+    existe", ...}`. Antes esto se trataba como un rechazo nuevo y pisaba
+    el estado ACEPTADO ya guardado con ERROR — un comprobante que SUNAT ya
+    tiene registrado sigue estando aceptado, así que send_sunat() usa esto
+    para NO tratarlo como una falla (ver facturacion.py/guias.py)."""
+    return "ya existe" in str(exc).lower()
 
 
 def parse_ose_response(response):

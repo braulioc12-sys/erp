@@ -150,7 +150,9 @@ def company_info_for_issuer(issuer, cfg):
     el 7 sep (segunda ronda) para armar los campos `emisor`/`transportista`
     que exige el formato real de tefacturo.pe — antes este helper solo
     tenía ruc/name/address (suficiente para el intento anterior, basado en
-    un manual incompleto)."""
+    un manual incompleto). `warehouse_code` se agregó el 8 sep, tras el
+    primer envío real de una guía: `datosDocumento.codigoAlmacen` es
+    obligatorio y no existía ningún dato parecido en el sistema."""
     if issuer == "BRMS":
         legal_suffix = ""  # razón social legal completa de BRMS aún sin confirmar (ver Cotizaciones)
         return {
@@ -161,6 +163,7 @@ def company_info_for_issuer(issuer, cfg):
             "commercial_name": "BRMS",
             "legal_name": f"BRMS {legal_suffix}".strip(),
             "mtc_registration": cfg.get("BRMS_MTC_REGISTRATION", ""),
+            "warehouse_code": cfg.get("BRMS_WAREHOUSE_CODE", ""),
         }
     return {
         "ruc": cfg.get("COMPANY_RUC", ""),
@@ -170,6 +173,7 @@ def company_info_for_issuer(issuer, cfg):
         "commercial_name": cfg.get("COMPANY_NAME", ""),
         "legal_name": f"{cfg.get('COMPANY_NAME', '')} S.A.C.".strip(),
         "mtc_registration": cfg.get("HARRASO_MTC_REGISTRATION", ""),
+        "warehouse_code": cfg.get("HARRASO_WAREHOUSE_CODE", ""),
     }
 
 

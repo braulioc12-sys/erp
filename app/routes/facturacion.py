@@ -19,6 +19,7 @@ from app.integrations.sunat_ose import (
     SunatOseError,
     build_client_from_config,
     build_invoice_payload,
+    is_duplicate_comprobante_error,
     parse_ose_response,
 )
 from app.storage import (
@@ -183,8 +184,29 @@ def send_sunat(invoice_id):
                 "poder emitir facturas electrónicas a su nombre."
             )
         payload = build_invoice_payload(invoice, items, client_row, company)
-        response = ose_client.emit_factura(payload)
-        result = parse_ose_response(response)
+        ya_existia = False
+        try:
+            response = ose_client.emit_factura(payload)
+            result = parse_ose_response(response)
+        except SunatOseError as emit_exc:
+            # Reenviar una factura que tefacturo.pe ya tiene registrada
+            # (ej. se reintenta "Enviar a SUNAT" solo para volver a
+            # descargar el PDF, tras un fallo de descarga) devuelve "el
+            # comprobante ya existe" — no es un rechazo nuevo de SUNAT.
+            # Confirmado en real, 8 sep, Factura F-0003: antes esto pisaba
+            # el estado ACEPTADO ya guardado con ERROR, aunque SUNAT
+            # siguiera teniendo la factura aceptada de verdad.
+            if is_duplicate_comprobante_error(emit_exc):
+                ya_existia = True
+                result = {
+                    "accepted": True,
+                    "message": invoice["sunat_message"]
+                    or "Aceptado por SUNAT (comprobante ya registrado en un envío anterior).",
+                    "xml_url": invoice["sunat_xml_url"],
+                    "cdr_url": invoice["sunat_cdr_url"],
+                }
+            else:
+                raise
 
         pdf_filename = invoice["sunat_pdf_filename"]
         pdf_url = invoice["sunat_pdf_url"]
@@ -213,7 +235,10 @@ def send_sunat(invoice_id):
             ),
         )
         if result["accepted"]:
-            flash("Factura enviada y aceptada por SUNAT.", "success")
+            if ya_existia:
+                flash("Esta factura ya estaba aceptada por SUNAT.", "success")
+            else:
+                flash("Factura enviada y aceptada por SUNAT.", "success")
         else:
             flash(f"SUNAT/tefacturo.pe rechazó la factura: {result['message']}", "error")
     except SunatOseError as exc:

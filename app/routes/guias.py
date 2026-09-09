@@ -19,6 +19,7 @@ from app.integrations.sunat_ose import (
     SunatOseError,
     build_client_from_config,
     build_waybill_payload,
+    is_duplicate_comprobante_error,
     parse_ose_response,
 )
 from app.storage import (
@@ -166,8 +167,27 @@ def send_sunat(waybill_id):
                 "poder emitir guías electrónicas a su nombre."
             )
         payload = build_waybill_payload(waybill, trip, company, client_row)
-        response = ose_client.emit_guia_transportista(payload)
-        result = parse_ose_response(response)
+        ya_existia = False
+        try:
+            response = ose_client.emit_guia_transportista(payload)
+            result = parse_ose_response(response)
+        except SunatOseError as emit_exc:
+            # Mismo caso que en facturacion.send_sunat() (ver ese comentario
+            # y is_duplicate_comprobante_error en sunat_ose.py): reenviar
+            # una guía que tefacturo.pe ya tiene registrada no es un
+            # rechazo nuevo — no hay que pisar un estado ACEPTADO ya
+            # guardado con ERROR.
+            if is_duplicate_comprobante_error(emit_exc):
+                ya_existia = True
+                result = {
+                    "accepted": True,
+                    "message": waybill["sunat_message"]
+                    or "Aceptado por SUNAT (comprobante ya registrado en un envío anterior).",
+                    "xml_url": waybill["sunat_xml_url"],
+                    "cdr_url": waybill["sunat_cdr_url"],
+                }
+            else:
+                raise
 
         pdf_filename = waybill["sunat_pdf_filename"]
         pdf_url = waybill["sunat_pdf_url"]
@@ -199,7 +219,10 @@ def send_sunat(waybill_id):
             ),
         )
         if result["accepted"]:
-            flash("Guía enviada y aceptada por SUNAT.", "success")
+            if ya_existia:
+                flash("Esta guía ya estaba aceptada por SUNAT.", "success")
+            else:
+                flash("Guía enviada y aceptada por SUNAT.", "success")
         else:
             flash(f"SUNAT/tefacturo.pe rechazó la guía: {result['message']}", "error")
     except SunatOseError as exc:
