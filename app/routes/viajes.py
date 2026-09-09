@@ -784,7 +784,7 @@ def _commissions_by_driver(month):
                JOIN drivers d2 ON d2.id = t.driver2_id
                WHERE t.double_driver = 1 AND strftime('%Y-%m', t.scheduled_date) = ? AND t.status != 'CANCELADO'
            ) combined
-           GROUP BY driver_id, origin, destination
+           GROUP BY driver_id, driver_name, origin, destination
            ORDER BY driver_name, origin, destination""",
         (month, month),
     )
