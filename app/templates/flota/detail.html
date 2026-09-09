@@ -67,6 +67,42 @@
   </div>
 </div>
 
+<div class="panel">
+  <h2>Documentos escaneados</h2>
+  <p class="muted mt-0">Foto o PDF de cada documento, según el tipo de unidad — para tracto/camión: Tarjeta de propiedad, SOAT, Revisión técnica, MTC y Póliza de responsabilidad civil; para carreta: Tarjeta de propiedad, Revisión técnica y MTC.</p>
+  <div class="detail-grid" style="margin-bottom:12px;">
+    {% for key, column, form_field, label, applies_to in document_types %}
+    {% if vehicle.vehicle_type in applies_to %}
+    <div class="detail-item">
+      <div class="label">{{ label }}</div>
+      <div class="value">
+        {% if vehicle[column] %}
+        <a href="{{ url_for('flota.vehicle_document_file', vehicle_id=vehicle.id, doc_key=key) }}" target="_blank">Ver documento</a>
+        {% else %}—{% endif %}
+      </div>
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+  {% if can(current_user.roles, 'flota', 'edit') %}
+  <form method="post" action="{{ url_for('flota.save_vehicle_documents', vehicle_id=vehicle.id) }}" enctype="multipart/form-data" class="form" style="max-width:520px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      {% for key, column, form_field, label, applies_to in document_types %}
+      {% if vehicle.vehicle_type in applies_to %}
+      <label>{{ label }} (foto o PDF)
+        <input type="file" name="{{ form_field }}" accept=".png,.jpg,.jpeg,.pdf,.webp,.heic,.heif">
+      </label>
+      {% endif %}
+      {% endfor %}
+    </div>
+    <div class="btn-group">
+      <button type="submit" class="btn btn-secondary btn-sm">Guardar documentos</button>
+    </div>
+  </form>
+  {% endif %}
+</div>
+
 {% if vehicle.notes %}
 <div class="panel">
   <h2>Notas</h2>

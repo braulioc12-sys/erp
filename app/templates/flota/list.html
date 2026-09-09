@@ -23,16 +23,41 @@
 <p class="muted mt-0">Haz clic en una unidad para ver su detalle completo: marca/modelo, propietario, capacidad y kilometraje actual (vía GPS).</p>
 {% endif %}
 
+<form class="filters" method="get">
+  {% if show_inactive %}<input type="hidden" name="ver" value="inactivas">{% endif %}
+  <label>Tipo
+    <select name="vehicle_type">
+      <option value="">Todos</option>
+      {% for t, t_label in [('CAMION', 'Camión'), ('TRACTO', 'Tracto'), ('CARRETA', 'Carreta')] %}
+      <option value="{{ t }}" {{ 'selected' if vehicle_type_filter == t }}>{{ t_label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Estado
+    <select name="status">
+      <option value="">Todos</option>
+      {% for s in ['ACTIVO', 'MANTENIMIENTO', 'INACTIVO'] %}
+      <option value="{{ s }}" {{ 'selected' if status_filter == s }}>{{ s.title() }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Modelo
+    <input type="text" name="model" value="{{ model_filter }}" placeholder="Ej. FH">
+  </label>
+  <button class="btn btn-secondary" type="submit">Filtrar</button>
+</form>
+
 <label style="max-width:320px;">Buscar por placa
   <input type="text" id="vehicleSearch" placeholder="Ej. ALZ728" oninput="filterVehicles()" autocomplete="off">
 </label>
 
 <div class="table-wrap">
   <table id="vehicleTable">
-    <thead><tr><th>Placa</th><th>Marca / Modelo</th><th>Tipo</th><th>Estado</th><th>SOAT vence</th><th>Rev. técnica vence</th><th></th></tr></thead>
+    <thead><tr><th>#</th><th>Placa</th><th>Marca / Modelo</th><th>Tipo</th><th>Estado</th><th>SOAT vence</th><th>Rev. técnica vence</th><th></th></tr></thead>
     <tbody>
       {% for v in vehicles %}
       <tr onclick="window.location='{{ url_for('flota.vehicle_detail', vehicle_id=v.id) }}'" style="cursor:pointer;" data-plate="{{ v.plate|lower }}">
+        <td>{{ loop.index }}</td>
         <td><a href="{{ url_for('flota.vehicle_detail', vehicle_id=v.id) }}">{{ v.plate }}</a></td>
         <td>{{ v.brand or '' }} {{ v.model or '' }}</td>
         <td>
@@ -56,7 +81,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="7" class="table-empty">{% if show_inactive %}No hay unidades inactivas.{% else %}No hay unidades registradas.{% endif %}</td></tr>
+      <tr><td colspan="8" class="table-empty">{% if show_inactive %}No hay unidades inactivas.{% else %}No hay unidades registradas.{% endif %}</td></tr>
       {% endfor %}
     </tbody>
   </table>

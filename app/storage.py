@@ -68,6 +68,16 @@ def local_sunat_documents_dir():
     return _local_dir("sunat_documents")
 
 
+def local_vehicle_documents_dir():
+    """Igual que las anteriores, pero para los documentos escaneados de una
+    unidad de Flota (tarjeta de propiedad, SOAT, revisión técnica, MTC,
+    póliza — 9 sep, pedido de Braulio). Los 5 tipos de documento comparten
+    esta misma carpeta/prefijo (cada archivo tiene un nombre único
+    generado con uuid.hex, igual que el resto de esta lista, así que no
+    hay riesgo de choque entre ellos)."""
+    return _local_dir("vehicle_documents")
+
+
 def _s3_bucket():
     return current_app.config["AWS_S3_BUCKET"]
 
@@ -93,6 +103,10 @@ def _s3_delivery_proofs_prefix():
 
 def _s3_sunat_documents_prefix():
     return (current_app.config.get("AWS_S3_SUNAT_DOCUMENTS_PREFIX") or "comprobantes-sunat").strip("/")
+
+
+def _s3_vehicle_documents_prefix():
+    return (current_app.config.get("AWS_S3_VEHICLE_DOCUMENTS_PREFIX") or "documentos-flota").strip("/")
 
 
 def _s3_key(filename, prefix):
@@ -262,3 +276,22 @@ def sunat_document_url(filename):
     SUNAT guardado en S3. En disco local, usar
     local_sunat_documents_dir() + send_from_directory."""
     return _presigned_url(_s3_sunat_documents_prefix(), filename)
+
+
+def save_vehicle_document(filename, raw_bytes):
+    """Igual que save_carrier_waybill()/save_sunat_document(), pero para un
+    documento escaneado de una unidad de Flota (9 sep) — carpeta/prefijo
+    separado. Los 5 tipos de documento (tarjeta de propiedad, SOAT,
+    revisión técnica, MTC, póliza) comparten esta misma función/carpeta."""
+    if using_s3():
+        _put_object(_s3_vehicle_documents_prefix(), filename, raw_bytes)
+    else:
+        with open(os.path.join(local_vehicle_documents_dir(), filename), "wb") as f:
+            f.write(raw_bytes)
+
+
+def vehicle_document_url(filename):
+    """Igual que carrier_waybill_url()/sunat_document_url(), pero para un
+    documento de Flota guardado en S3. En disco local, usar
+    local_vehicle_documents_dir() + send_from_directory."""
+    return _presigned_url(_s3_vehicle_documents_prefix(), filename)

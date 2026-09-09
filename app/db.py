@@ -388,6 +388,13 @@ COLUMN_MIGRATIONS = [
     ("invoices", "detraction_percentage", "REAL"),
     ("invoices", "detraction_amount", "REAL"),
     ("invoices", "detraction_bank_account", "TEXT"),
+    # Documentos de Flota (foto/PDF) — 9 sep, ver el comentario de estas
+    # mismas columnas en schema.sql (CREATE TABLE vehicles).
+    ("vehicles", "property_card_filename", "TEXT"),
+    ("vehicles", "soat_filename", "TEXT"),
+    ("vehicles", "technical_review_filename", "TEXT"),
+    ("vehicles", "mtc_filename", "TEXT"),
+    ("vehicles", "civil_liability_policy_filename", "TEXT"),
 ]
 
 

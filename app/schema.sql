@@ -95,6 +95,23 @@ CREATE TABLE IF NOT EXISTS vehicles (
     -- nombre elegido, no un id, mismo patrón que otros campos que ya usan
     -- catálogo en vez de texto libre en este proyecto.
     owner TEXT,
+    -- Documentos escaneados (foto o PDF) de la unidad, para verlos online
+    -- (9 sep, pedido de Braulio) — mismo mecanismo de almacenamiento que la
+    -- guía de transportista de un viaje o las fotos de conductores (ver
+    -- app/storage.py, save_vehicle_document()). Cada columna guarda solo el
+    -- nombre del archivo ya subido (o NULL si no se ha subido nada
+    -- todavía) — el archivo en sí vive en disco/S3, nunca en la base de
+    -- datos. Tarjeta de propiedad, Revisión Técnica y MTC aplican a
+    -- cualquier tipo de unidad; SOAT y la Póliza de responsabilidad civil
+    -- solo a Camión/Tracto (una Carreta no se asegura ni tiene SOAT propio
+    -- en Perú — depende del tracto que la jala) — ver
+    -- VEHICLE_DOCUMENT_TYPES en app/routes/flota.py para el detalle exacto
+    -- de qué tipo de unidad necesita cada documento.
+    property_card_filename TEXT,
+    soat_filename TEXT,
+    technical_review_filename TEXT,
+    mtc_filename TEXT,
+    civil_liability_policy_filename TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
