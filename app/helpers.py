@@ -152,7 +152,14 @@ def company_info_for_issuer(issuer, cfg):
     tenía ruc/name/address (suficiente para el intento anterior, basado en
     un manual incompleto). `warehouse_code` se agregó el 8 sep, tras el
     primer envío real de una guía: `datosDocumento.codigoAlmacen` es
-    obligatorio y no existía ningún dato parecido en el sistema."""
+    obligatorio y no existía ningún dato parecido en el sistema.
+    `bank_nacion_detraction_account` se agregó el 9 sep, para el cálculo de
+    detracción (ver `compute_detraction()` más abajo) — es la cuenta del
+    Banco de la Nación de cada empresa, distinta de la cuenta bancaria
+    "normal" que ya se usa en Cotizaciones (`COMPANY_BANK_NACION_ACCOUNT`/
+    `BRMS_BANK_ACCOUNT`): para Harraso resulta ser la MISMA cuenta
+    (confirmado contra una factura real ya emitida), pero BRMS necesita la
+    suya propia (SUNAT asigna una cuenta de detracciones por RUC)."""
     if issuer == "BRMS":
         legal_suffix = ""  # razón social legal completa de BRMS aún sin confirmar (ver Cotizaciones)
         return {
@@ -164,6 +171,7 @@ def company_info_for_issuer(issuer, cfg):
             "legal_name": f"BRMS {legal_suffix}".strip(),
             "mtc_registration": cfg.get("BRMS_MTC_REGISTRATION", ""),
             "warehouse_code": cfg.get("BRMS_WAREHOUSE_CODE", ""),
+            "bank_nacion_detraction_account": cfg.get("BRMS_BANK_NACION_DETRACTION_ACCOUNT", ""),
         }
     return {
         "ruc": cfg.get("COMPANY_RUC", ""),
@@ -174,6 +182,59 @@ def company_info_for_issuer(issuer, cfg):
         "legal_name": f"{cfg.get('COMPANY_NAME', '')} S.A.C.".strip(),
         "mtc_registration": cfg.get("HARRASO_MTC_REGISTRATION", ""),
         "warehouse_code": cfg.get("HARRASO_WAREHOUSE_CODE", ""),
+        "bank_nacion_detraction_account": cfg.get("COMPANY_BANK_NACION_ACCOUNT", ""),
+    }
+
+
+# Detracción (SPOT) — 9 sep, Braulio compartió una factura real ya emitida
+# (fuera de este ERP) que incluye el bloque "Concepto de Detracción": el
+# servicio de transporte de bienes por vía terrestre (el único que prestan
+# Harraso/BRMS) está sujeto al 4% de detracción cuando el importe de la
+# operación supera S/ 400 — código de bien "027" del catálogo SUNAT.
+# Confirmado en DOS fuentes independientes: (1) la propia factura real que
+# compartió Braulio (S/708.00 * 4% = S/28.32, coincide exacto con el monto
+# mostrado), y (2) la orientación oficial de SUNAT
+# (orientacion.sunat.gob.pe/detracciones-en-el-transporte-de-bienes-por-via-terrestre):
+# "el monto del depósito resulta de aplicar el porcentaje de cuatro por
+# ciento (4%) ... siempre que el importe de la operación ... sea mayor a
+# S/.400.00". Como Harraso/BRMS solo prestan este único servicio, se asume
+# que TODA factura de este sistema es "027" — no hace falta un catálogo de
+# servicios sujetos a detracción.
+DETRACTION_CODE = "027"
+DETRACTION_PERCENTAGE = 4.0
+DETRACTION_THRESHOLD = 400.0
+
+
+def compute_detraction(amount, company):
+    """Calcula si una factura está sujeta a detracción y, si aplica, su
+    monto — ver el comentario de las constantes DETRACTION_* arriba.
+    `amount` es el importe TOTAL de la operación (con IGV incluido, igual
+    que `invoices.amount`) — la detracción se calcula sobre ese total, no
+    sobre el valor de venta sin IGV (confirmado contra la factura real:
+    S/708 con IGV, no S/600 sin IGV, es la base del 4%). `company` es el
+    dict de `company_info_for_issuer()`, para tomar la cuenta del Banco de
+    la Nación correspondiente.
+
+    Devuelve un dict con `applies`, `code`, `percentage`, `amount` (monto
+    detraído) y `bank_account` — pensado para pasarse directo a la
+    inserción de la factura (ver app/routes/facturacion.py)."""
+    amount = float(amount or 0)
+    applies = amount > DETRACTION_THRESHOLD
+    if not applies:
+        return {
+            "applies": False,
+            "code": None,
+            "percentage": None,
+            "amount": None,
+            "bank_account": None,
+        }
+    detraction_amount = round(amount * DETRACTION_PERCENTAGE / 100, 2)
+    return {
+        "applies": True,
+        "code": DETRACTION_CODE,
+        "percentage": DETRACTION_PERCENTAGE,
+        "amount": detraction_amount,
+        "bank_account": company.get("bank_nacion_detraction_account", ""),
     }
 
 

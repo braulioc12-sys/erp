@@ -138,6 +138,16 @@ class Config:
     # sus cuentas a clientes — AJUSTAR el nombre del banco en
     # app/templates/cotizaciones/pdf.html si en realidad es de otro banco.
     BRMS_BANK_ACCOUNT = os.environ.get("BRMS_BANK_ACCOUNT", "480-4768721-0-81")
+    # Cuenta de detracciones de BRMS en el Banco de la Nación (9 sep, ver
+    # detraction_bank_account en app/schema.sql y compute_detraction() en
+    # app/helpers.py) — SUNAT asigna una cuenta de detracciones POR RUC al
+    # inscribirse como sujeto obligado, así que BRMS necesita la suya
+    # propia (no puede compartir COMPANY_BANK_NACION_ACCOUNT de arriba, que
+    # es de Harraso). Vacía por defecto, igual que BRMS_RUC/BRMS_ADDRESS —
+    # AJUSTAR antes de que una factura de BRMS pueda mostrar este dato.
+    BRMS_BANK_NACION_DETRACTION_ACCOUNT = os.environ.get(
+        "BRMS_BANK_NACION_DETRACTION_ACCOUNT", ""
+    )
 
     # decolecta.com: tipo de cambio SUNAT (liquidación de Gastos) y
     # consulta de RUC (autocompletar proveedor al registrar un gasto).

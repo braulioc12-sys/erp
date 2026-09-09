@@ -888,6 +888,27 @@ CREATE TABLE IF NOT EXISTS invoices (
     sunat_xml_url TEXT,
     sunat_cdr_url TEXT,
     sunat_sent_at TEXT,
+    -- Detracción (SPOT) — 9 sep, Braulio compartió una factura real ya
+    -- emitida (fuera de este ERP) que incluye el bloque "Concepto de
+    -- Detracción": el servicio de transporte de bienes por vía terrestre
+    -- (código de bien 027 del catálogo SUNAT) está sujeto a detracción del
+    -- 4% cuando el importe de la operación supera S/ 400 — confirmado
+    -- contra la orientación oficial de SUNAT
+    -- (orientacion.sunat.gob.pe/detracciones-en-el-transporte-de-bienes-por-via-terrestre)
+    -- y contra la factura real (S/708 * 4% = S/28.32, coincide exacto). Se
+    -- calcula y guarda al crear la factura (ver app/routes/facturacion.py)
+    -- porque Harraso/BRMS solo prestan este único servicio — no se
+    -- recalcula después, mismo criterio que "issuer". IMPORTANTE: por
+    -- ahora esto es informativo dentro del ERP — el envío a tefacturo.pe
+    -- (ver app/integrations/sunat_ose.py) todavía NO manda estos datos en
+    -- el JSON de la factura porque su documentación pública no especifica
+    -- el campo correspondiente (se le pidió a Braulio consultarlo con el
+    -- soporte de tefacturo.pe).
+    detraction_applies INTEGER NOT NULL DEFAULT 0,
+    detraction_code TEXT,
+    detraction_percentage REAL,
+    detraction_amount REAL,
+    detraction_bank_account TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

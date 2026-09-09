@@ -310,7 +310,22 @@ def build_invoice_payload(invoice, items, client, company):
     invoice: fila de `invoices`. items: filas de `invoice_items`.
     client: fila de `clients` (requiere `ruc`). company: dict devuelto por
     `company_info_for_issuer()`.
-    """
+
+    PENDIENTE (9 sep) — Detracción (SPOT): cuando `invoice.detraction_applies`
+    es verdadero (ver `compute_detraction()` en app/helpers.py), esta
+    factura debería reportarle a SUNAT el concepto de detracción (código de
+    bien, porcentaje, monto, cuenta del Banco de la Nación) — es un dato
+    real del comprobante electrónico UBL, no solo informativo. Este payload
+    TODAVÍA NO lo incluye: se revisó la documentación pública de
+    tefacturo.pe (tabla de campos de este endpoint, el JSON de ejemplo
+    completo, la página de "Ejemplos", y el catálogo de valores de
+    `tipoOperacion`) en varias pasadas independientes y en ninguna aparece
+    un campo de detracción — a diferencia de `codigoAlmacen` en la guía
+    transportista (que sí estaba, aunque solo en el ejemplo), acá no hay
+    ninguna pista de dónde iría. Se le pidió a Braulio consultarlo
+    directamente con el soporte de tefacturo.pe (ellos sí lo soportan desde
+    su portal web, con un toggle "Activar detracción" al emitir a mano) —
+    en cuanto tengamos el nombre real del campo, agregarlo acá."""
     if not client["ruc"]:
         raise SunatOseError(
             f"El cliente '{client['name']}' no tiene RUC registrado; una factura "

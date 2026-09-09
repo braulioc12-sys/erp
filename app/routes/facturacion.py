@@ -14,7 +14,7 @@ from flask import (
 
 from app.auth import permission_required, validate_csrf
 from app.db import execute, get_db, query_all, query_one
-from app.helpers import company_info_for_issuer, next_code, parse_date, today_str
+from app.helpers import company_info_for_issuer, compute_detraction, next_code, parse_date, today_str
 from app.integrations.sunat_ose import (
     SunatOseError,
     build_client_from_config,
@@ -99,11 +99,26 @@ def new():
         series = current_app.config["INVOICE_SERIES"]
         series_number = _next_series_number(series)
 
+        # Detracción (SPOT) — 9 sep: se calcula al crear la factura, igual
+        # que el "issuer", y no se recalcula después (ver compute_detraction
+        # en app/helpers.py para la regla completa: 4% cuando el total
+        # supera S/400, código de bien "027").
+        company = company_info_for_issuer(issuer, current_app.config)
+        detraction = compute_detraction(total, company)
+
         db = get_db()
         cur = db.execute(
-            """INSERT INTO invoices (number, client_id, issue_date, due_date, amount, notes, series, series_number, issuer)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (number, client_id, issue_date, due_date, total, request.form.get("notes", "").strip(), series, series_number, issuer),
+            """INSERT INTO invoices (number, client_id, issue_date, due_date, amount, notes, series, series_number, issuer,
+               detraction_applies, detraction_code, detraction_percentage, detraction_amount, detraction_bank_account)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                number, client_id, issue_date, due_date, total, request.form.get("notes", "").strip(), series, series_number, issuer,
+                1 if detraction["applies"] else 0,
+                detraction["code"],
+                detraction["percentage"],
+                detraction["amount"],
+                detraction["bank_account"],
+            ),
         )
         invoice_id = cur.lastrowid
         for t in trips:

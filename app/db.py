@@ -381,6 +381,13 @@ COLUMN_MIGRATIONS = [
     ("waybills", "transfer_reason", "TEXT NOT NULL DEFAULT 'OTROS'"),
     ("waybills", "sunat_pdf_filename", "TEXT"),
     ("invoices", "sunat_pdf_filename", "TEXT"),
+    # Detracción (SPOT) — 9 sep, ver el comentario de estas mismas columnas
+    # en schema.sql (CREATE TABLE invoices) para el detalle completo.
+    ("invoices", "detraction_applies", "INTEGER NOT NULL DEFAULT 0"),
+    ("invoices", "detraction_code", "TEXT"),
+    ("invoices", "detraction_percentage", "REAL"),
+    ("invoices", "detraction_amount", "REAL"),
+    ("invoices", "detraction_bank_account", "TEXT"),
 ]
 
 
