@@ -93,9 +93,14 @@
 
   <div id="fuel-fields" style="display:none;">
     <div class="form-row">
+      <label>Ciudad
+        <input type="text" name="fuel_city" id="fuel_city" value="{{ expense.fuel_city if expense else '' }}">
+      </label>
       <label>Nombre de grifo
         <input type="text" name="fuel_station_name" id="fuel_station_name" value="{{ expense.fuel_station_name if expense else '' }}">
       </label>
+    </div>
+    <div class="form-row">
       <label>Cantidad de galones
         <input type="number" step="0.01" name="fuel_gallons" id="fuel_gallons" value="{{ expense.fuel_gallons if expense and expense.fuel_gallons is not none else '' }}" oninput="onFuelInput()">
       </label>

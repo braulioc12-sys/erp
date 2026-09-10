@@ -117,45 +117,106 @@
   {% if not route %}
   <p class="muted mt-0">Esta ruta todavía no está en la <a href="{{ url_for('rutas.list_view') }}">tabla de consumo por ruta</a>, así que no hay un estimado con qué comparar.</p>
   {% endif %}
-  {% if advance.fuel_notes %}
-  <p class="mt-0"><strong>Observaciones:</strong> {{ advance.fuel_notes }}</p>
+  {# 10 sep, 2da ronda, pedido de Braulio: "en la parte de combustible sea
+     para agregar porque pueden ser varios por ruta... ciudad, nombre del
+     grifo, nro vale/factura, cant galones, precio unit y precio total. Si
+     dentro de gastos registrados hubo combustible se debe jalar a aca y
+     luego sumar el total." fuel_rows (ver _fuel_rows() en
+     app/routes/liquidaciones.py) mezcla las filas que vienen de un gasto
+     ya registrado con concepto "Combustible" (con su propio comprobante —
+     no se borran desde acá, se editan/borran como gasto) con las cargadas
+     a mano acá mismo, sin comprobante (esas sí se pueden borrar). El total
+     de galones de todas las filas es advance.fuel_actual — se recalcula
+     solo en el servidor cada vez que cambia algo (_recalc_fuel_actual). #}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Ciudad</th><th>Grifo</th><th>N° vale/factura</th>
+          <th class="text-right">Galones</th><th class="text-right">P. Unit.</th>
+          <th class="text-right">P. Total</th><th>Origen</th>
+          {% if advance.status == 'PENDIENTE' and can(current_user.roles, 'liquidaciones', 'edit') %}<th></th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in fuel_rows %}
+        <tr>
+          <td>{{ row.city or '—' }}</td>
+          <td>{{ row.station_name or '—' }}</td>
+          <td>{{ row.document_number or '—' }}</td>
+          <td class="text-right">{{ '%.2f'|format(row.gallons) if row.gallons else '—' }}</td>
+          <td class="text-right">{{ row.unit_price|money if row.unit_price is not none else '—' }}</td>
+          <td class="text-right">{{ row.total|money if row.total is not none else '—' }}</td>
+          <td>{{ 'Gasto registrado' if row.source == 'expense' else 'Carga rápida' }}</td>
+          {% if advance.status == 'PENDIENTE' and can(current_user.roles, 'liquidaciones', 'edit') %}
+          <td>
+            {% if row.source == 'manual' %}
+            <form method="post" action="{{ url_for('liquidaciones.fuel_entry_delete', entry_id=row.entry_id) }}" onsubmit="return confirm('¿Eliminar esta carga de combustible?');" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-secondary btn-sm">Eliminar</button>
+            </form>
+            {% endif %}
+          </td>
+          {% endif %}
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="muted">Todavía no hay combustible cargado para este viaje.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if advance.status == 'PENDIENTE' and can(current_user.roles, 'liquidaciones', 'edit') %}
+  <form method="post" action="{{ url_for('liquidaciones.fuel_entry_new', advance_id=advance.id) }}" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin-top:12px; padding:12px; background:var(--bg-soft,#f3f5f8); border-radius:8px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label style="margin:0;">Ciudad
+      <input type="text" name="city">
+    </label>
+    <label style="margin:0;">Grifo
+      <input type="text" name="station_name">
+    </label>
+    <label style="margin:0;">N° vale/factura
+      <input type="text" name="document_number">
+    </label>
+    <label style="margin:0;">Galones *
+      <input type="number" step="0.01" min="0.01" name="gallons" id="new-fuel-gallons" required>
+    </label>
+    <label style="margin:0;">Precio unitario (S/)
+      <input type="number" step="0.01" min="0" name="unit_price" id="new-fuel-unit-price">
+    </label>
+    <label style="margin:0;">Precio total (S/)
+      <input type="text" id="new-fuel-total" value="" readonly style="background:#fff;">
+    </label>
+    <button type="submit" class="btn btn-secondary">+ Agregar combustible</button>
+  </form>
+  <p class="muted" style="margin-top:4px;">Carga rápida sin comprobante — si tienes la factura/boleta, regístrala como gasto con concepto "Combustible" y aparecerá acá sola.</p>
+  <script>
+    (function () {
+      var gallonsInput = document.getElementById('new-fuel-gallons');
+      var priceInput = document.getElementById('new-fuel-unit-price');
+      var totalInput = document.getElementById('new-fuel-total');
+      function update() {
+        var gallons = parseFloat(gallonsInput.value);
+        var price = parseFloat(priceInput.value);
+        if (isNaN(gallons) || isNaN(price)) { totalInput.value = ''; return; }
+        totalInput.value = (gallons * price).toFixed(2);
+      }
+      gallonsInput.addEventListener('input', update);
+      priceInput.addEventListener('input', update);
+    })();
+  </script>
   {% endif %}
 
   {% if advance.status == 'PENDIENTE' and can(current_user.roles, 'liquidaciones', 'edit') %}
   <form method="post" action="{{ url_for('liquidaciones.save_fuel', advance_id=advance.id) }}" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin-top:12px; padding:12px; background:var(--bg-soft,#f3f5f8); border-radius:8px;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <label style="margin:0;">Combustible físico (gal)
-      <input type="number" step="0.01" min="0" name="fuel_actual" id="fuel-actual" value="{{ advance.fuel_actual if advance.fuel_actual is not none else '' }}">
-    </label>
     <label style="margin:0; flex:1; min-width:220px;">Observaciones
       <input type="text" name="fuel_notes" placeholder="Ej. Desvío por bloqueo de vía" value="{{ advance.fuel_notes or '' }}">
     </label>
-    <button type="submit" class="btn btn-secondary">Guardar combustible</button>
+    <button type="submit" class="btn btn-secondary">Guardar observaciones</button>
   </form>
-  {% if route and route.default_fuel_amount %}
-  <p class="muted" id="fuel-diff-hint" style="margin-top:8px; min-height:1.2em;"></p>
-  <script>
-    (function () {
-      var expected = {{ route.default_fuel_amount }};
-      var actualInput = document.getElementById('fuel-actual');
-      var hint = document.getElementById('fuel-diff-hint');
-      function update() {
-        var actual = parseFloat(actualInput.value);
-        if (isNaN(actual)) { hint.textContent = ''; return; }
-        var diff = actual - expected;
-        if (diff > 0.001) {
-          hint.textContent = 'Exceso al guardar: ' + diff.toFixed(2) + ' gal (se calcula solo).';
-          hint.style.color = 'var(--danger)';
-        } else {
-          hint.textContent = 'Sin exceso sobre lo estimado.';
-          hint.style.color = 'var(--success)';
-        }
-      }
-      actualInput.addEventListener('input', update);
-      update();
-    })();
-  </script>
-  {% endif %}
+  {% elif advance.fuel_notes %}
+  <p class="mt-0" style="margin-top:12px;"><strong>Observaciones:</strong> {{ advance.fuel_notes }}</p>
   {% endif %}
 </div>
 

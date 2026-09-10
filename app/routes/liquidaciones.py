@@ -350,6 +350,96 @@ def delete_payment(payment_id):
     return redirect(url_for("liquidaciones.detail", advance_id=advance["id"]))
 
 
+# --- Consumo de combustible: filas de "Gastos" con concepto Combustible
+# (jaladas automático) + entradas agregadas a mano en este mismo panel
+# (10 sep, 2da ronda, pedido de Braulio: "pueden ser varios [grifos] por
+# ruta... Si dentro de gastos registrados hubo combustible se debe jalar a
+# aca y luego sumar el total") ---
+
+def _fuel_rows(advance):
+    """Filas de consumo de combustible de una liquidación: una por cada
+    gasto de este viaje con concepto "Combustible" (con sus propios
+    grifo/ciudad/galones/precio — ver expense_form.html) + una por cada
+    entrada agregada a mano acá (tabla fuel_entries, sin comprobante — para
+    eso está registrarlo como Gasto en su lugar). Mismas claves en ambos
+    casos para poder mostrarlas juntas en una sola tabla; "source" distingue
+    de dónde vino cada una (una entrada de Gasto no se puede borrar ni
+    editar desde acá, solo desde Gastos)."""
+    rows = []
+    expense_rows = query_all(
+        """SELECT e.id, e.fuel_city, e.fuel_station_name, e.document_number, e.fuel_gallons,
+                  e.fuel_unit_price, e.amount, e.expense_date
+           FROM expenses e JOIN expense_concepts c ON c.id = e.concept_id
+           WHERE e.trip_id = ? AND UPPER(c.name) = 'COMBUSTIBLE'
+           ORDER BY e.expense_date, e.id""",
+        (advance["trip_id"],),
+    )
+    for e in expense_rows:
+        rows.append({
+            "source": "expense", "expense_id": e["id"], "city": e["fuel_city"],
+            "station_name": e["fuel_station_name"], "document_number": e["document_number"],
+            "gallons": e["fuel_gallons"] or 0, "unit_price": e["fuel_unit_price"], "total": e["amount"],
+        })
+    entries = query_all(
+        "SELECT * FROM fuel_entries WHERE advance_id = ? ORDER BY created_at, id", (advance["id"],)
+    )
+    for fe in entries:
+        gallons = fe["gallons"] or 0
+        total = gallons * fe["unit_price"] if fe["unit_price"] is not None else None
+        rows.append({
+            "source": "manual", "entry_id": fe["id"], "city": fe["city"],
+            "station_name": fe["station_name"], "document_number": fe["document_number"],
+            "gallons": gallons, "unit_price": fe["unit_price"], "total": total,
+        })
+    return rows
+
+
+def _recalc_fuel_actual(advance_id):
+    """Recalcula fuel_actual ("Combustible físico") y fuel_excess de una
+    liquidación a partir de TODAS sus filas de combustible (ver
+    _fuel_rows) — ya no se digita un solo número a mano (10 sep, 2da
+    ronda). Se llama cada vez que algo puede haber cambiado esa suma:
+    agregar/eliminar una entrada manual (fuel_entry_new/fuel_entry_delete),
+    o registrar/editar/eliminar un gasto de este viaje (new_expense/
+    edit_expense/delete_expense) — sin filtrar por concepto ahí: si el
+    gasto no es de Combustible, _fuel_rows no lo cuenta y el recálculo
+    simplemente da el mismo total de antes. No hace nada si la liquidación
+    ya está cerrada (mismo criterio que tenía save_fuel antes de este
+    cambio: una vez LIQUIDADO, el combustible físico queda congelado)."""
+    advance = query_one(
+        """SELECT a.*, t.origin as trip_origin, t.destination as trip_destination
+           FROM expense_advances a JOIN trips t ON t.id = a.trip_id WHERE a.id = ?""",
+        (advance_id,),
+    )
+    if advance is None or advance["status"] == "LIQUIDADO":
+        return
+    total_gallons = sum(r["gallons"] or 0 for r in _fuel_rows(advance))
+    route = None
+    if advance["route_id"]:
+        route = query_one("SELECT * FROM routes WHERE id = ?", (advance["route_id"],))
+    if route is None:
+        route = find_route(advance["trip_origin"], advance["trip_destination"])
+    fuel_excess = None
+    if total_gallons and route and route["default_fuel_amount"]:
+        fuel_excess = max(0.0, total_gallons - route["default_fuel_amount"])
+    execute(
+        "UPDATE expense_advances SET fuel_actual = ?, fuel_excess = ? WHERE id = ?",
+        (total_gallons or None, fuel_excess, advance_id),
+    )
+
+
+def _recalc_fuel_actual_for_trip(trip_id):
+    """Igual que _recalc_fuel_actual, pero a partir de un trip_id (usado
+    desde new_expense/edit_expense/delete_expense, que conocen el viaje del
+    gasto pero no directamente su liquidación) — no hace nada si ese viaje
+    todavía no tiene una liquidación (anticipo) creada."""
+    if not trip_id:
+        return
+    advance = query_one("SELECT id FROM expense_advances WHERE trip_id = ?", (trip_id,))
+    if advance:
+        _recalc_fuel_actual(advance["id"])
+
+
 @bp.route("/<int:advance_id>")
 @permission_required("liquidaciones", "view")
 def detail(advance_id):
@@ -383,59 +473,105 @@ def detail(advance_id):
         "liquidaciones/detail.html", advance=advance, expenses=expenses, spent=spent, difference=difference,
         payments=payments, offices=offices, office_labels={code: info["label"] for code, info in offices},
         route=route, today=today_str(), is_admin=("ADMIN" in g.user["roles"]),
+        fuel_rows=_fuel_rows(advance),
     )
 
 
 @bp.route("/<int:advance_id>/combustible", methods=["POST"])
 @permission_required("liquidaciones", "edit")
 def save_fuel(advance_id):
-    """4 sep, pedido de Braulio: registra el combustible FÍSICO (medido) de
-    este viaje, comparado contra el consumo SEGÚN TABLA de la ruta
-    (routes.default_fuel_amount).
+    """4 sep, pedido de Braulio: guarda las Observaciones de combustible de
+    este viaje (comparado contra el consumo SEGÚN TABLA de la ruta,
+    routes.default_fuel_amount).
 
     10 sep, pedido de Braulio: "combustible físico, combustible según
     tabla y exceso (que es la resta entre físico y tabla)" — el exceso YA
-    NO se digita a mano (como sí se hacía desde el 4 sep): ahora se calcula
-    solo, físico menos la tabla, y nunca queda negativo (si gastó menos de
-    lo estimado no hay "exceso", hay ahorro — pero eso no es lo que se
-    audita acá). Si la ruta no tiene un estimado en la tabla (o no se pudo
-    encontrar la ruta), no hay con qué comparar y el exceso queda sin
-    definir (None) — no se asume 0 para no ocultar un caso sin dato."""
+    NO se digita a mano (como sí se hacía desde el 4 sep): se calcula
+    solo, físico menos la tabla, y nunca queda negativo.
+
+    10 sep, 2da ronda, pedido de Braulio: "en la parte de combustible sea
+    para agregar porque pueden ser varios [grifos] por ruta... si dentro
+    de gastos registrados hubo combustible se debe jalar a aca y luego
+    sumar el total" — el combustible FÍSICO tampoco se digita más a mano
+    acá: ahora es la suma de las filas de consumo de combustible (gastos
+    con concepto Combustible + entradas agregadas a mano, ver _fuel_rows /
+    _recalc_fuel_actual y las rutas fuel_entry_new/fuel_entry_delete más
+    abajo). Este endpoint queda solo para las Observaciones."""
     if not validate_csrf():
         abort(400)
-    advance = query_one(
-        """SELECT a.*, t.origin as trip_origin, t.destination as trip_destination
-           FROM expense_advances a JOIN trips t ON t.id = a.trip_id WHERE a.id = ?""",
-        (advance_id,),
-    )
+    advance = query_one("SELECT * FROM expense_advances WHERE id = ?", (advance_id,))
     if advance is None:
         abort(404)
     if advance["status"] == "LIQUIDADO":
         flash("Esta liquidación ya está cerrada — no se puede editar el combustible.", "error")
         return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
 
-    fuel_actual = parse_float(request.form.get("fuel_actual"))
     fuel_notes = request.form.get("fuel_notes", "").strip()
+    execute("UPDATE expense_advances SET fuel_notes = ? WHERE id = ?", (fuel_notes or None, advance_id))
+    flash("Observaciones guardadas.", "success")
+    return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
 
-    if fuel_actual < 0:
-        flash("El combustible físico no puede ser negativo.", "error")
+
+@bp.route("/<int:advance_id>/combustible/agregar", methods=["POST"])
+@permission_required("liquidaciones", "edit")
+def fuel_entry_new(advance_id):
+    """10 sep, 2da ronda, pedido de Braulio: agrega una fila de consumo de
+    combustible directo en el panel de la liquidación — ciudad, grifo, N°
+    de vale/factura, galones y precio unitario (el precio total se calcula
+    solo). Sin comprobante adjunto a propósito (confirmado con Braulio):
+    si hace falta guardar la foto del vale/factura, se registra como Gasto
+    → Combustible en su lugar, que aparece solo en esta misma tabla (ver
+    _fuel_rows) — dos formas de llegar al mismo lugar, una con comprobante
+    y otra rápida sin él."""
+    if not validate_csrf():
+        abort(400)
+    advance = query_one("SELECT * FROM expense_advances WHERE id = ?", (advance_id,))
+    if advance is None:
+        abort(404)
+    if advance["status"] == "LIQUIDADO":
+        flash("Esta liquidación ya está cerrada — no se puede editar el combustible.", "error")
         return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
 
-    route = None
-    if advance["route_id"]:
-        route = query_one("SELECT * FROM routes WHERE id = ?", (advance["route_id"],))
-    if route is None:
-        route = find_route(advance["trip_origin"], advance["trip_destination"])
-    fuel_excess = None
-    if fuel_actual and route and route["default_fuel_amount"]:
-        fuel_excess = max(0.0, fuel_actual - route["default_fuel_amount"])
+    gallons = parse_float(request.form.get("gallons"), None)
+    if not gallons or gallons <= 0:
+        flash("Indica la cantidad de galones.", "error")
+        return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
+    unit_price = parse_float(request.form.get("unit_price"), None)
 
     execute(
-        "UPDATE expense_advances SET fuel_actual = ?, fuel_excess = ?, fuel_notes = ? WHERE id = ?",
-        (fuel_actual or None, fuel_excess, fuel_notes or None, advance_id),
+        """INSERT INTO fuel_entries (advance_id, city, station_name, document_number, gallons,
+           unit_price, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (
+            advance_id,
+            request.form.get("city", "").strip() or None,
+            request.form.get("station_name", "").strip() or None,
+            request.form.get("document_number", "").strip() or None,
+            gallons, unit_price, g.user["id"],
+        ),
     )
-    flash("Combustible registrado.", "success")
+    _recalc_fuel_actual(advance_id)
+    flash("Combustible agregado.", "success")
     return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
+
+
+@bp.route("/combustible/<int:entry_id>/eliminar", methods=["POST"])
+@permission_required("liquidaciones", "edit")
+def fuel_entry_delete(entry_id):
+    if not validate_csrf():
+        abort(400)
+    entry = query_one("SELECT * FROM fuel_entries WHERE id = ?", (entry_id,))
+    if entry is None:
+        abort(404)
+    advance = query_one("SELECT * FROM expense_advances WHERE id = ?", (entry["advance_id"],))
+    if advance is None:
+        abort(404)
+    if advance["status"] == "LIQUIDADO":
+        flash("Esta liquidación ya está cerrada.", "error")
+        return redirect(url_for("liquidaciones.detail", advance_id=advance["id"]))
+    execute("DELETE FROM fuel_entries WHERE id = ?", (entry_id,))
+    _recalc_fuel_actual(advance["id"])
+    flash("Entrada de combustible eliminada.", "success")
+    return redirect(url_for("liquidaciones.detail", advance_id=advance["id"]))
 
 
 def _next_voucher_number(office, month):
@@ -689,6 +825,7 @@ def new_expense():
         # recalcula también acá (no solo en el JS del formulario) para que
         # el monto guardado sea siempre consistente con esos dos campos
         # cuando vienen los dos.
+        fuel_city = request.form.get("fuel_city", "").strip() or None
         fuel_station_name = request.form.get("fuel_station_name", "").strip() or None
         fuel_gallons = parse_float(request.form.get("fuel_gallons"), None)
         fuel_unit_price = parse_float(request.form.get("fuel_unit_price"), None)
@@ -737,9 +874,9 @@ def new_expense():
         execute(
             """INSERT INTO expenses (trip_id, vehicle_id, type, amount, expense_date, description,
                receipt_filename, concept_id, document_number, due_date, provider_ruc, provider_name,
-               currency, exchange_rate, voucher_type, fuel_station_name, fuel_gallons, fuel_unit_price,
-               created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               currency, exchange_rate, voucher_type, fuel_city, fuel_station_name, fuel_gallons,
+               fuel_unit_price, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 trip_id, vehicle_id, expense_type, amount, expense_date,
                 request.form.get("description", "").strip(), receipt_filename, concept_id,
@@ -748,9 +885,15 @@ def new_expense():
                 request.form.get("provider_ruc", "").strip() or None,
                 request.form.get("provider_name", "").strip() or None,
                 request.form.get("currency", DEFAULT_CURRENCY) or DEFAULT_CURRENCY,
-                exchange_rate, voucher_type, fuel_station_name, fuel_gallons, fuel_unit_price, None,
+                exchange_rate, voucher_type, fuel_city, fuel_station_name, fuel_gallons, fuel_unit_price, None,
             ),
         )
+        # 10 sep, 2da ronda, pedido de Braulio: si este gasto es de
+        # Combustible, recalcula el combustible físico de la liquidación de
+        # este viaje (si ya tiene una) — ver _fuel_rows/_recalc_fuel_actual.
+        # No hace falta filtrar por concepto acá: si no es Combustible, el
+        # recálculo simplemente da el mismo total de antes.
+        _recalc_fuel_actual_for_trip(trip_id)
         flash("Gasto registrado. Recuerda incluirlo en la liquidación del viaje cuando la cierres.", "success")
         if trip_id:
             advance = query_one("SELECT id FROM expense_advances WHERE trip_id = ?", (trip_id,))
@@ -785,6 +928,7 @@ def edit_expense(expense_id):
         voucher_type = request.form.get("voucher_type") or "boleta"
         if voucher_type not in ("factura", "boleta"):
             voucher_type = "boleta"
+        fuel_city = request.form.get("fuel_city", "").strip() or None
         fuel_station_name = request.form.get("fuel_station_name", "").strip() or None
         fuel_gallons = parse_float(request.form.get("fuel_gallons"), None)
         fuel_unit_price = parse_float(request.form.get("fuel_unit_price"), None)
@@ -827,7 +971,7 @@ def edit_expense(expense_id):
             """UPDATE expenses SET trip_id = ?, vehicle_id = ?, type = ?, amount = ?, expense_date = ?,
                description = ?, receipt_filename = ?, concept_id = ?, document_number = ?, due_date = ?,
                provider_ruc = ?, provider_name = ?, currency = ?, exchange_rate = ?, voucher_type = ?,
-               fuel_station_name = ?, fuel_gallons = ?, fuel_unit_price = ? WHERE id = ?""",
+               fuel_city = ?, fuel_station_name = ?, fuel_gallons = ?, fuel_unit_price = ? WHERE id = ?""",
             (
                 trip_id, vehicle_id, expense_type, amount, expense_date,
                 request.form.get("description", "").strip(), receipt_filename, concept_id,
@@ -836,9 +980,16 @@ def edit_expense(expense_id):
                 request.form.get("provider_ruc", "").strip() or None,
                 request.form.get("provider_name", "").strip() or None,
                 request.form.get("currency", DEFAULT_CURRENCY) or DEFAULT_CURRENCY,
-                exchange_rate, voucher_type, fuel_station_name, fuel_gallons, fuel_unit_price, expense_id,
+                exchange_rate, voucher_type, fuel_city, fuel_station_name, fuel_gallons, fuel_unit_price,
+                expense_id,
             ),
         )
+        # 10 sep, 2da ronda: recalcula el combustible físico tanto del viaje
+        # anterior de este gasto (si cambió de viaje) como del nuevo — ver
+        # el mismo comentario en new_expense().
+        _recalc_fuel_actual_for_trip(expense["trip_id"])
+        if trip_id != expense["trip_id"]:
+            _recalc_fuel_actual_for_trip(trip_id)
         flash("Gasto actualizado.", "success")
         if trip_id:
             advance = query_one("SELECT id FROM expense_advances WHERE trip_id = ?", (trip_id,))
@@ -861,7 +1012,12 @@ def delete_expense(expense_id):
     if _expense_locked(expense):
         flash("Este gasto ya forma parte de una liquidación cerrada — no se puede eliminar.", "error")
         return redirect(request.referrer or url_for("liquidaciones.historial"))
+    trip_id_for_recalc = expense["trip_id"]
     execute("DELETE FROM expenses WHERE id = ?", (expense_id,))
+    # 10 sep, 2da ronda, pedido de Braulio: si este gasto era de Combustible,
+    # recalcula el combustible físico de la liquidación de ese viaje — ver
+    # _fuel_rows/_recalc_fuel_actual. No hace falta filtrar por concepto acá.
+    _recalc_fuel_actual_for_trip(trip_id_for_recalc)
     flash("Gasto eliminado.", "success")
     return redirect(request.referrer or url_for("liquidaciones.historial"))
 

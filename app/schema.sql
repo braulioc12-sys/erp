@@ -276,6 +276,11 @@ CREATE TABLE IF NOT EXISTS expenses (
     -- se guarda en una columna aparte: es el mismo "amount" de arriba,
     -- calculado solo como galones × precio unitario (ver
     -- new_expense()/edit_expense() en app/routes/liquidaciones.py).
+    -- Ciudad donde se hizo el consumo (10 sep, 2da ronda, pedido de
+    -- Braulio: "ciudad, nombre del grifo, nro vale/factura..." para poder
+    -- listar este gasto como una fila más en la tabla de combustible de la
+    -- liquidación del viaje — ver _fuel_rows() en app/routes/liquidaciones.py).
+    fuel_city TEXT,
     fuel_station_name TEXT,
     fuel_gallons REAL,
     fuel_unit_price REAL,
@@ -758,6 +763,28 @@ CREATE TABLE IF NOT EXISTS expense_advances (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Consumo de combustible cargado a mano directamente en el panel de la
+-- liquidación (10 sep, 2da ronda, pedido de Braulio: "en la parte de
+-- combustible sea para agregar porque pueden ser varios por ruta... ciudad,
+-- nombre del grifo, nro vale/factura, cant galones, precio unit y precio
+-- total"). Es un registro rápido SIN comprobante/foto (si el gasto sí tiene
+-- comprobante, se registra como un gasto normal con concepto "Combustible"
+-- en app/routes/liquidaciones.py `new_expense()`, y esas filas se listan
+-- acá también, mezcladas con estas — ver _fuel_rows()). El total de galones
+-- de ambas fuentes es lo que alimenta expense_advances.fuel_actual — ver
+-- _recalc_fuel_actual().
+CREATE TABLE IF NOT EXISTS fuel_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    advance_id INTEGER NOT NULL REFERENCES expense_advances(id),
+    city TEXT,
+    station_name TEXT,
+    document_number TEXT,
+    gallons REAL NOT NULL DEFAULT 0,
+    unit_price REAL,
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Cada entrega de dinero al conductor dentro de una misma liquidación
 -- (pedido de Braulio, 28 ago: a veces se da un anticipo al inicio del
 -- viaje y otro a mitad de camino). `expense_advances.amount_given` sigue
@@ -1162,3 +1189,4 @@ CREATE INDEX IF NOT EXISTS idx_waybills_trip ON waybills(trip_id);
 CREATE INDEX IF NOT EXISTS idx_inspections_vehicle ON inspections(vehicle_id);
 CREATE INDEX IF NOT EXISTS idx_inspection_items_inspection ON inspection_items(inspection_id);
 CREATE INDEX IF NOT EXISTS idx_expense_advances_trip ON expense_advances(trip_id);
+CREATE INDEX IF NOT EXISTS idx_fuel_entries_advance ON fuel_entries(advance_id);

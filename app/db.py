@@ -420,6 +420,11 @@ COLUMN_MIGRATIONS = [
     ("expenses", "fuel_station_name", "TEXT"),
     ("expenses", "fuel_gallons", "REAL"),
     ("expenses", "fuel_unit_price", "REAL"),
+    # Ciudad del consumo de combustible (10 sep, 2da ronda, pedido de
+    # Braulio) — ver el comentario de esta columna en schema.sql. La tabla
+    # nueva fuel_entries no necesita entrada acá: se crea sola vía
+    # CREATE TABLE IF NOT EXISTS en schema.sql en cada init_db().
+    ("expenses", "fuel_city", "TEXT"),
 ]
 
 
