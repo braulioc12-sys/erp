@@ -32,6 +32,7 @@
   {% for key, label in categories.items() %}
   <a class="btn {{ 'btn-primary' if key == active_category else 'btn-secondary' }}" href="{{ url_for('catalogos.list_view', categoria=key) }}">{{ label }}</a>
   {% endfor %}
+  <a class="btn btn-secondary" href="{{ url_for('catalogos.grifos_list') }}">Grifos</a>
 </div>
 
 <div class="panel" style="max-width:520px;">

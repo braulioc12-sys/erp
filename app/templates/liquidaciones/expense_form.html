@@ -93,13 +93,18 @@
 
   <div id="fuel-fields" style="display:none;">
     <div class="form-row">
-      <label>Ciudad
-        <input type="text" name="fuel_city" id="fuel_city" value="{{ expense.fuel_city if expense else '' }}">
-      </label>
-      <label>Nombre de grifo
-        <input type="text" name="fuel_station_name" id="fuel_station_name" value="{{ expense.fuel_station_name if expense else '' }}">
+      <label style="flex:1;">Grifo *
+        <select name="fuel_station_id" id="fuel_station_id">
+          <option value="">-- Elige un grifo registrado --</option>
+          {% for s in fuel_stations %}
+          <option value="{{ s.id }}" {{ 'selected' if expense and (expense.fuel_station_id|string) == (s.id|string) }}>{{ s.business_name }} — {{ s.city }}{{ ' (inactivo)' if not s.active }}</option>
+          {% endfor %}
+        </select>
       </label>
     </div>
+    {% if not fuel_stations %}
+    <p class="muted" style="margin-top:-8px;">Todavía no hay grifos registrados — un Administrador puede agregarlos desde <a href="{{ url_for('catalogos.grifos_list') }}" target="_blank">Catálogos → Grifos</a>.</p>
+    {% endif %}
     <div class="form-row">
       <label>Cantidad de galones
         <input type="number" step="0.01" name="fuel_gallons" id="fuel_gallons" value="{{ expense.fuel_gallons if expense and expense.fuel_gallons is not none else '' }}" oninput="onFuelInput()">

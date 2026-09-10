@@ -169,11 +169,13 @@
   {% if advance.status == 'PENDIENTE' and can(current_user.roles, 'liquidaciones', 'edit') %}
   <form method="post" action="{{ url_for('liquidaciones.fuel_entry_new', advance_id=advance.id) }}" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin-top:12px; padding:12px; background:var(--bg-soft,#f3f5f8); border-radius:8px;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <label style="margin:0;">Ciudad
-      <input type="text" name="city">
-    </label>
-    <label style="margin:0;">Grifo
-      <input type="text" name="station_name">
+    <label style="margin:0; flex:1; min-width:220px;">Grifo *
+      <select name="fuel_station_id" required>
+        <option value="">-- Elige un grifo registrado --</option>
+        {% for s in fuel_stations %}
+        <option value="{{ s.id }}">{{ s.business_name }} — {{ s.city }}</option>
+        {% endfor %}
+      </select>
     </label>
     <label style="margin:0;">N° vale/factura
       <input type="text" name="document_number">
@@ -189,6 +191,9 @@
     </label>
     <button type="submit" class="btn btn-secondary">+ Agregar combustible</button>
   </form>
+  {% if not fuel_stations %}
+  <p class="muted" style="margin-top:4px;">Todavía no hay grifos registrados — un Administrador puede agregarlos desde <a href="{{ url_for('catalogos.grifos_list') }}" target="_blank">Catálogos → Grifos</a>.</p>
+  {% endif %}
   <p class="muted" style="margin-top:4px;">Carga rápida sin comprobante — si tienes la factura/boleta, regístrala como gasto con concepto "Combustible" y aparecerá acá sola.</p>
   <script>
     (function () {

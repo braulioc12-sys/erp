@@ -106,3 +106,53 @@ def toggle_item(item_id):
     execute("UPDATE catalog_items SET active = ? WHERE id = ?", (0 if item["active"] else 1, item_id))
     flash("Actualizado." if item["active"] else "Reactivado.", "success")
     return redirect(url_for("catalogos.list_view", categoria=item["category"]))
+
+
+# --- Grifos (10 sep, 3ra ronda, pedido de Braulio: "dentro de catalogos
+# hay que poner los grifos, en este se registren de acuerdo a su ciudad
+# razon social y ruc, en la pantalla de liquidaciones se eligan los que
+# estan registrados"). Catálogo propio (no el genérico catalog_items de
+# arriba, que solo maneja un nombre) porque un grifo necesita 3 datos —
+# ver CREATE TABLE fuel_stations en schema.sql. Se usa desde el formulario
+# de gastos y desde el panel de combustible de la liquidación (ver
+# app/routes/liquidaciones.py). ---
+
+@bp.route("/grifos")
+@permission_required("catalogos", "view")
+def grifos_list():
+    stations = query_all("SELECT * FROM fuel_stations ORDER BY city, business_name")
+    return render_template("catalogos/grifos.html", stations=stations)
+
+
+@bp.route("/grifos/agregar", methods=["POST"])
+@permission_required("catalogos", "edit")
+def grifos_add():
+    if not validate_csrf():
+        abort(400)
+    city = request.form.get("city", "").strip()
+    business_name = request.form.get("business_name", "").strip()
+    ruc = request.form.get("ruc", "").strip()
+    if not city or not business_name or not ruc:
+        flash("Completa ciudad, razón social y RUC.", "error")
+        return redirect(url_for("catalogos.grifos_list"))
+
+    max_order = query_one("SELECT COALESCE(MAX(sort_order), -1) m FROM fuel_stations")["m"]
+    execute(
+        "INSERT INTO fuel_stations (city, business_name, ruc, sort_order) VALUES (?, ?, ?, ?)",
+        (city, business_name, ruc, max_order + 1),
+    )
+    flash(f'Grifo "{business_name}" ({city}) agregado.', "success")
+    return redirect(url_for("catalogos.grifos_list"))
+
+
+@bp.route("/grifos/<int:station_id>/alternar", methods=["POST"])
+@permission_required("catalogos", "edit")
+def grifos_toggle(station_id):
+    if not validate_csrf():
+        abort(400)
+    station = query_one("SELECT * FROM fuel_stations WHERE id = ?", (station_id,))
+    if station is None:
+        abort(404)
+    execute("UPDATE fuel_stations SET active = ? WHERE id = ?", (0 if station["active"] else 1, station_id))
+    flash("Actualizado." if station["active"] else "Reactivado.", "success")
+    return redirect(url_for("catalogos.grifos_list"))

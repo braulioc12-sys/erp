@@ -474,6 +474,10 @@ def detail(advance_id):
         payments=payments, offices=offices, office_labels={code: info["label"] for code, info in offices},
         route=route, today=today_str(), is_admin=("ADMIN" in g.user["roles"]),
         fuel_rows=_fuel_rows(advance),
+        # 10 sep, 3ra ronda, pedido de Braulio: grifos registrados en el
+        # catálogo, para elegir uno al agregar combustible acá — ver
+        # app/routes/catalogos.py.
+        fuel_stations=query_all("SELECT * FROM fuel_stations WHERE active = 1 ORDER BY city, business_name"),
     )
 
 
@@ -532,6 +536,17 @@ def fuel_entry_new(advance_id):
         flash("Esta liquidación ya está cerrada — no se puede editar el combustible.", "error")
         return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
 
+    # 10 sep, 3ra ronda, pedido de Braulio: "dentro de catalogos hay que
+    # poner los grifos... en la pantalla de liquidaciones se eligan los
+    # que estan registrados" — ya no se escribe la ciudad/el grifo a mano,
+    # se elige uno del catálogo (ver app/routes/catalogos.py) y ciudad +
+    # razón social se copian de ahí.
+    fuel_station_id = request.form.get("fuel_station_id") or None
+    station = query_one("SELECT * FROM fuel_stations WHERE id = ?", (fuel_station_id,)) if fuel_station_id else None
+    if station is None:
+        flash("Elige un grifo registrado (Catálogos → Grifos).", "error")
+        return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
+
     gallons = parse_float(request.form.get("gallons"), None)
     if not gallons or gallons <= 0:
         flash("Indica la cantidad de galones.", "error")
@@ -539,12 +554,10 @@ def fuel_entry_new(advance_id):
     unit_price = parse_float(request.form.get("unit_price"), None)
 
     execute(
-        """INSERT INTO fuel_entries (advance_id, city, station_name, document_number, gallons,
-           unit_price, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO fuel_entries (advance_id, fuel_station_id, city, station_name, document_number,
+           gallons, unit_price, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         (
-            advance_id,
-            request.form.get("city", "").strip() or None,
-            request.form.get("station_name", "").strip() or None,
+            advance_id, station["id"], station["city"], station["business_name"],
             request.form.get("document_number", "").strip() or None,
             gallons, unit_price, g.user["id"],
         ),
@@ -763,12 +776,26 @@ def _expense_form_context(expense=None, preselected_trip=None):
             preselected_trip_code = t["code"]
             preselected_vehicle_id = t["vehicle_id"]
             preselected_vehicle_plate = t["plate"]
+    # Grifos registrados en el catálogo (10 sep, 3ra ronda, pedido de
+    # Braulio: "dentro de catalogos hay que poner los grifos... en la
+    # pantalla de liquidaciones se eligan los que estan registrados") — ver
+    # app/routes/catalogos.py. Si se está editando un gasto cuyo grifo ya
+    # fue desactivado, se agrega igual al final de la lista (marcado
+    # "inactivo") para que el desplegable no pierda el valor guardado.
+    fuel_stations = query_all("SELECT * FROM fuel_stations WHERE active = 1 ORDER BY city, business_name")
+    if expense and expense["fuel_station_id"]:
+        active_ids = {s["id"] for s in fuel_stations}
+        if expense["fuel_station_id"] not in active_ids:
+            extra = query_one("SELECT * FROM fuel_stations WHERE id = ?", (expense["fuel_station_id"],))
+            if extra:
+                fuel_stations = list(fuel_stations) + [extra]
     return {
         "trips": trips,
         "trips_json": [dict(t) for t in trips],
         "vehicles": query_all("SELECT id, plate FROM vehicles ORDER BY plate"),
         "concepts": concepts,
         "concepts_json": [dict(c) for c in concepts],
+        "fuel_stations": fuel_stations,
         "expense": expense,
         "preselected_trip": preselected_trip,
         "preselected_trip_code": preselected_trip_code,
@@ -786,6 +813,26 @@ def _expense_locked(expense):
         return False
     advance = query_one("SELECT status FROM expense_advances WHERE id = ?", (expense["expense_advance_id"],))
     return bool(advance and advance["status"] == "LIQUIDADO")
+
+
+def _resolve_fuel_station(concept):
+    """Si el concepto elegido es "Combustible", exige haber elegido un
+    grifo del catálogo (10 sep, 3ra ronda, pedido de Braulio: "dentro de
+    catalogos hay que poner los grifos... en la pantalla de liquidaciones
+    se eligan los que estan registrados" — ver app/routes/catalogos.py) y
+    devuelve (fuel_station_id, fuel_city, fuel_station_name, error). Ciudad
+    y razón social se copian del grifo elegido, no se vuelven a pedir a
+    mano. Si el concepto no es Combustible, no hay nada que resolver."""
+    is_fuel = bool(concept) and str(concept["name"]).upper() == "COMBUSTIBLE"
+    if not is_fuel:
+        return None, None, None, None
+    station_id = request.form.get("fuel_station_id") or None
+    if not station_id:
+        return None, None, None, "Elige un grifo registrado (Catálogos → Grifos)."
+    station = query_one("SELECT * FROM fuel_stations WHERE id = ?", (station_id,))
+    if station is None:
+        return None, None, None, "Ese grifo ya no existe — elige otro de la lista."
+    return station["id"], station["city"], station["business_name"], None
 
 
 @bp.route("/gastos/nuevo", methods=["GET", "POST"])
@@ -825,8 +872,7 @@ def new_expense():
         # recalcula también acá (no solo en el JS del formulario) para que
         # el monto guardado sea siempre consistente con esos dos campos
         # cuando vienen los dos.
-        fuel_city = request.form.get("fuel_city", "").strip() or None
-        fuel_station_name = request.form.get("fuel_station_name", "").strip() or None
+        fuel_station_id, fuel_city, fuel_station_name, fuel_station_error = _resolve_fuel_station(concept)
         fuel_gallons = parse_float(request.form.get("fuel_gallons"), None)
         fuel_unit_price = parse_float(request.form.get("fuel_unit_price"), None)
         if fuel_gallons is not None and fuel_unit_price is not None:
@@ -835,6 +881,8 @@ def new_expense():
         errors = []
         if not concept:
             errors.append("Selecciona un concepto de gasto válido.")
+        if fuel_station_error:
+            errors.append(fuel_station_error)
         if amount <= 0:
             errors.append("El monto debe ser mayor a cero.")
         if not trip_id and not vehicle_id:
@@ -874,9 +922,9 @@ def new_expense():
         execute(
             """INSERT INTO expenses (trip_id, vehicle_id, type, amount, expense_date, description,
                receipt_filename, concept_id, document_number, due_date, provider_ruc, provider_name,
-               currency, exchange_rate, voucher_type, fuel_city, fuel_station_name, fuel_gallons,
-               fuel_unit_price, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               currency, exchange_rate, voucher_type, fuel_station_id, fuel_city, fuel_station_name,
+               fuel_gallons, fuel_unit_price, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 trip_id, vehicle_id, expense_type, amount, expense_date,
                 request.form.get("description", "").strip(), receipt_filename, concept_id,
@@ -885,7 +933,8 @@ def new_expense():
                 request.form.get("provider_ruc", "").strip() or None,
                 request.form.get("provider_name", "").strip() or None,
                 request.form.get("currency", DEFAULT_CURRENCY) or DEFAULT_CURRENCY,
-                exchange_rate, voucher_type, fuel_city, fuel_station_name, fuel_gallons, fuel_unit_price, None,
+                exchange_rate, voucher_type, fuel_station_id, fuel_city, fuel_station_name,
+                fuel_gallons, fuel_unit_price, None,
             ),
         )
         # 10 sep, 2da ronda, pedido de Braulio: si este gasto es de
@@ -928,8 +977,7 @@ def edit_expense(expense_id):
         voucher_type = request.form.get("voucher_type") or "boleta"
         if voucher_type not in ("factura", "boleta"):
             voucher_type = "boleta"
-        fuel_city = request.form.get("fuel_city", "").strip() or None
-        fuel_station_name = request.form.get("fuel_station_name", "").strip() or None
+        fuel_station_id, fuel_city, fuel_station_name, fuel_station_error = _resolve_fuel_station(concept)
         fuel_gallons = parse_float(request.form.get("fuel_gallons"), None)
         fuel_unit_price = parse_float(request.form.get("fuel_unit_price"), None)
         if fuel_gallons is not None and fuel_unit_price is not None:
@@ -938,6 +986,8 @@ def edit_expense(expense_id):
         errors = []
         if not concept:
             errors.append("Selecciona un concepto de gasto válido.")
+        if fuel_station_error:
+            errors.append(fuel_station_error)
         if amount <= 0:
             errors.append("El monto debe ser mayor a cero.")
         if not trip_id and not vehicle_id:
@@ -971,7 +1021,8 @@ def edit_expense(expense_id):
             """UPDATE expenses SET trip_id = ?, vehicle_id = ?, type = ?, amount = ?, expense_date = ?,
                description = ?, receipt_filename = ?, concept_id = ?, document_number = ?, due_date = ?,
                provider_ruc = ?, provider_name = ?, currency = ?, exchange_rate = ?, voucher_type = ?,
-               fuel_city = ?, fuel_station_name = ?, fuel_gallons = ?, fuel_unit_price = ? WHERE id = ?""",
+               fuel_station_id = ?, fuel_city = ?, fuel_station_name = ?, fuel_gallons = ?,
+               fuel_unit_price = ? WHERE id = ?""",
             (
                 trip_id, vehicle_id, expense_type, amount, expense_date,
                 request.form.get("description", "").strip(), receipt_filename, concept_id,
@@ -980,8 +1031,8 @@ def edit_expense(expense_id):
                 request.form.get("provider_ruc", "").strip() or None,
                 request.form.get("provider_name", "").strip() or None,
                 request.form.get("currency", DEFAULT_CURRENCY) or DEFAULT_CURRENCY,
-                exchange_rate, voucher_type, fuel_city, fuel_station_name, fuel_gallons, fuel_unit_price,
-                expense_id,
+                exchange_rate, voucher_type, fuel_station_id, fuel_city, fuel_station_name,
+                fuel_gallons, fuel_unit_price, expense_id,
             ),
         )
         # 10 sep, 2da ronda: recalcula el combustible físico tanto del viaje

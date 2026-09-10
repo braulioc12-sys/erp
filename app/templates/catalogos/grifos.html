@@ -1,0 +1,89 @@
+{% extends 'base.html' %}
+{% block title %}Grifos{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Grifos</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('catalogos.list_view') }}" class="btn btn-secondary">← Volver a Catálogos</a>
+  </div>
+</div>
+<p class="muted mt-0">Cada grifo se registra con su ciudad, razón social y RUC. Al registrar combustible (como gasto o como carga rápida en el panel de una liquidación) se elige uno de los grifos registrados acá — ciudad y grifo se completan solos.</p>
+
+<div class="panel" style="max-width:640px;">
+  <form method="post" action="{{ url_for('catalogos.grifos_add') }}" class="filters" style="margin-bottom:18px; flex-wrap:wrap;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>RUC
+      <input type="text" name="ruc" id="ruc" placeholder="Ej. 20123456789" maxlength="11" oninput="onRucInput()" required>
+    </label>
+    <label style="flex:1; min-width:200px;">Razón social
+      <input type="text" name="business_name" id="business_name" placeholder="Ej. PRIMAX S.A." required>
+    </label>
+    <label>Ciudad
+      <input type="text" name="city" placeholder="Ej. Trujillo" required>
+    </label>
+    <button type="submit" class="btn btn-primary">+ Agregar</button>
+  </form>
+  <p class="muted" id="ruc_status" style="margin-top:-10px; margin-bottom:14px; min-height:1.2em;"></p>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Ciudad</th><th>Razón social</th><th>RUC</th><th>Estado</th><th></th></tr></thead>
+      <tbody>
+        {% for s in stations %}
+        <tr>
+          <td>{{ s.city }}</td>
+          <td>{{ s.business_name }}</td>
+          <td>{{ s.ruc }}</td>
+          <td><span class="badge {{ 'badge-activo' if s.active else 'badge-inactivo' }}">{{ 'Activo' if s.active else 'Inactivo' }}</span></td>
+          <td>
+            <form method="post" action="{{ url_for('catalogos.grifos_toggle', station_id=s.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-secondary btn-sm" type="submit">{{ 'Desactivar' if s.active else 'Reactivar' }}</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="table-empty">No hay grifos registrados todavía.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted" style="margin-top:12px; margin-bottom:0;">Desactivar un grifo lo quita de la lista para registrar combustible nuevo, pero no afecta los gastos/entradas ya registrados con él.</p>
+</div>
+
+<script>
+  // Autocompleta la razón social al escribir un RUC de 11 dígitos,
+  // consultando SUNAT (mismo endpoint que usa el formulario de gastos —
+  // ver app/routes/liquidaciones.py `consultar_ruc()`). Nunca bloquea el
+  // registro del grifo: si falla o el RUC no existe, se completa a mano.
+  var rucLookupTimer = null;
+  var lastRucLookedUp = '';
+  function onRucInput() {
+    var rucInput = document.getElementById('ruc');
+    var status = document.getElementById('ruc_status');
+    var digits = (rucInput.value || '').replace(/\D/g, '');
+    if (rucLookupTimer) { clearTimeout(rucLookupTimer); }
+    if (digits.length !== 11) { status.textContent = ''; return; }
+    rucLookupTimer = setTimeout(function () { lookupRuc(digits); }, 500);
+  }
+  function lookupRuc(ruc) {
+    if (ruc === lastRucLookedUp) { return; }
+    lastRucLookedUp = ruc;
+    var status = document.getElementById('ruc_status');
+    var nameInput = document.getElementById('business_name');
+    status.textContent = 'Buscando en SUNAT…';
+    fetch('{{ url_for("liquidaciones.consultar_ruc") }}?ruc=' + ruc)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (ruc !== lastRucLookedUp) { return; }
+        if (!data.found) {
+          status.textContent = 'No se encontró ese RUC — escribe la razón social a mano.';
+          return;
+        }
+        nameInput.value = data.razon_social;
+        status.textContent = data.estado && data.estado !== 'ACTIVO' ? 'Estado SUNAT: ' + data.estado : '';
+      })
+      .catch(function () { status.textContent = ''; });
+  }
+</script>
+{% endblock %}

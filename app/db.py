@@ -425,6 +425,14 @@ COLUMN_MIGRATIONS = [
     # nueva fuel_entries no necesita entrada acá: se crea sola vía
     # CREATE TABLE IF NOT EXISTS en schema.sql en cada init_db().
     ("expenses", "fuel_city", "TEXT"),
+    # Catálogo de grifos (10 sep, 3ra ronda, pedido de Braulio: "dentro de
+    # catalogos hay que poner los grifos... en la pantalla de liquidaciones
+    # se eligan los que estan registrados") — ver el comentario de esta
+    # columna en schema.sql (CREATE TABLE expenses / CREATE TABLE
+    # fuel_entries). La tabla fuel_stations tampoco necesita entrada acá:
+    # es nueva, se crea sola en cada init_db().
+    ("expenses", "fuel_station_id", "INTEGER REFERENCES fuel_stations(id)"),
+    ("fuel_entries", "fuel_station_id", "INTEGER REFERENCES fuel_stations(id)"),
 ]
 
 

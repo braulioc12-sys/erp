@@ -280,6 +280,15 @@ CREATE TABLE IF NOT EXISTS expenses (
     -- Braulio: "ciudad, nombre del grifo, nro vale/factura..." para poder
     -- listar este gasto como una fila más en la tabla de combustible de la
     -- liquidación del viaje — ver _fuel_rows() en app/routes/liquidaciones.py).
+    -- fuel_station_id (10 sep, 3ra ronda, pedido de Braulio: "dentro de
+    -- catalogos hay que poner los grifos... en la pantalla de liquidaciones
+    -- se eligan los que estan registrados") amarra el gasto al grifo
+    -- elegido en el catálogo (ver CREATE TABLE fuel_stations más abajo,
+    -- administrado desde Catálogos → Grifos). fuel_city/fuel_station_name
+    -- se siguen guardando acá también, como una "foto" de ese momento
+    -- (ciudad y razón social del grifo elegido) para que la fila no cambie
+    -- de valor si el grifo se edita o desactiva más adelante.
+    fuel_station_id INTEGER REFERENCES fuel_stations(id),
     fuel_city TEXT,
     fuel_station_name TEXT,
     fuel_gallons REAL,
@@ -763,6 +772,25 @@ CREATE TABLE IF NOT EXISTS expense_advances (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Catálogo de grifos (10 sep, 3ra ronda, pedido de Braulio: "dentro de
+-- catalogos hay que poner los grifos, en este se registren de acuerdo a su
+-- ciudad razon social y ruc, en la pantalla de liquidaciones se eligan los
+-- que estan registrados"). Administrado desde Catálogos → Grifos (ver
+-- app/routes/catalogos.py) — solo Administrador, igual que el resto de
+-- Catálogos. Se elige un grifo registrado (no texto libre) tanto al
+-- registrar un gasto con concepto "Combustible" como al cargar una entrada
+-- rápida en el panel de la liquidación — ver expenses.fuel_station_id y
+-- fuel_entries.fuel_station_id más abajo.
+CREATE TABLE IF NOT EXISTS fuel_stations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    city TEXT NOT NULL,
+    business_name TEXT NOT NULL,
+    ruc TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Consumo de combustible cargado a mano directamente en el panel de la
 -- liquidación (10 sep, 2da ronda, pedido de Braulio: "en la parte de
 -- combustible sea para agregar porque pueden ser varios por ruta... ciudad,
@@ -772,10 +800,13 @@ CREATE TABLE IF NOT EXISTS expense_advances (
 -- en app/routes/liquidaciones.py `new_expense()`, y esas filas se listan
 -- acá también, mezcladas con estas — ver _fuel_rows()). El total de galones
 -- de ambas fuentes es lo que alimenta expense_advances.fuel_actual — ver
--- _recalc_fuel_actual().
+-- _recalc_fuel_actual(). fuel_station_id (10 sep, 3ra ronda) amarra la fila
+-- al grifo elegido del catálogo; city/station_name se guardan igual, como
+-- "foto" de ese momento (ver el mismo comentario en expenses más arriba).
 CREATE TABLE IF NOT EXISTS fuel_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     advance_id INTEGER NOT NULL REFERENCES expense_advances(id),
+    fuel_station_id INTEGER REFERENCES fuel_stations(id),
     city TEXT,
     station_name TEXT,
     document_number TEXT,
