@@ -19,7 +19,7 @@ app/templates/liquidaciones/list.html, columna agregada en el patch 0020):
 
 Este módulo es de SOLO LECTURA (un reporte) — el OK en sí se sigue dando
 desde el detalle de la liquidación, no desde acá."""
-from flask import Blueprint, render_template, request
+from flask import Blueprint, Response, render_template, request
 
 from app.accounting import office_choices
 from app.auth import permission_required
@@ -93,14 +93,22 @@ def _group_by_driver(advances):
     return [by_driver[key] for key in order]
 
 
+def _filters_from_args(args):
+    """Mismos 5 filtros para la vista y para el export a Excel, así ambos
+    quedan siempre de acuerdo (exportar respeta lo que se está viendo en
+    pantalla)."""
+    month = args.get("month") or today_str()[:7]
+    driver_id = args.get("driver_id", type=int)
+    office = args.get("office", "")
+    issuer = args.get("issuer", "")
+    q = args.get("q", "").strip()
+    return month, driver_id, office, issuer, q
+
+
 @bp.route("")
 @permission_required("rrhh", "view")
 def list_view():
-    month = request.args.get("month") or today_str()[:7]
-    driver_id = request.args.get("driver_id", type=int)
-    office = request.args.get("office", "")
-    issuer = request.args.get("issuer", "")
-    q = request.args.get("q", "").strip()
+    month, driver_id, office, issuer, q = _filters_from_args(request.args)
 
     advances = _ready_advances(month, driver_id, office, issuer, q)
     drivers = _group_by_driver(advances)
@@ -113,4 +121,30 @@ def list_view():
         drivers=drivers, grand_trips=grand_trips, grand_total=grand_total,
         all_drivers=query_all("SELECT id, name FROM drivers ORDER BY name"),
         offices=office_choices(), issuer_choices=ISSUER_CHOICES,
+    )
+
+
+# 10 sep, pedido de Braulio: "agregar la opcion de poder exportar a un
+# cuadro de excel el detalle de viajes por mes" — mismo patrón que los
+# demás exports del sistema (Historial de gastos, Comisiones por mes,
+# Resumen contable): respeta los filtros que estén aplicados en ese momento
+# en la pantalla (viene de los mismos query params del listado).
+@bp.route("/exportar")
+@permission_required("rrhh", "view")
+def export_excel():
+    from flask import current_app
+
+    from app.reports import build_rrhh_workbook
+
+    month, driver_id, office, issuer, q = _filters_from_args(request.args)
+
+    advances = _ready_advances(month, driver_id, office, issuer, q)
+    drivers = _group_by_driver(advances)
+
+    buffer = build_rrhh_workbook(drivers, company_name=current_app.config["COMPANY_NAME"], month=month)
+    filename = f"rrhh_{month}.xlsx"
+    return Response(
+        buffer.getvalue(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

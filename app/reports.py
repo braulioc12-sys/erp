@@ -253,6 +253,128 @@ def build_commissions_workbook(drivers, company_name, month):
     return buffer
 
 
+# 10 sep, pedido de Braulio: "agregar la opcion de poder exportar a un
+# cuadro de excel el detalle de viajes por mes" — export del módulo RRHH
+# (ver app/routes/rrhh.py), mismo patrón que build_commissions_workbook:
+# agrupado por conductor, con subtotal por conductor y total general.
+RRHH_COLUMN_WIDTHS = [11, 14, 30, 16, 12, 16, 13, 13, 30]
+RRHH_COLUMNS = [
+    "Código", "Viaje", "Ruta", "Empresa", "Oficina", "Fecha Liquidación",
+    "Entregado", "Gastado", "Combustible",
+]
+
+
+def build_rrhh_workbook(drivers, company_name, month):
+    """Construye el workbook del reporte RRHH: viajes con liquidación lista
+    para RRHH en el mes pedido, agrupados por conductor. `drivers` es la
+    misma estructura que arma rrhh._group_by_driver(): lista de dicts
+    {driver_name, advances: [fila de expense_advances + join de trips/
+    drivers], trip_count, total_spent}."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "RRHH"
+
+    last_col_letter = get_column_letter(len(RRHH_COLUMNS))
+
+    ws.merge_cells(f"A1:{last_col_letter}1")
+    ws["A1"] = f"{company_name} — Liquidaciones listas para RRHH"
+    ws["A1"].font = Font(bold=True, size=14, color=COLOR_PRIMARY)
+
+    ws.merge_cells(f"A2:{last_col_letter}2")
+    generated = datetime.now().strftime("%d/%m/%Y %H:%M")
+    ws["A2"] = f"Generado el {generated}  ·  Mes: {month}"
+    ws["A2"].font = Font(italic=True, size=10, color=COLOR_GRAY)
+
+    header_row = 4
+    for idx, title in enumerate(RRHH_COLUMNS, start=1):
+        cell = ws.cell(row=header_row, column=idx, value=title)
+        cell.font = Font(bold=True, color=COLOR_HEADER_TEXT)
+        cell.fill = PatternFill("solid", fgColor=COLOR_PRIMARY)
+        cell.alignment = Alignment(
+            horizontal="right" if title in ("Entregado", "Gastado") else "left", vertical="center"
+        )
+        cell.border = _thin_border("all")
+
+    ws.freeze_panes = f"A{header_row + 1}"
+
+    row = header_row + 1
+    grand_total = 0.0
+    grand_trips = 0
+
+    for d in drivers:
+        ws.merge_cells(f"A{row}:{last_col_letter}{row}")
+        group_cell = ws.cell(row=row, column=1, value=d["driver_name"])
+        group_cell.font = Font(bold=True, color=COLOR_PRIMARY)
+        group_cell.fill = PatternFill("solid", fgColor=COLOR_PRIMARY_SOFT)
+        row += 1
+
+        for a in d["advances"]:
+            trip_label = a["trip_code"]
+            if a["double_driver"] and a["driver2_name"]:
+                trip_label = f"{trip_label} (+ {a['driver2_name']})"
+            fuel_label = "Sin exceso"
+            if a["fuel_excess"] and a["fuel_excess"] > 0:
+                fuel_label = "Exceso aprobado"
+                if a["fuel_adjustment"]:
+                    fuel_label += f": {a['fuel_adjustment']}"
+
+            ws.cell(row=row, column=1, value=a["code"] or "—")
+            ws.cell(row=row, column=2, value=trip_label)
+            ws.cell(row=row, column=3, value=f"{a['origin']} → {a['destination']}")
+            ws.cell(row=row, column=4, value="BRMS" if a["issuer"] == "BRMS" else "Harraso Transport")
+            ws.cell(row=row, column=5, value=a["office"] or "—")
+            ws.cell(row=row, column=6, value=(a["liquidated_at"] or "")[:10])
+            given_cell = ws.cell(row=row, column=7, value=float(a["amount_given"] or 0))
+            given_cell.number_format = CURRENCY_FORMAT
+            given_cell.alignment = Alignment(horizontal="right")
+            spent_cell = ws.cell(row=row, column=8, value=float(a["liquidated_expenses_total"] or 0))
+            spent_cell.number_format = CURRENCY_FORMAT
+            spent_cell.alignment = Alignment(horizontal="right")
+            ws.cell(row=row, column=9, value=fuel_label)
+            for col in range(1, len(RRHH_COLUMNS) + 1):
+                ws.cell(row=row, column=col).border = _thin_border("bottom")
+            row += 1
+
+        ws.merge_cells(f"A{row}:F{row}")
+        subtotal_label = ws.cell(row=row, column=1, value=f"Subtotal {d['driver_name']} ({d['trip_count']} liquidación(es))")
+        subtotal_label.font = Font(bold=True)
+        subtotal_label.alignment = Alignment(horizontal="right")
+        subtotal_cell = ws.cell(row=row, column=8, value=float(d["total_spent"]))
+        subtotal_cell.number_format = CURRENCY_FORMAT
+        subtotal_cell.font = Font(bold=True)
+        subtotal_cell.border = Border(top=Side(style="thin", color="98A2B3"))
+        subtotal_label.border = Border(top=Side(style="thin", color="98A2B3"))
+        grand_total += d["total_spent"]
+        grand_trips += d["trip_count"]
+        row += 2
+
+    row += 1
+    ws.merge_cells(f"A{row}:F{row}")
+    total_label = ws.cell(row=row, column=1, value=f"TOTAL GENERAL ({grand_trips} liquidación(es))")
+    total_label.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
+    total_label.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
+    total_label.alignment = Alignment(horizontal="right", vertical="center")
+
+    total_cell = ws.cell(row=row, column=8, value=grand_total)
+    total_cell.number_format = CURRENCY_FORMAT
+    total_cell.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
+    total_cell.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
+    total_cell.alignment = Alignment(horizontal="right", vertical="center")
+
+    if not drivers:
+        ws.cell(row=header_row + 1, column=1, value="No hay liquidaciones listas para RRHH con estos filtros.").font = Font(italic=True, color=COLOR_GRAY)
+
+    for idx, width in enumerate(RRHH_COLUMN_WIDTHS, start=1):
+        ws.column_dimensions[get_column_letter(idx)].width = width
+
+    ws.sheet_view.showGridLines = False
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+
 # Anchos aproximados para las 16 columnas de RESUMEN_COLUMNS (ver
 # app/accounting.py): Origen, Num.Voucher, Fecha Liq., Cuenta, Monto Debe,
 # Monto Haber, Moneda, T.Cambio, Doc, Num.Doc, Fec.Doc, Fec.Ven, RUC/DNI,
