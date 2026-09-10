@@ -33,6 +33,9 @@
       <a href="{{ url_for('flota.list_view') }}" class="{{ 'active' if request.blueprint == 'flota' }}">Flota</a>
       <a href="{{ url_for('conductores.list_view') }}" class="{{ 'active' if request.blueprint == 'conductores' }}">Conductores</a>
       <a href="{{ url_for('liquidaciones.list_view') }}" class="{{ 'active' if request.blueprint == 'liquidaciones' }}">Liquidaciones</a>
+      {% if can(current_user.roles, 'rrhh', 'view') %}
+      <a href="{{ url_for('rrhh.list_view') }}" class="{{ 'active' if request.blueprint == 'rrhh' }}">RRHH</a>
+      {% endif %}
       <a href="{{ url_for('mantenimiento.list_view') }}" class="{{ 'active' if request.blueprint == 'mantenimiento' }}">Mantenimiento</a>
       {% if can(current_user.roles, 'inventarios', 'view') %}
       <a href="{{ url_for('inventarios.list_view') }}" class="{{ 'active' if request.blueprint == 'inventarios' }}">Inventarios</a>

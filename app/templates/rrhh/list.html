@@ -1,0 +1,93 @@
+{% extends 'base.html' %}
+{% block title %}RRHH{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>RRHH — Liquidaciones listas para enviar</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('liquidaciones.list_view') }}" class="btn btn-secondary">← Volver a Liquidaciones</a>
+  </div>
+</div>
+<p class="muted mt-0">
+  Viajes con liquidación cerrada y lista para enviarse a RRHH: entran solas las que no tuvieron exceso de
+  combustible, y las que sí tuvieron exceso recién aparecen aquí una vez que un Administrador dio el OK
+  (ver el cuadro de "Ajuste" en el detalle de cada liquidación).
+</p>
+
+<form class="filters" method="get">
+  <label>Periodo
+    <input type="month" name="month" value="{{ month }}" onchange="this.form.submit()">
+  </label>
+  <label>Conductor
+    <select name="driver_id">
+      <option value="">Todos</option>
+      {% for d in all_drivers %}
+      <option value="{{ d.id }}" {{ 'selected' if driver_id == d.id }}>{{ d.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Oficina
+    <select name="office">
+      <option value="">Todas</option>
+      {% for code, info in offices %}
+      <option value="{{ code }}" {{ 'selected' if office == code }}>{{ info.label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Empresa
+    <select name="issuer">
+      <option value="">Todas</option>
+      <option value="HARRASO" {{ 'selected' if issuer == 'HARRASO' }}>Harraso Transport</option>
+      <option value="BRMS" {{ 'selected' if issuer == 'BRMS' }}>BRMS</option>
+    </select>
+  </label>
+  <label>Buscar
+    <input type="text" name="q" value="{{ q }}" placeholder="Código de liquidación o de viaje">
+  </label>
+  <button class="btn btn-secondary" type="submit">Filtrar</button>
+</form>
+
+<p class="muted">
+  Total del periodo: <strong>{{ grand_trips }}</strong> liquidación(es) lista(s), <strong>{{ grand_total|money }}</strong> gastado en total.
+</p>
+
+{% for d in drivers %}
+<div class="panel">
+  <h2>{{ d.driver_name }} <span class="muted" style="font-weight:400;font-size:0.9rem;">— {{ d.trip_count }} liquidación(es), {{ d.total_spent|money }} gastado</span></h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Código</th><th>Viaje</th><th>Ruta</th><th>Empresa</th><th>Oficina</th>
+          <th>Fecha liquidación</th><th class="text-right">Entregado</th><th class="text-right">Gastado</th>
+          <th>Combustible</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in d.advances %}
+        <tr>
+          <td>{{ a.code or '—' }}</td>
+          <td>{{ a.trip_code }}{% if a.double_driver and a.driver2_name %} <span class="muted">(+ {{ a.driver2_name }})</span>{% endif %}</td>
+          <td>{{ a.origin }} → {{ a.destination }}</td>
+          <td>{{ 'BRMS' if a.issuer == 'BRMS' else 'Harraso Transport' }}</td>
+          <td>{{ a.office or '—' }}</td>
+          <td>{{ (a.liquidated_at or '')[:10] }}</td>
+          <td class="text-right">{{ a.amount_given|money }}</td>
+          <td class="text-right">{{ (a.liquidated_expenses_total or 0)|money }}</td>
+          <td>
+            {% if a.fuel_excess and a.fuel_excess > 0 %}
+            <span style="color:var(--success);">Exceso aprobado{% if a.fuel_adjustment %}: {{ a.fuel_adjustment }}{% endif %}</span>
+            {% else %}
+            <span class="muted">Sin exceso</span>
+            {% endif %}
+          </td>
+          <td><a href="{{ url_for('liquidaciones.detail', advance_id=a.id) }}" class="btn btn-secondary btn-sm">Ver</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="panel"><p class="mt-0 muted">No hay liquidaciones listas para RRHH con estos filtros.</p></div>
+{% endfor %}
+{% endblock %}

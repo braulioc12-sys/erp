@@ -38,6 +38,7 @@ def create_app(config_object=Config):
         conductores,
         viajes,
         liquidaciones,
+        rrhh,
         inventarios,
         mantenimiento,
         facturacion,
@@ -57,6 +58,9 @@ def create_app(config_object=Config):
     app.register_blueprint(conductores.bp)
     app.register_blueprint(viajes.bp)
     app.register_blueprint(liquidaciones.bp)
+    # 10 sep: rrhh importa ISSUER_CHOICES de app.routes.viajes — se importa
+    # después de viajes arriba para que ese módulo ya esté cargado.
+    app.register_blueprint(rrhh.bp)
     app.register_blueprint(inventarios.bp)
     app.register_blueprint(mantenimiento.bp)
     app.register_blueprint(facturacion.bp)

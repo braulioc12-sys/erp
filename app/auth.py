@@ -47,6 +47,9 @@ PERMISSIONS = {
         "usuarios": set(),
         "catalogos": set(),
         "integraciones": set(),
+        # 10 sep: módulo RRHH (ver app/routes/rrhh.py) — mismo grupo de
+        # acceso que Liquidaciones, solo Contabilidad/Admin.
+        "rrhh": set(),
     },
     # Programa unidades/conductores y da seguimiento a los viajes del día a
     # día — sin acceso a montos de Facturación/Liquidaciones/Cotizaciones ni
@@ -69,6 +72,7 @@ PERMISSIONS = {
         "usuarios": set(),
         "catalogos": set(),
         "integraciones": set(),
+        "rrhh": set(),
     },
     # Solo el módulo de Inventarios (repuestos, proveedores, compras) — la
     # AUTORIZACIÓN de una orden de compra sigue siendo exclusiva de
@@ -92,6 +96,7 @@ PERMISSIONS = {
         "usuarios": set(),
         "catalogos": set(),
         "integraciones": set(),
+        "rrhh": set(),
     },
     # Documentos con montos: Liquidaciones, Facturación, Cotizaciones. Ve
     # Viajes/Clientes (para ubicar a qué viaje o cliente corresponde cada
@@ -116,6 +121,12 @@ PERMISSIONS = {
         "usuarios": set(),
         "catalogos": set(),
         "integraciones": set(),
+        # 10 sep, pedido de Braulio ("modulo nuevo de RRHH... figuren los
+        # viajes con las liquidaciones que ya se cerraron... y han sido
+        # enviadas a RRHH") — mismo acceso que Liquidaciones: Contabilidad
+        # ve el reporte, pero el OK en sí lo sigue dando solo Administrador
+        # (ver rrhh_approve() en app/routes/liquidaciones.py).
+        "rrhh": {"view"},
     },
     # Solo el módulo de Mantenimiento (órdenes, trabajos) y ver Neumáticos.
     "MECANICO": {
@@ -136,6 +147,7 @@ PERMISSIONS = {
         "usuarios": set(),
         "catalogos": set(),
         "integraciones": set(),
+        "rrhh": set(),
     },
 }
 

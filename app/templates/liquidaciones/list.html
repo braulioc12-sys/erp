@@ -7,6 +7,9 @@
   <div class="page-actions">
     <a href="{{ url_for('liquidaciones.resumen_view') }}" class="btn btn-secondary">Resumen contable</a>
     <a href="{{ url_for('liquidaciones.historial') }}" class="btn btn-secondary">Historial de gastos</a>
+    {% if can(current_user.roles, 'rrhh', 'view') %}
+    <a href="{{ url_for('rrhh.list_view') }}" class="btn btn-secondary">RRHH</a>
+    {% endif %}
     <a href="{{ url_for('liquidaciones.whatsapp_list') }}" class="btn btn-secondary">📷 Borradores WhatsApp{% if whatsapp_pending_count %} ({{ whatsapp_pending_count }}){% endif %}</a>
     {% if can(current_user.roles, 'liquidaciones', 'edit') %}
     <a href="{{ url_for('liquidaciones.budgets_list') }}" class="btn btn-secondary">Presupuestos</a>
