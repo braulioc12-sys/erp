@@ -44,6 +44,28 @@ DOCUMENT_TYPES = [
 
 VALE_DOCUMENT_TYPE = "PL"
 
+# Tipo de comprobante elegido por gasto (10 sep, pedido de Braulio: "antes
+# de concepto hay que elegir el tipo de comprobante puede ser factura o
+# boleta"), independiente del concepto elegido. Si es "factura", la cuenta
+# contable y el tipo de documento del export se fuerzan a estos valores
+# para CUALQUIER concepto (mismo patrón que ya usan Peaje/Lavado/Consumo/
+# etc.); si es "boleta", se mantiene la cuenta/documento propios del
+# concepto, tal como ya funcionaba (ver resolve_expense_account() abajo).
+FACTURA_ACCOUNT_CODE = "42121"
+FACTURA_DOCUMENT_TYPE_CODE = "01"
+
+
+def resolve_expense_account(voucher_type, concept_account_code, concept_document_type_code):
+    """Cuenta contable y tipo de documento que le corresponden a un gasto
+    para el export de liquidación, según el "Tipo de comprobante" elegido
+    al registrarlo (ver expense_form.html / new_expense() / edit_expense()
+    en app/routes/liquidaciones.py). `voucher_type` es 'factura', 'boleta',
+    o None (gastos registrados antes de este cambio, 10 sep — se tratan
+    igual que 'boleta' para no alterar liquidaciones ya cerradas)."""
+    if voucher_type == "factura":
+        return FACTURA_ACCOUNT_CODE, FACTURA_DOCUMENT_TYPE_CODE
+    return concept_account_code, concept_document_type_code
+
 # Encabezados EXACTOS de la "hoja resumen" de la plantilla real de
 # Harraso (incluye espacios finales tal como están en su archivo) — el
 # export de liquidación debe generarlos en este mismo orden y con estos

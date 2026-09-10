@@ -26,6 +26,7 @@ from app.accounting import (
     VALE_DOCUMENT_TYPE,
     office_choices,
     office_info,
+    resolve_expense_account,
     voucher_label,
 )
 from app.auth import permission_required, validate_csrf
@@ -673,6 +674,26 @@ def new_expense():
         # no se vuelve a preguntar (pedido de Braulio, 28 ago).
         trip_id = (request.form.get("trip_id") or "").strip() or None
         vehicle_id = request.form.get("vehicle_id") or None
+        # Tipo de comprobante (10 sep, pedido de Braulio): se pide ANTES del
+        # concepto en el formulario. "factura" fuerza la cuenta/documento del
+        # export a 42121/01 para cualquier concepto; "boleta" mantiene los
+        # propios del concepto — ver resolve_expense_account() en
+        # app/accounting.py, usado al armar el resumen contable.
+        voucher_type = request.form.get("voucher_type") or "boleta"
+        if voucher_type not in ("factura", "boleta"):
+            voucher_type = "boleta"
+        # Datos del comprobante de combustible (10 sep, pedido de Braulio),
+        # solo visibles/completados en el formulario cuando el concepto es
+        # "Combustible". El "Precio total" no es un campo propio: se calcula
+        # solo como galones × precio unitario y completa el Monto — se
+        # recalcula también acá (no solo en el JS del formulario) para que
+        # el monto guardado sea siempre consistente con esos dos campos
+        # cuando vienen los dos.
+        fuel_station_name = request.form.get("fuel_station_name", "").strip() or None
+        fuel_gallons = parse_float(request.form.get("fuel_gallons"), None)
+        fuel_unit_price = parse_float(request.form.get("fuel_unit_price"), None)
+        if fuel_gallons is not None and fuel_unit_price is not None:
+            amount = round(fuel_gallons * fuel_unit_price, 2)
 
         errors = []
         if not concept:
@@ -716,8 +737,9 @@ def new_expense():
         execute(
             """INSERT INTO expenses (trip_id, vehicle_id, type, amount, expense_date, description,
                receipt_filename, concept_id, document_number, due_date, provider_ruc, provider_name,
-               currency, exchange_rate, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               currency, exchange_rate, voucher_type, fuel_station_name, fuel_gallons, fuel_unit_price,
+               created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 trip_id, vehicle_id, expense_type, amount, expense_date,
                 request.form.get("description", "").strip(), receipt_filename, concept_id,
@@ -726,7 +748,7 @@ def new_expense():
                 request.form.get("provider_ruc", "").strip() or None,
                 request.form.get("provider_name", "").strip() or None,
                 request.form.get("currency", DEFAULT_CURRENCY) or DEFAULT_CURRENCY,
-                exchange_rate, None,
+                exchange_rate, voucher_type, fuel_station_name, fuel_gallons, fuel_unit_price, None,
             ),
         )
         flash("Gasto registrado. Recuerda incluirlo en la liquidación del viaje cuando la cierres.", "success")
@@ -758,6 +780,16 @@ def edit_expense(expense_id):
         concept = query_one("SELECT * FROM expense_concepts WHERE id = ?", (concept_id,)) if concept_id else None
         trip_id = request.form.get("trip_id") or None
         vehicle_id = request.form.get("vehicle_id") or None
+        # Tipo de comprobante + datos de combustible (10 sep, pedido de
+        # Braulio) — ver el mismo bloque en new_expense().
+        voucher_type = request.form.get("voucher_type") or "boleta"
+        if voucher_type not in ("factura", "boleta"):
+            voucher_type = "boleta"
+        fuel_station_name = request.form.get("fuel_station_name", "").strip() or None
+        fuel_gallons = parse_float(request.form.get("fuel_gallons"), None)
+        fuel_unit_price = parse_float(request.form.get("fuel_unit_price"), None)
+        if fuel_gallons is not None and fuel_unit_price is not None:
+            amount = round(fuel_gallons * fuel_unit_price, 2)
 
         errors = []
         if not concept:
@@ -794,7 +826,8 @@ def edit_expense(expense_id):
         execute(
             """UPDATE expenses SET trip_id = ?, vehicle_id = ?, type = ?, amount = ?, expense_date = ?,
                description = ?, receipt_filename = ?, concept_id = ?, document_number = ?, due_date = ?,
-               provider_ruc = ?, provider_name = ?, currency = ?, exchange_rate = ? WHERE id = ?""",
+               provider_ruc = ?, provider_name = ?, currency = ?, exchange_rate = ?, voucher_type = ?,
+               fuel_station_name = ?, fuel_gallons = ?, fuel_unit_price = ? WHERE id = ?""",
             (
                 trip_id, vehicle_id, expense_type, amount, expense_date,
                 request.form.get("description", "").strip(), receipt_filename, concept_id,
@@ -803,7 +836,7 @@ def edit_expense(expense_id):
                 request.form.get("provider_ruc", "").strip() or None,
                 request.form.get("provider_name", "").strip() or None,
                 request.form.get("currency", DEFAULT_CURRENCY) or DEFAULT_CURRENCY,
-                exchange_rate, expense_id,
+                exchange_rate, voucher_type, fuel_station_name, fuel_gallons, fuel_unit_price, expense_id,
             ),
         )
         flash("Gasto actualizado.", "success")
@@ -1293,10 +1326,60 @@ def concepts_toggle(concept_id):
 # resumen" de la plantilla real de Harraso (ver app/accounting.py).
 # Pensado para pegarse directo en su sistema contable. ---
 
+def _rows_for_advance(a):
+    """Arma las filas Haber (vale) + Debe (gastos documentados) de UNA
+    liquidación cerrada (`a`, una fila de expense_advances con trip_code/
+    driver_name/driver_dni ya unidos), en el formato de columnas que espera
+    build_liquidacion_workbook. Cada fila lleva además advance_id/trip_code/
+    driver_name (10 sep, pedido de Braulio: el nombre del conductor debe
+    figurar en el encabezado de cada liquidación del export) — no se usan
+    como columna propia de la hoja resumen, solo para que
+    build_liquidacion_workbook() sepa dónde insertar ese encabezado."""
+    info = office_info(a["office"]) or {}
+    origen = info.get("origen_code", "")
+    num_voucher = voucher_label(a["voucher_number"])
+    fecha_liq = (a["liquidated_at"] or "")[:10]
+    tipo_cambio_vale = _fetch_exchange_rate(a["given_date"])
+
+    rows = [{
+        "advance_id": a["id"], "trip_code": a["trip_code"], "driver_name": a["driver_name"],
+        "origen": origen, "num_voucher": num_voucher, "fecha_liquidacion": fecha_liq,
+        "cuenta": info.get("cuenta_vale", ""), "monto_debe": None, "monto_haber": a["amount_given"],
+        "moneda": DEFAULT_CURRENCY, "tipo_cambio": tipo_cambio_vale, "doc": VALE_DOCUMENT_TYPE,
+        "num_doc": f"AV-{a['id']}", "fec_doc": a["given_date"], "fec_ven": a["given_date"],
+        "ruc_dni": a["driver_dni"], "glosa": "DOCUMENTO POR LIQUIDAR",
+        "ruc_dni2": a["driver_dni"], "razon_social": a["driver_name"],
+    }]
+
+    expenses = query_all(
+        """SELECT e.*, c.name as concept_name, c.account_code, c.document_type_code
+           FROM expenses e LEFT JOIN expense_concepts c ON c.id = e.concept_id
+           WHERE e.expense_advance_id = ? ORDER BY e.expense_date""",
+        (a["id"],),
+    )
+    for e in expenses:
+        # Tipo de comprobante (10 sep, pedido de Braulio): "factura" fuerza
+        # la cuenta/documento a 42121/01 sin importar el concepto; "boleta"
+        # (o gastos de antes de este cambio, sin voucher_type guardado)
+        # mantiene la cuenta/documento propios del concepto, como ya
+        # funcionaba — ver resolve_expense_account() en app/accounting.py.
+        cuenta, doc = resolve_expense_account(e["voucher_type"], e["account_code"], e["document_type_code"])
+        rows.append({
+            "advance_id": a["id"], "trip_code": a["trip_code"], "driver_name": a["driver_name"],
+            "origen": origen, "num_voucher": num_voucher, "fecha_liquidacion": fecha_liq,
+            "cuenta": cuenta or "", "monto_debe": e["amount"], "monto_haber": None,
+            "moneda": e["currency"] or DEFAULT_CURRENCY, "tipo_cambio": e["exchange_rate"],
+            "doc": doc or "", "num_doc": e["document_number"],
+            "fec_doc": e["expense_date"], "fec_ven": e["due_date"] or e["expense_date"],
+            "ruc_dni": e["provider_ruc"], "glosa": e["concept_name"] or pretty_label(e["type"]),
+            "ruc_dni2": e["provider_ruc"], "razon_social": e["provider_name"],
+        })
+    return rows
+
+
 def _liquidacion_rows(month, office_filter):
-    """Arma las filas Haber (vale) + Debe (gastos documentados) de cada
-    liquidación cerrada en el mes/oficina pedidos, en el formato de columnas
-    que espera build_liquidacion_workbook."""
+    """Arma las filas de todas las liquidaciones cerradas en el mes/oficina
+    pedidos (ver _rows_for_advance para el formato de cada una)."""
     sql = """SELECT a.*, t.code as trip_code, d.name as driver_name, d.document_number as driver_dni
              FROM expense_advances a
              JOIN trips t ON t.id = a.trip_id
@@ -1311,37 +1394,7 @@ def _liquidacion_rows(month, office_filter):
 
     rows = []
     for a in advances:
-        info = office_info(a["office"]) or {}
-        origen = info.get("origen_code", "")
-        num_voucher = voucher_label(a["voucher_number"])
-        fecha_liq = (a["liquidated_at"] or "")[:10]
-        tipo_cambio_vale = _fetch_exchange_rate(a["given_date"])
-
-        rows.append({
-            "origen": origen, "num_voucher": num_voucher, "fecha_liquidacion": fecha_liq,
-            "cuenta": info.get("cuenta_vale", ""), "monto_debe": None, "monto_haber": a["amount_given"],
-            "moneda": DEFAULT_CURRENCY, "tipo_cambio": tipo_cambio_vale, "doc": VALE_DOCUMENT_TYPE,
-            "num_doc": f"AV-{a['id']}", "fec_doc": a["given_date"], "fec_ven": a["given_date"],
-            "ruc_dni": a["driver_dni"], "glosa": "DOCUMENTO POR LIQUIDAR",
-            "ruc_dni2": a["driver_dni"], "razon_social": a["driver_name"],
-        })
-
-        expenses = query_all(
-            """SELECT e.*, c.name as concept_name, c.account_code, c.document_type_code
-               FROM expenses e LEFT JOIN expense_concepts c ON c.id = e.concept_id
-               WHERE e.expense_advance_id = ? ORDER BY e.expense_date""",
-            (a["id"],),
-        )
-        for e in expenses:
-            rows.append({
-                "origen": origen, "num_voucher": num_voucher, "fecha_liquidacion": fecha_liq,
-                "cuenta": e["account_code"] or "", "monto_debe": e["amount"], "monto_haber": None,
-                "moneda": e["currency"] or DEFAULT_CURRENCY, "tipo_cambio": e["exchange_rate"],
-                "doc": e["document_type_code"] or "", "num_doc": e["document_number"],
-                "fec_doc": e["expense_date"], "fec_ven": e["due_date"] or e["expense_date"],
-                "ruc_dni": e["provider_ruc"], "glosa": e["concept_name"] or pretty_label(e["type"]),
-                "ruc_dni2": e["provider_ruc"], "razon_social": e["provider_name"],
-            })
+        rows.extend(_rows_for_advance(a))
     return rows, advances
 
 
@@ -1374,6 +1427,40 @@ def resumen_export():
         rows, company_name=current_app.config["COMPANY_NAME"], filter_description=filter_description,
     )
     filename = f"liquidacion_{month}.xlsx"
+    return Response(
+        buffer.getvalue(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@bp.route("/<int:advance_id>/exportar")
+@permission_required("liquidaciones", "view")
+def advance_export(advance_id):
+    """Exporta UNA sola liquidación (10 sep, pedido de Braulio: "opcion de
+    exportar los gastos por cada liquidacion", además del export por
+    periodo completo que ya existía arriba), en el mismo formato de hoja
+    resumen, con el conductor de esa liquidación en el encabezado."""
+    a = query_one(
+        """SELECT a.*, t.code as trip_code, d.name as driver_name, d.document_number as driver_dni
+           FROM expense_advances a
+           JOIN trips t ON t.id = a.trip_id
+           LEFT JOIN drivers d ON d.id = t.driver_id
+           WHERE a.id = ?""",
+        (advance_id,),
+    )
+    if a is None:
+        abort(404)
+    if a["status"] != "LIQUIDADO":
+        flash("Esta liquidación todavía no está cerrada — no tiene export contable.", "error")
+        return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
+
+    rows = _rows_for_advance(a)
+    filter_description = f"Liquidación {a['trip_code']} · Conductor: {a['driver_name'] or '—'}"
+    buffer = build_liquidacion_workbook(
+        rows, company_name=current_app.config["COMPANY_NAME"], filter_description=filter_description,
+    )
+    filename = f"liquidacion_{a['trip_code']}.xlsx"
     return Response(
         buffer.getvalue(),
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

@@ -260,6 +260,25 @@ CREATE TABLE IF NOT EXISTS expenses (
     -- liquidarlo (ver app/routes/viaticos.py `liquidate()`). NULL si el
     -- gasto no forma parte de ninguna liquidación (todavía, o nunca).
     expense_advance_id INTEGER REFERENCES expense_advances(id),
+    -- Tipo de comprobante elegido al registrar el gasto (10 sep, pedido de
+    -- Braulio), 'factura' o 'boleta' — se pide ANTES del concepto. Si es
+    -- 'factura', la cuenta contable y el tipo de documento del export se
+    -- fuerzan a 42121/01 sin importar el concepto (ver
+    -- app.accounting.FACTURA_ACCOUNT_CODE/FACTURA_DOCUMENT_TYPE_CODE); si
+    -- es 'boleta', se mantiene la cuenta/documento propios del concepto,
+    -- como ya funcionaba. NULL en gastos registrados antes de este cambio
+    -- — se tratan igual que 'boleta' al exportar, para no alterar
+    -- liquidaciones ya cerradas.
+    voucher_type TEXT,
+    -- Datos del comprobante de combustible (10 sep, pedido de Braulio) —
+    -- solo se completan cuando el concepto elegido es "Combustible": nombre
+    -- del grifo y galones/precio unitario del vale. El "Precio total" no
+    -- se guarda en una columna aparte: es el mismo "amount" de arriba,
+    -- calculado solo como galones × precio unitario (ver
+    -- new_expense()/edit_expense() en app/routes/liquidaciones.py).
+    fuel_station_name TEXT,
+    fuel_gallons REAL,
+    fuel_unit_price REAL,
     created_by INTEGER REFERENCES users(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

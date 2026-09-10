@@ -430,7 +430,28 @@ def build_liquidacion_workbook(rows, company_name, filter_description):
     row = header_row + 1
     total_debe = 0.0
     total_haber = 0.0
+    last_advance_id = None
     for r in rows:
+        # Encabezado con el conductor de cada liquidación (10 sep, pedido
+        # de Braulio: "en el encabezado de cada liquidacion debe figurar el
+        # nombre del conductor de la liquidacion") — se inserta una fila
+        # extra apenas cambia advance_id, antes de la primera fila (Haber)
+        # de esa liquidación. rows trae ese campo desde _rows_for_advance()
+        # en app/routes/liquidaciones.py; si no viene (por compatibilidad
+        # con algún llamador viejo) simplemente no se inserta ningún
+        # encabezado.
+        advance_id = r.get("advance_id")
+        if advance_id is not None and advance_id != last_advance_id:
+            last_advance_id = advance_id
+            header_cell = ws.cell(
+                row=row, column=1,
+                value=f"Liquidación {r.get('trip_code') or ''} — Conductor: {r.get('driver_name') or '—'}",
+            )
+            ws.merge_cells(f"A{row}:{last_col_letter}{row}")
+            header_cell.font = Font(bold=True, color=COLOR_PRIMARY)
+            header_cell.fill = PatternFill("solid", fgColor=COLOR_PRIMARY_SOFT)
+            header_cell.alignment = Alignment(vertical="center")
+            row += 1
         values = [
             r.get("origen") or "",
             r.get("num_voucher") or "",

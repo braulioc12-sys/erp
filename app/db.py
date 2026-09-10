@@ -413,6 +413,13 @@ COLUMN_MIGRATIONS = [
     # schema.sql (CREATE TABLE trips).
     ("trips", "container_code", "TEXT"),
     ("trips", "container_photo_filename", "TEXT"),
+    # Tipo de comprobante (factura/boleta) elegido por gasto + datos del
+    # comprobante de combustible (10 sep, pedido de Braulio) — ver el
+    # comentario de estas columnas en schema.sql (CREATE TABLE expenses).
+    ("expenses", "voucher_type", "TEXT"),
+    ("expenses", "fuel_station_name", "TEXT"),
+    ("expenses", "fuel_gallons", "REAL"),
+    ("expenses", "fuel_unit_price", "REAL"),
 ]
 
 
@@ -535,6 +542,47 @@ def _backfill_user_roles_postgres(conn):
     )
 
 
+# Concepto "COMBUSTIBLE" (10 sep, pedido de Braulio: cuadros de grifo/
+# galones/precio al registrar un gasto de combustible) — no estaba en el
+# catálogo original de conceptos (DEFAULT_EXPENSE_CONCEPTS en
+# app/seed_data.py solo corre en una base nueva y vacía), así que hace
+# falta agregarlo también a las bases ya desplegadas. Se corre en cada
+# arranque, igual que _backfill_user_roles_*: idempotente (solo inserta si
+# todavía no existe un concepto con ese nombre, sin importar mayúsculas —
+# por si Braulio ya lo había agregado a mano desde Catálogos), así que es
+# seguro repetirlo. Mismos valores que Peaje/Lavado/Consumo/etc.: cuenta
+# 42121, factura, documento "01" (ver DEFAULT_EXPENSE_CONCEPTS).
+_COMBUSTIBLE_CONCEPT = ("COMBUSTIBLE", "42121", "factura", "01")
+
+
+def _ensure_combustible_concept_sqlite(conn):
+    row = conn.execute(
+        "SELECT id FROM expense_concepts WHERE UPPER(name) = ?", (_COMBUSTIBLE_CONCEPT[0],)
+    ).fetchone()
+    if row:
+        return
+    max_order = conn.execute("SELECT COALESCE(MAX(sort_order), -1) FROM expense_concepts").fetchone()[0]
+    conn.execute(
+        """INSERT INTO expense_concepts (name, account_code, voucher_type_label, document_type_code, sort_order)
+           VALUES (?, ?, ?, ?, ?)""",
+        (*_COMBUSTIBLE_CONCEPT, max_order + 1),
+    )
+
+
+def _ensure_combustible_concept_postgres(conn):
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM expense_concepts WHERE UPPER(name) = %s", (_COMBUSTIBLE_CONCEPT[0],))
+    if cur.fetchone():
+        return
+    cur.execute("SELECT COALESCE(MAX(sort_order), -1) FROM expense_concepts")
+    max_order = cur.fetchone()[0]
+    cur.execute(
+        """INSERT INTO expense_concepts (name, account_code, voucher_type_label, document_type_code, sort_order)
+           VALUES (%s, %s, %s, %s, %s)""",
+        (*_COMBUSTIBLE_CONCEPT, max_order + 1),
+    )
+
+
 _PRAGMA_LINE_RE = re.compile(r"^\s*PRAGMA\s[^\n]*;\s*$", re.MULTILINE | re.IGNORECASE)
 _CREATE_TABLE_START_RE = re.compile(r"CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\(")
 _COL_REFERENCES_RE = re.compile(r"\s+REFERENCES\s+(\w+)\s*\(([^)]+)\)")
@@ -653,6 +701,7 @@ def init_db(app):
             cur.execute(fk_sql)
             _apply_role_check_migration_postgres(conn)
             _backfill_user_roles_postgres(conn)
+            _ensure_combustible_concept_postgres(conn)
             conn.commit()
         finally:
             conn.close()
@@ -664,6 +713,7 @@ def init_db(app):
         _apply_column_migrations_sqlite(conn)
         _apply_role_check_migration_sqlite(conn)
         _backfill_user_roles_sqlite(conn)
+        _ensure_combustible_concept_sqlite(conn)
         conn.commit()
         conn.close()
 

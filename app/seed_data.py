@@ -66,6 +66,13 @@ DEFAULT_EXPENSE_CONCEPTS = [
     ("MANTENIMIENTO VEHICULO", "63433", "boleta", "03"),
     ("DOCUMENTO POR LIQUIDAR", "14132", "vales pucallpa", "PL"),
     ("PEAJE", "42121", "factura", "01"),
+    # 10 sep, pedido de Braulio: cuadros de grifo/galones/precio al
+    # registrar un gasto de Combustible — no venía en la hoja "Conceptos"
+    # original, se agregó con el mismo patrón de Peaje/Lavado/Consumo
+    # (cuenta 42121, factura). En bases ya desplegadas se agrega sola al
+    # arrancar la app (ver _ensure_combustible_concept_sqlite/_postgres en
+    # app/db.py), porque el seed de acá solo corre en una base nueva y vacía.
+    ("COMBUSTIBLE", "42121", "factura", "01"),
     ("RECIBOS POR HONORARIO", "4241", "recibos por honorario", "02"),
     ("CONSUMO ALIMENTOS", "6314", "boleta", "03"),
     ("DOCUMENTO POR LIQUIDAR", "14131", "vales lima", "PL"),

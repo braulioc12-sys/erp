@@ -60,7 +60,7 @@
   <h2>Liquidaciones incluidas</h2>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Voucher</th><th>Viaje</th><th>Conductor</th><th class="text-right">Entregado</th></tr></thead>
+      <thead><tr><th>Voucher</th><th>Viaje</th><th>Conductor</th><th class="text-right">Entregado</th><th></th></tr></thead>
       <tbody>
         {% for a in advances %}
         <tr>
@@ -68,6 +68,7 @@
           <td><a href="{{ url_for('liquidaciones.detail', advance_id=a.id) }}">{{ a.trip_code }}</a></td>
           <td>{{ a.driver_name or '—' }}</td>
           <td class="text-right">{{ a.amount_given|money }}</td>
+          <td><a href="{{ url_for('liquidaciones.advance_export', advance_id=a.id) }}" class="btn btn-secondary" style="padding:4px 10px; font-size:0.85em;">⬇ Exportar esta liquidación</a></td>
         </tr>
         {% endfor %}
       </tbody>

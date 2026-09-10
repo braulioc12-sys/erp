@@ -63,7 +63,19 @@
   </label>
 
   <h2 style="margin-top:20px;">Datos contables</h2>
-  <p class="muted" style="margin-top:-8px;">El concepto es la única clasificación del gasto — al elegirlo se completan solas la cuenta contable y el tipo de comprobante que arman el export de <a href="{{ url_for('liquidaciones.resumen_view') }}" target="_blank">Resumen contable</a>. Si el concepto que necesitas no está en la lista, un Administrador puede agregarlo desde <a href="{{ url_for('liquidaciones.concepts_list') }}" target="_blank">Liquidaciones → Conceptos</a>.</p>
+  <p class="muted" style="margin-top:-8px;">Elige primero el tipo de comprobante y luego el concepto — juntos arman la cuenta contable y el tipo de documento que se usan en el export de <a href="{{ url_for('liquidaciones.resumen_view') }}" target="_blank">Resumen contable</a>. Si el concepto que necesitas no está en la lista, un Administrador puede agregarlo desde <a href="{{ url_for('liquidaciones.concepts_list') }}" target="_blank">Liquidaciones → Conceptos</a>.</p>
+
+  <label>Tipo de comprobante *
+    <span style="display:flex; gap:18px; align-items:center; margin-top:4px;">
+      <label style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;">
+        <input type="radio" name="voucher_type" value="factura" onchange="onConceptChange()" {{ 'checked' if expense and expense.voucher_type == 'factura' }}> Factura
+      </label>
+      <label style="display:inline-flex; align-items:center; gap:6px; font-weight:normal;">
+        <input type="radio" name="voucher_type" value="boleta" onchange="onConceptChange()" {{ 'checked' if not expense or expense.voucher_type != 'factura' }}> Boleta
+      </label>
+    </span>
+  </label>
+  <p class="muted" style="margin-top:-8px;">Si es factura, la cuenta contable se fuerza a 42121 para cualquier concepto. Si es boleta, se mantiene la cuenta y el tipo de documento propios del concepto elegido.</p>
 
   <div class="form-row">
     <label>Concepto *
@@ -77,6 +89,26 @@
     <label>Cuenta / comprobante
       <input type="text" id="concept_info" value="" readonly placeholder="Se completa al elegir un concepto" style="background:var(--bg-soft, #f3f5f8);">
     </label>
+  </div>
+
+  <div id="fuel-fields" style="display:none;">
+    <div class="form-row">
+      <label>Nombre de grifo
+        <input type="text" name="fuel_station_name" id="fuel_station_name" value="{{ expense.fuel_station_name if expense else '' }}">
+      </label>
+      <label>Cantidad de galones
+        <input type="number" step="0.01" name="fuel_gallons" id="fuel_gallons" value="{{ expense.fuel_gallons if expense and expense.fuel_gallons is not none else '' }}" oninput="onFuelInput()">
+      </label>
+    </div>
+    <div class="form-row">
+      <label>Precio unitario (S/)
+        <input type="number" step="0.01" name="fuel_unit_price" id="fuel_unit_price" value="{{ expense.fuel_unit_price if expense and expense.fuel_unit_price is not none else '' }}" oninput="onFuelInput()">
+      </label>
+      <label>Precio total (S/)
+        <input type="text" id="fuel_total" value="" readonly style="background:var(--bg-soft, #f3f5f8);">
+      </label>
+    </div>
+    <p class="muted" style="margin-top:-8px;">El precio total se calcula solo (galones × precio unitario) y completa el campo "Monto (S/)" de arriba.</p>
   </div>
 
   <div class="form-row">
@@ -129,20 +161,76 @@
 
 <script>
   var CONCEPTS = {{ (concepts_json or []) | tojson }};
+
+  // Tipo de comprobante (10 sep, pedido de Braulio): se elige ANTES del
+  // concepto. "Factura" fuerza la cuenta a 42121 sin importar el concepto;
+  // "Boleta" mantiene la cuenta/comprobante propios del concepto elegido,
+  // como ya funcionaba (ver resolve_expense_account() en app/accounting.py,
+  // usado igual al armar el export contable).
+  function getVoucherType() {
+    var radios = document.getElementsByName('voucher_type');
+    for (var i = 0; i < radios.length; i++) {
+      if (radios[i].checked) { return radios[i].value; }
+    }
+    return 'boleta';
+  }
+
+  function findConcept(id) {
+    for (var i = 0; i < CONCEPTS.length; i++) {
+      if (String(CONCEPTS[i].id) === String(id)) { return CONCEPTS[i]; }
+    }
+    return null;
+  }
+
   function onConceptChange() {
     var select = document.getElementById('concept_id');
     var info = document.getElementById('concept_info');
     var id = select.value;
-    if (!id) { info.value = ''; return; }
-    for (var i = 0; i < CONCEPTS.length; i++) {
-      if (String(CONCEPTS[i].id) === String(id)) {
-        info.value = 'Cuenta ' + CONCEPTS[i].account_code + ' · ' + CONCEPTS[i].voucher_type_label;
-        return;
-      }
+    var concept = id ? findConcept(id) : null;
+    if (!concept) {
+      info.value = '';
+    } else if (getVoucherType() === 'factura') {
+      info.value = 'Cuenta 42121 · Factura (se fuerza por ser factura)';
+    } else {
+      info.value = 'Cuenta ' + concept.account_code + ' · ' + concept.voucher_type_label;
     }
-    info.value = '';
+    toggleFuelFields(concept);
   }
   document.addEventListener('DOMContentLoaded', onConceptChange);
+
+  // Cuadros de combustible (10 sep, pedido de Braulio): "Nombre de grifo,
+  // Cantidad de galones, precio unitario y precio total" — visibles solo
+  // cuando el concepto elegido es "Combustible". El precio total se
+  // calcula solo (galones × precio unitario) y completa el Monto de
+  // arriba, que se vuelve de solo lectura mientras tanto para que no quede
+  // desincronizado del cálculo.
+  function toggleFuelFields(concept) {
+    var block = document.getElementById('fuel-fields');
+    var amountInput = document.querySelector('input[name="amount"]');
+    var isFuel = !!concept && String(concept.name || '').toUpperCase() === 'COMBUSTIBLE';
+    block.style.display = isFuel ? '' : 'none';
+    if (amountInput) {
+      amountInput.readOnly = isFuel;
+      amountInput.style.background = isFuel ? 'var(--bg-soft, #f3f5f8)' : '';
+    }
+    if (isFuel) { onFuelInput(); }
+  }
+
+  function onFuelInput() {
+    var gallonsInput = document.getElementById('fuel_gallons');
+    var priceInput = document.getElementById('fuel_unit_price');
+    var totalInput = document.getElementById('fuel_total');
+    var amountInput = document.querySelector('input[name="amount"]');
+    var gallons = parseFloat(gallonsInput.value);
+    var price = parseFloat(priceInput.value);
+    if (isNaN(gallons) || isNaN(price)) {
+      totalInput.value = '';
+      return;
+    }
+    var total = Math.round(gallons * price * 100) / 100;
+    totalInput.value = total.toFixed(2);
+    if (amountInput) { amountInput.value = total.toFixed(2); }
+  }
 
   // La Unidad se completa sola con la que ya tiene asignada el viaje
   // elegido (trips.vehicle_id) — no tiene sentido volver a preguntarla si
