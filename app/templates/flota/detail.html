@@ -91,7 +91,7 @@
       {% for key, column, form_field, label, applies_to, optional in document_types %}
       {% if vehicle.vehicle_type in applies_to %}
       <label>{{ label }}{% if optional %} (opcional){% endif %} (foto o PDF)
-        <input type="file" name="{{ form_field }}" accept=".png,.jpg,.jpeg,.pdf,.webp,.heic,.heif">
+        <input type="file" name="{{ form_field }}" accept=".png,.jpg,.jpeg,.pdf,.webp,.heic,.heif" class="js-scan-input">
       </label>
       {% endif %}
       {% endfor %}

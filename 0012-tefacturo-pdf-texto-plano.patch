@@ -1,0 +1,78 @@
+From c1dc059ea273d1bb4fd0ccf87d415f46c5ce0ddb Mon Sep 17 00:00:00 2001
+From: Dev <dev@example.com>
+Date: Tue, 8 Sep 2026 17:37:51 +0000
+Subject: [PATCH] tefacturo.pe: get_pdf_bytes soporta respuesta en texto plano
+ (no JSON) de consultarPdf (8 sep)
+
+---
+ app/integrations/sunat_ose.py | 44 ++++++++++++++++++++++++++++++++---
+ 1 file changed, 41 insertions(+), 3 deletions(-)
+
+diff --git a/app/integrations/sunat_ose.py b/app/integrations/sunat_ose.py
+index 22e6d3b..4027a48 100644
+--- a/app/integrations/sunat_ose.py
++++ b/app/integrations/sunat_ose.py
+@@ -215,7 +215,18 @@ class TefacturoClient:
+     def get_pdf_bytes(self, tipo_comprobante, serie, numero):
+         """Descarga el PDF de un comprobante ya emitido y devuelve sus
+         bytes (decodificados de base64). tipo_comprobante: '01' = factura,
+-        '09' = guía de remisión."""
++        '09' = guía de remisión.
++
++        Confirmado en real (8 sep, Factura F-0003 — quedó ACEPTADA por
++        SUNAT, pero la descarga del PDF falló con "Respuesta inesperada de
++        tefacturo.pe: Expecting value: line 1 column 1 (char 0)"):
++        `consultarPdf` NO envuelve la respuesta en JSON como el resto de
++        endpoints — devuelve el base64 del PDF como texto plano directo
++        (sin comillas ni llaves), así que `_request()` (que siempre hace
++        `json.loads`) fallaba antes de llegar siquiera a `_extract_base64_pdf`.
++        Por eso esta llamada se arma a mano en vez de reusar `_request()`:
++        intenta interpretar la respuesta como JSON (por si en algún caso sí
++        viene envuelta) y, si eso falla, usa el texto tal cual."""
+         self._require_configured()
+         body = {
+             "emisor": int(self.ruc),
+@@ -223,11 +234,38 @@ class TefacturoClient:
+             "serie": serie,
+             "tipoComprobante": tipo_comprobante,
+         }
+-        result = self._request("PUT", f"/pdfapi/pdfapi/consultarPdf/{self.ruc}", body)
++        url = f"{self.base_url}/pdfapi/pdfapi/consultarPdf/{self.ruc}"
++        data = json.dumps(body).encode("utf-8")
++        headers = {"Content-Type": "application/json"}
++        token = self._get_token()
++        if token:
++            headers["Authorization"] = f"Bearer {token}"
++        req = urllib.request.Request(url, data=data, headers=headers, method="PUT")
++        try:
++            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
++                raw = resp.read().decode("utf-8")
++        except urllib.error.HTTPError as exc:
++            detail = exc.read().decode("utf-8", "ignore")
++            raise SunatOseError(f"tefacturo.pe respondió {exc.code} al consultar el PDF: {detail}")
++        except urllib.error.URLError as exc:
++            raise SunatOseError(f"No se pudo conectar con tefacturo.pe ({url}): {exc.reason}")
++
++        raw = raw.strip()
++        if not raw:
++            raise SunatOseError("tefacturo.pe no devolvió el PDF del comprobante.")
++
++        try:
++            result = json.loads(raw)
++        except (json.JSONDecodeError, ValueError):
++            result = raw
++
+         b64 = _extract_base64_pdf(result)
+         if not b64:
+             raise SunatOseError("tefacturo.pe no devolvió el PDF del comprobante.")
+-        return base64.b64decode(b64)
++        try:
++            return base64.b64decode(b64.strip(), validate=False)
++        except (ValueError, TypeError) as exc:
++            raise SunatOseError(f"El PDF devuelto por tefacturo.pe no se pudo decodificar: {exc}")
+ 
+ 
+ def _extract_base64_pdf(result):
+-- 
+2.43.0
+

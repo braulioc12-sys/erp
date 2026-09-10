@@ -110,12 +110,12 @@
   <p class="muted" style="margin-top:-8px;">Déjalo vacío para que el sistema use el tipo de cambio SUNAT de la fecha del gasto. Solo complétalo a mano si el servicio no respondió o quieres forzar un valor distinto. La fecha de vencimiento se registra igual a la fecha de emisión.</p>
 
   <label>Comprobante — tomar foto ahora (opcional)
-    <input type="file" name="receipt" accept="image/*" capture="environment">
+    <input type="file" name="receipt" accept="image/*" capture="environment" class="js-scan-input">
   </label>
-  <p class="muted" style="margin-top:-8px;">En el celular esto abre la cámara directamente. Si prefieres elegir una foto ya tomada o un PDF, usa el campo de abajo en su lugar (llena solo uno de los dos).</p>
+  <p class="muted" style="margin-top:-8px;">En el celular esto abre la cámara directamente. Después de tomar la foto puedes ajustar las 4 esquinas del comprobante para que salga derecho y más legible. Si prefieres elegir una foto ya tomada o un PDF, usa el campo de abajo en su lugar (llena solo uno de los dos).</p>
 
   <label>Comprobante — o subir un archivo (foto o PDF, opcional)
-    <input type="file" name="receipt" accept=".png,.jpg,.jpeg,.pdf,.webp">
+    <input type="file" name="receipt" accept=".png,.jpg,.jpeg,.pdf,.webp" class="js-scan-input">
   </label>
   {% if expense and expense.receipt_filename %}
   <p class="muted" style="margin-top:-8px;">Ya tiene un comprobante adjunto — sube uno nuevo solo si quieres reemplazarlo.</p>

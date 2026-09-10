@@ -1,0 +1,26 @@
+From f170be6e39916adf0f31bd0e97e46990872c72f7 Mon Sep 17 00:00:00 2001
+From: ERP Dev <dev@erp.local>
+Date: Wed, 9 Sep 2026 16:48:10 +0000
+Subject: [PATCH] 0016: comisiones - fix GROUP BY incompatible con PostgreSQL
+ (500 en /viajes/comisiones)
+
+---
+ app/routes/viajes.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/app/routes/viajes.py b/app/routes/viajes.py
+index 6eb0163..342170e 100644
+--- a/app/routes/viajes.py
++++ b/app/routes/viajes.py
+@@ -784,7 +784,7 @@ def _commissions_by_driver(month):
+                JOIN drivers d2 ON d2.id = t.driver2_id
+                WHERE t.double_driver = 1 AND strftime('%Y-%m', t.scheduled_date) = ? AND t.status != 'CANCELADO'
+            ) combined
+-           GROUP BY driver_id, origin, destination
++           GROUP BY driver_id, driver_name, origin, destination
+            ORDER BY driver_name, origin, destination""",
+         (month, month),
+     )
+-- 
+2.43.0
+

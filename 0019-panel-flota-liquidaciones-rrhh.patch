@@ -1,0 +1,436 @@
+From 1dbd25547fb8aabc13958d7436d60918ef11caa5 Mon Sep 17 00:00:00 2001
+From: ERP Dev <dev@erp.local>
+Date: Wed, 9 Sep 2026 17:33:10 +0000
+Subject: [PATCH] 0019: Panel (alertas agrupadas por tipo), Flota (revision
+ tecnica especial opcional) y Liquidaciones (aprobacion de RRHH exclusiva de
+ Administrador)
+
+---
+ app/db.py                               | 10 +++
+ app/routes/flota.py                     | 38 ++++++----
+ app/routes/liquidaciones.py             | 40 ++++++++++-
+ app/schema.sql                          | 20 ++++++
+ app/static/css/style.css                | 14 ++++
+ app/templates/dashboard/index.html      | 93 ++++++++++++++++++-------
+ app/templates/flota/detail.html         | 10 +--
+ app/templates/liquidaciones/detail.html | 28 ++++++++
+ app/templates/liquidaciones/list.html   | 13 +++-
+ 9 files changed, 217 insertions(+), 49 deletions(-)
+
+diff --git a/app/db.py b/app/db.py
+index 61fcf59..27cf9df 100644
+--- a/app/db.py
++++ b/app/db.py
+@@ -395,6 +395,16 @@ COLUMN_MIGRATIONS = [
+     ("vehicles", "technical_review_filename", "TEXT"),
+     ("vehicles", "mtc_filename", "TEXT"),
+     ("vehicles", "civil_liability_policy_filename", "TEXT"),
++    # "Revisión técnica especial" (9 sep, pedido de Braulio) — opcional,
++    # ver VEHICLE_DOCUMENT_TYPES en app/routes/flota.py.
++    ("vehicles", "special_technical_review_filename", "TEXT"),
++    # Aprobación de RRHH de una liquidación cerrada (9 sep, pedido de
++    # Braulio) — exclusiva de Administrador, ver el comentario de estas
++    # columnas en schema.sql (CREATE TABLE expense_advances) y
++    # rrhh_approve() en app/routes/liquidaciones.py.
++    ("expense_advances", "rrhh_approved_at", "TEXT"),
++    ("expense_advances", "rrhh_approved_by_name", "TEXT"),
++    ("expense_advances", "rrhh_approved_by_user_id", "INTEGER REFERENCES users(id)"),
+ ]
+ 
+ 
+diff --git a/app/routes/flota.py b/app/routes/flota.py
+index c7000a3..b21b474 100644
+--- a/app/routes/flota.py
++++ b/app/routes/flota.py
+@@ -39,19 +39,29 @@ VEHICLE_DOCUMENT_FIELDS = [
+ # de tracto ... Tarjeta de propiedad, SOat, revision tecnica, MTC y poliza
+ # de responsabilidad civil. En el caso de las carretas tarjeta de
+ # propiedad, revision tecnica y mtc"). Cada tupla es
+-# (clave_en_url, columna_en_bd, campo_del_formulario, etiqueta, tipos_que_lo_necesitan).
+-# CAMION se trata igual que TRACTO (unidad completa que circula sola) —
+-# Braulio no lo mencionó explícitamente, pero no tiene sentido excluirlo de
+-# documentos que exige SUNAT/MTC a cualquier vehículo que no sea un
+-# remolque. Mismo criterio de formatos permitidos que la guía de
+-# transportista de un viaje (ver ALLOWED_WAYBILL_EXTENSIONS en
+-# app/routes/viajes.py): foto o PDF.
++# (clave_en_url, columna_en_bd, campo_del_formulario, etiqueta,
++# tipos_que_lo_necesitan, opcional). CAMION se trata igual que TRACTO
++# (unidad completa que circula sola) — Braulio no lo mencionó
++# explícitamente, pero no tiene sentido excluirlo de documentos que exige
++# SUNAT/MTC a cualquier vehículo que no sea un remolque. Mismo criterio de
++# formatos permitidos que la guía de transportista de un viaje (ver
++# ALLOWED_WAYBILL_EXTENSIONS en app/routes/viajes.py): foto o PDF.
++#
++# "Revisión técnica especial" (9 sep, pedido de Braulio) se agregó como un
++# documento APARTE de la Revisión técnica normal — no todas las unidades la
++# tramitan (aplica a casos particulares, ej. conversión a GLP/GNV o
++# transporte de mercancías especiales), así que es el único documento
++# marcado `opcional=True`: no se resalta como faltante en ningún lado ni
++# bloquea nada, simplemente está disponible para subirla si corresponde.
++# Se dejó disponible para los 3 tipos de unidad (igual que Revisión
++# técnica) — avisar si en la práctica solo debe aplicar a algunos.
+ VEHICLE_DOCUMENT_TYPES = [
+-    ("tarjeta-propiedad", "property_card_filename", "property_card_file", "Tarjeta de propiedad", {"CAMION", "TRACTO", "CARRETA"}),
+-    ("soat", "soat_filename", "soat_file", "SOAT", {"CAMION", "TRACTO"}),
+-    ("revision-tecnica", "technical_review_filename", "technical_review_file", "Revisión técnica", {"CAMION", "TRACTO", "CARRETA"}),
+-    ("mtc", "mtc_filename", "mtc_file", "MTC", {"CAMION", "TRACTO", "CARRETA"}),
+-    ("poliza-responsabilidad-civil", "civil_liability_policy_filename", "civil_liability_policy_file", "Póliza de responsabilidad civil", {"CAMION", "TRACTO"}),
++    ("tarjeta-propiedad", "property_card_filename", "property_card_file", "Tarjeta de propiedad", {"CAMION", "TRACTO", "CARRETA"}, False),
++    ("soat", "soat_filename", "soat_file", "SOAT", {"CAMION", "TRACTO"}, False),
++    ("revision-tecnica", "technical_review_filename", "technical_review_file", "Revisión técnica", {"CAMION", "TRACTO", "CARRETA"}, False),
++    ("revision-tecnica-especial", "special_technical_review_filename", "special_technical_review_file", "Revisión técnica especial", {"CAMION", "TRACTO", "CARRETA"}, True),
++    ("mtc", "mtc_filename", "mtc_file", "MTC", {"CAMION", "TRACTO", "CARRETA"}, False),
++    ("poliza-responsabilidad-civil", "civil_liability_policy_filename", "civil_liability_policy_file", "Póliza de responsabilidad civil", {"CAMION", "TRACTO"}, False),
+ ]
+ VEHICLE_DOCUMENT_TYPES_BY_KEY = {key: t for t in VEHICLE_DOCUMENT_TYPES for key in [t[0]]}
+ 
+@@ -197,7 +207,7 @@ def save_vehicle_documents(vehicle_id):
+     updates = []
+     params = []
+     any_file_sent = False
+-    for key, column, form_field, label, applies_to in VEHICLE_DOCUMENT_TYPES:
++    for key, column, form_field, label, applies_to, optional in VEHICLE_DOCUMENT_TYPES:
+         if vehicle["vehicle_type"] not in applies_to:
+             continue
+         file_storage = request.files.get(form_field)
+@@ -224,7 +234,7 @@ def vehicle_document_file(vehicle_id, doc_key):
+     doc_type = VEHICLE_DOCUMENT_TYPES_BY_KEY.get(doc_key)
+     if doc_type is None:
+         abort(404)
+-    _, column, _, _, _ = doc_type
++    _, column, _, _, _, _ = doc_type
+     vehicle = query_one(f"SELECT {column} AS filename FROM vehicles WHERE id = ?", (vehicle_id,))
+     if vehicle is None or not vehicle["filename"]:
+         abort(404)
+diff --git a/app/routes/liquidaciones.py b/app/routes/liquidaciones.py
+index ca81408..ea22557 100644
+--- a/app/routes/liquidaciones.py
++++ b/app/routes/liquidaciones.py
+@@ -381,7 +381,7 @@ def detail(advance_id):
+     return render_template(
+         "liquidaciones/detail.html", advance=advance, expenses=expenses, spent=spent, difference=difference,
+         payments=payments, offices=offices, office_labels={code: info["label"] for code, info in offices},
+-        route=route, today=today_str(),
++        route=route, today=today_str(), is_admin=("ADMIN" in g.user["roles"]),
+     )
+ 
+ 
+@@ -477,6 +477,44 @@ def liquidate(advance_id):
+     return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
+ 
+ 
++@bp.route("/<int:advance_id>/aprobar-rrhh", methods=["POST"])
++@permission_required("liquidaciones", "edit")
++def rrhh_approve(advance_id):
++    """9 sep, pedido de Braulio: "una vez que se cierren [las liquidaciones]
++    tienen que estar listas para ser enviadas a RRHH, pero para esto solo
++    el administrador puede dar el OK final luego de ver el consumo de
++    combustible para los casos de excesos". Exclusivo de Administrador,
++    chequeado por ROL directamente aquí y no solo por el permiso "edit" del
++    módulo (que también tiene Contabilidad) — mismo criterio que
++    inventarios.purchases_authorize(). Solo se puede dar el OK sobre una
++    liquidación ya cerrada (status = 'LIQUIDADO'); no se exige haber
++    registrado combustible primero (no todas las rutas lo tienen cargado
++    todavía), pero el detalle muestra el combustible/exceso de forma
++    prominente para que el administrador lo revise antes de aprobar."""
++    if not validate_csrf():
++        abort(400)
++    if "ADMIN" not in g.user["roles"]:
++        flash("Solo un Administrador puede dar el OK final para enviar una liquidación a RRHH.", "error")
++        return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
++    advance = query_one("SELECT * FROM expense_advances WHERE id = ?", (advance_id,))
++    if advance is None:
++        abort(404)
++    if advance["status"] != "LIQUIDADO":
++        flash("Primero hay que cerrar la liquidación antes de poder aprobarla para RRHH.", "error")
++        return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
++    if advance["rrhh_approved_at"]:
++        flash("Esta liquidación ya estaba aprobada para RRHH.", "error")
++        return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
++    execute(
++        """UPDATE expense_advances
++           SET rrhh_approved_at = datetime('now'), rrhh_approved_by_name = ?, rrhh_approved_by_user_id = ?
++           WHERE id = ?""",
++        (g.user["name"], g.user["id"], advance_id),
++    )
++    flash("Liquidación aprobada — ya está lista para enviarse a RRHH.", "success")
++    return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
++
++
+ # --- Gastos individuales de un viaje (o de una unidad, sin viaje) ---
+ 
+ def _expense_concepts(only_active=True, exclude_vale=False):
+diff --git a/app/schema.sql b/app/schema.sql
+index c9de209..064e2ca 100644
+--- a/app/schema.sql
++++ b/app/schema.sql
+@@ -110,6 +110,12 @@ CREATE TABLE IF NOT EXISTS vehicles (
+     property_card_filename TEXT,
+     soat_filename TEXT,
+     technical_review_filename TEXT,
++    -- 9 sep, pedido de Braulio: "revisión técnica especial", opcional para
++    -- cualquier tipo de unidad — a diferencia de los demás documentos de
++    -- esta tabla, no se resalta como faltante en ningún lado (ver
++    -- VEHICLE_DOCUMENT_TYPES en app/routes/flota.py, único con
++    -- `opcional=True`).
++    special_technical_review_filename TEXT,
+     mtc_filename TEXT,
+     civil_liability_policy_filename TEXT,
+     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+@@ -697,6 +703,20 @@ CREATE TABLE IF NOT EXISTS expense_advances (
+     -- nunca se reinicia — ver `_next_liquidation_code` en
+     -- app/routes/liquidaciones.py.
+     code TEXT,
++    -- 9 sep, pedido de Braulio: "una vez que se cierren [las liquidaciones]
++    -- tienen que estar listas para ser enviadas a RRHH, pero para esto
++    -- solo el administrador puede dar el OK final luego de ver el consumo
++    -- de combustible para los casos de excesos". Es una aprobación
++    -- SEPARADA del cierre (status = 'LIQUIDADO') — mismo patrón que
++    -- inventory_purchases.authorized_at/authorized_by_* (autorización de
++    -- una orden de compra, exclusiva de Administrador, chequeada por ROL
++    -- directamente en el código y no por el permiso "edit" del módulo, ya
++    -- que Contabilidad también tiene "edit" sobre Liquidaciones pero no
++    -- debe poder dar este OK). NULL hasta que un Administrador la apruebe;
++    -- ver rrhh_approve() en app/routes/liquidaciones.py.
++    rrhh_approved_at TEXT,
++    rrhh_approved_by_name TEXT,
++    rrhh_approved_by_user_id INTEGER REFERENCES users(id),
+     created_by INTEGER REFERENCES users(id),
+     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+ );
+diff --git a/app/static/css/style.css b/app/static/css/style.css
+index afe9f4b..680d738 100644
+--- a/app/static/css/style.css
++++ b/app/static/css/style.css
+@@ -180,6 +180,20 @@ textarea { resize: vertical; min-height: 70px; }
+ .alert-list { display: flex; flex-direction: column; gap: 8px; }
+ .alert-item { padding: 10px 14px; border-radius: 8px; background: var(--warning-soft); color: var(--warning); font-size: 0.88rem; display: flex; justify-content: space-between; gap: 10px; }
+ 
++/* Alertas del Panel agrupadas por tipo (9 sep) — cada tipo en su propio
++   <details> colapsable, para que el panel no se vea como un listado
++   interminable con decenas de alertas mezcladas. */
++.alert-groups { display: flex; flex-direction: column; gap: 10px; }
++.alert-group { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
++.alert-group summary { cursor: pointer; padding: 12px 14px; font-weight: 600; font-size: 0.92rem; background: var(--bg); display: flex; justify-content: space-between; gap: 10px; list-style: none; }
++.alert-group summary::-webkit-details-marker { display: none; }
++.alert-group summary::before { content: '▸'; margin-right: 8px; color: var(--text-muted); font-size: 0.75rem; }
++.alert-group[open] summary::before { content: '▾'; }
++.alert-group summary.alert-group-overdue { color: var(--danger); background: var(--danger-soft); }
++.alert-count { font-weight: 500; color: var(--text-muted); font-size: 0.85rem; }
++.alert-group summary.alert-group-overdue .alert-count { color: var(--danger); }
++.alert-group .alert-list { padding: 10px 14px 14px; }
++
+ /* Diagrama de neumáticos */
+ .tire-body { fill: var(--surface); stroke: var(--border); stroke-width: 2; }
+ .tire-axle { stroke: var(--border); stroke-width: 4; }
+diff --git a/app/templates/dashboard/index.html b/app/templates/dashboard/index.html
+index b751d6f..cbc9cd6 100644
+--- a/app/templates/dashboard/index.html
++++ b/app/templates/dashboard/index.html
+@@ -33,33 +33,72 @@
+ {% if driver_document_alerts or vehicle_document_alerts or maintenance_alerts or km_alerts or budget_alerts or tire_alerts %}
+ <div class="panel">
+   <h2>Alertas próximas</h2>
+-  <div class="alert-list">
+-    {% for a in driver_document_alerts %}
+-    <div class="alert-item"><span>{{ a.document }} de <strong>{{ a.name }}</strong> {{ 'ya venció' if a.overdue else 'vence' }}</span><span>{{ a.expiry }}</span></div>
+-    {% endfor %}
+-    {% for a in vehicle_document_alerts %}
+-    <div class="alert-item"><span>{{ a.document }} de la unidad <strong>{{ a.plate }}</strong> {{ 'ya venció' if a.overdue else 'vence' }}</span><span>{{ a.expiry }}</span></div>
+-    {% endfor %}
+-    {% for a in maintenance_alerts %}
+-    <div class="alert-item"><span>Mantenimiento programado — unidad <strong>{{ a.plate }}</strong></span><span>{{ a.next_due_date }}</span></div>
+-    {% endfor %}
+-    {% for a in km_alerts %}
+-    <div class="alert-item">
+-      <span>Unidad <strong>{{ a.plate }}</strong> {{ 'ya superó' if a.overdue else 'se acerca a' }} su próximo mantenimiento por kilometraje</span>
+-      <span>{{ '{:,.0f}'.format(a.current_km) }} / {{ '{:,.0f}'.format(a.next_due_km) }} km{% if not a.overdue %} (faltan {{ '{:,.0f}'.format(a.remaining_km) }} km){% endif %}</span>
+-    </div>
+-    {% endfor %}
+-    {% for a in budget_alerts %}
+-    <div class="alert-item">
+-      <span>{{ a.label }} {{ 'superó' if a.over else 'se acerca a' }} su presupuesto mensual de gastos</span>
+-      <span>{{ a.spent|money }} / {{ a.budget|money }} ({{ (a.ratio * 100)|round|int }}%)</span>
+-    </div>
+-    {% endfor %}
+-    {% for a in tire_alerts %}
+-    <div class="alert-item">
+-      <span>Neumático en <strong>{{ a.position_label }}</strong> de la unidad <strong>{{ a.plate }}</strong> {{ 'ya superó' if a.overdue else 'se acerca a' }} su vida útil</span>
+-      <span>{{ '{:,.0f}'.format(a.accumulated_km) }} / {{ '{:,.0f}'.format(a.expected_life_km) }} km ({{ a.percent }}%)</span>
+-    </div>
++  {# 9 sep, pedido de Braulio: "agrupar las alertas por tipo, para que no
++     se vea un listado tan largo" — antes todas las alertas (documentos de
++     conductores/unidades, mantenimiento por fecha y por kilometraje,
++     presupuestos, neumáticos) salían en una sola lista plana, que con
++     varias decenas de alertas se volvía interminable. Ahora cada tipo va
++     en su propio grupo colapsable (<details>), con el total entre
++     paréntesis en el título — así se ve de un vistazo cuántas hay de cada
++     tipo sin tener que desplazarse por todas. Un grupo con al menos una
++     alerta YA VENCIDA se abre expandido de entrada (y su título se marca
++     en rojo) para que lo urgente no quede escondido; el resto arranca
++     colapsado. #}
++  {% set alert_groups = [
++    ('Documentos de conductores', driver_document_alerts),
++    ('Documentos de unidades', vehicle_document_alerts),
++    ('Mantenimiento programado', maintenance_alerts),
++    ('Mantenimiento por kilometraje', km_alerts),
++    ('Presupuestos de gastos', budget_alerts),
++    ('Neumáticos', tire_alerts),
++  ] %}
++  <div class="alert-groups">
++    {% for group_label, group_alerts in alert_groups %}
++      {% if group_alerts %}
++      {% set group_overdue = group_alerts|selectattr('overdue')|list|length if group_label != 'Presupuestos de gastos' else group_alerts|selectattr('over')|list|length %}
++      <details class="alert-group" {% if group_overdue %}open{% endif %}>
++        <summary class="{{ 'alert-group-overdue' if group_overdue else '' }}">
++          <span>{{ group_label }}</span>
++          <span class="alert-count">{{ group_alerts|length }}{% if group_overdue %} · {{ group_overdue }} vencida(s){% endif %}</span>
++        </summary>
++        <div class="alert-list">
++          {% if group_label == 'Documentos de conductores' %}
++            {% for a in group_alerts %}
++            <div class="alert-item"><span>{{ a.document }} de <strong>{{ a.name }}</strong> {{ 'ya venció' if a.overdue else 'vence' }}</span><span>{{ a.expiry }}</span></div>
++            {% endfor %}
++          {% elif group_label == 'Documentos de unidades' %}
++            {% for a in group_alerts %}
++            <div class="alert-item"><span>{{ a.document }} de la unidad <strong>{{ a.plate }}</strong> {{ 'ya venció' if a.overdue else 'vence' }}</span><span>{{ a.expiry }}</span></div>
++            {% endfor %}
++          {% elif group_label == 'Mantenimiento programado' %}
++            {% for a in group_alerts %}
++            <div class="alert-item"><span>Mantenimiento programado — unidad <strong>{{ a.plate }}</strong></span><span>{{ a.next_due_date }}</span></div>
++            {% endfor %}
++          {% elif group_label == 'Mantenimiento por kilometraje' %}
++            {% for a in group_alerts %}
++            <div class="alert-item">
++              <span>Unidad <strong>{{ a.plate }}</strong> {{ 'ya superó' if a.overdue else 'se acerca a' }} su próximo mantenimiento por kilometraje</span>
++              <span>{{ '{:,.0f}'.format(a.current_km) }} / {{ '{:,.0f}'.format(a.next_due_km) }} km{% if not a.overdue %} (faltan {{ '{:,.0f}'.format(a.remaining_km) }} km){% endif %}</span>
++            </div>
++            {% endfor %}
++          {% elif group_label == 'Presupuestos de gastos' %}
++            {% for a in group_alerts %}
++            <div class="alert-item">
++              <span>{{ a.label }} {{ 'superó' if a.over else 'se acerca a' }} su presupuesto mensual de gastos</span>
++              <span>{{ a.spent|money }} / {{ a.budget|money }} ({{ (a.ratio * 100)|round|int }}%)</span>
++            </div>
++            {% endfor %}
++          {% elif group_label == 'Neumáticos' %}
++            {% for a in group_alerts %}
++            <div class="alert-item">
++              <span>Neumático en <strong>{{ a.position_label }}</strong> de la unidad <strong>{{ a.plate }}</strong> {{ 'ya superó' if a.overdue else 'se acerca a' }} su vida útil</span>
++              <span>{{ '{:,.0f}'.format(a.accumulated_km) }} / {{ '{:,.0f}'.format(a.expected_life_km) }} km ({{ a.percent }}%)</span>
++            </div>
++            {% endfor %}
++          {% endif %}
++        </div>
++      </details>
++      {% endif %}
+     {% endfor %}
+   </div>
+ </div>
+diff --git a/app/templates/flota/detail.html b/app/templates/flota/detail.html
+index 2aaf97a..1c115f6 100644
+--- a/app/templates/flota/detail.html
++++ b/app/templates/flota/detail.html
+@@ -69,12 +69,12 @@
+ 
+ <div class="panel">
+   <h2>Documentos escaneados</h2>
+-  <p class="muted mt-0">Foto o PDF de cada documento, según el tipo de unidad — para tracto/camión: Tarjeta de propiedad, SOAT, Revisión técnica, MTC y Póliza de responsabilidad civil; para carreta: Tarjeta de propiedad, Revisión técnica y MTC.</p>
++  <p class="muted mt-0">Foto o PDF de cada documento, según el tipo de unidad — para tracto/camión: Tarjeta de propiedad, SOAT, Revisión técnica, MTC y Póliza de responsabilidad civil; para carreta: Tarjeta de propiedad, Revisión técnica y MTC. La Revisión técnica especial es opcional para cualquier tipo de unidad.</p>
+   <div class="detail-grid" style="margin-bottom:12px;">
+-    {% for key, column, form_field, label, applies_to in document_types %}
++    {% for key, column, form_field, label, applies_to, optional in document_types %}
+     {% if vehicle.vehicle_type in applies_to %}
+     <div class="detail-item">
+-      <div class="label">{{ label }}</div>
++      <div class="label">{{ label }}{% if optional %} <span class="muted">(opcional)</span>{% endif %}</div>
+       <div class="value">
+         {% if vehicle[column] %}
+         <a href="{{ url_for('flota.vehicle_document_file', vehicle_id=vehicle.id, doc_key=key) }}" target="_blank">Ver documento</a>
+@@ -88,9 +88,9 @@
+   <form method="post" action="{{ url_for('flota.save_vehicle_documents', vehicle_id=vehicle.id) }}" enctype="multipart/form-data" class="form" style="max-width:520px;">
+     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+     <div class="form-row">
+-      {% for key, column, form_field, label, applies_to in document_types %}
++      {% for key, column, form_field, label, applies_to, optional in document_types %}
+       {% if vehicle.vehicle_type in applies_to %}
+-      <label>{{ label }} (foto o PDF)
++      <label>{{ label }}{% if optional %} (opcional){% endif %} (foto o PDF)
+         <input type="file" name="{{ form_field }}" accept=".png,.jpg,.jpeg,.pdf,.webp,.heic,.heif">
+       </label>
+       {% endif %}
+diff --git a/app/templates/liquidaciones/detail.html b/app/templates/liquidaciones/detail.html
+index dda2515..7d0d868 100644
+--- a/app/templates/liquidaciones/detail.html
++++ b/app/templates/liquidaciones/detail.html
+@@ -141,6 +141,34 @@
+     Voucher: <strong>{{ '%02d'|format(advance.voucher_number) if advance.voucher_number else '—' }}</strong>.
+     Aparece en <a href="{{ url_for('liquidaciones.resumen_view', month=advance.liquidated_at[:7], office=advance.office) }}">Liquidaciones → Resumen contable</a>.</p>
+ </div>
++
++{# 9 sep, pedido de Braulio: "una vez que se cierren estas tienen que
++   estar listas para ser enviadas a RRHH, pero para esto solo el
++   administrador puede dar el OK final luego de ver el consumo de
++   combustible para los casos de excesos". Aprobación separada del cierre
++   — ver rrhh_approve() en app/routes/liquidaciones.py. #}
++<div class="panel">
++  <h2>Envío a RRHH</h2>
++  {% if advance.rrhh_approved_at %}
++  <p class="mt-0" style="color:var(--success);">✓ Aprobada para RRHH el {{ advance.rrhh_approved_at }} por <strong>{{ advance.rrhh_approved_by_name }}</strong> — ya está lista para enviarse.</p>
++  {% else %}
++    {% if advance.fuel_excess %}
++    <p class="mt-0" style="color:var(--danger);">Esta liquidación registra un exceso de combustible de <strong>{{ '%.2f gal'|format(advance.fuel_excess) }}</strong> (ver "Consumo de combustible" arriba) — revísalo antes de aprobar.</p>
++    {% elif advance.fuel_actual is none %}
++    <p class="muted mt-0">Todavía no se registró el combustible real de este viaje (ver "Consumo de combustible" arriba).</p>
++    {% else %}
++    <p class="muted mt-0">Sin exceso de combustible registrado.</p>
++    {% endif %}
++    {% if is_admin %}
++    <form method="post" action="{{ url_for('liquidaciones.rrhh_approve', advance_id=advance.id) }}" onsubmit="return confirm('¿Dar el OK final y marcar esta liquidación como lista para enviarse a RRHH?');">
++      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
++      <button type="submit" class="btn btn-primary">Dar OK y marcar lista para RRHH</button>
++    </form>
++    {% else %}
++    <p class="muted mt-0">Pendiente de la aprobación de un Administrador antes de poder enviarse a RRHH.</p>
++    {% endif %}
++  {% endif %}
++</div>
+ {% endif %}
+ 
+ {% if advance.notes %}
+diff --git a/app/templates/liquidaciones/list.html b/app/templates/liquidaciones/list.html
+index 3b53e3d..51ef95e 100644
+--- a/app/templates/liquidaciones/list.html
++++ b/app/templates/liquidaciones/list.html
+@@ -20,7 +20,7 @@
+ 
+ <div class="table-wrap">
+   <table>
+-    <thead><tr><th>Código</th><th>Viaje</th><th>Ruta</th><th class="text-right">Entregado</th><th class="text-right">Gastado</th><th>Estado</th><th>Oficina</th><th>Voucher</th></tr></thead>
++    <thead><tr><th>Código</th><th>Viaje</th><th>Ruta</th><th class="text-right">Entregado</th><th class="text-right">Gastado</th><th>Estado</th><th>Oficina</th><th>Voucher</th><th>RRHH</th></tr></thead>
+     <tbody>
+       {% for a in advances %}
+       <tr onclick="window.location='{{ url_for('liquidaciones.detail', advance_id=a.id) }}'" style="cursor:pointer;">
+@@ -32,9 +32,18 @@
+         <td>{{ m.badge(a.status) }}</td>
+         <td>{{ a.office or '—' }}</td>
+         <td>{{ '%02d'|format(a.voucher_number) if a.voucher_number else '—' }}</td>
++        <td>
++          {% if a.rrhh_approved_at %}
++          <span style="color:var(--success); font-weight:600;">Lista</span>
++          {% elif a.status == 'LIQUIDADO' %}
++          <span class="muted">Pendiente de OK</span>
++          {% else %}
++          <span class="muted">—</span>
++          {% endif %}
++        </td>
+       </tr>
+       {% else %}
+-      <tr><td colspan="8" class="table-empty">No hay liquidaciones registradas todavía.</td></tr>
++      <tr><td colspan="9" class="table-empty">No hay liquidaciones registradas todavía.</td></tr>
+       {% endfor %}
+     </tbody>
+   </table>
+-- 
+2.43.0
+

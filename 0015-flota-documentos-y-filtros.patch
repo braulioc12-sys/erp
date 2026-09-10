@@ -1,0 +1,421 @@
+From 7d120a532df6df3374776027a1b06328cd68cfe5 Mon Sep 17 00:00:00 2001
+From: ERP Dev <dev@erp.local>
+Date: Wed, 9 Sep 2026 16:23:21 +0000
+Subject: [PATCH] 0015: Flota - documentos por tipo de unidad + filtros de
+ lista (Tipo/Estado/Modelo)
+
+---
+ app/db.py                       |   7 ++
+ app/routes/flota.py             | 163 ++++++++++++++++++++++++++++++--
+ app/schema.sql                  |  17 ++++
+ app/storage.py                  |  33 +++++++
+ app/templates/flota/detail.html |  36 +++++++
+ app/templates/flota/list.html   |  29 +++++-
+ 6 files changed, 276 insertions(+), 9 deletions(-)
+
+diff --git a/app/db.py b/app/db.py
+index 475fee2..61fcf59 100644
+--- a/app/db.py
++++ b/app/db.py
+@@ -388,6 +388,13 @@ COLUMN_MIGRATIONS = [
+     ("invoices", "detraction_percentage", "REAL"),
+     ("invoices", "detraction_amount", "REAL"),
+     ("invoices", "detraction_bank_account", "TEXT"),
++    # Documentos de Flota (foto/PDF) — 9 sep, ver el comentario de estas
++    # mismas columnas en schema.sql (CREATE TABLE vehicles).
++    ("vehicles", "property_card_filename", "TEXT"),
++    ("vehicles", "soat_filename", "TEXT"),
++    ("vehicles", "technical_review_filename", "TEXT"),
++    ("vehicles", "mtc_filename", "TEXT"),
++    ("vehicles", "civil_liability_policy_filename", "TEXT"),
+ ]
+ 
+ 
+diff --git a/app/routes/flota.py b/app/routes/flota.py
+index 7d7a98d..c7000a3 100644
+--- a/app/routes/flota.py
++++ b/app/routes/flota.py
+@@ -1,7 +1,19 @@
++import uuid
+ from datetime import datetime, timedelta
+ 
+-from flask import Blueprint, Response, abort, flash, redirect, render_template, request, url_for
++from flask import (
++    Blueprint,
++    Response,
++    abort,
++    flash,
++    redirect,
++    render_template,
++    request,
++    send_from_directory,
++    url_for,
++)
+ 
++from app import storage
+ from app.auth import permission_required, validate_csrf
+ from app.bulk_import import (
+     OIL_CHANGE_COLUMNS,
+@@ -23,6 +35,57 @@ VEHICLE_DOCUMENT_FIELDS = [
+     ("technical_review_expiry", "Revisión técnica"),
+ ]
+ 
++# Documentos escaneados de una unidad (9 sep, pedido de Braulio: "en el caso
++# de tracto ... Tarjeta de propiedad, SOat, revision tecnica, MTC y poliza
++# de responsabilidad civil. En el caso de las carretas tarjeta de
++# propiedad, revision tecnica y mtc"). Cada tupla es
++# (clave_en_url, columna_en_bd, campo_del_formulario, etiqueta, tipos_que_lo_necesitan).
++# CAMION se trata igual que TRACTO (unidad completa que circula sola) —
++# Braulio no lo mencionó explícitamente, pero no tiene sentido excluirlo de
++# documentos que exige SUNAT/MTC a cualquier vehículo que no sea un
++# remolque. Mismo criterio de formatos permitidos que la guía de
++# transportista de un viaje (ver ALLOWED_WAYBILL_EXTENSIONS en
++# app/routes/viajes.py): foto o PDF.
++VEHICLE_DOCUMENT_TYPES = [
++    ("tarjeta-propiedad", "property_card_filename", "property_card_file", "Tarjeta de propiedad", {"CAMION", "TRACTO", "CARRETA"}),
++    ("soat", "soat_filename", "soat_file", "SOAT", {"CAMION", "TRACTO"}),
++    ("revision-tecnica", "technical_review_filename", "technical_review_file", "Revisión técnica", {"CAMION", "TRACTO", "CARRETA"}),
++    ("mtc", "mtc_filename", "mtc_file", "MTC", {"CAMION", "TRACTO", "CARRETA"}),
++    ("poliza-responsabilidad-civil", "civil_liability_policy_filename", "civil_liability_policy_file", "Póliza de responsabilidad civil", {"CAMION", "TRACTO"}),
++]
++VEHICLE_DOCUMENT_TYPES_BY_KEY = {key: t for t in VEHICLE_DOCUMENT_TYPES for key in [t[0]]}
++
++ALLOWED_VEHICLE_DOCUMENT_EXTENSIONS = {".png", ".jpg", ".jpeg", ".pdf", ".webp", ".heic", ".heif"}
++VEHICLE_DOCUMENT_MIME_TO_EXTENSION = {
++    "image/jpeg": ".jpg",
++    "image/png": ".png",
++    "image/webp": ".webp",
++    "image/heic": ".heic",
++    "image/heif": ".heif",
++    "application/pdf": ".pdf",
++}
++
++
++def _save_vehicle_document_file(file_storage):
++    """Igual que _save_waybill_file() en app/routes/viajes.py, pero
++    guardando con storage.save_vehicle_document(). Devuelve el nombre
++    guardado, o None si no se subió nada válido."""
++    import os
++
++    if not file_storage or not file_storage.filename:
++        return None
++    ext = os.path.splitext(file_storage.filename)[1].lower()
++    if ext not in ALLOWED_VEHICLE_DOCUMENT_EXTENSIONS:
++        ext = VEHICLE_DOCUMENT_MIME_TO_EXTENSION.get((file_storage.mimetype or "").lower())
++    if not ext:
++        return None
++    raw_bytes = file_storage.read()
++    if not raw_bytes:
++        return None
++    filename = f"{uuid.uuid4().hex}{ext}"
++    storage.save_vehicle_document(filename, raw_bytes)
++    return filename
++
+ 
+ def vehicle_document_alerts():
+     """Unidades cuyo SOAT o Revisión Técnica vence dentro de
+@@ -60,15 +123,46 @@ def list_view():
+     con solo una etiqueta "Inactivo" — daba la sensación de "se eliminó y
+     volvió a aparecer". Ahora la lista principal solo muestra unidades
+     activas/en mantenimiento por defecto; las inactivas quedan aparte, en
+-    ?ver=inactivas, con un enlace para ir y volver."""
++    ?ver=inactivas, con un enlace para ir y volver.
++
++    9 sep, pedido de Braulio: la lista también sale enumerada y se puede
++    filtrar por Tipo, Estado y Modelo (query string, mismo patrón de
++    filtros que viajes/list.html). Si se elige un Estado explícito, ese
++    filtro manda sobre el criterio activas/inactivas de arriba (si no,
++    ?ver=inactivas seguiría "peleando" con, por ejemplo, status=ACTIVO y
++    nunca mostraría nada)."""
+     show_inactive = request.args.get("ver") == "inactivas"
+-    if show_inactive:
+-        vehicles = query_all("SELECT * FROM vehicles WHERE status = 'INACTIVO' ORDER BY plate")
++    vehicle_type = request.args.get("vehicle_type", "").strip().upper()
++    status = request.args.get("status", "").strip().upper()
++    model = request.args.get("model", "").strip()
++
++    conditions = []
++    params = []
++    if status in ("ACTIVO", "MANTENIMIENTO", "INACTIVO"):
++        conditions.append("status = ?")
++        params.append(status)
++    elif show_inactive:
++        conditions.append("status = 'INACTIVO'")
+     else:
+-        vehicles = query_all("SELECT * FROM vehicles WHERE status != 'INACTIVO' ORDER BY plate")
++        conditions.append("status != 'INACTIVO'")
++    if vehicle_type in ("CAMION", "TRACTO", "CARRETA"):
++        conditions.append("vehicle_type = ?")
++        params.append(vehicle_type)
++    if model:
++        conditions.append("model LIKE ?")
++        params.append(f"%{model}%")
++    vehicles = query_all(
++        f"SELECT * FROM vehicles WHERE {' AND '.join(conditions)} ORDER BY plate", tuple(params)
++    )
+     inactive_count = query_one("SELECT COUNT(*) n FROM vehicles WHERE status = 'INACTIVO'")["n"]
+     return render_template(
+-        "flota/list.html", vehicles=vehicles, show_inactive=show_inactive, inactive_count=inactive_count
++        "flota/list.html",
++        vehicles=vehicles,
++        show_inactive=show_inactive,
++        inactive_count=inactive_count,
++        vehicle_type_filter=vehicle_type,
++        status_filter=status,
++        model_filter=model,
+     )
+ 
+ 
+@@ -82,7 +176,62 @@ def vehicle_detail(vehicle_id):
+     vehicle = query_one("SELECT * FROM vehicles WHERE id = ?", (vehicle_id,))
+     if vehicle is None:
+         abort(404)
+-    return render_template("flota/detail.html", vehicle=vehicle)
++    return render_template("flota/detail.html", vehicle=vehicle, document_types=VEHICLE_DOCUMENT_TYPES)
++
++
++@bp.route("/<int:vehicle_id>/documentos", methods=["POST"])
++@permission_required("flota", "edit")
++def save_vehicle_documents(vehicle_id):
++    """9 sep, pedido de Braulio: subir/actualizar los documentos escaneados
++    de una unidad (ver VEHICLE_DOCUMENT_TYPES) — Tarjeta de propiedad, SOAT,
++    Revisión técnica, MTC y Póliza de responsabilidad civil para
++    tracto/camión; Tarjeta de propiedad, Revisión técnica y MTC para
++    carretas. Solo se actualiza la columna de los documentos que trajeron
++    un archivo nuevo en este envío; el resto conserva el archivo que ya
++    tenía (mismo criterio que save_waybill() en app/routes/viajes.py)."""
++    if not validate_csrf():
++        abort(400)
++    vehicle = query_one("SELECT * FROM vehicles WHERE id = ?", (vehicle_id,))
++    if vehicle is None:
++        abort(404)
++    updates = []
++    params = []
++    any_file_sent = False
++    for key, column, form_field, label, applies_to in VEHICLE_DOCUMENT_TYPES:
++        if vehicle["vehicle_type"] not in applies_to:
++            continue
++        file_storage = request.files.get(form_field)
++        if file_storage and file_storage.filename:
++            any_file_sent = True
++        new_filename = _save_vehicle_document_file(file_storage)
++        if new_filename:
++            updates.append(f"{column} = ?")
++            params.append(new_filename)
++    if updates:
++        params.append(vehicle_id)
++        execute(f"UPDATE vehicles SET {', '.join(updates)} WHERE id = ?", tuple(params))
++        flash("Documentos actualizados.", "success")
++    elif any_file_sent:
++        flash("No se pudo guardar el archivo: use PDF, JPG, PNG, WEBP o HEIC.", "error")
++    else:
++        flash("No se subió ningún archivo nuevo.", "error")
++    return redirect(url_for("flota.vehicle_detail", vehicle_id=vehicle_id))
++
++
++@bp.route("/<int:vehicle_id>/documentos/<doc_key>")
++@permission_required("flota", "view")
++def vehicle_document_file(vehicle_id, doc_key):
++    doc_type = VEHICLE_DOCUMENT_TYPES_BY_KEY.get(doc_key)
++    if doc_type is None:
++        abort(404)
++    _, column, _, _, _ = doc_type
++    vehicle = query_one(f"SELECT {column} AS filename FROM vehicles WHERE id = ?", (vehicle_id,))
++    if vehicle is None or not vehicle["filename"]:
++        abort(404)
++    filename = vehicle["filename"]
++    if storage.using_s3():
++        return redirect(storage.vehicle_document_url(filename))
++    return send_from_directory(storage.local_vehicle_documents_dir(), filename)
+ 
+ 
+ # --- Vehículos ---
+diff --git a/app/schema.sql b/app/schema.sql
+index 29d1384..c9de209 100644
+--- a/app/schema.sql
++++ b/app/schema.sql
+@@ -95,6 +95,23 @@ CREATE TABLE IF NOT EXISTS vehicles (
+     -- nombre elegido, no un id, mismo patrón que otros campos que ya usan
+     -- catálogo en vez de texto libre en este proyecto.
+     owner TEXT,
++    -- Documentos escaneados (foto o PDF) de la unidad, para verlos online
++    -- (9 sep, pedido de Braulio) — mismo mecanismo de almacenamiento que la
++    -- guía de transportista de un viaje o las fotos de conductores (ver
++    -- app/storage.py, save_vehicle_document()). Cada columna guarda solo el
++    -- nombre del archivo ya subido (o NULL si no se ha subido nada
++    -- todavía) — el archivo en sí vive en disco/S3, nunca en la base de
++    -- datos. Tarjeta de propiedad, Revisión Técnica y MTC aplican a
++    -- cualquier tipo de unidad; SOAT y la Póliza de responsabilidad civil
++    -- solo a Camión/Tracto (una Carreta no se asegura ni tiene SOAT propio
++    -- en Perú — depende del tracto que la jala) — ver
++    -- VEHICLE_DOCUMENT_TYPES en app/routes/flota.py para el detalle exacto
++    -- de qué tipo de unidad necesita cada documento.
++    property_card_filename TEXT,
++    soat_filename TEXT,
++    technical_review_filename TEXT,
++    mtc_filename TEXT,
++    civil_liability_policy_filename TEXT,
+     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+ );
+ 
+diff --git a/app/storage.py b/app/storage.py
+index 8542118..c4952c3 100644
+--- a/app/storage.py
++++ b/app/storage.py
+@@ -68,6 +68,16 @@ def local_sunat_documents_dir():
+     return _local_dir("sunat_documents")
+ 
+ 
++def local_vehicle_documents_dir():
++    """Igual que las anteriores, pero para los documentos escaneados de una
++    unidad de Flota (tarjeta de propiedad, SOAT, revisión técnica, MTC,
++    póliza — 9 sep, pedido de Braulio). Los 5 tipos de documento comparten
++    esta misma carpeta/prefijo (cada archivo tiene un nombre único
++    generado con uuid.hex, igual que el resto de esta lista, así que no
++    hay riesgo de choque entre ellos)."""
++    return _local_dir("vehicle_documents")
++
++
+ def _s3_bucket():
+     return current_app.config["AWS_S3_BUCKET"]
+ 
+@@ -95,6 +105,10 @@ def _s3_sunat_documents_prefix():
+     return (current_app.config.get("AWS_S3_SUNAT_DOCUMENTS_PREFIX") or "comprobantes-sunat").strip("/")
+ 
+ 
++def _s3_vehicle_documents_prefix():
++    return (current_app.config.get("AWS_S3_VEHICLE_DOCUMENTS_PREFIX") or "documentos-flota").strip("/")
++
++
+ def _s3_key(filename, prefix):
+     return f"{prefix}/{filename}"
+ 
+@@ -262,3 +276,22 @@ def sunat_document_url(filename):
+     SUNAT guardado en S3. En disco local, usar
+     local_sunat_documents_dir() + send_from_directory."""
+     return _presigned_url(_s3_sunat_documents_prefix(), filename)
++
++
++def save_vehicle_document(filename, raw_bytes):
++    """Igual que save_carrier_waybill()/save_sunat_document(), pero para un
++    documento escaneado de una unidad de Flota (9 sep) — carpeta/prefijo
++    separado. Los 5 tipos de documento (tarjeta de propiedad, SOAT,
++    revisión técnica, MTC, póliza) comparten esta misma función/carpeta."""
++    if using_s3():
++        _put_object(_s3_vehicle_documents_prefix(), filename, raw_bytes)
++    else:
++        with open(os.path.join(local_vehicle_documents_dir(), filename), "wb") as f:
++            f.write(raw_bytes)
++
++
++def vehicle_document_url(filename):
++    """Igual que carrier_waybill_url()/sunat_document_url(), pero para un
++    documento de Flota guardado en S3. En disco local, usar
++    local_vehicle_documents_dir() + send_from_directory."""
++    return _presigned_url(_s3_vehicle_documents_prefix(), filename)
+diff --git a/app/templates/flota/detail.html b/app/templates/flota/detail.html
+index 8e6e052..2aaf97a 100644
+--- a/app/templates/flota/detail.html
++++ b/app/templates/flota/detail.html
+@@ -67,6 +67,42 @@
+   </div>
+ </div>
+ 
++<div class="panel">
++  <h2>Documentos escaneados</h2>
++  <p class="muted mt-0">Foto o PDF de cada documento, según el tipo de unidad — para tracto/camión: Tarjeta de propiedad, SOAT, Revisión técnica, MTC y Póliza de responsabilidad civil; para carreta: Tarjeta de propiedad, Revisión técnica y MTC.</p>
++  <div class="detail-grid" style="margin-bottom:12px;">
++    {% for key, column, form_field, label, applies_to in document_types %}
++    {% if vehicle.vehicle_type in applies_to %}
++    <div class="detail-item">
++      <div class="label">{{ label }}</div>
++      <div class="value">
++        {% if vehicle[column] %}
++        <a href="{{ url_for('flota.vehicle_document_file', vehicle_id=vehicle.id, doc_key=key) }}" target="_blank">Ver documento</a>
++        {% else %}—{% endif %}
++      </div>
++    </div>
++    {% endif %}
++    {% endfor %}
++  </div>
++  {% if can(current_user.roles, 'flota', 'edit') %}
++  <form method="post" action="{{ url_for('flota.save_vehicle_documents', vehicle_id=vehicle.id) }}" enctype="multipart/form-data" class="form" style="max-width:520px;">
++    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
++    <div class="form-row">
++      {% for key, column, form_field, label, applies_to in document_types %}
++      {% if vehicle.vehicle_type in applies_to %}
++      <label>{{ label }} (foto o PDF)
++        <input type="file" name="{{ form_field }}" accept=".png,.jpg,.jpeg,.pdf,.webp,.heic,.heif">
++      </label>
++      {% endif %}
++      {% endfor %}
++    </div>
++    <div class="btn-group">
++      <button type="submit" class="btn btn-secondary btn-sm">Guardar documentos</button>
++    </div>
++  </form>
++  {% endif %}
++</div>
++
+ {% if vehicle.notes %}
+ <div class="panel">
+   <h2>Notas</h2>
+diff --git a/app/templates/flota/list.html b/app/templates/flota/list.html
+index d97d3a0..28ad6ca 100644
+--- a/app/templates/flota/list.html
++++ b/app/templates/flota/list.html
+@@ -23,16 +23,41 @@
+ <p class="muted mt-0">Haz clic en una unidad para ver su detalle completo: marca/modelo, propietario, capacidad y kilometraje actual (vía GPS).</p>
+ {% endif %}
+ 
++<form class="filters" method="get">
++  {% if show_inactive %}<input type="hidden" name="ver" value="inactivas">{% endif %}
++  <label>Tipo
++    <select name="vehicle_type">
++      <option value="">Todos</option>
++      {% for t, t_label in [('CAMION', 'Camión'), ('TRACTO', 'Tracto'), ('CARRETA', 'Carreta')] %}
++      <option value="{{ t }}" {{ 'selected' if vehicle_type_filter == t }}>{{ t_label }}</option>
++      {% endfor %}
++    </select>
++  </label>
++  <label>Estado
++    <select name="status">
++      <option value="">Todos</option>
++      {% for s in ['ACTIVO', 'MANTENIMIENTO', 'INACTIVO'] %}
++      <option value="{{ s }}" {{ 'selected' if status_filter == s }}>{{ s.title() }}</option>
++      {% endfor %}
++    </select>
++  </label>
++  <label>Modelo
++    <input type="text" name="model" value="{{ model_filter }}" placeholder="Ej. FH">
++  </label>
++  <button class="btn btn-secondary" type="submit">Filtrar</button>
++</form>
++
+ <label style="max-width:320px;">Buscar por placa
+   <input type="text" id="vehicleSearch" placeholder="Ej. ALZ728" oninput="filterVehicles()" autocomplete="off">
+ </label>
+ 
+ <div class="table-wrap">
+   <table id="vehicleTable">
+-    <thead><tr><th>Placa</th><th>Marca / Modelo</th><th>Tipo</th><th>Estado</th><th>SOAT vence</th><th>Rev. técnica vence</th><th></th></tr></thead>
++    <thead><tr><th>#</th><th>Placa</th><th>Marca / Modelo</th><th>Tipo</th><th>Estado</th><th>SOAT vence</th><th>Rev. técnica vence</th><th></th></tr></thead>
+     <tbody>
+       {% for v in vehicles %}
+       <tr onclick="window.location='{{ url_for('flota.vehicle_detail', vehicle_id=v.id) }}'" style="cursor:pointer;" data-plate="{{ v.plate|lower }}">
++        <td>{{ loop.index }}</td>
+         <td><a href="{{ url_for('flota.vehicle_detail', vehicle_id=v.id) }}">{{ v.plate }}</a></td>
+         <td>{{ v.brand or '' }} {{ v.model or '' }}</td>
+         <td>
+@@ -56,7 +81,7 @@
+         </td>
+       </tr>
+       {% else %}
+-      <tr><td colspan="7" class="table-empty">{% if show_inactive %}No hay unidades inactivas.{% else %}No hay unidades registradas.{% endif %}</td></tr>
++      <tr><td colspan="8" class="table-empty">{% if show_inactive %}No hay unidades inactivas.{% else %}No hay unidades registradas.{% endif %}</td></tr>
+       {% endfor %}
+     </tbody>
+   </table>
+-- 
+2.43.0
+

@@ -15,6 +15,8 @@
       });
     }
   </script>
+  <!-- 10 sep: recorte "tipo escáner" al subir fotos de documentos (ver app/static/js/doc-scanner.js) -->
+  <script src="{{ url_for('static', filename='js/doc-scanner.js') }}" defer></script>
 </head>
 <body>
 {% if current_user %}

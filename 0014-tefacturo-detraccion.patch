@@ -1,0 +1,292 @@
+From 4e21ef7753479aa3f2c8def00c35cde1bdd34a56 Mon Sep 17 00:00:00 2001
+From: Dev <dev@example.com>
+Date: Wed, 9 Sep 2026 14:25:57 +0000
+Subject: [PATCH] Facturacion: detraccion SPOT (codigo 027, 4%, umbral S/400) -
+ informativa, pendiente de confirmar campo API con tefacturo.pe (9 sep)
+
+---
+ .env.example                          |  5 +++
+ app/db.py                             |  7 +++
+ app/helpers.py                        | 63 ++++++++++++++++++++++++++-
+ app/integrations/sunat_ose.py         | 17 +++++++-
+ app/routes/facturacion.py             | 23 ++++++++--
+ app/schema.sql                        | 21 +++++++++
+ app/templates/facturacion/detail.html | 15 +++++++
+ config.py                             | 10 +++++
+ 8 files changed, 155 insertions(+), 6 deletions(-)
+
+diff --git a/.env.example b/.env.example
+index e30fb02..5522dc5 100644
+--- a/.env.example
++++ b/.env.example
+@@ -95,6 +95,11 @@ COMPANY_BANK_BCP_CHECKING_ACCOUNT=1949949117029
+ BRMS_RUC=
+ BRMS_ADDRESS=
+ BRMS_BANK_ACCOUNT=480-4768721-0-81
++# Cuenta de detracciones de BRMS en el Banco de la Nación (9 sep) — SUNAT
++# asigna una por RUC, así que BRMS necesita la suya propia (no puede
++# compartir la de Harraso, COMPANY_BANK_NACION_ACCOUNT más arriba). Vacía
++# hasta que la confirmes.
++BRMS_BANK_NACION_DETRACTION_ACCOUNT=
+ 
+ # decolecta.com: tipo de cambio SUNAT y consulta de RUC (autocompletar
+ # proveedor al registrar un gasto en Liquidaciones, y autocompletar el
+diff --git a/app/db.py b/app/db.py
+index 64460db..475fee2 100644
+--- a/app/db.py
++++ b/app/db.py
+@@ -381,6 +381,13 @@ COLUMN_MIGRATIONS = [
+     ("waybills", "transfer_reason", "TEXT NOT NULL DEFAULT 'OTROS'"),
+     ("waybills", "sunat_pdf_filename", "TEXT"),
+     ("invoices", "sunat_pdf_filename", "TEXT"),
++    # Detracción (SPOT) — 9 sep, ver el comentario de estas mismas columnas
++    # en schema.sql (CREATE TABLE invoices) para el detalle completo.
++    ("invoices", "detraction_applies", "INTEGER NOT NULL DEFAULT 0"),
++    ("invoices", "detraction_code", "TEXT"),
++    ("invoices", "detraction_percentage", "REAL"),
++    ("invoices", "detraction_amount", "REAL"),
++    ("invoices", "detraction_bank_account", "TEXT"),
+ ]
+ 
+ 
+diff --git a/app/helpers.py b/app/helpers.py
+index 8a4c9b9..1087da4 100644
+--- a/app/helpers.py
++++ b/app/helpers.py
+@@ -152,7 +152,14 @@ def company_info_for_issuer(issuer, cfg):
+     tenía ruc/name/address (suficiente para el intento anterior, basado en
+     un manual incompleto). `warehouse_code` se agregó el 8 sep, tras el
+     primer envío real de una guía: `datosDocumento.codigoAlmacen` es
+-    obligatorio y no existía ningún dato parecido en el sistema."""
++    obligatorio y no existía ningún dato parecido en el sistema.
++    `bank_nacion_detraction_account` se agregó el 9 sep, para el cálculo de
++    detracción (ver `compute_detraction()` más abajo) — es la cuenta del
++    Banco de la Nación de cada empresa, distinta de la cuenta bancaria
++    "normal" que ya se usa en Cotizaciones (`COMPANY_BANK_NACION_ACCOUNT`/
++    `BRMS_BANK_ACCOUNT`): para Harraso resulta ser la MISMA cuenta
++    (confirmado contra una factura real ya emitida), pero BRMS necesita la
++    suya propia (SUNAT asigna una cuenta de detracciones por RUC)."""
+     if issuer == "BRMS":
+         legal_suffix = ""  # razón social legal completa de BRMS aún sin confirmar (ver Cotizaciones)
+         return {
+@@ -164,6 +171,7 @@ def company_info_for_issuer(issuer, cfg):
+             "legal_name": f"BRMS {legal_suffix}".strip(),
+             "mtc_registration": cfg.get("BRMS_MTC_REGISTRATION", ""),
+             "warehouse_code": cfg.get("BRMS_WAREHOUSE_CODE", ""),
++            "bank_nacion_detraction_account": cfg.get("BRMS_BANK_NACION_DETRACTION_ACCOUNT", ""),
+         }
+     return {
+         "ruc": cfg.get("COMPANY_RUC", ""),
+@@ -174,6 +182,59 @@ def company_info_for_issuer(issuer, cfg):
+         "legal_name": f"{cfg.get('COMPANY_NAME', '')} S.A.C.".strip(),
+         "mtc_registration": cfg.get("HARRASO_MTC_REGISTRATION", ""),
+         "warehouse_code": cfg.get("HARRASO_WAREHOUSE_CODE", ""),
++        "bank_nacion_detraction_account": cfg.get("COMPANY_BANK_NACION_ACCOUNT", ""),
++    }
++
++
++# Detracción (SPOT) — 9 sep, Braulio compartió una factura real ya emitida
++# (fuera de este ERP) que incluye el bloque "Concepto de Detracción": el
++# servicio de transporte de bienes por vía terrestre (el único que prestan
++# Harraso/BRMS) está sujeto al 4% de detracción cuando el importe de la
++# operación supera S/ 400 — código de bien "027" del catálogo SUNAT.
++# Confirmado en DOS fuentes independientes: (1) la propia factura real que
++# compartió Braulio (S/708.00 * 4% = S/28.32, coincide exacto con el monto
++# mostrado), y (2) la orientación oficial de SUNAT
++# (orientacion.sunat.gob.pe/detracciones-en-el-transporte-de-bienes-por-via-terrestre):
++# "el monto del depósito resulta de aplicar el porcentaje de cuatro por
++# ciento (4%) ... siempre que el importe de la operación ... sea mayor a
++# S/.400.00". Como Harraso/BRMS solo prestan este único servicio, se asume
++# que TODA factura de este sistema es "027" — no hace falta un catálogo de
++# servicios sujetos a detracción.
++DETRACTION_CODE = "027"
++DETRACTION_PERCENTAGE = 4.0
++DETRACTION_THRESHOLD = 400.0
++
++
++def compute_detraction(amount, company):
++    """Calcula si una factura está sujeta a detracción y, si aplica, su
++    monto — ver el comentario de las constantes DETRACTION_* arriba.
++    `amount` es el importe TOTAL de la operación (con IGV incluido, igual
++    que `invoices.amount`) — la detracción se calcula sobre ese total, no
++    sobre el valor de venta sin IGV (confirmado contra la factura real:
++    S/708 con IGV, no S/600 sin IGV, es la base del 4%). `company` es el
++    dict de `company_info_for_issuer()`, para tomar la cuenta del Banco de
++    la Nación correspondiente.
++
++    Devuelve un dict con `applies`, `code`, `percentage`, `amount` (monto
++    detraído) y `bank_account` — pensado para pasarse directo a la
++    inserción de la factura (ver app/routes/facturacion.py)."""
++    amount = float(amount or 0)
++    applies = amount > DETRACTION_THRESHOLD
++    if not applies:
++        return {
++            "applies": False,
++            "code": None,
++            "percentage": None,
++            "amount": None,
++            "bank_account": None,
++        }
++    detraction_amount = round(amount * DETRACTION_PERCENTAGE / 100, 2)
++    return {
++        "applies": True,
++        "code": DETRACTION_CODE,
++        "percentage": DETRACTION_PERCENTAGE,
++        "amount": detraction_amount,
++        "bank_account": company.get("bank_nacion_detraction_account", ""),
+     }
+ 
+ 
+diff --git a/app/integrations/sunat_ose.py b/app/integrations/sunat_ose.py
+index 58b578e..902a917 100644
+--- a/app/integrations/sunat_ose.py
++++ b/app/integrations/sunat_ose.py
+@@ -310,7 +310,22 @@ def build_invoice_payload(invoice, items, client, company):
+     invoice: fila de `invoices`. items: filas de `invoice_items`.
+     client: fila de `clients` (requiere `ruc`). company: dict devuelto por
+     `company_info_for_issuer()`.
+-    """
++
++    PENDIENTE (9 sep) — Detracción (SPOT): cuando `invoice.detraction_applies`
++    es verdadero (ver `compute_detraction()` en app/helpers.py), esta
++    factura debería reportarle a SUNAT el concepto de detracción (código de
++    bien, porcentaje, monto, cuenta del Banco de la Nación) — es un dato
++    real del comprobante electrónico UBL, no solo informativo. Este payload
++    TODAVÍA NO lo incluye: se revisó la documentación pública de
++    tefacturo.pe (tabla de campos de este endpoint, el JSON de ejemplo
++    completo, la página de "Ejemplos", y el catálogo de valores de
++    `tipoOperacion`) en varias pasadas independientes y en ninguna aparece
++    un campo de detracción — a diferencia de `codigoAlmacen` en la guía
++    transportista (que sí estaba, aunque solo en el ejemplo), acá no hay
++    ninguna pista de dónde iría. Se le pidió a Braulio consultarlo
++    directamente con el soporte de tefacturo.pe (ellos sí lo soportan desde
++    su portal web, con un toggle "Activar detracción" al emitir a mano) —
++    en cuanto tengamos el nombre real del campo, agregarlo acá."""
+     if not client["ruc"]:
+         raise SunatOseError(
+             f"El cliente '{client['name']}' no tiene RUC registrado; una factura "
+diff --git a/app/routes/facturacion.py b/app/routes/facturacion.py
+index 14b3a4a..8c99502 100644
+--- a/app/routes/facturacion.py
++++ b/app/routes/facturacion.py
+@@ -14,7 +14,7 @@ from flask import (
+ 
+ from app.auth import permission_required, validate_csrf
+ from app.db import execute, get_db, query_all, query_one
+-from app.helpers import company_info_for_issuer, next_code, parse_date, today_str
++from app.helpers import company_info_for_issuer, compute_detraction, next_code, parse_date, today_str
+ from app.integrations.sunat_ose import (
+     SunatOseError,
+     build_client_from_config,
+@@ -99,11 +99,26 @@ def new():
+         series = current_app.config["INVOICE_SERIES"]
+         series_number = _next_series_number(series)
+ 
++        # Detracción (SPOT) — 9 sep: se calcula al crear la factura, igual
++        # que el "issuer", y no se recalcula después (ver compute_detraction
++        # en app/helpers.py para la regla completa: 4% cuando el total
++        # supera S/400, código de bien "027").
++        company = company_info_for_issuer(issuer, current_app.config)
++        detraction = compute_detraction(total, company)
++
+         db = get_db()
+         cur = db.execute(
+-            """INSERT INTO invoices (number, client_id, issue_date, due_date, amount, notes, series, series_number, issuer)
+-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+-            (number, client_id, issue_date, due_date, total, request.form.get("notes", "").strip(), series, series_number, issuer),
++            """INSERT INTO invoices (number, client_id, issue_date, due_date, amount, notes, series, series_number, issuer,
++               detraction_applies, detraction_code, detraction_percentage, detraction_amount, detraction_bank_account)
++               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
++            (
++                number, client_id, issue_date, due_date, total, request.form.get("notes", "").strip(), series, series_number, issuer,
++                1 if detraction["applies"] else 0,
++                detraction["code"],
++                detraction["percentage"],
++                detraction["amount"],
++                detraction["bank_account"],
++            ),
+         )
+         invoice_id = cur.lastrowid
+         for t in trips:
+diff --git a/app/schema.sql b/app/schema.sql
+index da25391..29d1384 100644
+--- a/app/schema.sql
++++ b/app/schema.sql
+@@ -888,6 +888,27 @@ CREATE TABLE IF NOT EXISTS invoices (
+     sunat_xml_url TEXT,
+     sunat_cdr_url TEXT,
+     sunat_sent_at TEXT,
++    -- Detracción (SPOT) — 9 sep, Braulio compartió una factura real ya
++    -- emitida (fuera de este ERP) que incluye el bloque "Concepto de
++    -- Detracción": el servicio de transporte de bienes por vía terrestre
++    -- (código de bien 027 del catálogo SUNAT) está sujeto a detracción del
++    -- 4% cuando el importe de la operación supera S/ 400 — confirmado
++    -- contra la orientación oficial de SUNAT
++    -- (orientacion.sunat.gob.pe/detracciones-en-el-transporte-de-bienes-por-via-terrestre)
++    -- y contra la factura real (S/708 * 4% = S/28.32, coincide exacto). Se
++    -- calcula y guarda al crear la factura (ver app/routes/facturacion.py)
++    -- porque Harraso/BRMS solo prestan este único servicio — no se
++    -- recalcula después, mismo criterio que "issuer". IMPORTANTE: por
++    -- ahora esto es informativo dentro del ERP — el envío a tefacturo.pe
++    -- (ver app/integrations/sunat_ose.py) todavía NO manda estos datos en
++    -- el JSON de la factura porque su documentación pública no especifica
++    -- el campo correspondiente (se le pidió a Braulio consultarlo con el
++    -- soporte de tefacturo.pe).
++    detraction_applies INTEGER NOT NULL DEFAULT 0,
++    detraction_code TEXT,
++    detraction_percentage REAL,
++    detraction_amount REAL,
++    detraction_bank_account TEXT,
+     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+ );
+ 
+diff --git a/app/templates/facturacion/detail.html b/app/templates/facturacion/detail.html
+index 95ce131..758a6e4 100644
+--- a/app/templates/facturacion/detail.html
++++ b/app/templates/facturacion/detail.html
+@@ -39,6 +39,21 @@
+   <div class="detail-item"><div class="label">Total</div><div class="value">{{ invoice.amount|money }}</div></div>
+ </div>
+ 
++{% if invoice.detraction_applies %}
++<div class="panel">
++  <h2>Concepto de Detracción</h2>
++  <div class="detail-grid">
++    <div class="detail-item"><div class="label">Código del bien/servicio</div><div class="value">{{ invoice.detraction_code }}</div></div>
++    <div class="detail-item"><div class="label">Porcentaje</div><div class="value">{{ '%.2f'|format(invoice.detraction_percentage) }}%</div></div>
++    <div class="detail-item"><div class="label">Monto detraído</div><div class="value">{{ invoice.detraction_amount|money }}</div></div>
++    <div class="detail-item"><div class="label">Neto a cobrar del cliente</div><div class="value">{{ (invoice.amount - invoice.detraction_amount)|money }}</div></div>
++    <div class="detail-item"><div class="label">Cuenta Bco. de la Nación</div><div class="value">{{ invoice.detraction_bank_account or '⚠ falta configurar' }}</div></div>
++  </div>
++  <p class="mt-0 muted">Esta factura supera S/ 400 por un servicio de transporte de carga (código 027) — está sujeta a detracción del 4%. El cliente debe depositar {{ invoice.detraction_amount|money }} en la cuenta del Banco de la Nación de arriba y transferir el resto ({{ (invoice.amount - invoice.detraction_amount)|money }}) directamente.</p>
++  <p class="mt-0"><strong>⚠ Pendiente:</strong> por ahora "Enviar a SUNAT" NO incluye este dato en el comprobante electrónico — la documentación pública de tefacturo.pe no especifica cómo mandarlo. Hasta confirmarlo con su soporte, registra la detracción también desde el portal de tefacturo.pe para esta factura (tienen una opción "Activar detracción" al emitir).</p>
++</div>
++{% endif %}
++
+ <div class="panel">
+   <h2>Estado ante SUNAT {{ m.badge(invoice.sunat_status) }}</h2>
+   {% if invoice.sunat_message %}<p class="mt-0 muted">{{ invoice.sunat_message }}</p>{% endif %}
+diff --git a/config.py b/config.py
+index 1b9c174..d654197 100644
+--- a/config.py
++++ b/config.py
+@@ -138,6 +138,16 @@ class Config:
+     # sus cuentas a clientes — AJUSTAR el nombre del banco en
+     # app/templates/cotizaciones/pdf.html si en realidad es de otro banco.
+     BRMS_BANK_ACCOUNT = os.environ.get("BRMS_BANK_ACCOUNT", "480-4768721-0-81")
++    # Cuenta de detracciones de BRMS en el Banco de la Nación (9 sep, ver
++    # detraction_bank_account en app/schema.sql y compute_detraction() en
++    # app/helpers.py) — SUNAT asigna una cuenta de detracciones POR RUC al
++    # inscribirse como sujeto obligado, así que BRMS necesita la suya
++    # propia (no puede compartir COMPANY_BANK_NACION_ACCOUNT de arriba, que
++    # es de Harraso). Vacía por defecto, igual que BRMS_RUC/BRMS_ADDRESS —
++    # AJUSTAR antes de que una factura de BRMS pueda mostrar este dato.
++    BRMS_BANK_NACION_DETRACTION_ACCOUNT = os.environ.get(
++        "BRMS_BANK_NACION_DETRACTION_ACCOUNT", ""
++    )
+ 
+     # decolecta.com: tipo de cambio SUNAT (liquidación de Gastos) y
+     # consulta de RUC (autocompletar proveedor al registrar un gasto).
+-- 
+2.43.0
+

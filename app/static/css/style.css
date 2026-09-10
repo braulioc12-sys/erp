@@ -214,3 +214,35 @@ textarea { resize: vertical; min-height: 70px; }
   .content { padding: 18px; }
   .form-row { grid-template-columns: 1fr; }
 }
+
+/* 10 sep, pedido de Braulio: recorte "tipo escáner" al subir fotos de
+   documentos (ver app/static/js/doc-scanner.js) — modal con las 4 esquinas
+   arrastrables sobre la foto recién elegida/tomada. */
+.doc-scanner-overlay {
+  display: none;
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(17, 24, 39, 0.78);
+  align-items: center; justify-content: center;
+  padding: 16px;
+}
+.doc-scanner-overlay.open { display: flex; }
+body.doc-scanner-lock { overflow: hidden; }
+.doc-scanner-box {
+  background: var(--surface); border-radius: 12px; padding: 16px;
+  max-width: 96vw; max-height: 92vh; overflow: auto;
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+}
+.doc-scanner-title { margin: 0; font-weight: 600; font-size: 0.95rem; text-align: center; }
+.doc-scanner-imgwrap { position: relative; line-height: 0; touch-action: none; }
+.doc-scanner-img { display: block; max-width: 88vw; max-height: 58vh; image-orientation: from-image; }
+.doc-scanner-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.doc-scanner-quad {
+  fill: rgba(29, 78, 216, 0.18); stroke: var(--primary); stroke-width: 2;
+}
+.doc-scanner-handle {
+  position: absolute; width: 28px; height: 28px; margin-left: -14px; margin-top: -14px;
+  border-radius: 50%; background: var(--primary); border: 3px solid #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.35); touch-action: none; cursor: grab;
+}
+.doc-scanner-bw { display: flex; align-items: center; gap: 6px; font-size: 0.88rem; }
+.doc-scanner-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }

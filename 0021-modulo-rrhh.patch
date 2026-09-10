@@ -1,0 +1,366 @@
+From 21bd6bd6eb030b1ed6532da3b2d162d6ab830c32 Mon Sep 17 00:00:00 2001
+From: ERP Dev <dev@erp.local>
+Date: Thu, 10 Sep 2026 15:21:04 +0000
+Subject: [PATCH] =?UTF-8?q?0021:=20m=C3=B3dulo=20RRHH=20=E2=80=94=20liquid?=
+ =?UTF-8?q?aciones=20listas=20para=20enviar,=20agrupadas=20por=20conductor?=
+ =?UTF-8?q?,=20con=20filtros=20de=20periodo/conductor/oficina/empresa/b?=
+ =?UTF-8?q?=C3=BAsqueda?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Pedido de Braulio (10 sep): "Hay que hacer un modulo nuevo de RRHH, en el
+cual figuren los viajes con las liquidaciones que ya se cerraron y salen
+con el OK y han sido enviadas a RRHH. Aca entran defrente las liquidaciones
+que no tuvieron exceso de combustible, y las que si tuvieron se espera el
+ok del administrador para que puedan figurar ahi. Dentro de este menu se
+elige el periodo y figuran los viajes por cada conductor. Debe tener
+tambien mas filtros."
+
+- Nuevo blueprint app/routes/rrhh.py, de solo lectura: lista las
+  liquidaciones LIQUIDADAS que ya están listas para RRHH (sin exceso de
+  combustible, o con exceso ya aprobado por un Administrador — mismo
+  criterio que la columna RRHH de liquidaciones/list.html), agrupadas por
+  conductor principal del viaje.
+- Filtros: periodo (mes), conductor, oficina, empresa (Harraso/BRMS) y
+  búsqueda por código de liquidación/viaje.
+- Nuevo permiso de módulo "rrhh": Administrador y Contabilidad (view) —
+  mismo grupo que ya tiene acceso a Liquidaciones.
+- Enlace nuevo en el menú lateral y en la cabecera de Liquidaciones,
+  visibles solo para quien tiene el permiso.
+---
+ app/__init__.py                       |   4 +
+ app/auth.py                           |  12 +++
+ app/routes/rrhh.py                    | 116 ++++++++++++++++++++++++++
+ app/templates/base.html               |   3 +
+ app/templates/liquidaciones/list.html |   3 +
+ app/templates/rrhh/list.html          |  93 +++++++++++++++++++++
+ 6 files changed, 231 insertions(+)
+ create mode 100644 app/routes/rrhh.py
+ create mode 100644 app/templates/rrhh/list.html
+
+diff --git a/app/__init__.py b/app/__init__.py
+index b2327d5..449f9d0 100644
+--- a/app/__init__.py
++++ b/app/__init__.py
+@@ -38,6 +38,7 @@ def create_app(config_object=Config):
+         conductores,
+         viajes,
+         liquidaciones,
++        rrhh,
+         inventarios,
+         mantenimiento,
+         facturacion,
+@@ -57,6 +58,9 @@ def create_app(config_object=Config):
+     app.register_blueprint(conductores.bp)
+     app.register_blueprint(viajes.bp)
+     app.register_blueprint(liquidaciones.bp)
++    # 10 sep: rrhh importa ISSUER_CHOICES de app.routes.viajes — se importa
++    # después de viajes arriba para que ese módulo ya esté cargado.
++    app.register_blueprint(rrhh.bp)
+     app.register_blueprint(inventarios.bp)
+     app.register_blueprint(mantenimiento.bp)
+     app.register_blueprint(facturacion.bp)
+diff --git a/app/auth.py b/app/auth.py
+index 4af2fc2..50584ba 100644
+--- a/app/auth.py
++++ b/app/auth.py
+@@ -47,6 +47,9 @@ PERMISSIONS = {
+         "usuarios": set(),
+         "catalogos": set(),
+         "integraciones": set(),
++        # 10 sep: módulo RRHH (ver app/routes/rrhh.py) — mismo grupo de
++        # acceso que Liquidaciones, solo Contabilidad/Admin.
++        "rrhh": set(),
+     },
+     # Programa unidades/conductores y da seguimiento a los viajes del día a
+     # día — sin acceso a montos de Facturación/Liquidaciones/Cotizaciones ni
+@@ -69,6 +72,7 @@ PERMISSIONS = {
+         "usuarios": set(),
+         "catalogos": set(),
+         "integraciones": set(),
++        "rrhh": set(),
+     },
+     # Solo el módulo de Inventarios (repuestos, proveedores, compras) — la
+     # AUTORIZACIÓN de una orden de compra sigue siendo exclusiva de
+@@ -92,6 +96,7 @@ PERMISSIONS = {
+         "usuarios": set(),
+         "catalogos": set(),
+         "integraciones": set(),
++        "rrhh": set(),
+     },
+     # Documentos con montos: Liquidaciones, Facturación, Cotizaciones. Ve
+     # Viajes/Clientes (para ubicar a qué viaje o cliente corresponde cada
+@@ -116,6 +121,12 @@ PERMISSIONS = {
+         "usuarios": set(),
+         "catalogos": set(),
+         "integraciones": set(),
++        # 10 sep, pedido de Braulio ("modulo nuevo de RRHH... figuren los
++        # viajes con las liquidaciones que ya se cerraron... y han sido
++        # enviadas a RRHH") — mismo acceso que Liquidaciones: Contabilidad
++        # ve el reporte, pero el OK en sí lo sigue dando solo Administrador
++        # (ver rrhh_approve() en app/routes/liquidaciones.py).
++        "rrhh": {"view"},
+     },
+     # Solo el módulo de Mantenimiento (órdenes, trabajos) y ver Neumáticos.
+     "MECANICO": {
+@@ -136,6 +147,7 @@ PERMISSIONS = {
+         "usuarios": set(),
+         "catalogos": set(),
+         "integraciones": set(),
++        "rrhh": set(),
+     },
+ }
+ 
+diff --git a/app/routes/rrhh.py b/app/routes/rrhh.py
+new file mode 100644
+index 0000000..30b2e87
+--- /dev/null
++++ b/app/routes/rrhh.py
+@@ -0,0 +1,116 @@
++"""Módulo RRHH: viajes/liquidaciones ya cerradas y listas para enviarse a
++Recursos Humanos.
++
++10 sep, pedido de Braulio: "Hay que hacer un modulo nuevo de RRHH, en el
++cual figuren los viajes con las liquidaciones que ya se cerraron y salen
++con el OK y han sido enviadas a RRHH. Aca entran defrente las liquidaciones
++que no tuvieron exceso de combustible, y las que si tuvieron se espera el
++ok del administrador para que puedan figurar ahi. Dentro de este menu se
++elige el periodo y figuran los viajes por cada conductor. Debe tener
++tambien mas filtros."
++
++Una liquidación queda "lista para RRHH" con el mismo criterio que ya usa
++la columna RRHH del listado de Liquidaciones (ver
++app/templates/liquidaciones/list.html, columna agregada en el patch 0020):
++  - está cerrada (status = 'LIQUIDADO'), Y
++  - o bien no tuvo exceso de combustible (fuel_excess nulo o 0), o bien un
++    Administrador ya dio el OK explícito (rrhh_approved_at no nulo) — ver
++    rrhh_approve() en app/routes/liquidaciones.py.
++
++Este módulo es de SOLO LECTURA (un reporte) — el OK en sí se sigue dando
++desde el detalle de la liquidación, no desde acá."""
++from flask import Blueprint, render_template, request
++
++from app.accounting import office_choices
++from app.auth import permission_required
++from app.db import query_all
++from app.helpers import today_str
++from app.routes.viajes import ISSUER_CHOICES
++
++bp = Blueprint("rrhh", __name__, url_prefix="/rrhh")
++
++# Misma condición que la columna "RRHH" de liquidaciones/list.html: cerrada
++# y, o sin exceso de combustible, o con el OK del Administrador ya dado.
++READY_FOR_RRHH_SQL = (
++    "a.status = 'LIQUIDADO' "
++    "AND (a.fuel_excess IS NULL OR a.fuel_excess <= 0 OR a.rrhh_approved_at IS NOT NULL)"
++)
++
++
++def _ready_advances(month, driver_id, office, issuer, q):
++    """Liquidaciones listas para RRHH en el periodo (mes) y filtros pedidos.
++    El filtro de conductor mira solo al conductor PRINCIPAL del viaje
++    (trips.driver_id) — una liquidación es una sola por viaje, no se separa
++    por conductor como sí pasa con las comisiones (ver
++    viajes._commissions_by_driver); en un viaje de doble conductor el
++    segundo conductor se sigue mostrando junto al primero en cada fila."""
++    sql = f"""SELECT a.*, t.code as trip_code, t.origin, t.destination, t.issuer,
++                     t.double_driver, d.id as driver_id, d.name as driver_name,
++                     d2.name as driver2_name
++              FROM expense_advances a
++              JOIN trips t ON t.id = a.trip_id
++              LEFT JOIN drivers d ON d.id = t.driver_id
++              LEFT JOIN drivers d2 ON d2.id = t.driver2_id
++              WHERE {READY_FOR_RRHH_SQL} AND strftime('%Y-%m', a.liquidated_at) = ?"""
++    params = [month]
++    if driver_id:
++        sql += " AND t.driver_id = ?"
++        params.append(driver_id)
++    if office:
++        sql += " AND a.office = ?"
++        params.append(office)
++    if issuer:
++        sql += " AND t.issuer = ?"
++        params.append(issuer)
++    if q:
++        sql += " AND (a.code LIKE ? OR t.code LIKE ?)"
++        like = f"%{q}%"
++        params.extend([like, like])
++    sql += " ORDER BY d.name IS NULL, d.name, a.liquidated_at, a.id"
++    return query_all(sql, params)
++
++
++def _group_by_driver(advances):
++    """Agrupa las liquidaciones ya filtradas por conductor principal, mismo
++    patrón que viajes._commissions_by_driver — un conductor por panel, con
++    sus viajes/liquidaciones listados debajo."""
++    by_driver = {}
++    order = []
++    for a in advances:
++        key = a["driver_id"] or 0
++        if key not in by_driver:
++            by_driver[key] = {
++                "driver_name": a["driver_name"] or "Sin conductor asignado",
++                "advances": [],
++                "trip_count": 0,
++                "total_spent": 0.0,
++            }
++            order.append(key)
++        entry = by_driver[key]
++        entry["advances"].append(a)
++        entry["trip_count"] += 1
++        entry["total_spent"] += a["liquidated_expenses_total"] or 0.0
++    return [by_driver[key] for key in order]
++
++
++@bp.route("")
++@permission_required("rrhh", "view")
++def list_view():
++    month = request.args.get("month") or today_str()[:7]
++    driver_id = request.args.get("driver_id", type=int)
++    office = request.args.get("office", "")
++    issuer = request.args.get("issuer", "")
++    q = request.args.get("q", "").strip()
++
++    advances = _ready_advances(month, driver_id, office, issuer, q)
++    drivers = _group_by_driver(advances)
++    grand_trips = len(advances)
++    grand_total = sum(a["liquidated_expenses_total"] or 0.0 for a in advances)
++
++    return render_template(
++        "rrhh/list.html",
++        month=month, driver_id=driver_id, office=office, issuer=issuer, q=q,
++        drivers=drivers, grand_trips=grand_trips, grand_total=grand_total,
++        all_drivers=query_all("SELECT id, name FROM drivers ORDER BY name"),
++        offices=office_choices(), issuer_choices=ISSUER_CHOICES,
++    )
+diff --git a/app/templates/base.html b/app/templates/base.html
+index 23c62f6..77f36cb 100644
+--- a/app/templates/base.html
++++ b/app/templates/base.html
+@@ -33,6 +33,9 @@
+       <a href="{{ url_for('flota.list_view') }}" class="{{ 'active' if request.blueprint == 'flota' }}">Flota</a>
+       <a href="{{ url_for('conductores.list_view') }}" class="{{ 'active' if request.blueprint == 'conductores' }}">Conductores</a>
+       <a href="{{ url_for('liquidaciones.list_view') }}" class="{{ 'active' if request.blueprint == 'liquidaciones' }}">Liquidaciones</a>
++      {% if can(current_user.roles, 'rrhh', 'view') %}
++      <a href="{{ url_for('rrhh.list_view') }}" class="{{ 'active' if request.blueprint == 'rrhh' }}">RRHH</a>
++      {% endif %}
+       <a href="{{ url_for('mantenimiento.list_view') }}" class="{{ 'active' if request.blueprint == 'mantenimiento' }}">Mantenimiento</a>
+       {% if can(current_user.roles, 'inventarios', 'view') %}
+       <a href="{{ url_for('inventarios.list_view') }}" class="{{ 'active' if request.blueprint == 'inventarios' }}">Inventarios</a>
+diff --git a/app/templates/liquidaciones/list.html b/app/templates/liquidaciones/list.html
+index 1a585d1..9a2c27a 100644
+--- a/app/templates/liquidaciones/list.html
++++ b/app/templates/liquidaciones/list.html
+@@ -7,6 +7,9 @@
+   <div class="page-actions">
+     <a href="{{ url_for('liquidaciones.resumen_view') }}" class="btn btn-secondary">Resumen contable</a>
+     <a href="{{ url_for('liquidaciones.historial') }}" class="btn btn-secondary">Historial de gastos</a>
++    {% if can(current_user.roles, 'rrhh', 'view') %}
++    <a href="{{ url_for('rrhh.list_view') }}" class="btn btn-secondary">RRHH</a>
++    {% endif %}
+     <a href="{{ url_for('liquidaciones.whatsapp_list') }}" class="btn btn-secondary">📷 Borradores WhatsApp{% if whatsapp_pending_count %} ({{ whatsapp_pending_count }}){% endif %}</a>
+     {% if can(current_user.roles, 'liquidaciones', 'edit') %}
+     <a href="{{ url_for('liquidaciones.budgets_list') }}" class="btn btn-secondary">Presupuestos</a>
+diff --git a/app/templates/rrhh/list.html b/app/templates/rrhh/list.html
+new file mode 100644
+index 0000000..e2ede00
+--- /dev/null
++++ b/app/templates/rrhh/list.html
+@@ -0,0 +1,93 @@
++{% extends 'base.html' %}
++{% block title %}RRHH{% endblock %}
++{% block content %}
++<div class="page-header">
++  <h1>RRHH — Liquidaciones listas para enviar</h1>
++  <div class="page-actions">
++    <a href="{{ url_for('liquidaciones.list_view') }}" class="btn btn-secondary">← Volver a Liquidaciones</a>
++  </div>
++</div>
++<p class="muted mt-0">
++  Viajes con liquidación cerrada y lista para enviarse a RRHH: entran solas las que no tuvieron exceso de
++  combustible, y las que sí tuvieron exceso recién aparecen aquí una vez que un Administrador dio el OK
++  (ver el cuadro de "Ajuste" en el detalle de cada liquidación).
++</p>
++
++<form class="filters" method="get">
++  <label>Periodo
++    <input type="month" name="month" value="{{ month }}" onchange="this.form.submit()">
++  </label>
++  <label>Conductor
++    <select name="driver_id">
++      <option value="">Todos</option>
++      {% for d in all_drivers %}
++      <option value="{{ d.id }}" {{ 'selected' if driver_id == d.id }}>{{ d.name }}</option>
++      {% endfor %}
++    </select>
++  </label>
++  <label>Oficina
++    <select name="office">
++      <option value="">Todas</option>
++      {% for code, info in offices %}
++      <option value="{{ code }}" {{ 'selected' if office == code }}>{{ info.label }}</option>
++      {% endfor %}
++    </select>
++  </label>
++  <label>Empresa
++    <select name="issuer">
++      <option value="">Todas</option>
++      <option value="HARRASO" {{ 'selected' if issuer == 'HARRASO' }}>Harraso Transport</option>
++      <option value="BRMS" {{ 'selected' if issuer == 'BRMS' }}>BRMS</option>
++    </select>
++  </label>
++  <label>Buscar
++    <input type="text" name="q" value="{{ q }}" placeholder="Código de liquidación o de viaje">
++  </label>
++  <button class="btn btn-secondary" type="submit">Filtrar</button>
++</form>
++
++<p class="muted">
++  Total del periodo: <strong>{{ grand_trips }}</strong> liquidación(es) lista(s), <strong>{{ grand_total|money }}</strong> gastado en total.
++</p>
++
++{% for d in drivers %}
++<div class="panel">
++  <h2>{{ d.driver_name }} <span class="muted" style="font-weight:400;font-size:0.9rem;">— {{ d.trip_count }} liquidación(es), {{ d.total_spent|money }} gastado</span></h2>
++  <div class="table-wrap">
++    <table>
++      <thead>
++        <tr>
++          <th>Código</th><th>Viaje</th><th>Ruta</th><th>Empresa</th><th>Oficina</th>
++          <th>Fecha liquidación</th><th class="text-right">Entregado</th><th class="text-right">Gastado</th>
++          <th>Combustible</th><th></th>
++        </tr>
++      </thead>
++      <tbody>
++        {% for a in d.advances %}
++        <tr>
++          <td>{{ a.code or '—' }}</td>
++          <td>{{ a.trip_code }}{% if a.double_driver and a.driver2_name %} <span class="muted">(+ {{ a.driver2_name }})</span>{% endif %}</td>
++          <td>{{ a.origin }} → {{ a.destination }}</td>
++          <td>{{ 'BRMS' if a.issuer == 'BRMS' else 'Harraso Transport' }}</td>
++          <td>{{ a.office or '—' }}</td>
++          <td>{{ (a.liquidated_at or '')[:10] }}</td>
++          <td class="text-right">{{ a.amount_given|money }}</td>
++          <td class="text-right">{{ (a.liquidated_expenses_total or 0)|money }}</td>
++          <td>
++            {% if a.fuel_excess and a.fuel_excess > 0 %}
++            <span style="color:var(--success);">Exceso aprobado{% if a.fuel_adjustment %}: {{ a.fuel_adjustment }}{% endif %}</span>
++            {% else %}
++            <span class="muted">Sin exceso</span>
++            {% endif %}
++          </td>
++          <td><a href="{{ url_for('liquidaciones.detail', advance_id=a.id) }}" class="btn btn-secondary btn-sm">Ver</a></td>
++        </tr>
++        {% endfor %}
++      </tbody>
++    </table>
++  </div>
++</div>
++{% else %}
++<div class="panel"><p class="mt-0 muted">No hay liquidaciones listas para RRHH con estos filtros.</p></div>
++{% endfor %}
++{% endblock %}
+-- 
+2.43.0
+

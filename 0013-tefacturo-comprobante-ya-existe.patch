@@ -1,0 +1,150 @@
+From 433918caefe0257dd1d74990c48f09e559822e9b Mon Sep 17 00:00:00 2001
+From: Dev <dev@example.com>
+Date: Tue, 8 Sep 2026 17:45:07 +0000
+Subject: [PATCH] tefacturo.pe: reenviar un comprobante ya aceptado no lo marca
+ ERROR (8 sep)
+
+---
+ app/integrations/sunat_ose.py | 14 ++++++++++++++
+ app/routes/facturacion.py     | 31 ++++++++++++++++++++++++++++---
+ app/routes/guias.py           | 29 ++++++++++++++++++++++++++---
+ 3 files changed, 68 insertions(+), 6 deletions(-)
+
+diff --git a/app/integrations/sunat_ose.py b/app/integrations/sunat_ose.py
+index 4027a48..58b578e 100644
+--- a/app/integrations/sunat_ose.py
++++ b/app/integrations/sunat_ose.py
+@@ -548,6 +548,20 @@ def build_client_from_config(app_config, issuer="HARRASO"):
+     )
+ 
+ 
++def is_duplicate_comprobante_error(exc):
++    """True si el SunatOseError viene de reenviar un comprobante que
++    tefacturo.pe ya tiene registrado. Confirmado en real (8 sep, Factura
++    F-0003): al reintentar "Enviar a SUNAT" sobre una factura que ya había
++    quedado ACEPTADO (se reintentó solo para volver a descargar el PDF,
++    tras el bug corregido en get_pdf_bytes()), tefacturo.pe respondió 400
++    con `{"message": "El comprobante <ruc>-<tipo>-<serie>-<numero> ya
++    existe", ...}`. Antes esto se trataba como un rechazo nuevo y pisaba
++    el estado ACEPTADO ya guardado con ERROR — un comprobante que SUNAT ya
++    tiene registrado sigue estando aceptado, así que send_sunat() usa esto
++    para NO tratarlo como una falla (ver facturacion.py/guias.py)."""
++    return "ya existe" in str(exc).lower()
++
++
+ def parse_ose_response(response):
+     """Normaliza la respuesta de tefacturo.pe a un dict simple. Una
+     respuesta HTTP no-2xx ya levanta SunatOseError antes de llegar aquí
+diff --git a/app/routes/facturacion.py b/app/routes/facturacion.py
+index d4f581a..14b3a4a 100644
+--- a/app/routes/facturacion.py
++++ b/app/routes/facturacion.py
+@@ -19,6 +19,7 @@ from app.integrations.sunat_ose import (
+     SunatOseError,
+     build_client_from_config,
+     build_invoice_payload,
++    is_duplicate_comprobante_error,
+     parse_ose_response,
+ )
+ from app.storage import (
+@@ -183,8 +184,29 @@ def send_sunat(invoice_id):
+                 "poder emitir facturas electrónicas a su nombre."
+             )
+         payload = build_invoice_payload(invoice, items, client_row, company)
+-        response = ose_client.emit_factura(payload)
+-        result = parse_ose_response(response)
++        ya_existia = False
++        try:
++            response = ose_client.emit_factura(payload)
++            result = parse_ose_response(response)
++        except SunatOseError as emit_exc:
++            # Reenviar una factura que tefacturo.pe ya tiene registrada
++            # (ej. se reintenta "Enviar a SUNAT" solo para volver a
++            # descargar el PDF, tras un fallo de descarga) devuelve "el
++            # comprobante ya existe" — no es un rechazo nuevo de SUNAT.
++            # Confirmado en real, 8 sep, Factura F-0003: antes esto pisaba
++            # el estado ACEPTADO ya guardado con ERROR, aunque SUNAT
++            # siguiera teniendo la factura aceptada de verdad.
++            if is_duplicate_comprobante_error(emit_exc):
++                ya_existia = True
++                result = {
++                    "accepted": True,
++                    "message": invoice["sunat_message"]
++                    or "Aceptado por SUNAT (comprobante ya registrado en un envío anterior).",
++                    "xml_url": invoice["sunat_xml_url"],
++                    "cdr_url": invoice["sunat_cdr_url"],
++                }
++            else:
++                raise
+ 
+         pdf_filename = invoice["sunat_pdf_filename"]
+         pdf_url = invoice["sunat_pdf_url"]
+@@ -213,7 +235,10 @@ def send_sunat(invoice_id):
+             ),
+         )
+         if result["accepted"]:
+-            flash("Factura enviada y aceptada por SUNAT.", "success")
++            if ya_existia:
++                flash("Esta factura ya estaba aceptada por SUNAT.", "success")
++            else:
++                flash("Factura enviada y aceptada por SUNAT.", "success")
+         else:
+             flash(f"SUNAT/tefacturo.pe rechazó la factura: {result['message']}", "error")
+     except SunatOseError as exc:
+diff --git a/app/routes/guias.py b/app/routes/guias.py
+index 80c5fc5..b21b239 100644
+--- a/app/routes/guias.py
++++ b/app/routes/guias.py
+@@ -19,6 +19,7 @@ from app.integrations.sunat_ose import (
+     SunatOseError,
+     build_client_from_config,
+     build_waybill_payload,
++    is_duplicate_comprobante_error,
+     parse_ose_response,
+ )
+ from app.storage import (
+@@ -166,8 +167,27 @@ def send_sunat(waybill_id):
+                 "poder emitir guías electrónicas a su nombre."
+             )
+         payload = build_waybill_payload(waybill, trip, company, client_row)
+-        response = ose_client.emit_guia_transportista(payload)
+-        result = parse_ose_response(response)
++        ya_existia = False
++        try:
++            response = ose_client.emit_guia_transportista(payload)
++            result = parse_ose_response(response)
++        except SunatOseError as emit_exc:
++            # Mismo caso que en facturacion.send_sunat() (ver ese comentario
++            # y is_duplicate_comprobante_error en sunat_ose.py): reenviar
++            # una guía que tefacturo.pe ya tiene registrada no es un
++            # rechazo nuevo — no hay que pisar un estado ACEPTADO ya
++            # guardado con ERROR.
++            if is_duplicate_comprobante_error(emit_exc):
++                ya_existia = True
++                result = {
++                    "accepted": True,
++                    "message": waybill["sunat_message"]
++                    or "Aceptado por SUNAT (comprobante ya registrado en un envío anterior).",
++                    "xml_url": waybill["sunat_xml_url"],
++                    "cdr_url": waybill["sunat_cdr_url"],
++                }
++            else:
++                raise
+ 
+         pdf_filename = waybill["sunat_pdf_filename"]
+         pdf_url = waybill["sunat_pdf_url"]
+@@ -199,7 +219,10 @@ def send_sunat(waybill_id):
+             ),
+         )
+         if result["accepted"]:
+-            flash("Guía enviada y aceptada por SUNAT.", "success")
++            if ya_existia:
++                flash("Esta guía ya estaba aceptada por SUNAT.", "success")
++            else:
++                flash("Guía enviada y aceptada por SUNAT.", "success")
+         else:
+             flash(f"SUNAT/tefacturo.pe rechazó la guía: {result['message']}", "error")
+     except SunatOseError as exc:
+-- 
+2.43.0
+
