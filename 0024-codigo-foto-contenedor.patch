@@ -1,0 +1,405 @@
+From f337b22fb72aa336e1ccbd2f9ef2d656e7eeca5f Mon Sep 17 00:00:00 2001
+From: Harraso Dev <dev@harraso.local>
+Date: Thu, 10 Sep 2026 17:33:01 +0000
+Subject: [PATCH] =?UTF-8?q?Agregar=20c=C3=B3digo=20de=20contenedor=20y=20f?=
+ =?UTF-8?q?oto=20de=20evidencia=20al=20crear=20un=20viaje?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Cuando el tipo de carga elegido en Nuevo viaje es 'Contenedor', ahora
+aparecen dos campos adicionales (opcionales): el código del contenedor
+y una foto de evidencia de que está en buen estado. Ambos se guardan
+en el viaje, se muestran en su detalle, y se pueden editar/reemplazar
+después. Al elegir cualquier otro tipo de carga, esos campos se
+ocultan y se limpian.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01DZdZYuHCadmZAJWq9pZbaL
+---
+ app/db.py                        |   5 ++
+ app/routes/viajes.py             | 100 ++++++++++++++++++++++++++++++-
+ app/schema.sql                   |   7 +++
+ app/storage.py                   |  29 +++++++++
+ app/templates/viajes/detail.html |  11 ++++
+ app/templates/viajes/form.html   |  50 +++++++++++++++-
+ 6 files changed, 196 insertions(+), 6 deletions(-)
+
+diff --git a/app/db.py b/app/db.py
+index 8c0a5b5..afe633d 100644
+--- a/app/db.py
++++ b/app/db.py
+@@ -408,6 +408,11 @@ COLUMN_MIGRATIONS = [
+     # Nota de ajuste del Administrador (10 sep, pedido de Braulio) — ver el
+     # comentario de esta columna en schema.sql.
+     ("expense_advances", "fuel_adjustment", "TEXT"),
++    # Código de contenedor + foto de evidencia de buen estado (10 sep,
++    # pedido de Braulio) — ver el comentario de estas columnas en
++    # schema.sql (CREATE TABLE trips).
++    ("trips", "container_code", "TEXT"),
++    ("trips", "container_photo_filename", "TEXT"),
+ ]
+ 
+ 
+diff --git a/app/routes/viajes.py b/app/routes/viajes.py
+index 342170e..da81391 100644
+--- a/app/routes/viajes.py
++++ b/app/routes/viajes.py
+@@ -68,6 +68,19 @@ ATTACHMENT_MIME_TO_EXTENSION = {
+     "application/pdf": ".pdf",
+ }
+ 
++# Foto de evidencia del estado del contenedor (10 sep, pedido de Braulio) —
++# solo aplica cuando cargo_type='CONTENEDOR'. A diferencia de los adjuntos
++# de arriba, es siempre una foto (nunca un PDF), así que usa su propio
++# conjunto de extensiones permitidas en vez de ALLOWED_ATTACHMENT_EXTENSIONS.
++ALLOWED_CONTAINER_PHOTO_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".heic", ".heif"}
++CONTAINER_PHOTO_MIME_TO_EXTENSION = {
++    "image/jpeg": ".jpg",
++    "image/png": ".png",
++    "image/webp": ".webp",
++    "image/heic": ".heic",
++    "image/heif": ".heif",
++}
++
+ 
+ def _parse_issuer(form):
+     issuer = (form.get("issuer") or "").strip().upper()
+@@ -92,6 +105,13 @@ def _parse_cargo_type(form):
+     return value if value in valid else None
+ 
+ 
++def _parse_container_code(form):
++    """Código del contenedor (10 sep, pedido de Braulio) — texto libre, sin
++    formato estricto exigido (no todos los clientes usan el estándar ISO
++    6346 de 11 caracteres). Se guarda en mayúsculas por consistencia."""
++    return (form.get("container_code") or "").strip().upper() or None
++
++
+ def _parse_ownership(form):
+     value = (form.get("ownership") or "").strip().upper()
+     return "TERCERO" if value == "TERCERO" else "PROPIA"
+@@ -340,6 +360,17 @@ def new():
+         driver2_id = (request.form.get("driver2_id") or None) if double_driver else None
+         issuer = _parse_issuer(request.form)
+         cargo_type = _parse_cargo_type(request.form)
++        # Código de contenedor + foto de evidencia (10 sep) — solo aplican a
++        # viajes de tipo CONTENEDOR; se limpian a None para cualquier otro
++        # tipo de carga aunque el formulario los haya enviado (mismo
++        # criterio que los campos de propia/tercero en
++        # _ownership_and_third_party_fields).
++        if cargo_type == "CONTENEDOR":
++            container_code = _parse_container_code(request.form)
++            container_photo_filename = _save_container_photo_file(request.files.get("container_photo"))
++        else:
++            container_code = None
++            container_photo_filename = None
+         ownership_fields, ownership_errors = _ownership_and_third_party_fields(request.form)
+         errors = list(ownership_errors)
+         if not client_id:
+@@ -373,10 +404,11 @@ def new():
+         )
+         trip_id = execute(
+             """INSERT INTO trips (code, client_id, vehicle_id, trailer_vehicle_id, driver_id, driver2_id,
+-               origin, destination, cargo_description, cargo_weight_kg, cargo_type, scheduled_date, rate,
++               origin, destination, cargo_description, cargo_weight_kg, cargo_type, container_code,
++               container_photo_filename, scheduled_date, rate,
+                driver_commission, double_driver, single_leg, notes, issuer, ownership,
+                third_party_name, third_party_unit, third_party_rate, third_party_payment_term, created_by)
+-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
++               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             (
+                 code,
+                 client_id,
+@@ -389,6 +421,8 @@ def new():
+                 request.form.get("cargo_description", "").strip(),
+                 parse_float(request.form.get("cargo_weight_kg"), None),
+                 cargo_type,
++                container_code,
++                container_photo_filename,
+                 scheduled_date,
+                 parse_float(request.form.get("rate")),
+                 driver_commission,
+@@ -444,6 +478,18 @@ def edit(trip_id):
+         driver2_id = (request.form.get("driver2_id") or None) if double_driver else None
+         issuer = _parse_issuer(request.form)
+         cargo_type = _parse_cargo_type(request.form)
++        # Código de contenedor + foto de evidencia (10 sep) — igual que en
++        # new(): solo aplican a CONTENEDOR. Si ya había una foto y no se
++        # sube una nueva, se conserva la anterior (mismo criterio que
++        # save_waybill()/save_delivery_proof()); si el tipo de carga deja de
++        # ser CONTENEDOR, se limpian ambos campos.
++        if cargo_type == "CONTENEDOR":
++            container_code = _parse_container_code(request.form)
++            new_container_photo = _save_container_photo_file(request.files.get("container_photo"))
++            container_photo_filename = new_container_photo if new_container_photo else trip["container_photo_filename"]
++        else:
++            container_code = None
++            container_photo_filename = None
+         ownership_fields, ownership_errors = _ownership_and_third_party_fields(request.form)
+         errors = list(ownership_errors)
+         if route_error:
+@@ -488,7 +534,8 @@ def edit(trip_id):
+         )
+         execute(
+             """UPDATE trips SET client_id=?, vehicle_id=?, trailer_vehicle_id=?, driver_id=?, driver2_id=?,
+-               origin=?, destination=?, cargo_description=?, cargo_weight_kg=?, cargo_type=?, scheduled_date=?,
++               origin=?, destination=?, cargo_description=?, cargo_weight_kg=?, cargo_type=?, container_code=?,
++               container_photo_filename=?, scheduled_date=?,
+                rate=?, driver_commission=?, double_driver=?, single_leg=?, notes=?, issuer=?, ownership=?,
+                third_party_name=?, third_party_unit=?, third_party_rate=?, third_party_payment_term=?
+                WHERE id=?""",
+@@ -503,6 +550,8 @@ def edit(trip_id):
+                 request.form.get("cargo_description", "").strip(),
+                 parse_float(request.form.get("cargo_weight_kg"), None),
+                 cargo_type,
++                container_code,
++                container_photo_filename,
+                 scheduled_date,
+                 parse_float(request.form.get("rate")),
+                 driver_commission,
+@@ -724,6 +773,51 @@ def delivery_proof_file(trip_id):
+     return send_from_directory(storage.local_delivery_proofs_dir(), trip["delivery_proof_filename"])
+ 
+ 
++# --- Foto de evidencia del contenedor (10 sep, pedido de Braulio) ---------
++#
++# "cuando se eliga tipo de carga contenedor, tiene que haber la opcion de
++# registrar el codigo del contenedor y asimismo se pueda subir una foto de
++# evidencia de que el contenedor esta en buen estado." A diferencia de la
++# guía de transportista / conformidad de entrega, se registra directo en el
++# formulario de alta/edición del viaje (viajes/form.html), no aparte — y
++# siempre es una foto (nunca un PDF), así que no reusa
++# _save_binary_attachment() (que sí acepta PDF).
++
++def _save_container_photo_file(file_storage):
++    """Guarda la foto de evidencia del estado del contenedor y devuelve el
++    nombre guardado, o None si no se subió nada válido. Mismo patrón que
++    _save_binary_attachment(), pero restringido a fotos."""
++    if not file_storage or not file_storage.filename:
++        return None
++    ext = os.path.splitext(file_storage.filename)[1].lower()
++    if ext not in ALLOWED_CONTAINER_PHOTO_EXTENSIONS:
++        ext = CONTAINER_PHOTO_MIME_TO_EXTENSION.get((file_storage.mimetype or "").lower())
++    if not ext:
++        return None
++    raw_bytes = file_storage.read()
++    if not raw_bytes:
++        return None
++    compressed = compress_photo(raw_bytes)
++    if compressed is not None:
++        filename = f"{uuid.uuid4().hex}.jpg"
++        storage.save_container_photo(filename, compressed)
++        return filename
++    filename = f"{uuid.uuid4().hex}{ext}"
++    storage.save_container_photo(filename, raw_bytes)
++    return filename
++
++
++@bp.route("/<int:trip_id>/contenedor/foto")
++@permission_required("viajes", "view")
++def container_photo_file(trip_id):
++    trip = query_one("SELECT container_photo_filename FROM trips WHERE id = ?", (trip_id,))
++    if trip is None or not trip["container_photo_filename"]:
++        abort(404)
++    if storage.using_s3():
++        return redirect(storage.container_photo_url(trip["container_photo_filename"]))
++    return send_from_directory(storage.local_container_photos_dir(), trip["container_photo_filename"])
++
++
+ # --- Facturado / Pagado (3 sep, pedido de Braulio) -------------------------
+ #
+ # "invoiced" ya existía (se marca solo al generar una factura desde
+diff --git a/app/schema.sql b/app/schema.sql
+index 4082944..db50caa 100644
+--- a/app/schema.sql
++++ b/app/schema.sql
+@@ -193,6 +193,13 @@ CREATE TABLE IF NOT EXISTS trips (
+     -- _active_trailers() en app/routes/viajes.py).
+     trailer_vehicle_id INTEGER REFERENCES vehicles(id),
+     cargo_type TEXT CHECK (cargo_type IN ('PLATAFORMA', 'CONTENEDOR', 'PARIHUELERO', 'FURGON', 'OTROS')),
++    -- Código del contenedor + foto de evidencia de buen estado (10 sep,
++    -- pedido de Braulio) — solo aplican cuando cargo_type='CONTENEDOR' (se
++    -- limpian a NULL si el viaje no es de contenedor, ver new()/edit() en
++    -- app/routes/viajes.py). La foto se guarda con el mismo mecanismo que
++    -- la guía de transportista (ver app/storage.py).
++    container_code TEXT,
++    container_photo_filename TEXT,
+     -- Unidad propia (de Flota) vs. subcontratada a un tercero. Si es
+     -- TERCERO, vehicle_id/trailer_vehicle_id no aplican — la unidad del
+     -- tercero se anota en third_party_unit (texto libre, no está en Flota).
+diff --git a/app/storage.py b/app/storage.py
+index c4952c3..8e7ed64 100644
+--- a/app/storage.py
++++ b/app/storage.py
+@@ -61,6 +61,13 @@ def local_delivery_proofs_dir():
+     return _local_dir("delivery_proofs")
+ 
+ 
++def local_container_photos_dir():
++    """Igual que local_carrier_waybills_dir() pero para la foto de evidencia
++    del estado del contenedor (10 sep, solo cuando cargo_type='CONTENEDOR')
++    — carpeta separada en disco."""
++    return _local_dir("container_photos")
++
++
+ def local_sunat_documents_dir():
+     """Igual que las anteriores, pero para el PDF real que devuelve
+     tefacturo.pe al emitir una factura o guía de remisión (7 sep, segunda
+@@ -101,6 +108,10 @@ def _s3_delivery_proofs_prefix():
+     return (current_app.config.get("AWS_S3_DELIVERY_PROOFS_PREFIX") or "conformidad-entrega").strip("/")
+ 
+ 
++def _s3_container_photos_prefix():
++    return (current_app.config.get("AWS_S3_CONTAINER_PHOTOS_PREFIX") or "fotos-contenedor").strip("/")
++
++
+ def _s3_sunat_documents_prefix():
+     return (current_app.config.get("AWS_S3_SUNAT_DOCUMENTS_PREFIX") or "comprobantes-sunat").strip("/")
+ 
+@@ -259,6 +270,24 @@ def delivery_proof_url(filename):
+     return _presigned_url(_s3_delivery_proofs_prefix(), filename)
+ 
+ 
++def save_container_photo(filename, raw_bytes):
++    """Igual que save_carrier_waybill()/save_delivery_proof(), pero para la
++    foto de evidencia del estado del contenedor (10 sep) — carpeta/prefijo
++    separado."""
++    if using_s3():
++        _put_object(_s3_container_photos_prefix(), filename, raw_bytes)
++    else:
++        with open(os.path.join(local_container_photos_dir(), filename), "wb") as f:
++            f.write(raw_bytes)
++
++
++def container_photo_url(filename):
++    """Igual que carrier_waybill_url()/delivery_proof_url(), pero para una
++    foto de contenedor guardada en S3. En disco local, usar
++    local_container_photos_dir() + send_from_directory."""
++    return _presigned_url(_s3_container_photos_prefix(), filename)
++
++
+ def save_sunat_document(filename, raw_bytes):
+     """Igual que save_receipt()/save_carrier_waybill(), pero para el PDF
+     real que devuelve tefacturo.pe al emitir una factura o guía (7 sep,
+diff --git a/app/templates/viajes/detail.html b/app/templates/viajes/detail.html
+index 9a4a1e6..c660239 100644
+--- a/app/templates/viajes/detail.html
++++ b/app/templates/viajes/detail.html
+@@ -33,6 +33,17 @@
+   <div class="detail-item"><div class="label">Empresa que opera</div><div class="value">{{ 'BRMS' if trip.issuer == 'BRMS' else 'Harraso Transport' }}</div></div>
+   <div class="detail-item"><div class="label">Ruta</div><div class="value">{{ trip.origin }} → {{ trip.destination }}</div></div>
+   <div class="detail-item"><div class="label">Tipo de carga</div><div class="value">{{ cargo_type_labels.get(trip.cargo_type, '—') }}</div></div>
++  {% if trip.cargo_type == 'CONTENEDOR' %}
++  <div class="detail-item"><div class="label">Código de contenedor</div><div class="value">{{ trip.container_code or '—' }}</div></div>
++  <div class="detail-item">
++    <div class="label">Foto de evidencia</div>
++    <div class="value">
++      {% if trip.container_photo_filename %}
++      <a href="{{ url_for('viajes.container_photo_file', trip_id=trip.id) }}" target="_blank">Ver foto</a>
++      {% else %}—{% endif %}
++    </div>
++  </div>
++  {% endif %}
+   {% if trip.ownership == 'TERCERO' %}
+   <div class="detail-item"><div class="label">Unidad</div><div class="value">Tercero — {{ trip.third_party_name or '—' }}{% if trip.third_party_unit %} ({{ trip.third_party_unit }}){% endif %}</div></div>
+   <div class="detail-item"><div class="label">Flete acordado</div><div class="value">{{ trip.third_party_rate|money if trip.third_party_rate is not none else '—' }}</div></div>
+diff --git a/app/templates/viajes/form.html b/app/templates/viajes/form.html
+index 5df41dc..255d676 100644
+--- a/app/templates/viajes/form.html
++++ b/app/templates/viajes/form.html
+@@ -2,7 +2,7 @@
+ {% block title %}{{ 'Editar viaje' if mode == 'edit' else 'Nuevo viaje' }}{% endblock %}
+ {% block content %}
+ <div class="page-header"><h1>{{ 'Editar viaje' if mode == 'edit' else 'Nuevo viaje' }}</h1></div>
+-<form class="form panel" method="post" style="max-width: 760px;">
++<form class="form panel" method="post" enctype="multipart/form-data" style="max-width: 760px;">
+   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+ 
+   <label>Cliente *
+@@ -41,7 +41,7 @@
+       </select>
+     </label>
+     <label>Tipo de carga *
+-      <select name="cargo_type" required>
++      <select name="cargo_type" id="trip-cargo-type" required>
+         <option value="">-- Selecciona --</option>
+         {% for value, label in cargo_types %}
+         <option value="{{ value }}" {{ 'selected' if trip and trip.cargo_type == value }}>{{ label }}</option>
+@@ -50,6 +50,20 @@
+     </label>
+   </div>
+ 
++  <div id="trip-container-fields" style="display:none;">
++    <div class="form-row">
++      <label>Código del contenedor
++        <input type="text" name="container_code" value="{{ trip.container_code if trip else '' }}" placeholder="Ej. MSCU1234567">
++      </label>
++      <label>Foto de evidencia (buen estado)
++        <input type="file" name="container_photo" accept="image/*" capture="environment">
++      </label>
++    </div>
++    {% if trip and trip.container_photo_filename %}
++    <p class="muted" style="margin-top:-8px;">Ya tiene una foto — sube una nueva solo si quieres reemplazarla. <a href="{{ url_for('viajes.container_photo_file', trip_id=trip_id) }}" target="_blank">Ver foto actual</a></p>
++    {% endif %}
++  </div>
++
+   <label>Unidad *</label>
+   <div style="display:flex; flex-wrap:wrap; gap:8px 20px; margin:-8px 0 16px;">
+     <label style="flex-direction: row; align-items: center; gap: 8px; width:auto;">
+@@ -125,7 +139,7 @@
+   </p>
+ 
+   <label>Tipo de carga *
+-    <select name="cargo_type" required>
++    <select name="cargo_type" id="trip-cargo-type" required>
+       <option value="">-- Selecciona --</option>
+       {% for value, label in cargo_types %}
+       <option value="{{ value }}" {{ 'selected' if trip and trip.cargo_type == value }}>{{ label }}</option>
+@@ -133,6 +147,20 @@
+     </select>
+   </label>
+ 
++  <div id="trip-container-fields" style="display:none;">
++    <div class="form-row">
++      <label>Código del contenedor
++        <input type="text" name="container_code" value="{{ trip.container_code if trip else '' }}" placeholder="Ej. MSCU1234567">
++      </label>
++      <label>Foto de evidencia (buen estado)
++        <input type="file" name="container_photo" accept="image/*" capture="environment">
++      </label>
++    </div>
++    {% if trip and trip.container_photo_filename %}
++    <p class="muted" style="margin-top:-8px;">Ya tiene una foto — sube una nueva solo si quieres reemplazarla. <a href="{{ url_for('viajes.container_photo_file', trip_id=trip_id) }}" target="_blank">Ver foto actual</a></p>
++    {% endif %}
++  </div>
++
+   {% if current_ownership == 'TERCERO' %}
+   <div class="form-row">
+     <label>Empresa/tercero *
+@@ -324,6 +352,22 @@
+       terceroRadio.addEventListener('change', toggleOwnership);
+       toggleOwnership();
+     }
++
++    // Código de contenedor + foto de evidencia (10 sep, pedido de
++    // Braulio): solo se muestran cuando el tipo de carga es "Contenedor" —
++    // ninguno de los dos es obligatorio, así que no hace falta togglear
++    // "required". El mismo id se usa en el bloque `mode == 'edit'` y en el
++    // bloque `mode == 'new'` de este archivo, pero nunca ambos a la vez en
++    // el DOM (son ramas Jinja mutuamente excluyentes).
++    var cargoTypeSelect = document.getElementById('trip-cargo-type');
++    var containerFields = document.getElementById('trip-container-fields');
++    if (cargoTypeSelect && containerFields) {
++      var toggleContainerFields = function () {
++        containerFields.style.display = cargoTypeSelect.value === 'CONTENEDOR' ? '' : 'none';
++      };
++      cargoTypeSelect.addEventListener('change', toggleContainerFields);
++      toggleContainerFields();
++    }
+   })();
+ </script>
+ {% endblock %}
+-- 
+2.43.0
+
