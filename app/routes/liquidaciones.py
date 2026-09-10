@@ -388,14 +388,25 @@ def detail(advance_id):
 @bp.route("/<int:advance_id>/combustible", methods=["POST"])
 @permission_required("liquidaciones", "edit")
 def save_fuel(advance_id):
-    """4 sep, pedido de Braulio: registra el combustible real de este viaje
-    contra la tabla de consumo estimado de la ruta (routes.default_fuel_amount).
-    El "exceso" es un campo aparte para digitar — no se recalcula solo a
-    partir de la diferencia, el liquidador lo confirma/ajusta — con su
-    cuadro de observaciones al costado para justificarlo."""
+    """4 sep, pedido de Braulio: registra el combustible FÍSICO (medido) de
+    este viaje, comparado contra el consumo SEGÚN TABLA de la ruta
+    (routes.default_fuel_amount).
+
+    10 sep, pedido de Braulio: "combustible físico, combustible según
+    tabla y exceso (que es la resta entre físico y tabla)" — el exceso YA
+    NO se digita a mano (como sí se hacía desde el 4 sep): ahora se calcula
+    solo, físico menos la tabla, y nunca queda negativo (si gastó menos de
+    lo estimado no hay "exceso", hay ahorro — pero eso no es lo que se
+    audita acá). Si la ruta no tiene un estimado en la tabla (o no se pudo
+    encontrar la ruta), no hay con qué comparar y el exceso queda sin
+    definir (None) — no se asume 0 para no ocultar un caso sin dato."""
     if not validate_csrf():
         abort(400)
-    advance = query_one("SELECT * FROM expense_advances WHERE id = ?", (advance_id,))
+    advance = query_one(
+        """SELECT a.*, t.origin as trip_origin, t.destination as trip_destination
+           FROM expense_advances a JOIN trips t ON t.id = a.trip_id WHERE a.id = ?""",
+        (advance_id,),
+    )
     if advance is None:
         abort(404)
     if advance["status"] == "LIQUIDADO":
@@ -403,16 +414,24 @@ def save_fuel(advance_id):
         return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
 
     fuel_actual = parse_float(request.form.get("fuel_actual"))
-    fuel_excess = parse_float(request.form.get("fuel_excess"))
     fuel_notes = request.form.get("fuel_notes", "").strip()
 
-    if fuel_actual < 0 or fuel_excess < 0:
-        flash("El combustible real y el exceso no pueden ser negativos.", "error")
+    if fuel_actual < 0:
+        flash("El combustible físico no puede ser negativo.", "error")
         return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
+
+    route = None
+    if advance["route_id"]:
+        route = query_one("SELECT * FROM routes WHERE id = ?", (advance["route_id"],))
+    if route is None:
+        route = find_route(advance["trip_origin"], advance["trip_destination"])
+    fuel_excess = None
+    if fuel_actual and route and route["default_fuel_amount"]:
+        fuel_excess = max(0.0, fuel_actual - route["default_fuel_amount"])
 
     execute(
         "UPDATE expense_advances SET fuel_actual = ?, fuel_excess = ?, fuel_notes = ? WHERE id = ?",
-        (fuel_actual or None, fuel_excess or None, fuel_notes or None, advance_id),
+        (fuel_actual or None, fuel_excess, fuel_notes or None, advance_id),
     )
     flash("Combustible registrado.", "success")
     return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
@@ -490,7 +509,15 @@ def rrhh_approve(advance_id):
     liquidación ya cerrada (status = 'LIQUIDADO'); no se exige haber
     registrado combustible primero (no todas las rutas lo tienen cargado
     todavía), pero el detalle muestra el combustible/exceso de forma
-    prominente para que el administrador lo revise antes de aprobar."""
+    prominente para que el administrador lo revise antes de aprobar.
+
+    10 sep, pedido de Braulio: "en el caso que el exceso sea mayor a 0, a
+    la derecha que diga ajuste y sea un cuadro que solo... administrador
+    pueda editar... Si no hay exceso no es necesario ajustar el
+    combustible" — `fuel_adjustment` es ese cuadro: una nota libre que el
+    administrador puede dejar junto con el OK cuando hay exceso (el motivo,
+    un descuento a aplicar, etc.). Es opcional incluso con exceso — el
+    campo del formulario simplemente no se muestra cuando no hay exceso."""
     if not validate_csrf():
         abort(400)
     if "ADMIN" not in g.user["roles"]:
@@ -505,11 +532,13 @@ def rrhh_approve(advance_id):
     if advance["rrhh_approved_at"]:
         flash("Esta liquidación ya estaba aprobada para RRHH.", "error")
         return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
+    fuel_adjustment = request.form.get("fuel_adjustment", "").strip()
     execute(
         """UPDATE expense_advances
-           SET rrhh_approved_at = datetime('now'), rrhh_approved_by_name = ?, rrhh_approved_by_user_id = ?
+           SET rrhh_approved_at = datetime('now'), rrhh_approved_by_name = ?, rrhh_approved_by_user_id = ?,
+               fuel_adjustment = ?
            WHERE id = ?""",
-        (g.user["name"], g.user["id"], advance_id),
+        (g.user["name"], g.user["id"], fuel_adjustment or None, advance_id),
     )
     flash("Liquidación aprobada — ya está lista para enviarse a RRHH.", "success")
     return redirect(url_for("liquidaciones.detail", advance_id=advance_id))

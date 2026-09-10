@@ -687,14 +687,25 @@ CREATE TABLE IF NOT EXISTS expense_advances (
     notes TEXT,
     -- 4 sep, pedido de Braulio: consumo de combustible de este viaje,
     -- comparado contra la tabla de consumo estimado de la ruta
-    -- (routes.default_fuel_amount). fuel_actual es lo que registra el
-    -- liquidador; fuel_excess es un campo aparte para digitar el exceso
-    -- (no se recalcula solo — el liquidador lo confirma/ajusta), y
-    -- fuel_notes son las observaciones para justificarlo. Los tres NULL
-    -- hasta que se registre combustible para esta liquidación.
+    -- (routes.default_fuel_amount). fuel_actual ("combustible físico") es
+    -- lo que registra el liquidador; fuel_notes son sus observaciones. Los
+    -- tres NULL hasta que se registre combustible para esta liquidación.
+    -- fuel_excess ("exceso") — 10 sep, pedido de Braulio: DESDE esa fecha
+    -- ya no se digita a mano (antes sí, 4-9 sep) — se calcula solo en
+    -- save_fuel() como fuel_actual menos routes.default_fuel_amount (nunca
+    -- negativo; NULL si no hay ruta/estimado con qué compararlo).
     fuel_actual REAL,
     fuel_excess REAL,
     fuel_notes TEXT,
+    -- 10 sep, pedido de Braulio: "en el caso que el exceso sea mayor a 0,
+    -- a la derecha que diga ajuste y sea un cuadro que solo... el
+    -- administrador pueda editar y poner el OK para enviar a RRHH" — nota
+    -- libre y opcional del Administrador (motivo, descuento a aplicar,
+    -- etc.), capturada junto con la aprobación de RRHH — ver
+    -- rrhh_approve() en app/routes/liquidaciones.py. Solo tiene sentido
+    -- cuando fuel_excess > 0 (si no hay exceso no hace falta ajustar
+    -- nada), pero no se restringe a nivel de base de datos.
+    fuel_adjustment TEXT,
     -- 4 sep, pedido de Braulio: código correlativo de la liquidación según
     -- la empresa operadora del viaje (trips.issuer) — B-0001, B-0002... si
     -- es BRMS, H-0001, H-0002... si es Harraso. Se asigna al crear el

@@ -405,6 +405,9 @@ COLUMN_MIGRATIONS = [
     ("expense_advances", "rrhh_approved_at", "TEXT"),
     ("expense_advances", "rrhh_approved_by_name", "TEXT"),
     ("expense_advances", "rrhh_approved_by_user_id", "INTEGER REFERENCES users(id)"),
+    # Nota de ajuste del Administrador (10 sep, pedido de Braulio) — ver el
+    # comentario de esta columna en schema.sql.
+    ("expense_advances", "fuel_adjustment", "TEXT"),
 ]
 
 

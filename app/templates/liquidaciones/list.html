@@ -33,10 +33,16 @@
         <td>{{ a.office or '—' }}</td>
         <td>{{ '%02d'|format(a.voucher_number) if a.voucher_number else '—' }}</td>
         <td>
-          {% if a.rrhh_approved_at %}
+          {# 10 sep, pedido de Braulio: "si no hay exceso no es necesario
+             ajustar el combustible" — sin exceso, una liquidación cerrada
+             queda lista para RRHH sola, sin necesitar el OK del
+             Administrador (que solo hace falta cuando hay exceso). #}
+          {% if a.status == 'LIQUIDADO' and a.rrhh_approved_at %}
           <span style="color:var(--success); font-weight:600;">Lista</span>
-          {% elif a.status == 'LIQUIDADO' %}
+          {% elif a.status == 'LIQUIDADO' and a.fuel_excess and a.fuel_excess > 0 %}
           <span class="muted">Pendiente de OK</span>
+          {% elif a.status == 'LIQUIDADO' %}
+          <span style="color:var(--success); font-weight:600;">Lista</span>
           {% else %}
           <span class="muted">—</span>
           {% endif %}

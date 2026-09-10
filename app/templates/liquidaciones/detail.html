@@ -64,39 +64,70 @@
 </div>
 
 {# 4 sep, pedido de Braulio: tabla de consumo de combustible de la ruta,
-   comparada contra el combustible real que registra el liquidador, con un
-   campo para digitar el exceso y observaciones para justificarlo. #}
+   comparada contra el combustible físico que registra el liquidador.
+
+   10 sep, pedido de Braulio: "que diga combustible físico, combustible
+   según tabla y exceso (que es la resta entre físico y tabla). En el caso
+   que el exceso sea mayor a 0, a la derecha que diga ajuste y sea un
+   cuadro que solo alguien con rol de administrador pueda editar y poner
+   el OK para enviar a RRHH. Si no hay exceso no es necesario ajustar el
+   combustible." — el exceso se calcula solo (ver save_fuel()), ya no se
+   digita a mano. La columna "Ajuste" solo aparece cuando hay exceso
+   (> 0) y la liquidación ya está cerrada: para el Administrador es un
+   formulario en línea (nota opcional + botón OK, que da el mismo OK de
+   RRHH que antes vivía en un panel aparte — ver rrhh_approve()); para
+   cualquier otro rol es de solo lectura. Sin exceso, la liquidación queda
+   lista para RRHH automáticamente al cerrarse, sin necesitar esta
+   aprobación — reemplaza el panel "Envío a RRHH" que existía antes. #}
+{% set has_excess = advance.fuel_excess is not none and advance.fuel_excess > 0 %}
 <div class="panel">
   <h2>Consumo de combustible</h2>
-  {% if route %}
-  <p class="muted mt-0">Consumo estimado para esta ruta, según la <a href="{{ url_for('rutas.list_view') }}">tabla de consumo por ruta</a>: <strong>{{ '%.2f gal'|format(route.default_fuel_amount) }}</strong></p>
-  {% else %}
+  <div class="detail-grid" style="margin-bottom:12px;">
+    <div class="detail-item">
+      <div class="label">Combustible físico</div>
+      <div class="value">{{ '%.2f gal'|format(advance.fuel_actual) if advance.fuel_actual is not none else '—' }}</div>
+    </div>
+    <div class="detail-item">
+      <div class="label">Combustible según tabla</div>
+      <div class="value">{% if route %}{{ '%.2f gal'|format(route.default_fuel_amount) }}{% else %}—{% endif %}</div>
+    </div>
+    <div class="detail-item">
+      <div class="label">Exceso</div>
+      <div class="value" style="{{ 'color:var(--danger);' if has_excess }}">{{ '%.2f gal'|format(advance.fuel_excess) if advance.fuel_excess is not none else '—' }}</div>
+    </div>
+    {% if has_excess and advance.status == 'LIQUIDADO' %}
+    <div class="detail-item">
+      <div class="label">Ajuste</div>
+      <div class="value">
+        {% if advance.rrhh_approved_at %}
+        <span style="color:var(--success); font-weight:600;">{{ advance.fuel_adjustment or 'OK' }}</span>
+        {% elif is_admin %}
+        <form method="post" action="{{ url_for('liquidaciones.rrhh_approve', advance_id=advance.id) }}" onsubmit="return confirm('¿Dar el OK final y marcar esta liquidación como lista para enviarse a RRHH?');" style="display:flex; gap:6px; align-items:center;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="text" name="fuel_adjustment" placeholder="Nota (opcional)" style="width:130px; font-size:0.85rem; padding:4px 6px;">
+          <button type="submit" class="btn btn-primary btn-sm">OK</button>
+        </form>
+        {% else %}
+        <span class="muted">Pendiente</span>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  {% if not route %}
   <p class="muted mt-0">Esta ruta todavía no está en la <a href="{{ url_for('rutas.list_view') }}">tabla de consumo por ruta</a>, así que no hay un estimado con qué comparar.</p>
   {% endif %}
-
-  {% if advance.fuel_actual is not none or advance.fuel_excess is not none or advance.fuel_notes %}
-  <div class="detail-grid" style="margin-bottom:12px;">
-    <div class="detail-item"><div class="label">Combustible real</div><div class="value">{{ '%.2f gal'|format(advance.fuel_actual) if advance.fuel_actual is not none else '—' }}</div></div>
-    <div class="detail-item">
-      <div class="label">Exceso registrado</div>
-      <div class="value" style="{{ 'color:var(--danger);' if advance.fuel_excess }}">{{ '%.2f gal'|format(advance.fuel_excess) if advance.fuel_excess is not none else '—' }}</div>
-    </div>
-  </div>
   {% if advance.fuel_notes %}
   <p class="mt-0"><strong>Observaciones:</strong> {{ advance.fuel_notes }}</p>
-  {% endif %}
   {% endif %}
 
   {% if advance.status == 'PENDIENTE' and can(current_user.roles, 'liquidaciones', 'edit') %}
   <form method="post" action="{{ url_for('liquidaciones.save_fuel', advance_id=advance.id) }}" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin-top:12px; padding:12px; background:var(--bg-soft,#f3f5f8); border-radius:8px;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <label style="margin:0;">Combustible real (gal)
+    <label style="margin:0;">Combustible físico (gal)
       <input type="number" step="0.01" min="0" name="fuel_actual" id="fuel-actual" value="{{ advance.fuel_actual if advance.fuel_actual is not none else '' }}">
     </label>
-    <label style="margin:0;">Exceso (gal)
-      <input type="number" step="0.01" min="0" name="fuel_excess" id="fuel-excess" value="{{ advance.fuel_excess if advance.fuel_excess is not none else '' }}">
-    </label>
-    <label style="margin:0; flex:1; min-width:220px;">Observaciones (para justificar el exceso)
+    <label style="margin:0; flex:1; min-width:220px;">Observaciones
       <input type="text" name="fuel_notes" placeholder="Ej. Desvío por bloqueo de vía" value="{{ advance.fuel_notes or '' }}">
     </label>
     <button type="submit" class="btn btn-secondary">Guardar combustible</button>
@@ -107,22 +138,17 @@
     (function () {
       var expected = {{ route.default_fuel_amount }};
       var actualInput = document.getElementById('fuel-actual');
-      var excessInput = document.getElementById('fuel-excess');
       var hint = document.getElementById('fuel-diff-hint');
       function update() {
         var actual = parseFloat(actualInput.value);
         if (isNaN(actual)) { hint.textContent = ''; return; }
         var diff = actual - expected;
         if (diff > 0.001) {
-          hint.textContent = 'Exceso sobre lo estimado: ' + diff.toFixed(2) + ' gal.';
+          hint.textContent = 'Exceso al guardar: ' + diff.toFixed(2) + ' gal (se calcula solo).';
           hint.style.color = 'var(--danger)';
-          if (!excessInput.value) { excessInput.value = diff.toFixed(2); }
-        } else if (diff < -0.001) {
-          hint.textContent = 'Por debajo de lo estimado: ' + Math.abs(diff).toFixed(2) + ' gal.';
-          hint.style.color = 'var(--success)';
         } else {
-          hint.textContent = 'Igual al consumo estimado.';
-          hint.style.color = '';
+          hint.textContent = 'Sin exceso sobre lo estimado.';
+          hint.style.color = 'var(--success)';
         }
       }
       actualInput.addEventListener('input', update);
@@ -140,33 +166,12 @@
     Oficina: <strong>{{ office_labels.get(advance.office, advance.office or '—') }}</strong> ·
     Voucher: <strong>{{ '%02d'|format(advance.voucher_number) if advance.voucher_number else '—' }}</strong>.
     Aparece en <a href="{{ url_for('liquidaciones.resumen_view', month=advance.liquidated_at[:7], office=advance.office) }}">Liquidaciones → Resumen contable</a>.</p>
-</div>
-
-{# 9 sep, pedido de Braulio: "una vez que se cierren estas tienen que
-   estar listas para ser enviadas a RRHH, pero para esto solo el
-   administrador puede dar el OK final luego de ver el consumo de
-   combustible para los casos de excesos". Aprobación separada del cierre
-   — ver rrhh_approve() en app/routes/liquidaciones.py. #}
-<div class="panel">
-  <h2>Envío a RRHH</h2>
-  {% if advance.rrhh_approved_at %}
-  <p class="mt-0" style="color:var(--success);">✓ Aprobada para RRHH el {{ advance.rrhh_approved_at }} por <strong>{{ advance.rrhh_approved_by_name }}</strong> — ya está lista para enviarse.</p>
+  {% if has_excess and not advance.rrhh_approved_at %}
+  <p class="mt-0" style="color:var(--danger);">Tiene exceso de combustible — pendiente del "Ajuste" de un Administrador (ver "Consumo de combustible" arriba) antes de poder enviarse a RRHH.</p>
+  {% elif advance.rrhh_approved_at %}
+  <p class="mt-0" style="color:var(--success);">✓ Lista para enviarse a RRHH — aprobada el {{ advance.rrhh_approved_at }} por <strong>{{ advance.rrhh_approved_by_name }}</strong>.</p>
   {% else %}
-    {% if advance.fuel_excess %}
-    <p class="mt-0" style="color:var(--danger);">Esta liquidación registra un exceso de combustible de <strong>{{ '%.2f gal'|format(advance.fuel_excess) }}</strong> (ver "Consumo de combustible" arriba) — revísalo antes de aprobar.</p>
-    {% elif advance.fuel_actual is none %}
-    <p class="muted mt-0">Todavía no se registró el combustible real de este viaje (ver "Consumo de combustible" arriba).</p>
-    {% else %}
-    <p class="muted mt-0">Sin exceso de combustible registrado.</p>
-    {% endif %}
-    {% if is_admin %}
-    <form method="post" action="{{ url_for('liquidaciones.rrhh_approve', advance_id=advance.id) }}" onsubmit="return confirm('¿Dar el OK final y marcar esta liquidación como lista para enviarse a RRHH?');">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" class="btn btn-primary">Dar OK y marcar lista para RRHH</button>
-    </form>
-    {% else %}
-    <p class="muted mt-0">Pendiente de la aprobación de un Administrador antes de poder enviarse a RRHH.</p>
-    {% endif %}
+  <p class="mt-0" style="color:var(--success);">✓ Sin exceso de combustible — lista para enviarse a RRHH.</p>
   {% endif %}
 </div>
 {% endif %}
