@@ -2,7 +2,7 @@
 {% block title %}{{ 'Editar viaje' if mode == 'edit' else 'Nuevo viaje' }}{% endblock %}
 {% block content %}
 <div class="page-header"><h1>{{ 'Editar viaje' if mode == 'edit' else 'Nuevo viaje' }}</h1></div>
-<form class="form panel" method="post" style="max-width: 760px;">
+<form class="form panel" method="post" enctype="multipart/form-data" style="max-width: 760px;">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
   <label>Cliente *
@@ -41,13 +41,27 @@
       </select>
     </label>
     <label>Tipo de carga *
-      <select name="cargo_type" required>
+      <select name="cargo_type" id="trip-cargo-type" required>
         <option value="">-- Selecciona --</option>
         {% for value, label in cargo_types %}
         <option value="{{ value }}" {{ 'selected' if trip and trip.cargo_type == value }}>{{ label }}</option>
         {% endfor %}
       </select>
     </label>
+  </div>
+
+  <div id="trip-container-fields" style="display:none;">
+    <div class="form-row">
+      <label>Código del contenedor
+        <input type="text" name="container_code" value="{{ trip.container_code if trip else '' }}" placeholder="Ej. MSCU1234567">
+      </label>
+      <label>Foto de evidencia (buen estado)
+        <input type="file" name="container_photo" accept="image/*" capture="environment">
+      </label>
+    </div>
+    {% if trip and trip.container_photo_filename %}
+    <p class="muted" style="margin-top:-8px;">Ya tiene una foto — sube una nueva solo si quieres reemplazarla. <a href="{{ url_for('viajes.container_photo_file', trip_id=trip_id) }}" target="_blank">Ver foto actual</a></p>
+    {% endif %}
   </div>
 
   <label>Unidad *</label>
@@ -125,13 +139,27 @@
   </p>
 
   <label>Tipo de carga *
-    <select name="cargo_type" required>
+    <select name="cargo_type" id="trip-cargo-type" required>
       <option value="">-- Selecciona --</option>
       {% for value, label in cargo_types %}
       <option value="{{ value }}" {{ 'selected' if trip and trip.cargo_type == value }}>{{ label }}</option>
       {% endfor %}
     </select>
   </label>
+
+  <div id="trip-container-fields" style="display:none;">
+    <div class="form-row">
+      <label>Código del contenedor
+        <input type="text" name="container_code" value="{{ trip.container_code if trip else '' }}" placeholder="Ej. MSCU1234567">
+      </label>
+      <label>Foto de evidencia (buen estado)
+        <input type="file" name="container_photo" accept="image/*" capture="environment">
+      </label>
+    </div>
+    {% if trip and trip.container_photo_filename %}
+    <p class="muted" style="margin-top:-8px;">Ya tiene una foto — sube una nueva solo si quieres reemplazarla. <a href="{{ url_for('viajes.container_photo_file', trip_id=trip_id) }}" target="_blank">Ver foto actual</a></p>
+    {% endif %}
+  </div>
 
   {% if current_ownership == 'TERCERO' %}
   <div class="form-row">
@@ -323,6 +351,22 @@
       propiaRadio.addEventListener('change', toggleOwnership);
       terceroRadio.addEventListener('change', toggleOwnership);
       toggleOwnership();
+    }
+
+    // Código de contenedor + foto de evidencia (10 sep, pedido de
+    // Braulio): solo se muestran cuando el tipo de carga es "Contenedor" —
+    // ninguno de los dos es obligatorio, así que no hace falta togglear
+    // "required". El mismo id se usa en el bloque `mode == 'edit'` y en el
+    // bloque `mode == 'new'` de este archivo, pero nunca ambos a la vez en
+    // el DOM (son ramas Jinja mutuamente excluyentes).
+    var cargoTypeSelect = document.getElementById('trip-cargo-type');
+    var containerFields = document.getElementById('trip-container-fields');
+    if (cargoTypeSelect && containerFields) {
+      var toggleContainerFields = function () {
+        containerFields.style.display = cargoTypeSelect.value === 'CONTENEDOR' ? '' : 'none';
+      };
+      cargoTypeSelect.addEventListener('change', toggleContainerFields);
+      toggleContainerFields();
     }
   })();
 </script>

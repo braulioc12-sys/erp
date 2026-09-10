@@ -68,6 +68,19 @@ ATTACHMENT_MIME_TO_EXTENSION = {
     "application/pdf": ".pdf",
 }
 
+# Foto de evidencia del estado del contenedor (10 sep, pedido de Braulio) —
+# solo aplica cuando cargo_type='CONTENEDOR'. A diferencia de los adjuntos
+# de arriba, es siempre una foto (nunca un PDF), así que usa su propio
+# conjunto de extensiones permitidas en vez de ALLOWED_ATTACHMENT_EXTENSIONS.
+ALLOWED_CONTAINER_PHOTO_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".heic", ".heif"}
+CONTAINER_PHOTO_MIME_TO_EXTENSION = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/heic": ".heic",
+    "image/heif": ".heif",
+}
+
 
 def _parse_issuer(form):
     issuer = (form.get("issuer") or "").strip().upper()
@@ -90,6 +103,13 @@ def _parse_cargo_type(form):
     value = (form.get("cargo_type") or "").strip().upper()
     valid = {code for code, _ in CARGO_TYPES}
     return value if value in valid else None
+
+
+def _parse_container_code(form):
+    """Código del contenedor (10 sep, pedido de Braulio) — texto libre, sin
+    formato estricto exigido (no todos los clientes usan el estándar ISO
+    6346 de 11 caracteres). Se guarda en mayúsculas por consistencia."""
+    return (form.get("container_code") or "").strip().upper() or None
 
 
 def _parse_ownership(form):
@@ -340,6 +360,17 @@ def new():
         driver2_id = (request.form.get("driver2_id") or None) if double_driver else None
         issuer = _parse_issuer(request.form)
         cargo_type = _parse_cargo_type(request.form)
+        # Código de contenedor + foto de evidencia (10 sep) — solo aplican a
+        # viajes de tipo CONTENEDOR; se limpian a None para cualquier otro
+        # tipo de carga aunque el formulario los haya enviado (mismo
+        # criterio que los campos de propia/tercero en
+        # _ownership_and_third_party_fields).
+        if cargo_type == "CONTENEDOR":
+            container_code = _parse_container_code(request.form)
+            container_photo_filename = _save_container_photo_file(request.files.get("container_photo"))
+        else:
+            container_code = None
+            container_photo_filename = None
         ownership_fields, ownership_errors = _ownership_and_third_party_fields(request.form)
         errors = list(ownership_errors)
         if not client_id:
@@ -373,10 +404,11 @@ def new():
         )
         trip_id = execute(
             """INSERT INTO trips (code, client_id, vehicle_id, trailer_vehicle_id, driver_id, driver2_id,
-               origin, destination, cargo_description, cargo_weight_kg, cargo_type, scheduled_date, rate,
+               origin, destination, cargo_description, cargo_weight_kg, cargo_type, container_code,
+               container_photo_filename, scheduled_date, rate,
                driver_commission, double_driver, single_leg, notes, issuer, ownership,
                third_party_name, third_party_unit, third_party_rate, third_party_payment_term, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 code,
                 client_id,
@@ -389,6 +421,8 @@ def new():
                 request.form.get("cargo_description", "").strip(),
                 parse_float(request.form.get("cargo_weight_kg"), None),
                 cargo_type,
+                container_code,
+                container_photo_filename,
                 scheduled_date,
                 parse_float(request.form.get("rate")),
                 driver_commission,
@@ -444,6 +478,18 @@ def edit(trip_id):
         driver2_id = (request.form.get("driver2_id") or None) if double_driver else None
         issuer = _parse_issuer(request.form)
         cargo_type = _parse_cargo_type(request.form)
+        # Código de contenedor + foto de evidencia (10 sep) — igual que en
+        # new(): solo aplican a CONTENEDOR. Si ya había una foto y no se
+        # sube una nueva, se conserva la anterior (mismo criterio que
+        # save_waybill()/save_delivery_proof()); si el tipo de carga deja de
+        # ser CONTENEDOR, se limpian ambos campos.
+        if cargo_type == "CONTENEDOR":
+            container_code = _parse_container_code(request.form)
+            new_container_photo = _save_container_photo_file(request.files.get("container_photo"))
+            container_photo_filename = new_container_photo if new_container_photo else trip["container_photo_filename"]
+        else:
+            container_code = None
+            container_photo_filename = None
         ownership_fields, ownership_errors = _ownership_and_third_party_fields(request.form)
         errors = list(ownership_errors)
         if route_error:
@@ -488,7 +534,8 @@ def edit(trip_id):
         )
         execute(
             """UPDATE trips SET client_id=?, vehicle_id=?, trailer_vehicle_id=?, driver_id=?, driver2_id=?,
-               origin=?, destination=?, cargo_description=?, cargo_weight_kg=?, cargo_type=?, scheduled_date=?,
+               origin=?, destination=?, cargo_description=?, cargo_weight_kg=?, cargo_type=?, container_code=?,
+               container_photo_filename=?, scheduled_date=?,
                rate=?, driver_commission=?, double_driver=?, single_leg=?, notes=?, issuer=?, ownership=?,
                third_party_name=?, third_party_unit=?, third_party_rate=?, third_party_payment_term=?
                WHERE id=?""",
@@ -503,6 +550,8 @@ def edit(trip_id):
                 request.form.get("cargo_description", "").strip(),
                 parse_float(request.form.get("cargo_weight_kg"), None),
                 cargo_type,
+                container_code,
+                container_photo_filename,
                 scheduled_date,
                 parse_float(request.form.get("rate")),
                 driver_commission,
@@ -722,6 +771,51 @@ def delivery_proof_file(trip_id):
     if storage.using_s3():
         return redirect(storage.delivery_proof_url(trip["delivery_proof_filename"]))
     return send_from_directory(storage.local_delivery_proofs_dir(), trip["delivery_proof_filename"])
+
+
+# --- Foto de evidencia del contenedor (10 sep, pedido de Braulio) ---------
+#
+# "cuando se eliga tipo de carga contenedor, tiene que haber la opcion de
+# registrar el codigo del contenedor y asimismo se pueda subir una foto de
+# evidencia de que el contenedor esta en buen estado." A diferencia de la
+# guía de transportista / conformidad de entrega, se registra directo en el
+# formulario de alta/edición del viaje (viajes/form.html), no aparte — y
+# siempre es una foto (nunca un PDF), así que no reusa
+# _save_binary_attachment() (que sí acepta PDF).
+
+def _save_container_photo_file(file_storage):
+    """Guarda la foto de evidencia del estado del contenedor y devuelve el
+    nombre guardado, o None si no se subió nada válido. Mismo patrón que
+    _save_binary_attachment(), pero restringido a fotos."""
+    if not file_storage or not file_storage.filename:
+        return None
+    ext = os.path.splitext(file_storage.filename)[1].lower()
+    if ext not in ALLOWED_CONTAINER_PHOTO_EXTENSIONS:
+        ext = CONTAINER_PHOTO_MIME_TO_EXTENSION.get((file_storage.mimetype or "").lower())
+    if not ext:
+        return None
+    raw_bytes = file_storage.read()
+    if not raw_bytes:
+        return None
+    compressed = compress_photo(raw_bytes)
+    if compressed is not None:
+        filename = f"{uuid.uuid4().hex}.jpg"
+        storage.save_container_photo(filename, compressed)
+        return filename
+    filename = f"{uuid.uuid4().hex}{ext}"
+    storage.save_container_photo(filename, raw_bytes)
+    return filename
+
+
+@bp.route("/<int:trip_id>/contenedor/foto")
+@permission_required("viajes", "view")
+def container_photo_file(trip_id):
+    trip = query_one("SELECT container_photo_filename FROM trips WHERE id = ?", (trip_id,))
+    if trip is None or not trip["container_photo_filename"]:
+        abort(404)
+    if storage.using_s3():
+        return redirect(storage.container_photo_url(trip["container_photo_filename"]))
+    return send_from_directory(storage.local_container_photos_dir(), trip["container_photo_filename"])
 
 
 # --- Facturado / Pagado (3 sep, pedido de Braulio) -------------------------

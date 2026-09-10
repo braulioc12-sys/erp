@@ -33,6 +33,17 @@
   <div class="detail-item"><div class="label">Empresa que opera</div><div class="value">{{ 'BRMS' if trip.issuer == 'BRMS' else 'Harraso Transport' }}</div></div>
   <div class="detail-item"><div class="label">Ruta</div><div class="value">{{ trip.origin }} → {{ trip.destination }}</div></div>
   <div class="detail-item"><div class="label">Tipo de carga</div><div class="value">{{ cargo_type_labels.get(trip.cargo_type, '—') }}</div></div>
+  {% if trip.cargo_type == 'CONTENEDOR' %}
+  <div class="detail-item"><div class="label">Código de contenedor</div><div class="value">{{ trip.container_code or '—' }}</div></div>
+  <div class="detail-item">
+    <div class="label">Foto de evidencia</div>
+    <div class="value">
+      {% if trip.container_photo_filename %}
+      <a href="{{ url_for('viajes.container_photo_file', trip_id=trip.id) }}" target="_blank">Ver foto</a>
+      {% else %}—{% endif %}
+    </div>
+  </div>
+  {% endif %}
   {% if trip.ownership == 'TERCERO' %}
   <div class="detail-item"><div class="label">Unidad</div><div class="value">Tercero — {{ trip.third_party_name or '—' }}{% if trip.third_party_unit %} ({{ trip.third_party_unit }}){% endif %}</div></div>
   <div class="detail-item"><div class="label">Flete acordado</div><div class="value">{{ trip.third_party_rate|money if trip.third_party_rate is not none else '—' }}</div></div>

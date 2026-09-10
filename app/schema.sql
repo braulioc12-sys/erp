@@ -193,6 +193,13 @@ CREATE TABLE IF NOT EXISTS trips (
     -- _active_trailers() en app/routes/viajes.py).
     trailer_vehicle_id INTEGER REFERENCES vehicles(id),
     cargo_type TEXT CHECK (cargo_type IN ('PLATAFORMA', 'CONTENEDOR', 'PARIHUELERO', 'FURGON', 'OTROS')),
+    -- Código del contenedor + foto de evidencia de buen estado (10 sep,
+    -- pedido de Braulio) — solo aplican cuando cargo_type='CONTENEDOR' (se
+    -- limpian a NULL si el viaje no es de contenedor, ver new()/edit() en
+    -- app/routes/viajes.py). La foto se guarda con el mismo mecanismo que
+    -- la guía de transportista (ver app/storage.py).
+    container_code TEXT,
+    container_photo_filename TEXT,
     -- Unidad propia (de Flota) vs. subcontratada a un tercero. Si es
     -- TERCERO, vehicle_id/trailer_vehicle_id no aplican — la unidad del
     -- tercero se anota en third_party_unit (texto libre, no está en Flota).

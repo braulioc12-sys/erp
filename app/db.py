@@ -408,6 +408,11 @@ COLUMN_MIGRATIONS = [
     # Nota de ajuste del Administrador (10 sep, pedido de Braulio) — ver el
     # comentario de esta columna en schema.sql.
     ("expense_advances", "fuel_adjustment", "TEXT"),
+    # Código de contenedor + foto de evidencia de buen estado (10 sep,
+    # pedido de Braulio) — ver el comentario de estas columnas en
+    # schema.sql (CREATE TABLE trips).
+    ("trips", "container_code", "TEXT"),
+    ("trips", "container_photo_filename", "TEXT"),
 ]
 
 

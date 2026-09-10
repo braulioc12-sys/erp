@@ -61,6 +61,13 @@ def local_delivery_proofs_dir():
     return _local_dir("delivery_proofs")
 
 
+def local_container_photos_dir():
+    """Igual que local_carrier_waybills_dir() pero para la foto de evidencia
+    del estado del contenedor (10 sep, solo cuando cargo_type='CONTENEDOR')
+    — carpeta separada en disco."""
+    return _local_dir("container_photos")
+
+
 def local_sunat_documents_dir():
     """Igual que las anteriores, pero para el PDF real que devuelve
     tefacturo.pe al emitir una factura o guía de remisión (7 sep, segunda
@@ -99,6 +106,10 @@ def _s3_carrier_waybills_prefix():
 
 def _s3_delivery_proofs_prefix():
     return (current_app.config.get("AWS_S3_DELIVERY_PROOFS_PREFIX") or "conformidad-entrega").strip("/")
+
+
+def _s3_container_photos_prefix():
+    return (current_app.config.get("AWS_S3_CONTAINER_PHOTOS_PREFIX") or "fotos-contenedor").strip("/")
 
 
 def _s3_sunat_documents_prefix():
@@ -257,6 +268,24 @@ def delivery_proof_url(filename):
     guardada en S3. En disco local, usar local_delivery_proofs_dir() +
     send_from_directory."""
     return _presigned_url(_s3_delivery_proofs_prefix(), filename)
+
+
+def save_container_photo(filename, raw_bytes):
+    """Igual que save_carrier_waybill()/save_delivery_proof(), pero para la
+    foto de evidencia del estado del contenedor (10 sep) — carpeta/prefijo
+    separado."""
+    if using_s3():
+        _put_object(_s3_container_photos_prefix(), filename, raw_bytes)
+    else:
+        with open(os.path.join(local_container_photos_dir(), filename), "wb") as f:
+            f.write(raw_bytes)
+
+
+def container_photo_url(filename):
+    """Igual que carrier_waybill_url()/delivery_proof_url(), pero para una
+    foto de contenedor guardada en S3. En disco local, usar
+    local_container_photos_dir() + send_from_directory."""
+    return _presigned_url(_s3_container_photos_prefix(), filename)
 
 
 def save_sunat_document(filename, raw_bytes):
