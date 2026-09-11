@@ -141,6 +141,8 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
+from app.ubigeo import validar_ubigeo
+
 IGV_RATE = 0.18
 
 # Token cacheado en memoria del propio proceso, por RUC — evita loguearse
@@ -500,6 +502,19 @@ def build_waybill_payload(waybill, trip, company, client):
         missing.append(f"falta el registro MTC de {company.get('name')} (HARRASO_MTC_REGISTRATION/BRMS_MTC_REGISTRATION)")
     if not waybill["origin_ubigeo"] or not waybill["destination_ubigeo"]:
         missing.append("falta el ubigeo de partida y/o llegada (SUNAT lo exige, 6 dígitos)")
+    else:
+        # 10 sep, patch 0028: revalida contra el catálogo del INEI/SUNAT
+        # justo antes de enviar — por si la guía se guardó antes de este
+        # patch, o su ubigeo se tocó directamente en la base de datos. Sin
+        # esto, un código inválido como "080000" llega a tefacturo.pe y
+        # provoca un error interno suyo (NullPointerException) en vez de un
+        # mensaje claro.
+        origin_error = validar_ubigeo(waybill["origin_ubigeo"], "el ubigeo de partida")
+        destination_error = validar_ubigeo(waybill["destination_ubigeo"], "el ubigeo de llegada")
+        if origin_error:
+            missing.append(origin_error.rstrip("."))
+        if destination_error:
+            missing.append(destination_error.rstrip("."))
     if not waybill["vehicle_plate"]:
         missing.append("falta la placa del vehículo")
     if not waybill["driver_document"]:

@@ -9,58 +9,84 @@
 
   <div class="form-row">
     <label>Fecha de emisión *
-      <input type="date" name="issue_date" value="{{ today }}" required>
+      <input type="date" name="issue_date" value="{{ form_values.issue_date if form_values else today }}" required>
     </label>
     <label>N.º de bultos
-      <input type="number" step="1" min="1" name="packages" value="1">
+      <input type="number" step="1" min="1" name="packages" value="{{ form_values.packages if form_values else 1 }}">
     </label>
     <label>Peso bruto total (kg)
-      <input type="number" step="0.01" name="weight_kg" value="{{ trip.cargo_weight_kg or '' }}">
+      <input type="number" step="0.01" name="weight_kg" value="{{ form_values.weight_kg if form_values else (trip.cargo_weight_kg or '') }}">
     </label>
   </div>
 
   <div class="form-row">
     <label>Dirección de partida
-      <input type="text" name="origin_address" value="{{ trip.origin }}">
+      <input type="text" name="origin_address" value="{{ form_values.origin_address if form_values else trip.origin }}">
     </label>
     <label>Dirección de llegada
-      <input type="text" name="destination_address" value="{{ trip.destination }}">
+      <input type="text" name="destination_address" value="{{ form_values.destination_address if form_values else trip.destination }}">
     </label>
   </div>
 
   <div class="form-row">
-    <label>Ubigeo de partida (código INEI, 6 dígitos)
-      <input type="text" name="origin_ubigeo" pattern="[0-9]{6}" maxlength="6" placeholder="Ej. 150101" title="6 dígitos">
-    </label>
-    <label>Ubigeo de llegada (código INEI, 6 dígitos)
-      <input type="text" name="destination_ubigeo" pattern="[0-9]{6}" maxlength="6" placeholder="Ej. 250101" title="6 dígitos">
-    </label>
+    <div style="flex:1;">
+      <strong>Ubigeo de partida</strong>
+      <div class="form-row" id="origin-ubigeo-selects">
+        <label>Departamento
+          <select data-role="departamento"></select>
+        </label>
+        <label>Provincia
+          <select data-role="provincia"></select>
+        </label>
+        <label>Distrito
+          <select data-role="distrito-select"></select>
+          <input type="text" data-role="distrito-texto" maxlength="2" pattern="[0-9]{2}" placeholder="N.º de distrito (2 dígitos)" style="display:none;">
+        </label>
+      </div>
+      <input type="hidden" name="origin_ubigeo" data-role="ubigeo-final" value="{{ form_values.origin_ubigeo if form_values else '' }}">
+    </div>
+    <div style="flex:1;">
+      <strong>Ubigeo de llegada</strong>
+      <div class="form-row" id="destination-ubigeo-selects">
+        <label>Departamento
+          <select data-role="departamento"></select>
+        </label>
+        <label>Provincia
+          <select data-role="provincia"></select>
+        </label>
+        <label>Distrito
+          <select data-role="distrito-select"></select>
+          <input type="text" data-role="distrito-texto" maxlength="2" pattern="[0-9]{2}" placeholder="N.º de distrito (2 dígitos)" style="display:none;">
+        </label>
+      </div>
+      <input type="hidden" name="destination_ubigeo" data-role="ubigeo-final" value="{{ form_values.destination_ubigeo if form_values else '' }}">
+    </div>
   </div>
-  <p class="muted" style="margin-top:-8px;">SUNAT exige el código de ubigeo (distrito) de partida y llegada para enviar la guía electrónica — puedes dejarlo en blanco y completarlo después, pero "Enviar a SUNAT" lo va a pedir. Búscalo en el listado de ubigeos del INEI/SUNAT si no lo tienes a mano.</p>
+  <p class="muted" style="margin-top:-8px;">Elige Departamento y Provincia de la lista (son datos reales del INEI, no se pueden escribir mal). Para Amazonas, Áncash, Apurímac, Arequipa, Ayacucho, Cajamarca, Callao, Cusco y Lima también puedes elegir el Distrito por nombre; en el resto de departamentos escribe el número de distrito (2 dígitos) — igual se valida que el departamento y la provincia existan de verdad antes de guardar.</p>
 
   <label>Motivo de traslado
     <select name="transfer_reason">
       {% for code, label in transfer_reasons %}
-      <option value="{{ code }}" {{ 'selected' if code == 'OTROS' }}>{{ label }}</option>
+      <option value="{{ code }}" {{ 'selected' if code == (form_values.transfer_reason if form_values else 'OTROS') }}>{{ label }}</option>
       {% endfor %}
     </select>
   </label>
 
   <div class="form-row">
     <label>Placa del vehículo
-      <input type="text" name="vehicle_plate" value="{{ trip.vehicle_plate or '' }}">
+      <input type="text" name="vehicle_plate" value="{{ form_values.vehicle_plate if form_values else (trip.vehicle_plate or '') }}">
     </label>
     <label>Conductor
-      <input type="text" name="driver_name" value="{{ trip.driver_name or '' }}">
+      <input type="text" name="driver_name" value="{{ form_values.driver_name if form_values else (trip.driver_name or '') }}">
     </label>
   </div>
 
   <div class="form-row">
     <label>DNI del conductor
-      <input type="text" name="driver_document" value="{{ trip.driver_document or '' }}" placeholder="Necesario para SUNAT">
+      <input type="text" name="driver_document" value="{{ form_values.driver_document if form_values else (trip.driver_document or '') }}" placeholder="Necesario para SUNAT">
     </label>
     <label>Licencia de conducir
-      <input type="text" name="driver_license" value="{{ trip.driver_license or '' }}">
+      <input type="text" name="driver_license" value="{{ form_values.driver_license if form_values else (trip.driver_license or '') }}">
     </label>
   </div>
   {% if not trip.driver_document %}
@@ -68,7 +94,7 @@
   {% endif %}
 
   <label>Observaciones
-    <textarea name="notes"></textarea>
+    <textarea name="notes">{{ form_values.notes if form_values else '' }}</textarea>
   </label>
 
   <div class="btn-group">
@@ -76,4 +102,127 @@
     <a href="{{ url_for('viajes.detail', trip_id=trip.id) }}" class="btn btn-secondary">Cancelar</a>
   </div>
 </form>
+
+<script id="ubigeo-catalog-data" type="application/json">{{ ubigeo_catalog | tojson }}</script>
+<script>
+(function () {
+  "use strict";
+  var catalogo = JSON.parse(document.getElementById("ubigeo-catalog-data").textContent);
+  var completos = catalogo.completos; // códigos de depto con distritos completos
+
+  // Listas auxiliares, ordenadas por nombre, para llenar los <select>.
+  var departamentos = Object.keys(catalogo.departamentos)
+    .map(function (code) { return { code: code, nombre: catalogo.departamentos[code] }; })
+    .sort(function (a, b) { return a.nombre.localeCompare(b.nombre); });
+
+  var provinciasPorDepto = {};
+  Object.keys(catalogo.provincias).forEach(function (code) {
+    var p = catalogo.provincias[code];
+    provinciasPorDepto[p.departamento] = provinciasPorDepto[p.departamento] || [];
+    provinciasPorDepto[p.departamento].push({ code: code, nombre: p.nombre });
+  });
+  Object.keys(provinciasPorDepto).forEach(function (dept) {
+    provinciasPorDepto[dept].sort(function (a, b) { return a.nombre.localeCompare(b.nombre); });
+  });
+
+  var distritosPorProvincia = {};
+  Object.keys(catalogo.distritos).forEach(function (code) {
+    var d = catalogo.distritos[code];
+    distritosPorProvincia[d.provincia] = distritosPorProvincia[d.provincia] || [];
+    distritosPorProvincia[d.provincia].push({ code: code, nombre: d.nombre });
+  });
+  Object.keys(distritosPorProvincia).forEach(function (prov) {
+    distritosPorProvincia[prov].sort(function (a, b) { return a.nombre.localeCompare(b.nombre); });
+  });
+
+  function fillSelect(select, items, placeholder, valueKey, labelKey) {
+    select.innerHTML = "";
+    var opt0 = document.createElement("option");
+    opt0.value = "";
+    opt0.textContent = placeholder;
+    select.appendChild(opt0);
+    items.forEach(function (item) {
+      var opt = document.createElement("option");
+      opt.value = item[valueKey];
+      opt.textContent = item[labelKey];
+      select.appendChild(opt);
+    });
+  }
+
+  function setupGroup(containerId, hiddenInput, initialCode) {
+    var container = document.getElementById(containerId);
+    var deptoSelect = container.querySelector('[data-role="departamento"]');
+    var provSelect = container.querySelector('[data-role="provincia"]');
+    var distSelect = container.querySelector('[data-role="distrito-select"]');
+    var distTexto = container.querySelector('[data-role="distrito-texto"]');
+
+    fillSelect(deptoSelect, departamentos, "-- Departamento --", "code", "nombre");
+
+    function actualizarFinal() {
+      var dept = deptoSelect.value;
+      var prov = provSelect.value;
+      if (!dept || !prov) {
+        hiddenInput.value = "";
+        return;
+      }
+      if (completos.indexOf(dept) !== -1) {
+        // El <select> de distrito usa como valor el ubigeo COMPLETO de 6
+        // dígitos (viene así del catálogo) — se usa tal cual.
+        hiddenInput.value = distSelect.value || "";
+      } else {
+        var dist = distTexto.value.trim();
+        hiddenInput.value = /^[0-9]{2}$/.test(dist) ? prov + dist : "";
+      }
+    }
+
+    function onDeptoChange(distritoInicial) {
+      var dept = deptoSelect.value;
+      var provs = provinciasPorDepto[dept] || [];
+      fillSelect(provSelect, provs, "-- Provincia --", "code", "nombre");
+      onProvChange(distritoInicial);
+    }
+
+    function onProvChange(distritoInicial) {
+      var prov = provSelect.value;
+      var dept = deptoSelect.value;
+      if (completos.indexOf(dept) !== -1) {
+        distSelect.style.display = "";
+        distTexto.style.display = "none";
+        var dists = distritosPorProvincia[prov] || [];
+        fillSelect(distSelect, dists, "-- Distrito --", "code", "nombre");
+        // distritoInicial, en este modo, es el ubigeo COMPLETO de 6 dígitos.
+        if (distritoInicial) { distSelect.value = distritoInicial; }
+      } else {
+        distSelect.style.display = "none";
+        distTexto.style.display = "";
+        distSelect.innerHTML = "";
+        // distritoInicial, en este modo, son los últimos 2 dígitos sueltos.
+        if (distritoInicial) { distTexto.value = distritoInicial.slice(-2); }
+      }
+      actualizarFinal();
+    }
+
+    deptoSelect.addEventListener("change", function () { onDeptoChange(null); });
+    provSelect.addEventListener("change", function () { onProvChange(null); });
+    distSelect.addEventListener("change", actualizarFinal);
+    distTexto.addEventListener("input", actualizarFinal);
+
+    // Si venimos de un error de validación con un ubigeo ya elegido, se
+    // reconstruyen las 3 selecciones a partir del código de 6 dígitos.
+    if (initialCode && /^[0-9]{6}$/.test(initialCode)) {
+      var deptInicial = initialCode.slice(0, 2);
+      var provInicial = initialCode.slice(0, 4);
+      deptoSelect.value = deptInicial;
+      onDeptoChange(null);
+      provSelect.value = provInicial;
+      onProvChange(initialCode);
+    }
+  }
+
+  var originHidden = document.querySelector('input[name="origin_ubigeo"]');
+  var destinationHidden = document.querySelector('input[name="destination_ubigeo"]');
+  setupGroup("origin-ubigeo-selects", originHidden, originHidden.value);
+  setupGroup("destination-ubigeo-selects", destinationHidden, destinationHidden.value);
+})();
+</script>
 {% endblock %}

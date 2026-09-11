@@ -28,8 +28,26 @@ from app.storage import (
     sunat_document_url,
     using_s3,
 )
+from app.ubigeo import (
+    DEPARTAMENTOS,
+    DEPARTAMENTOS_CON_DISTRITOS_COMPLETOS,
+    DISTRITOS,
+    PROVINCIAS,
+    validar_ubigeo,
+)
 
 bp = Blueprint("guias", __name__, url_prefix="/guias")
+
+# 10 sep, patch 0028: catálogo de ubigeos (departamento/provincia/distrito)
+# para los desplegables en cascada del formulario — se arma una sola vez acá
+# y se pasa tal cual al template (ver app/ubigeo.py para el alcance real del
+# catálogo de distritos, completo solo en 9 de los 25 departamentos).
+UBIGEO_CATALOG = {
+    "departamentos": DEPARTAMENTOS,
+    "provincias": PROVINCIAS,
+    "distritos": DISTRITOS,
+    "completos": sorted(DEPARTAMENTOS_CON_DISTRITOS_COMPLETOS),
+}
 
 # Catálogo SUNAT de motivo de traslado, confirmado en la documentación real
 # de tefacturo.pe (7 sep, segunda ronda) — se muestra tal cual en el
@@ -82,6 +100,29 @@ def new(trip_id):
     if request.method == "POST":
         if not validate_csrf():
             abort(400)
+
+        # 10 sep, patch 0028: valida los ubigeos contra el catálogo real del
+        # INEI/SUNAT ANTES de guardar — evita que un código inventado (como
+        # "080000", que causó un error críptico de tefacturo.pe) llegue
+        # siquiera a guardarse. Ver app/ubigeo.py para el alcance exacto del
+        # catálogo (completo a nivel departamento/provincia; a nivel
+        # distrito solo para 9 departamentos).
+        origin_ubigeo = request.form.get("origin_ubigeo", "").strip()
+        destination_ubigeo = request.form.get("destination_ubigeo", "").strip()
+        ubigeo_error = validar_ubigeo(origin_ubigeo, "El ubigeo de partida") or validar_ubigeo(
+            destination_ubigeo, "El ubigeo de llegada"
+        )
+        if ubigeo_error:
+            flash(ubigeo_error, "error")
+            return render_template(
+                "guias/form.html",
+                trip=trip,
+                today=today_str(),
+                transfer_reasons=TRANSFER_REASONS,
+                form_values=request.form,
+                ubigeo_catalog=UBIGEO_CATALOG,
+            )
+
         series = current_app.config["WAYBILL_SERIES"]
         series_number = _next_series_number(series)
         waybill_id = execute(
@@ -121,7 +162,11 @@ def new(trip_id):
         return redirect(url_for("guias.detail", waybill_id=waybill_id))
 
     return render_template(
-        "guias/form.html", trip=trip, today=today_str(), transfer_reasons=TRANSFER_REASONS
+        "guias/form.html",
+        trip=trip,
+        today=today_str(),
+        transfer_reasons=TRANSFER_REASONS,
+        ubigeo_catalog=UBIGEO_CATALOG,
     )
 
 
