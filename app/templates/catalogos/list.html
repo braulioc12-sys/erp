@@ -33,6 +33,7 @@
   <a class="btn {{ 'btn-primary' if key == active_category else 'btn-secondary' }}" href="{{ url_for('catalogos.list_view', categoria=key) }}">{{ label }}</a>
   {% endfor %}
   <a class="btn btn-secondary" href="{{ url_for('catalogos.grifos_list') }}">Grifos</a>
+  <a class="btn btn-secondary" href="{{ url_for('liquidaciones.concepts_list') }}">Conceptos de gastos</a>
 </div>
 
 <div class="panel" style="max-width:520px;">

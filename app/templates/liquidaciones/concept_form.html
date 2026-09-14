@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+{% block title %}Editar concepto — {{ concept.name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Editar concepto</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('liquidaciones.concepts_list') }}" class="btn btn-secondary">← Volver a Conceptos</a>
+  </div>
+</div>
+<p class="muted mt-0">Cambia la cuenta contable, el tipo de comprobante o el nombre de este concepto. El cambio aplica de inmediato a los gastos nuevos; los gastos ya registrados con este concepto no se modifican.</p>
+
+<div class="panel" style="max-width:520px;">
+  <form method="post" class="form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Nombre / Glosa
+      <input type="text" name="name" value="{{ form_values.name if form_values else concept.name }}" required>
+    </label>
+    <label>Cuenta contable
+      <input type="text" name="account_code" value="{{ form_values.account_code if form_values else concept.account_code }}" required>
+    </label>
+    <label>Tipo de comprobante
+      <input type="text" name="voucher_type_label" value="{{ form_values.voucher_type_label if form_values else concept.voucher_type_label }}" required>
+    </label>
+    <label>Doc.
+      <select name="document_type_code" required>
+        {% for code, label in document_types %}
+        <option value="{{ code }}" {{ 'selected' if code == (form_values.document_type_code if form_values else concept.document_type_code) }}>{{ code }} — {{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <div class="btn-group">
+      <button type="submit" class="btn btn-primary">Guardar cambios</button>
+      <a href="{{ url_for('liquidaciones.concepts_list') }}" class="btn btn-secondary">Cancelar</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

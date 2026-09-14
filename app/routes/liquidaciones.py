@@ -1515,6 +1515,44 @@ def concepts_add():
     return redirect(url_for("liquidaciones.concepts_list"))
 
 
+@bp.route("/conceptos/<int:concept_id>/editar", methods=["GET", "POST"])
+@permission_required("catalogos", "edit")
+def concepts_edit(concept_id):
+    """14 sep, pedido de Braulio: poder editar un concepto ya existente
+    (nombre, cuenta contable, tipo de comprobante, tipo de documento) desde
+    Catálogos, en vez de tener que pedir un patch de código cada vez que
+    una cuenta contable está mal (ver patch 0030 — el caso real que motivó
+    este pedido)."""
+    concept = query_one("SELECT * FROM expense_concepts WHERE id = ?", (concept_id,))
+    if concept is None:
+        abort(404)
+
+    if request.method == "POST":
+        if not validate_csrf():
+            abort(400)
+        name = request.form.get("name", "").strip().upper()
+        account_code = request.form.get("account_code", "").strip()
+        voucher_type_label = request.form.get("voucher_type_label", "").strip()
+        document_type_code = request.form.get("document_type_code", "").strip()
+
+        if not name or not account_code or not voucher_type_label or not document_type_code:
+            flash("Completa nombre, cuenta contable, tipo de comprobante y tipo de documento.", "error")
+            return render_template(
+                "liquidaciones/concept_form.html", concept=concept, document_types=DOCUMENT_TYPES,
+                form_values=request.form,
+            )
+
+        execute(
+            """UPDATE expense_concepts SET name = ?, account_code = ?, voucher_type_label = ?,
+               document_type_code = ? WHERE id = ?""",
+            (name, account_code, voucher_type_label, document_type_code, concept_id),
+        )
+        flash(f'Concepto "{name}" actualizado.', "success")
+        return redirect(url_for("liquidaciones.concepts_list"))
+
+    return render_template("liquidaciones/concept_form.html", concept=concept, document_types=DOCUMENT_TYPES)
+
+
 @bp.route("/conceptos/<int:concept_id>/alternar", methods=["POST"])
 @permission_required("catalogos", "edit")
 def concepts_toggle(concept_id):
