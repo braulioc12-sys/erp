@@ -26,8 +26,10 @@ que reemplaza al primer intento del mismo día basado en un PDF suelto de
   transportista — que es la que evidencia SU servicio de transporte.
   Avisar si esta interpretación no es la correcta.
 - Consultar PDF ya emitido: PUT /pdfapi/pdfapi/consultarPdf/{ruc} con
-  {"emisor", "numero", "serie", "tipoComprobante"} (01=Factura, 09=Guía) —
-  la respuesta trae el PDF completo codificado en base64. Se usa aquí para
+  {"emisor", "numero", "serie", "tipoComprobante"} (01=Factura, 31=Guía de
+  remisión TRANSPORTISTA — ver la nota del 14 sep en get_pdf_bytes() sobre
+  el "09" que se usaba antes por error) — la respuesta trae el PDF completo
+  codificado en base64. Se usa aquí para
   guardar una copia del PDF real en el propio ERP apenas se emite un
   comprobante (mismo mecanismo de almacenamiento que el resto del sistema,
   ver app/storage.py) — así Braulio no depende de volver a consultarlo en
@@ -260,7 +262,9 @@ class TefacturoClient:
     def get_pdf_bytes(self, tipo_comprobante, serie, numero):
         """Descarga el PDF de un comprobante ya emitido y devuelve sus
         bytes (decodificados de base64). tipo_comprobante: '01' = factura,
-        '09' = guía de remisión.
+        '31' = guía de remisión TRANSPORTISTA (Catálogo No. 01 de SUNAT —
+        '09' es la guía de remisión REMITENTE, un documento distinto que
+        este sistema no emite; ver la nota del 14 sep más abajo).
 
         Confirmado en real (8 sep, Factura F-0003 — quedó ACEPTADA por
         SUNAT, pero la descarga del PDF falló con "Respuesta inesperada de
@@ -271,7 +275,19 @@ class TefacturoClient:
         `json.loads`) fallaba antes de llegar siquiera a `_extract_base64_pdf`.
         Por eso esta llamada se arma a mano en vez de reusar `_request()`:
         intenta interpretar la respuesta como JSON (por si en algún caso sí
-        viene envuelta) y, si eso falla, usa el texto tal cual."""
+        viene envuelta) y, si eso falla, usa el texto tal cual.
+
+        Nota (14 sep, patch 0033): guias.py llamaba a este método con
+        tipo_comprobante='09' para la guía TRANSPORTISTA. Una guía real
+        quedó ACEPTADA por SUNAT pero la descarga del PDF falló con 404:
+        "No se encontró el tipo: 09 del comprobante: V001_10 para el RUC:
+        ...". Según el Catálogo No. 01 de SUNAT (confirmado contra el
+        anexo oficial: sunat.gob.pe/legislacion/superin/2017/anexoE-245-2017.pdf),
+        el código 09 es "GUIA DE REMISION REMITENTE" y el código 31 es
+        "GUIA DE REMISION TRANSPORTISTA" — este sistema únicamente emite
+        la guía TRANSPORTISTA (ver la nota del endpoint de emisión más
+        arriba), así que el tipoComprobante correcto para consultar su PDF
+        es '31', no '09'. Corregido en guias.py."""
         self._require_configured()
         body = {
             "emisor": int(self.ruc),

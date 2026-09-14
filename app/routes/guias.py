@@ -246,7 +246,12 @@ def send_sunat(waybill_id):
         pdf_url = waybill["sunat_pdf_url"]
         if result["accepted"]:
             try:
-                pdf_bytes = ose_client.get_pdf_bytes("09", waybill["series"], waybill["series_number"])
+                # 14 sep, patch 0033: '31' = Guía de Remisión TRANSPORTISTA
+                # (Catálogo No. 01 SUNAT) — '09' es la guía REMITENTE, un
+                # documento distinto que este sistema no emite. Confirmado
+                # por un 404 real de tefacturo.pe ("No se encontró el tipo:
+                # 09 del comprobante...") en una guía que sí quedó ACEPTADA.
+                pdf_bytes = ose_client.get_pdf_bytes("31", waybill["series"], waybill["series_number"])
                 pdf_filename = f"guia-{waybill_id}-{uuid.uuid4().hex}.pdf"
                 save_sunat_document(pdf_filename, pdf_bytes)
                 pdf_url = url_for("guias.view_sunat_pdf", waybill_id=waybill_id)
