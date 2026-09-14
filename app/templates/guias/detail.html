@@ -18,6 +18,7 @@
   <div class="detail-item"><div class="label">Empresa que emite</div><div class="value">{{ 'BRMS' if waybill.issuer == 'BRMS' else 'Harraso Transport' }}</div></div>
   <div class="detail-item"><div class="label">Ruta</div><div class="value">{{ waybill.origin_address }} → {{ waybill.destination_address }}</div></div>
   <div class="detail-item"><div class="label">Fecha de emisión</div><div class="value">{{ waybill.issue_date }}</div></div>
+  <div class="detail-item"><div class="label">Fecha de entrega</div><div class="value">{{ waybill.delivery_date or waybill.issue_date }}</div></div>
   <div class="detail-item"><div class="label">Peso / bultos</div><div class="value">{{ waybill.weight_kg or '—' }} kg / {{ waybill.packages or '—' }}</div></div>
   <div class="detail-item"><div class="label">Vehículo</div><div class="value">{{ waybill.vehicle_plate or '—' }}</div></div>
   <div class="detail-item"><div class="label">Conductor</div><div class="value">{{ waybill.driver_name or '—' }} ({{ waybill.driver_document or 'sin DNI' }})</div></div>

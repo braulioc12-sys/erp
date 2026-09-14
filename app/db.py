@@ -433,6 +433,13 @@ COLUMN_MIGRATIONS = [
     # es nueva, se crea sola en cada init_db().
     ("expenses", "fuel_station_id", "INTEGER REFERENCES fuel_stations(id)"),
     ("fuel_entries", "fuel_station_id", "INTEGER REFERENCES fuel_stations(id)"),
+    # 14 sep, patch 0029: "Fecha de entrega" (fechaEntrega) — campo real que
+    # exige tefacturo.pe en la guía transportista y que el payload actual
+    # nunca mandaba (ver la nota larga en build_waybill_payload() sobre la
+    # guía real que Braulio compartió y el NullPointerException que persistía
+    # después del patch 0028 de ubigeo). Opcional en el formulario: si se
+    # deja en blanco, se usa la misma fecha de emisión.
+    ("waybills", "delivery_date", "TEXT"),
 ]
 
 

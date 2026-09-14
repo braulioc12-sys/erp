@@ -1068,6 +1068,10 @@ CREATE TABLE IF NOT EXISTS waybills (
     -- después, mismo criterio que invoices.issuer arriba.
     issuer TEXT NOT NULL DEFAULT 'HARRASO' CHECK (issuer IN ('HARRASO', 'BRMS')),
     issue_date TEXT NOT NULL,
+    -- 14 sep, patch 0029: fecha de entrega (fechaEntrega) — campo real de
+    -- tefacturo.pe, ver el comentario largo en build_waybill_payload().
+    -- Opcional: si se deja vacía, se usa issue_date.
+    delivery_date TEXT,
     weight_kg REAL,
     packages INTEGER,
     origin_address TEXT,

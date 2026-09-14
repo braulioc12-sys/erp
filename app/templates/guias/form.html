@@ -11,6 +11,9 @@
     <label>Fecha de emisión *
       <input type="date" name="issue_date" value="{{ form_values.issue_date if form_values else today }}" required>
     </label>
+    <label>Fecha de entrega
+      <input type="date" name="delivery_date" value="{{ form_values.delivery_date if form_values else '' }}">
+    </label>
     <label>N.º de bultos
       <input type="number" step="1" min="1" name="packages" value="{{ form_values.packages if form_values else 1 }}">
     </label>
@@ -18,6 +21,7 @@
       <input type="number" step="0.01" name="weight_kg" value="{{ form_values.weight_kg if form_values else (trip.cargo_weight_kg or '') }}">
     </label>
   </div>
+  <p class="muted" style="margin-top:-8px;">Si dejas la fecha de entrega en blanco, se usa la misma fecha de emisión.</p>
 
   <div class="form-row">
     <label>Dirección de partida

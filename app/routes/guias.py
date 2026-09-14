@@ -125,11 +125,18 @@ def new(trip_id):
 
         series = current_app.config["WAYBILL_SERIES"]
         series_number = _next_series_number(series)
+        # 14 sep, patch 0029: fecha de entrega (fechaEntrega, exigida por
+        # tefacturo.pe — ver la nota en build_waybill_payload) — opcional en
+        # el formulario, si se deja en blanco se usa la misma fecha de
+        # emisión.
+        issue_date_value = parse_date(request.form.get("issue_date")) or today_str()
+        delivery_date_value = parse_date(request.form.get("delivery_date")) or issue_date_value
         waybill_id = execute(
-            """INSERT INTO waybills (trip_id, series, series_number, issuer, issue_date, weight_kg, packages,
+            """INSERT INTO waybills (trip_id, series, series_number, issuer, issue_date, delivery_date,
+               weight_kg, packages,
                origin_address, destination_address, origin_ubigeo, destination_ubigeo, transfer_reason,
                vehicle_plate, driver_document, driver_name, driver_license, notes, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 trip_id,
                 series,
@@ -138,7 +145,8 @@ def new(trip_id):
                 # nombre de la misma empresa que el viaje (trips.issuer,
                 # Harraso o BRMS) — se copia aquí y no se recalcula después.
                 trip["issuer"],
-                parse_date(request.form.get("issue_date")) or today_str(),
+                issue_date_value,
+                delivery_date_value,
                 parse_float(request.form.get("weight_kg"), None),
                 int(parse_float(request.form.get("packages"), 1)),
                 request.form.get("origin_address", "").strip() or trip["origin"],

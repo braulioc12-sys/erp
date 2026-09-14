@@ -494,7 +494,42 @@ def build_waybill_payload(waybill, trip, company, client):
     en este campo puntual — el resto de la estructura (sin `codigoAlmacen`/
     `datosEnvio`, con `motivoTraslado`/`modalidadTransporte` sueltos) sí
     quedó validada por el servidor real, que llegó a procesar el JSON hasta
-    este punto."""
+    este punto.
+
+    **14 sep, patch 0029 — el NullPointerException de `BaseDispatchAdviceBuilder.buildPoint`
+    seguía apareciendo DESPUÉS del patch 0028** (que solo arregló la
+    validación de ubigeo, un problema real pero distinto): Braulio probó de
+    nuevo con ubigeos válidos (150119 Lurín / 080101 Cusco) y con
+    direcciones completas — mismo error, byte a byte. Se descartó también
+    la hipótesis RENIEC-vs-INEI. Braulio consiguió una guía REAL, aceptada
+    por SUNAT, generada directo desde el portal propio de tefacturo.pe (no
+    desde este sistema) — su PDF muestra varios campos que este payload
+    JAMÁS mandaba: Pagador de Flete, Fecha de Entrega, Transbordo
+    Programado, Retorno de Vehículo Vacío, Retorno Vehículo Contenedores
+    Vacíos, Tarjeta de Circulación. Se le pidió a Braulio la colección
+    Postman original para confirmar nombres de campo antes de adivinar; no
+    la tenía a mano, pero encontró la página pública de documentación
+    (la misma que ya se había descartado como desactualizada en el patch
+    0017 — ver la nota "Corrección importante" arriba) y esa página SÍ
+    confirma, en su JSON de ejemplo, los nombres exactos de: `fechaEntrega`,
+    `transbordoProgramado`, `retornoVehiculoVacio`,
+    `retornoVehiculoContenedoresVacios`, `transporteSubcontratado`,
+    `trasladoTotalBienes` (la doc vieja los anida bajo un objeto
+    `datosEnvio` que ya sabemos que el servidor real NO usa — acá se
+    agregan sueltos al nivel raíz, igual que `fechaInicioTraslado`/
+    `pesoBrutoTotal`/etc., siguiendo el mismo patrón que ya demostró ser
+    el real). "Pagador de Flete" y "Tarjeta de Circulación" NO aparecen en
+    NINGÚN documento (ni la colección Postman de patch 0017, ni esta página
+    pública) — lo más probable es que tefacturo.pe los complete por su
+    cuenta (datos ya cargados en su propio portal, ej. la tarjeta de
+    circulación asociada a la placa) y no sean parte de este JSON; no se
+    agregan acá.
+
+    Esto es una MEJOR SUPOSICIÓN, no una confirmación contra el servidor
+    real (mismo nivel de certeza que el patch 0017 antes del 0018) —
+    Braulio: manda la primera guía real con este cambio y revisa bien el
+    resultado; si tefacturo.pe la rechaza, pásame el error exacto tal cual
+    para corregir contra eso en vez de seguir adivinando."""
     missing = []
     if not client["ruc"]:
         missing.append(f"el cliente '{client['name']}' no tiene RUC registrado")
@@ -554,6 +589,27 @@ def build_waybill_payload(waybill, trip, company, client):
         "pesoBrutoTotal": waybill["weight_kg"] or 0,
         "unidadPeso": "KGM",
         "numeroBultos": waybill["packages"] or 0,
+        # 14 sep, patch 0029 (ver la nota larga arriba): campos confirmados
+        # por la guía real aceptada de Braulio, ausentes hasta ahora. Sin
+        # datos propios para "transbordo"/"retorno de vehículo vacío" en el
+        # sistema, se dejan fijos en "False" (igual que en el ejemplo real
+        # de Braulio, donde los tres salían "NO") — avisar si algún viaje sí
+        # necesita transbordo programado o retorno de vehículo/contenedores
+        # vacíos, para agregarlo como campo del formulario.
+        "transbordoProgramado": "False",
+        "retornoVehiculoVacio": "False",
+        "retornoVehiculoContenedoresVacios": "False",
+        # "delivery_date" es opcional en el formulario de Guías — si se deja
+        # vacío, se usa la misma fecha de emisión.
+        "fechaEntrega": waybill["delivery_date"] or waybill["issue_date"],
+        # trips.ownership distingue flota PROPIA de un viaje operado por un
+        # TERCERO subcontratado (ver app/routes/viajes.py) — mapeo directo a
+        # este campo de tefacturo.pe.
+        "transporteSubcontratado": trip["ownership"] == "TERCERO",
+        # Harraso/BRMS siempre trasladan la totalidad de la carga del viaje
+        # en una sola guía (no hay concepto de "envío parcial" en el
+        # sistema) — avisar si eso llega a no ser cierto en algún caso.
+        "trasladoTotalBienes": True,
         "puntoPartida": {
             "ubigeo": waybill["origin_ubigeo"],
             "direccion": waybill["origin_address"] or trip["origin"],
