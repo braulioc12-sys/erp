@@ -65,7 +65,21 @@ DEFAULT_EXPENSE_CONCEPTS = [
     ("HOSPEDAJE", "6313", "boleta", "03"),
     ("MANTENIMIENTO VEHICULO", "63433", "boleta", "03"),
     ("DOCUMENTO POR LIQUIDAR", "14132", "vales pucallpa", "PL"),
-    ("PEAJE", "42121", "factura", "01"),
+    # 14 sep, corrección pedida por Braulio: estos 8 conceptos tenían la
+    # cuenta de FACTURA (42121) guardada como su cuenta propia — como
+    # resolve_expense_account() solo fuerza 42121 cuando el radio dice
+    # "factura" y deja la cuenta del concepto tal cual cuando dice
+    # "boleta" (ver app/accounting.py), elegir "boleta" en estos conceptos
+    # seguía mostrando 42121 en vez de la cuenta real de boleta. Corregido
+    # con las cuentas que dio Braulio: Peaje 6313 (misma que Hospedaje);
+    # Aflojatodo/Arreglo carga/Lavado/Silicona/Engrase/Cochera 63433 (misma
+    # que Mantenimiento Vehículo); Consumo 6314 (misma que Consumo
+    # Alimentos). Si alguna vez SÍ llega por factura, el radio "Factura"
+    # sigue forzando 42121 igual que antes — eso no cambió. En bases ya
+    # desplegadas se corrige sola al arrancar la app (ver
+    # _fix_boleta_account_codes_sqlite/_postgres en app/db.py), porque el
+    # seed de acá solo corre en una base nueva y vacía.
+    ("PEAJE", "6313", "boleta", "03"),
     # 10 sep, pedido de Braulio: cuadros de grifo/galones/precio al
     # registrar un gasto de Combustible — no venía en la hoja "Conceptos"
     # original, se agregó con el mismo patrón de Peaje/Lavado/Consumo
@@ -76,13 +90,13 @@ DEFAULT_EXPENSE_CONCEPTS = [
     ("RECIBOS POR HONORARIO", "4241", "recibos por honorario", "02"),
     ("CONSUMO ALIMENTOS", "6314", "boleta", "03"),
     ("DOCUMENTO POR LIQUIDAR", "14131", "vales lima", "PL"),
-    ("AFLOJATODO", "42121", "factura", "01"),
-    ("ARREGLO CARGA", "42121", "factura", "01"),
-    ("LAVADO", "42121", "factura", "01"),
-    ("CONSUMO", "42121", "factura", "01"),
-    ("SILICONA", "42121", "factura", "01"),
-    ("ENGRASE", "42121", "factura", "01"),
-    ("COCHERA", "42121", "factura", "01"),
+    ("AFLOJATODO", "63433", "boleta", "03"),
+    ("ARREGLO CARGA", "63433", "boleta", "03"),
+    ("LAVADO", "63433", "boleta", "03"),
+    ("CONSUMO", "6314", "boleta", "03"),
+    ("SILICONA", "63433", "boleta", "03"),
+    ("ENGRASE", "63433", "boleta", "03"),
+    ("COCHERA", "63433", "boleta", "03"),
     ("HIDROLINA", "63433", "boleta", "03"),
     # AJUSTAR: cuenta 14133 y "vales tarapoto" no venían en la hoja
     # Conceptos original (solo Lima/Pucallpa) — se agregó siguiendo el

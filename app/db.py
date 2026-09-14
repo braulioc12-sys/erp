@@ -603,6 +603,50 @@ def _ensure_combustible_concept_postgres(conn):
     )
 
 
+# 14 sep, pedido de Braulio: "cuando se selecciona factura las cuentas
+# estan correctas, pero cuando es boleta sigue jalando cuentas de
+# factura". Estos 8 conceptos se sembraron (y siguen en la base ya
+# desplegada de Braulio) con la cuenta de FACTURA (42121) como su propia
+# cuenta — como resolve_expense_account() (app/accounting.py) solo
+# reemplaza la cuenta cuando el radio dice "factura" y deja la del
+# concepto tal cual cuando dice "boleta", elegir boleta en estos conceptos
+# seguía mostrando 42121. Mismo patrón que
+# _ensure_combustible_concept_sqlite/_postgres: corre en cada arranque,
+# solo actualiza los conceptos que coincidan por nombre Y que TODAVÍA
+# tengan la cuenta vieja (42121) — así no pisa nada si Braulio ya lo
+# corrigió a mano desde Catálogos antes de este patch.
+_BOLETA_ACCOUNT_FIXES = {
+    "PEAJE": ("6313", "03", "boleta"),
+    "AFLOJATODO": ("63433", "03", "boleta"),
+    "ARREGLO CARGA": ("63433", "03", "boleta"),
+    "LAVADO": ("63433", "03", "boleta"),
+    "CONSUMO": ("6314", "03", "boleta"),
+    "SILICONA": ("63433", "03", "boleta"),
+    "ENGRASE": ("63433", "03", "boleta"),
+    "COCHERA": ("63433", "03", "boleta"),
+}
+_BOLETA_ACCOUNT_FIXES_OLD_CODE = "42121"
+
+
+def _fix_boleta_account_codes_sqlite(conn):
+    for name, (account_code, doc_code, label) in _BOLETA_ACCOUNT_FIXES.items():
+        conn.execute(
+            """UPDATE expense_concepts SET account_code = ?, document_type_code = ?, voucher_type_label = ?
+               WHERE UPPER(name) = ? AND account_code = ?""",
+            (account_code, doc_code, label, name, _BOLETA_ACCOUNT_FIXES_OLD_CODE),
+        )
+
+
+def _fix_boleta_account_codes_postgres(conn):
+    cur = conn.cursor()
+    for name, (account_code, doc_code, label) in _BOLETA_ACCOUNT_FIXES.items():
+        cur.execute(
+            """UPDATE expense_concepts SET account_code = %s, document_type_code = %s, voucher_type_label = %s
+               WHERE UPPER(name) = %s AND account_code = %s""",
+            (account_code, doc_code, label, name, _BOLETA_ACCOUNT_FIXES_OLD_CODE),
+        )
+
+
 _PRAGMA_LINE_RE = re.compile(r"^\s*PRAGMA\s[^\n]*;\s*$", re.MULTILINE | re.IGNORECASE)
 _CREATE_TABLE_START_RE = re.compile(r"CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\(")
 _COL_REFERENCES_RE = re.compile(r"\s+REFERENCES\s+(\w+)\s*\(([^)]+)\)")
@@ -722,6 +766,7 @@ def init_db(app):
             _apply_role_check_migration_postgres(conn)
             _backfill_user_roles_postgres(conn)
             _ensure_combustible_concept_postgres(conn)
+            _fix_boleta_account_codes_postgres(conn)
             conn.commit()
         finally:
             conn.close()
@@ -734,6 +779,7 @@ def init_db(app):
         _apply_role_check_migration_sqlite(conn)
         _backfill_user_roles_sqlite(conn)
         _ensure_combustible_concept_sqlite(conn)
+        _fix_boleta_account_codes_sqlite(conn)
         conn.commit()
         conn.close()
 
