@@ -473,63 +473,71 @@ def build_waybill_payload(waybill, trip, company, client):
     `remitente` como `destinatario` — ver la nota de "SIMPLIFICACIONES" al
     inicio de este archivo.
 
-    Reescrito el 9 sep contra la colección Postman OFICIAL que Braulio
-    compartió (ejemplos reales de "Guía Transportista" y "Guía Remitente",
-    ambos con el mismo `baseUrl` real `https://jarvis.tefacturo.pe`) — ver
-    la nota "Corrección importante (9 sep)" al inicio de este archivo para
-    el porqué de este cambio frente a la versión del 8 sep. Estructura
-    plana (sin `datosEnvio` ni `codigoAlmacen`): `motivoTraslado`,
-    `modalidadTransporte`, `fechaInicioTraslado`, `pesoBrutoTotal`,
-    `unidadPeso`, `numeroBultos`, `puntoPartida`/`puntoLlegada` van sueltos
-    al nivel raíz; `conductores`/`vehiculos` usan `nombreCompleto`/
-    `licenciaConducir` y un flag `principal`; el detalle se llama
-    `detalleDocumento`.
+    **14 sep, patch 0032 — CAUSA REAL ENCONTRADA Y CONFIRMADA por soporte
+    técnico de tefacturo.pe (Jorge, vía WhatsApp), con evidencia de un 201
+    Created real.** El `NullPointerException` en
+    `BaseDispatchAdviceBuilder.buildPoint` que persistía desde el reporte
+    original (ver patches 0028/0029) NUNCA fue por el ubigeo, la dirección,
+    ni por campos faltantes al nivel raíz — fue porque, desde el patch 0017
+    (9 sep), este payload manda `puntoPartida`/`puntoLlegada` y el resto de
+    los datos de envío SUELTOS en la raíz del JSON, cuando el endpoint de
+    guía TRANSPORTISTA los espera anidados dentro de un objeto
+    `datosEnvio`. Al no encontrar esa clave, el deserializador de
+    tefacturo.pe simplemente deja `datosEnvio` en `null` (JSON tolera
+    campos desconocidos sin error) — y `buildPoint()`, que arma el punto de
+    partida/llegada A PARTIR de `datosEnvio`, revienta con NPE apenas
+    intenta leerlo. Por eso el error era IDÉNTICO sin importar qué tan
+    válidos fueran el ubigeo o la dirección: nunca llegaban a usarse.
 
-    `conductores[].tipoDocumentoIdentidad` CONFIRMADO contra el servidor
-    real (9 sep, primer envío real con este código): el ejemplo de la
-    colección Postman usa "DNI", pero tefacturo.pe respondió 400 rechazando
-    ese valor exacto y devolviendo el enum real aceptado — DNI corresponde
-    a "DOC_NACIONAL_DE_IDENTIDAD" (el mismo valor largo que ya se usaba
-    antes del 9 sep). Es decir, la colección Postman también tenía un error
-    en este campo puntual — el resto de la estructura (sin `codigoAlmacen`/
-    `datosEnvio`, con `motivoTraslado`/`modalidadTransporte` sueltos) sí
-    quedó validada por el servidor real, que llegó a procesar el JSON hasta
-    este punto.
+    Esto explica también por qué el patch 0017/0018 sí pudo confirmarse
+    parcialmente contra el servidor real en su momento (un 400 real sobre
+    `conductores[].tipoDocumentoIdentidad`): `conductores`/`vehiculos`
+    SIEMPRE fueron correctos sueltos en la raíz (nunca estuvieron dentro de
+    `datosEnvio`), así que el deserializador llegaba a procesarlos sin
+    problema — el bug vivía específicamente en los campos que sí debían ir
+    dentro de `datosEnvio` y nunca se habían probado de punta a punta
+    contra un envío ACEPTADO.
 
-    **14 sep, patch 0029 — el NullPointerException de `BaseDispatchAdviceBuilder.buildPoint`
-    seguía apareciendo DESPUÉS del patch 0028** (que solo arregló la
-    validación de ubigeo, un problema real pero distinto): Braulio probó de
-    nuevo con ubigeos válidos (150119 Lurín / 080101 Cusco) y con
-    direcciones completas — mismo error, byte a byte. Se descartó también
-    la hipótesis RENIEC-vs-INEI. Braulio consiguió una guía REAL, aceptada
-    por SUNAT, generada directo desde el portal propio de tefacturo.pe (no
-    desde este sistema) — su PDF muestra varios campos que este payload
-    JAMÁS mandaba: Pagador de Flete, Fecha de Entrega, Transbordo
-    Programado, Retorno de Vehículo Vacío, Retorno Vehículo Contenedores
-    Vacíos, Tarjeta de Circulación. Se le pidió a Braulio la colección
-    Postman original para confirmar nombres de campo antes de adivinar; no
-    la tenía a mano, pero encontró la página pública de documentación
-    (la misma que ya se había descartado como desactualizada en el patch
-    0017 — ver la nota "Corrección importante" arriba) y esa página SÍ
-    confirma, en su JSON de ejemplo, los nombres exactos de: `fechaEntrega`,
-    `transbordoProgramado`, `retornoVehiculoVacio`,
-    `retornoVehiculoContenedoresVacios`, `transporteSubcontratado`,
-    `trasladoTotalBienes` (la doc vieja los anida bajo un objeto
-    `datosEnvio` que ya sabemos que el servidor real NO usa — acá se
-    agregan sueltos al nivel raíz, igual que `fechaInicioTraslado`/
-    `pesoBrutoTotal`/etc., siguiendo el mismo patrón que ya demostró ser
-    el real). "Pagador de Flete" y "Tarjeta de Circulación" NO aparecen en
-    NINGÚN documento (ni la colección Postman de patch 0017, ni esta página
-    pública) — lo más probable es que tefacturo.pe los complete por su
-    cuenta (datos ya cargados en su propio portal, ej. la tarjeta de
-    circulación asociada a la placa) y no sean parte de este JSON; no se
-    agregan acá.
+    La página pública de documentación (la misma que ya se había marcado
+    como "desactualizada" en el patch 0017, precisamente por anidar estos
+    campos bajo `datosEnvio`) tenía razón en la forma — el error del patch
+    0017 no fue descartarla por capricho, sino que en ese momento SÍ exigía
+    de más (`codigoAlmacen`), y la colección Postman parecía más simple y
+    confiable. La lección: la forma correcta y los campos obligatorios son
+    cosas separadas, y sin poder probar contra el servidor real, conviene
+    quedarse con la duda en vez de asumir que toda una fuente está mal.
 
-    Esto es una MEJOR SUPOSICIÓN, no una confirmación contra el servidor
-    real (mismo nivel de certeza que el patch 0017 antes del 0018) —
-    Braulio: manda la primera guía real con este cambio y revisa bien el
-    resultado; si tefacturo.pe la rechaza, pásame el error exacto tal cual
-    para corregir contra eso en vez de seguir adivinando."""
+    Jorge (tefacturo.pe) probó en su ambiente el JSON que le pasamos (con
+    los datos reales del caso) reestructurado así y confirmó 201 Created:
+    - `datosEnvio` (nuevo objeto): `transbordoProgramado`,
+      `retornoVehiculoVacio`, `retornoVehiculoContenedoresVacios`
+      (strings "False"/"True"), `unidadMedida` ("KILOS", NO "KGM"),
+      `pesoBruto` (string), `numeroBultos` (número), `fechaTraslado`,
+      `fechaEntrega`, `puntoPartida`/`puntoLlegada`,
+      `transporteSubcontratado` (boolean), `trasladoTotalBienes` (boolean).
+    - `conductores[]` usa `nombreLegal` (no `nombreCompleto`) y
+      `liscenciaConducir` (SÍ, con ese error de tipeo — es el nombre real
+      del campo, confirmado en el JSON que probó Jorge) — sin flag
+      `principal`.
+    - `vehiculos[]` solo trae `placa` — sin flag `principal`.
+    - El detalle se llama `detalleGuia` (no `detalleDocumento`), con
+      `numeroOrden` (int) y `unidadNombre` nuevos, y `cantidad` como
+      NÚMERO (no string).
+    - `motivoTraslado` y `modalidadTransporte` NO aparecen en absoluto en
+      el JSON confirmado — se quitan de este payload. Tiene sentido:
+      "modalidad de transporte" (público/privado) es información que solo
+      hace falta en la guía REMITENTE, para que el dueño de la carga
+      declare cómo mueve su mercadería — en la guía TRANSPORTISTA ya es
+      implícito (por definición, la emite quien presta el servicio de
+      transporte). Si más adelante hace falta reportar el motivo de
+      traslado igual, hay que preguntarle a tefacturo.pe dónde va — no se
+      adivina un nombre de campo nuevo sin evidencia.
+    - `numeroPallet` (que sí aparece en la doc pública y en el JSON de
+      prueba de Jorge) NO se agrega acá: no hay ningún dato de "número de
+      pallet" en el sistema, y mandar un valor inventado en un documento
+      fiscal es peor que no mandarlo. Si tefacturo.pe lo exige como
+      obligatorio, el próximo envío real lo va a decir con un error
+      puntual — recién ahí se agrega un campo real al formulario."""
     missing = []
     if not client["ruc"]:
         missing.append(f"el cliente '{client['name']}' no tiene RUC registrado")
@@ -580,43 +588,49 @@ def build_waybill_payload(waybill, trip, company, client):
             "fechaEmision": waybill["issue_date"],
             "glosa": waybill["notes"] or trip["cargo_description"] or "",
         },
-        "motivoTraslado": waybill["transfer_reason"] or "OTROS",
-        # Harraso/BRMS siempre transportan carga de terceros cobrando por el
-        # servicio — nunca mueven su propia mercadería con su propia flota —
-        # así que este valor queda fijo (ver nota al inicio del archivo).
-        "modalidadTransporte": "TRANSPORTE_PUBLICO",
-        "fechaInicioTraslado": waybill["issue_date"],
-        "pesoBrutoTotal": waybill["weight_kg"] or 0,
-        "unidadPeso": "KGM",
-        "numeroBultos": waybill["packages"] or 0,
-        # 14 sep, patch 0029 (ver la nota larga arriba): campos confirmados
-        # por la guía real aceptada de Braulio, ausentes hasta ahora. Sin
-        # datos propios para "transbordo"/"retorno de vehículo vacío" en el
-        # sistema, se dejan fijos en "False" (igual que en el ejemplo real
-        # de Braulio, donde los tres salían "NO") — avisar si algún viaje sí
-        # necesita transbordo programado o retorno de vehículo/contenedores
-        # vacíos, para agregarlo como campo del formulario.
-        "transbordoProgramado": "False",
-        "retornoVehiculoVacio": "False",
-        "retornoVehiculoContenedoresVacios": "False",
-        # "delivery_date" es opcional en el formulario de Guías — si se deja
-        # vacío, se usa la misma fecha de emisión.
-        "fechaEntrega": waybill["delivery_date"] or waybill["issue_date"],
-        # trips.ownership distingue flota PROPIA de un viaje operado por un
-        # TERCERO subcontratado (ver app/routes/viajes.py) — mapeo directo a
-        # este campo de tefacturo.pe.
-        "transporteSubcontratado": trip["ownership"] == "TERCERO",
-        # Harraso/BRMS siempre trasladan la totalidad de la carga del viaje
-        # en una sola guía (no hay concepto de "envío parcial" en el
-        # sistema) — avisar si eso llega a no ser cierto en algún caso.
-        "trasladoTotalBienes": True,
-        "puntoPartida": {
-            "ubigeo": waybill["origin_ubigeo"],
-            "direccion": waybill["origin_address"] or trip["origin"],
-        },
-        "puntoLlegada": {
-            "ubigeo": waybill["destination_ubigeo"],
-            "direccion": waybill["destination_address"] or trip["destination"],
+        "remitente": party,
+        "destinatario": dict(party),
+        # 14 sep, patch 0032 (ver la nota larga arriba): CONFIRMADO por
+        # soporte técnico de tefacturo.pe (201 Created real) — estos campos
+        # van anidados acá, no sueltos en la raíz como se mandaban desde el
+        # patch 0017. Ese era el bug real detrás del NullPointerException en
+        # BaseDispatchAdviceBuilder.buildPoint que persistía desde el
+        # reporte original.
+        "datosEnvio": {
+            # Sin datos propios para "transbordo"/"retorno de vehículo
+            # vacío" en el sistema, se dejan fijos en "False" (igual que en
+            # el ejemplo real de Braulio, donde los tres salían "NO") —
+            # avisar si algún viaje sí necesita alguno en true, para
+            # agregarlo como campo del formulario.
+            "transbordoProgramado": "False",
+            "retornoVehiculoVacio": "False",
+            "retornoVehiculoContenedoresVacios": "False",
+            # "KILOS", NO "KGM" — confirmado en el JSON real que aceptó
+            # tefacturo.pe.
+            "unidadMedida": "KILOS",
+            "pesoBruto": str(waybill["weight_kg"] or 0),
+            "numeroBultos": waybill["packages"] or 0,
+            "fechaTraslado": waybill["issue_date"],
+            # "delivery_date" es opcional en el formulario de Guías — si se
+            # deja vacío, se usa la misma fecha de emisión.
+            "fechaEntrega": waybill["delivery_date"] or waybill["issue_date"],
+            "puntoPartida": {
+                "ubigeo": waybill["origin_ubigeo"],
+                "direccion": waybill["origin_address"] or trip["origin"],
+            },
+            "puntoLlegada": {
+                "ubigeo": waybill["destination_ubigeo"],
+                "direccion": waybill["destination_address"] or trip["destination"],
+            },
+            # trips.ownership distingue flota PROPIA de un viaje operado
+            # por un TERCERO subcontratado (ver app/routes/viajes.py) —
+            # mapeo directo a este campo de tefacturo.pe.
+            "transporteSubcontratado": trip["ownership"] == "TERCERO",
+            # Harraso/BRMS siempre trasladan la totalidad de la carga del
+            # viaje en una sola guía (no hay concepto de "envío parcial" en
+            # el sistema) — avisar si eso llega a no ser cierto en algún
+            # caso.
+            "trasladoTotalBienes": True,
         },
         "transportista": {
             "correo": company.get("email", ""),
@@ -626,28 +640,29 @@ def build_waybill_payload(waybill, trip, company, client):
             "tipoDocumentoIdentidad": "RUC",
             "registroMTC": company.get("mtc_registration", ""),
         },
-        "remitente": party,
-        "destinatario": dict(party),
         "conductores": [
             {
-                "nombreCompleto": waybill["driver_name"] or "",
+                # "nombreLegal" y "liscenciaConducir" (con ese error de
+                # tipeo) — nombres reales confirmados en el JSON que probó
+                # tefacturo.pe, no "nombreCompleto"/"licenciaConducir" ni
+                # flag "principal" (ver nota al inicio del archivo).
+                "nombreLegal": waybill["driver_name"] or "",
                 "numeroDocumentoIdentidad": waybill["driver_document"] or "",
                 "tipoDocumentoIdentidad": "DOC_NACIONAL_DE_IDENTIDAD",
-                "licenciaConducir": waybill["driver_license"] or "",
-                # Un solo conductor por guía en este sistema — ver nota al
-                # inicio del archivo — se manda como el "principal".
-                "principal": True,
+                "liscenciaConducir": waybill["driver_license"] or "",
             }
         ],
         "vehiculos": [
-            {"placa": waybill["vehicle_plate"] or "", "principal": True},
+            {"placa": waybill["vehicle_plate"] or ""},
         ],
-        "detalleDocumento": [
+        "detalleGuia": [
             {
+                "numeroOrden": 1,
                 "codigoProducto": f"CARGA-{trip['id']}",
                 "descripcion": trip["cargo_description"] or "Carga general",
                 "unidadMedida": "KILOGRAMO",
-                "cantidad": str(waybill["weight_kg"] or 1),
+                "unidadNombre": "KILOGRAMO",
+                "cantidad": waybill["weight_kg"] or 1,
             }
         ],
     }
