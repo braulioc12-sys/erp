@@ -33,12 +33,15 @@
   </form>
   {% endif %}
 
+  {% if jobs %}
+  <input type="text" id="job-catalog-search" placeholder="Buscar trabajo (ej. embrague, aceite...)" style="margin-bottom:12px;">
+  {% endif %}
   <div class="table-wrap">
     <table>
       <thead><tr><th>Trabajo</th><th>Tiempo estimado</th><th>Estado</th><th></th></tr></thead>
       <tbody>
         {% for j in jobs %}
-        <tr>
+        <tr class="job-row" data-job-name="{{ j.name|lower }}">
           <td>{{ j.name }}</td>
           <td>{{ j.estimated_minutes }} min</td>
           <td><span class="badge {{ 'badge-activo' if j.active else 'badge-inactivo' }}">{{ 'Activo' if j.active else 'Inactivo' }}</span></td>
@@ -54,9 +57,34 @@
         {% else %}
         <tr><td colspan="4" class="table-empty">No hay trabajos registrados todavía.</td></tr>
         {% endfor %}
+        <tr id="job-catalog-search-empty" class="table-empty-row" style="display:none;"><td colspan="4" class="table-empty">Ningún trabajo coincide con la búsqueda.</td></tr>
       </tbody>
     </table>
   </div>
+  {% if jobs %}
+  <script>
+    // 15 sep, pedido de Braulio: "en la parte de mantenimiento deberia
+    // haber un buscador para encontrar los tipos de trabajo" -- el
+    // catálogo de trabajos (este listado) es el lugar más directo para
+    // buscarlos; mismo filtro por nombre que en las casillas de
+    // Registrar mantenimiento / Agregar trabajos a una orden.
+    (function () {
+      var search = document.getElementById('job-catalog-search');
+      var rows = document.querySelectorAll('.job-row');
+      var empty = document.getElementById('job-catalog-search-empty');
+      search.addEventListener('input', function () {
+        var q = search.value.trim().toLowerCase();
+        var visible = 0;
+        rows.forEach(function (row) {
+          var match = !q || row.dataset.jobName.indexOf(q) !== -1;
+          row.style.display = match ? '' : 'none';
+          if (match) visible++;
+        });
+        empty.style.display = visible === 0 ? '' : 'none';
+      });
+    })();
+  </script>
+  {% endif %}
   <p class="muted" style="margin-top:12px; margin-bottom:0;">Desactivar un trabajo lo quita de los formularios nuevos, pero no afecta los registros históricos que ya lo usan.</p>
 </div>
 {% endblock %}

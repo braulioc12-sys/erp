@@ -39,8 +39,11 @@
 
   <label>Trabajos realizados (opcional, para estimar el tiempo y costo de mano de obra)</label>
   <div class="panel" style="background:var(--bg-soft, #f8f9fb); margin-top:-8px;">
+    {% if job_types %}
+    <input type="text" id="job-search" placeholder="Buscar trabajo (ej. embrague, aceite...)" style="margin-bottom:12px;">
+    {% endif %}
     {% for j in job_types %}
-    <div class="job-block" style="margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid var(--border, #e2e5ea);">
+    <div class="job-block" data-job-name="{{ j.name|lower }}" style="margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid var(--border, #e2e5ea);">
       <label style="flex-direction:row; align-items:center; gap:8px; flex-wrap:wrap;">
         <input type="checkbox" name="job_type_ids" value="{{ j.id }}" class="job-check" data-minutes="{{ j.estimated_minutes }}" data-job-id="{{ j.id }}" style="width:auto;">
         {{ j.name }} <span class="muted">({{ j.estimated_minutes }} min)</span>
@@ -61,6 +64,7 @@
     {% else %}
     <p class="muted mt-0">Todavía no hay trabajos registrados.</p>
     {% endfor %}
+    <p class="muted mt-0" id="job-search-empty" style="display:none;">Ningún trabajo coincide con la búsqueda.</p>
     <p class="mt-0">Tiempo estimado total: <strong id="job-minutes-total">0</strong> min · <a href="{{ url_for('mantenimiento.jobs_list') }}" target="_blank">Registrar un trabajo nuevo</a></p>
   </div>
 
@@ -109,6 +113,28 @@
       document.querySelectorAll('.remove-crew-row').forEach(function (btn) {
         btn.addEventListener('click', function () { btn.closest('.crew-row').remove(); update(); });
       });
+
+      // 15 sep, pedido de Braulio: "en la parte de mantenimiento deberia
+      // haber un buscador para encontrar los tipos de trabajo" -- el
+      // catálogo ya puede tener varias decenas de trabajos (ver el Excel de
+      // actividades de taller), así que se filtra la lista de casillas por
+      // nombre a medida que se escribe (solo esconde/muestra, no toca
+      // ninguna casilla marcada).
+      var jobSearch = document.getElementById('job-search');
+      var jobBlocks = document.querySelectorAll('.job-block');
+      var jobSearchEmpty = document.getElementById('job-search-empty');
+      if (jobSearch) {
+        jobSearch.addEventListener('input', function () {
+          var q = jobSearch.value.trim().toLowerCase();
+          var visible = 0;
+          jobBlocks.forEach(function (block) {
+            var match = !q || block.dataset.jobName.indexOf(q) !== -1;
+            block.style.display = match ? '' : 'none';
+            if (match) visible++;
+          });
+          if (jobSearchEmpty) jobSearchEmpty.style.display = visible === 0 ? '' : 'none';
+        });
+      }
 
       // --- Kilometraje GPS: se auto-llena al elegir la unidad ---
       var vehiclesKm = {{ vehicles_km|tojson }};
