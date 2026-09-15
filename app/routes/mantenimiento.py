@@ -554,17 +554,23 @@ def job_set_mechanic_type(record_id):
 # --- Trabajos de mantenimiento (catálogo con tiempo estimado) ---
 
 def get_catalog_jobs(only_active=True):
+    # 15 sep, pedido de Braulio: "ordena el menu de trabajos por orden
+    # alfabetico" -- antes se ordenaba por sort_order (el orden en que se
+    # cargaron/agregaron), que no tiene ninguna relación con el nombre. Ya
+    # no hay ninguna pantalla que reordene sort_order a mano, así que
+    # cambiar el ORDER BY a "name" no pierde nada -- la columna sigue
+    # existiendo en la tabla, solo dejó de usarse para mostrar la lista.
     sql = "SELECT * FROM maintenance_job_types WHERE 1=1"
     if only_active:
         sql += " AND active = 1"
-    sql += " ORDER BY sort_order, name"
+    sql += " ORDER BY name"
     return query_all(sql)
 
 
 @bp.route("/trabajos")
 @permission_required("mantenimiento", "view")
 def jobs_list():
-    jobs = query_all("SELECT * FROM maintenance_job_types ORDER BY sort_order, name")
+    jobs = query_all("SELECT * FROM maintenance_job_types ORDER BY name")
     return render_template("mantenimiento/jobs.html", jobs=jobs, default_job_types=DEFAULT_JOB_TYPES)
 
 
