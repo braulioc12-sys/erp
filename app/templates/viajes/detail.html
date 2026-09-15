@@ -226,6 +226,14 @@
 </div>
 {% endif %}
 
+{# 15 sep (patch 0039), corrección de Braulio: "si ya figuran nuestros datos
+   como transportista no es necesario adjuntar o crear guia de
+   transportista" -- cuando la guía del remitente ya trae nuestros datos
+   (shipper_waybill_shows_carrier == 'SI'), este panel tampoco hace falta
+   (queda cubierto por el panel "Guía del remitente" de arriba). En
+   cualquier otro caso (sin responder todavía, respondió "No", o viaje
+   TERCERO) se sigue mostrando igual que siempre. #}
+{% if trip.shipper_waybill_shows_carrier != 'SI' %}
 <div class="panel">
   <h2>Guía de transportista</h2>
   <p class="muted mt-0">Documento propio del transportista (distinto de la guía de remisión SUNAT de arriba) — número y/o foto/PDF adjunta.</p>
@@ -257,6 +265,7 @@
   </form>
   {% endif %}
 </div>
+{% endif %}
 
 {% if trip.ownership != 'TERCERO' %}
 <div class="panel">
