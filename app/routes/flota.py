@@ -301,18 +301,30 @@ def edit_vehicle(vehicle_id):
             abort(400)
         new_km = parse_float(request.form.get("current_km"), None)
         km_changed = new_km is not None and new_km != vehicle["current_km"]
+        new_status = request.form.get("status", "ACTIVO")
+        # 15 sep, pedido de Braulio: "disponible para programar" solo tiene
+        # sentido mientras la unidad está en mantenimiento -- si acá (Flota
+        # -> Editar unidad, que Despachador también puede usar) se le
+        # cambia el estado a otra cosa, se resetea el flag a 0 para que no
+        # quede "disponible" arrastrado la próxima vez que la unidad vuelva
+        # a entrar a mantenimiento. El flag en sí solo se marca desde
+        # Mantenimiento -> Por unidad (permiso exclusivo de
+        # Administrador/Mecánico, ver mantenimiento.py) -- este formulario
+        # no lo expone para editar.
+        available_for_scheduling = vehicle["available_for_scheduling"] if new_status == "MANTENIMIENTO" else 0
         execute(
             """UPDATE vehicles SET plate=?, brand=?, model=?, capacity_kg=?, status=?, vehicle_type=?, notes=?,
                soat_expiry=?, technical_review_expiry=?,
                current_km=?, current_km_updated_at=?, gps_external_id=?, owner=?,
-               last_oil_change_km=?, last_oil_change_date=?, last_oil_change_workshop=?, last_oil_change_oil=?
+               last_oil_change_km=?, last_oil_change_date=?, last_oil_change_workshop=?, last_oil_change_oil=?,
+               available_for_scheduling=?
                WHERE id=?""",
             (
                 request.form.get("plate", "").strip().upper(),
                 request.form.get("brand", "").strip(),
                 request.form.get("model", "").strip(),
                 request.form.get("capacity_kg") or None,
-                request.form.get("status", "ACTIVO"),
+                new_status,
                 request.form.get("vehicle_type", "CAMION"),
                 request.form.get("notes", "").strip(),
                 parse_date(request.form.get("soat_expiry")),
@@ -325,6 +337,7 @@ def edit_vehicle(vehicle_id):
                 parse_date(request.form.get("last_oil_change_date")),
                 request.form.get("last_oil_change_workshop", "").strip() or None,
                 request.form.get("last_oil_change_oil", "").strip() or None,
+                available_for_scheduling,
                 vehicle_id,
             ),
         )
@@ -374,7 +387,7 @@ def delete_vehicle(vehicle_id):
     if not validate_csrf():
         abort(400)
     if _vehicle_has_history(vehicle_id):
-        execute("UPDATE vehicles SET status = 'INACTIVO' WHERE id = ?", (vehicle_id,))
+        execute("UPDATE vehicles SET status = 'INACTIVO', available_for_scheduling = 0 WHERE id = ?", (vehicle_id,))
         flash(
             "La unidad tiene historial asociado (viajes, gastos, mantenimiento, neumáticos o "
             "inspecciones); se marcó como inactiva para no perder ese historial.",

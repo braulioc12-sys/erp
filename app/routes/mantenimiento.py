@@ -274,7 +274,17 @@ def new():
             )
 
         if request.form.get("mark_in_maintenance"):
-            execute("UPDATE vehicles SET status = 'MANTENIMIENTO' WHERE id = ?", (vehicle_id,))
+            # 15 sep, pedido de Braulio: "cuando ingrese una unidad debe
+            # salir la opcion [de] que ya este disponible para programar" —
+            # se puede marcar de una vez, al mismo momento de ingresarla a
+            # mantenimiento (si no se marca acá, queda en 0/NO disponible
+            # por defecto, y se puede marcar después desde Mantenimiento ->
+            # Por unidad).
+            available = 1 if request.form.get("available_for_scheduling") else 0
+            execute(
+                "UPDATE vehicles SET status = 'MANTENIMIENTO', available_for_scheduling = ? WHERE id = ?",
+                (available, vehicle_id),
+            )
 
         flash("Mantenimiento registrado.", "success")
         return redirect(url_for("mantenimiento.list_view"))
@@ -730,7 +740,8 @@ def mechanics_toggle(mechanic_id):
 @permission_required("mantenimiento", "view")
 def by_vehicle():
     summary = query_all(
-        """SELECT v.id, v.plate, v.current_km, v.current_km_updated_at, COUNT(m.id) as n_records,
+        """SELECT v.id, v.plate, v.current_km, v.current_km_updated_at, v.status, v.available_for_scheduling,
+                  COUNT(m.id) as n_records,
                   COALESCE(SUM(m.cost), 0) as total_cost,
                   MAX(m.maintenance_date) as last_date
            FROM vehicles v
@@ -739,6 +750,37 @@ def by_vehicle():
            ORDER BY v.plate"""
     )
     return render_template("mantenimiento/by_vehicle.html", summary=summary)
+
+
+@bp.route("/unidad/<int:vehicle_id>/disponible-programar", methods=["POST"])
+@permission_required("mantenimiento", "edit")
+def set_vehicle_available_for_scheduling(vehicle_id):
+    """15 sep, pedido de Braulio: "cuando ingrese una unidad debe salir la
+    opcion [de] que ya este disponible para programar... esta opcion solo
+    la puede habilitar el administrador y el personal de mantenimiento."
+    Alcanza con exigir permiso "mantenimiento":"edit" -- en este sistema
+    eso es exactamente Administrador + Mecánico (ver PERMISSIONS en
+    app/auth.py); Despachador/Operador/Almacén solo tienen "ver" y
+    Contabilidad no tiene acceso a Mantenimiento -- no hace falta ningún
+    chequeo de rol adicional acá. Solo tiene efecto mientras la unidad
+    está en mantenimiento; fuera de eso no hay nada que "programar" (la
+    unidad ya está disponible por default)."""
+    if not validate_csrf():
+        abort(400)
+    vehicle = query_one("SELECT id, plate, status FROM vehicles WHERE id = ?", (vehicle_id,))
+    if vehicle is None:
+        abort(404)
+    next_url = request.form.get("next") or url_for("mantenimiento.by_vehicle")
+    if vehicle["status"] != "MANTENIMIENTO":
+        flash("Esta opción solo aplica mientras la unidad está en mantenimiento.", "error")
+        return redirect(next_url)
+    available = 1 if request.form.get("available") == "1" else 0
+    execute("UPDATE vehicles SET available_for_scheduling = ? WHERE id = ?", (available, vehicle_id))
+    flash(
+        f'"{vehicle["plate"]}" marcada como {"disponible" if available else "NO disponible"} para programar viajes mientras está en mantenimiento.',
+        "success",
+    )
+    return redirect(next_url)
 
 
 @bp.route("/unidad/<int:vehicle_id>/kilometraje", methods=["POST"])

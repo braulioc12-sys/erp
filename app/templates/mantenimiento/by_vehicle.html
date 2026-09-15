@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
 {% block title %}Historial y costos por unidad{% endblock %}
 {% block content %}
 <div class="page-header">
@@ -10,11 +11,26 @@
 
 <div class="table-wrap">
   <table>
-    <thead><tr><th>Unidad</th><th>Kilometraje actual</th><th class="text-right"># Mantenimientos</th><th class="text-right">Costo total</th><th>Último mantenimiento</th><th></th></tr></thead>
+    <thead><tr><th>Unidad</th><th>Disponible para programar</th><th>Kilometraje actual</th><th class="text-right"># Mantenimientos</th><th class="text-right">Costo total</th><th>Último mantenimiento</th><th></th></tr></thead>
     <tbody>
       {% for s in summary %}
       <tr>
         <td>{{ s.plate }}</td>
+        <td>
+          {% if s.status == 'MANTENIMIENTO' %}
+          {{ m.badge('DISPONIBLE' if s.available_for_scheduling else 'NO_DISPONIBLE') }}
+          {% if can(current_user.roles, 'mantenimiento', 'edit') %}
+          <form method="post" action="{{ url_for('mantenimiento.set_vehicle_available_for_scheduling', vehicle_id=s.id) }}" style="margin-top:4px;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="next" value="{{ url_for('mantenimiento.by_vehicle') }}">
+            <input type="hidden" name="available" value="{{ '0' if s.available_for_scheduling else '1' }}">
+            <button type="submit" class="btn btn-secondary btn-sm">{{ 'Marcar NO disponible' if s.available_for_scheduling else 'Marcar disponible' }}</button>
+          </form>
+          {% endif %}
+          {% else %}
+          <span class="muted">— (no está en mantenimiento)</span>
+          {% endif %}
+        </td>
         <td>
           {{ '{:,.0f} km'.format(s.current_km) if s.current_km is not none else 'Sin dato' }}
           {% if s.current_km_updated_at %}<br><span class="muted">Actualizado: {{ s.current_km_updated_at }}</span>{% endif %}
@@ -36,7 +52,7 @@
         <td><a href="{{ url_for('mantenimiento.list_view', vehicle_id=s.id) }}" class="btn btn-secondary btn-sm">Ver historial</a></td>
       </tr>
       {% else %}
-      <tr><td colspan="6" class="table-empty">No hay unidades registradas.</td></tr>
+      <tr><td colspan="7" class="table-empty">No hay unidades registradas.</td></tr>
       {% endfor %}
     </tbody>
   </table>

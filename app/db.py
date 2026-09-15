@@ -465,6 +465,13 @@ COLUMN_MIGRATIONS = [
     ("waybills", "payer_type", "TEXT NOT NULL DEFAULT 'DESTINATARIO'"),
     ("waybills", "payer_ruc", "TEXT"),
     ("waybills", "payer_name", "TEXT"),
+    # 15 sep, pedido de Braulio: "disponible para programar" mientras una
+    # unidad está en mantenimiento -- solo Administrador/Mecánico pueden
+    # marcarla (ver Mantenimiento -> Por unidad), y solo entonces se puede
+    # elegir esa unidad al crear/editar un viaje (ver
+    # _active_vehicles()/_active_trailers() en app/routes/viajes.py). Ver
+    # la nota larga junto a esta columna en schema.sql.
+    ("vehicles", "available_for_scheduling", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 

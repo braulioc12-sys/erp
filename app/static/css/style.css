@@ -134,6 +134,9 @@ td.wrap, th.wrap { white-space: normal; }
 .badge-rechazada { background: var(--danger-soft); color: var(--danger); }
 /* Borradores de gasto desde WhatsApp (1 sep) */
 .badge-aprobado { background: var(--success-soft); color: var(--success); }
+/* "Disponible para programar" de una unidad en mantenimiento (15 sep) */
+.badge-disponible { background: var(--success-soft); color: var(--success); }
+.badge-no_disponible { background: var(--danger-soft); color: var(--danger); }
 
 /* Forms */
 form.form { display: flex; flex-direction: column; gap: 14px; max-width: 640px; }

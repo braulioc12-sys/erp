@@ -222,9 +222,18 @@ def _active_vehicles(current_vehicle_id=None):
     formulario de viajes — excluye las de tipo CARRETA (3 sep: la carreta
     ahora se elige aparte, ver _active_trailers). Incluye la unidad ya
     asignada al viaje aunque esté inactiva/sea CARRETA, para no perderla del
-    desplegable al editar un viaje viejo (mismo criterio que ya se usaba)."""
+    desplegable al editar un viaje viejo (mismo criterio que ya se usaba).
+
+    15 sep, pedido de Braulio: una unidad en mantenimiento también aparece
+    acá si fue marcada "disponible para programar" (available_for_scheduling
+    — solo Administrador/Mecánico pueden marcarla, ver Mantenimiento -> Por
+    unidad). Sigue habiendo un chequeo al guardar el viaje (ver
+    _vehicle_maintenance_error()) por si la unidad deja de estar disponible
+    entre que se cargó el formulario y se envía."""
     return query_all(
-        "SELECT * FROM vehicles WHERE (vehicle_type != 'CARRETA' AND status = 'ACTIVO') OR id = ? ORDER BY plate",
+        """SELECT * FROM vehicles
+           WHERE (vehicle_type != 'CARRETA' AND (status = 'ACTIVO' OR (status = 'MANTENIMIENTO' AND available_for_scheduling = 1)))
+           OR id = ? ORDER BY plate""",
         (current_vehicle_id,),
     )
 
@@ -232,11 +241,67 @@ def _active_vehicles(current_vehicle_id=None):
 def _active_trailers(current_trailer_id=None):
     """Carretas (semirremolques) disponibles para el campo "Carreta" del
     formulario de viajes (3 sep, pedido de Braulio: "se debe seleccionar
-    tanto la unidad tracto como la carreta")."""
+    tanto la unidad tracto como la carreta"). Mismo criterio de "disponible
+    para programar" que _active_vehicles() (15 sep) -- una carreta es una
+    fila más de "vehicles", con el mismo status/flag."""
     return query_all(
-        "SELECT * FROM vehicles WHERE (vehicle_type = 'CARRETA' AND status = 'ACTIVO') OR id = ? ORDER BY plate",
+        """SELECT * FROM vehicles
+           WHERE (vehicle_type = 'CARRETA' AND (status = 'ACTIVO' OR (status = 'MANTENIMIENTO' AND available_for_scheduling = 1)))
+           OR id = ? ORDER BY plate""",
         (current_trailer_id,),
     )
+
+
+def _vehicle_maintenance_error(vehicle_id):
+    """15 sep, pedido de Braulio: "Si no tiene marcada la opcion de
+    disponible para programar, le debe salir a la hora de querer asignar
+    la unidad a un viaje en rojo con el mensaje unidad en mantenimiento."
+    Devuelve el mensaje de error (se agrega a la lista `errors` del
+    formulario, que ya se muestra en rojo vía flash "error" — mismo
+    mecanismo que cualquier otro error de validación) o None si la unidad
+    está bien. _active_vehicles()/_active_trailers() ya excluyen del
+    desplegable a una unidad en mantenimiento sin este flag, pero este
+    chequeo es la defensa real -- cubre el caso de una unidad que ya
+    estaba asignada a un viaje y entró a mantenimiento después (sigue en
+    el desplegable al editar ese viaje, ver el "OR id = ?" de arriba), y
+    cualquier envío del formulario con un vehicle_id manipulado a mano."""
+    if not vehicle_id:
+        return None
+    vehicle = query_one("SELECT plate, status, available_for_scheduling FROM vehicles WHERE id = ?", (vehicle_id,))
+    if vehicle is None or vehicle["status"] != "MANTENIMIENTO" or vehicle["available_for_scheduling"]:
+        return None
+    return f'Unidad en mantenimiento: "{vehicle["plate"]}" no fue marcada como disponible para programar (solo Administrador o Mantenimiento pueden hacerlo, en Mantenimiento → Por unidad).'
+
+
+def _vehicle_open_orders_warning(vehicle_id):
+    """15 sep, pedido de Braulio: "Si aun tiene sigue en estado en
+    proceso, debe salir una alerta al operador... indicando que la unidad
+    aun tiene ordenes de trabajo abiertas, las cuales deben ser atendidas
+    cuanto antes." Se avisa (no bloquea, a diferencia de
+    _vehicle_maintenance_error()) cuando la unidad SÍ está disponible para
+    programar pero todavía tiene una orden de mantenimiento sin terminar
+    -- "abierta" replica el mismo criterio que _order_status() en
+    app/routes/mantenimiento.py (SIN_TRABAJOS/PENDIENTE/EN_PROCESO, osea
+    cualquier cosa que no sea TERMINADA), reescrito acá en SQL para no
+    importar entre módulos de rutas."""
+    if not vehicle_id:
+        return None
+    vehicle = query_one("SELECT plate, status, available_for_scheduling FROM vehicles WHERE id = ?", (vehicle_id,))
+    if vehicle is None or vehicle["status"] != "MANTENIMIENTO" or not vehicle["available_for_scheduling"]:
+        return None
+    open_order = query_one(
+        """SELECT m.id FROM maintenance_records m
+           WHERE m.vehicle_id = ?
+           AND (
+               NOT EXISTS (SELECT 1 FROM maintenance_record_jobs j WHERE j.maintenance_record_id = m.id)
+               OR EXISTS (SELECT 1 FROM maintenance_record_jobs j WHERE j.maintenance_record_id = m.id AND j.status != 'TERMINADO')
+           )
+           LIMIT 1""",
+        (vehicle_id,),
+    )
+    if open_order is None:
+        return None
+    return f'La unidad "{vehicle["plate"]}" todavía tiene órdenes de trabajo abiertas en Mantenimiento — deben atenderse cuanto antes.'
 
 
 def _resolve_route_selection(form, current_trip=None):
@@ -312,8 +377,16 @@ def _ownership_and_third_party_fields(form):
         fields["trailer_vehicle_id"] = form.get("trailer_vehicle_id") or None
         if not fields["vehicle_id"]:
             errors.append("Selecciona la unidad tracto.")
+        else:
+            maintenance_error = _vehicle_maintenance_error(fields["vehicle_id"])
+            if maintenance_error:
+                errors.append(maintenance_error)
         if not fields["trailer_vehicle_id"]:
             errors.append("Selecciona la carreta.")
+        else:
+            maintenance_error = _vehicle_maintenance_error(fields["trailer_vehicle_id"])
+            if maintenance_error:
+                errors.append(maintenance_error)
     else:
         fields["third_party_name"] = (form.get("third_party_name") or "").strip() or None
         fields["third_party_unit"] = (form.get("third_party_unit") or "").strip() or None
@@ -439,6 +512,12 @@ def new():
             ),
         )
         flash(f"Viaje {code} creado.", "success")
+        for w in (
+            _vehicle_open_orders_warning(ownership_fields["vehicle_id"]),
+            _vehicle_open_orders_warning(ownership_fields["trailer_vehicle_id"]),
+        ):
+            if w:
+                flash(w, "info")
         return redirect(url_for("viajes.detail", trip_id=trip_id))
 
     # Llega desde el paso 1 (empresa/unidad ya elegidos en la query string) —
@@ -568,6 +647,12 @@ def edit(trip_id):
             ),
         )
         flash("Viaje actualizado.", "success")
+        for w in (
+            _vehicle_open_orders_warning(ownership_fields["vehicle_id"]),
+            _vehicle_open_orders_warning(ownership_fields["trailer_vehicle_id"]),
+        ):
+            if w:
+                flash(w, "info")
         return redirect(url_for("viajes.detail", trip_id=trip_id))
 
     return render_template(

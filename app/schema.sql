@@ -148,6 +148,18 @@ CREATE TABLE IF NOT EXISTS vehicles (
     special_technical_review_filename TEXT,
     mtc_filename TEXT,
     civil_liability_policy_filename TEXT,
+    -- 15 sep, pedido de Braulio: "cuando ingrese una unidad [a mantenimiento]
+    -- debe salir la opcion [de] que ya este disponible para programar...
+    -- esta opcion solo la puede habilitar el administrador y el personal de
+    -- mantenimiento." Solo importa mientras status='MANTENIMIENTO' -- con
+    -- cualquier otro status la unidad ya está disponible normalmente, sin
+    -- necesitar este flag (ver _active_vehicles()/_active_trailers() en
+    -- app/routes/viajes.py, que solo la consultan en ese caso). Se resetea a
+    -- 0 cada vez que la unidad sale de mantenimiento (ver edit_vehicle() en
+    -- app/routes/flota.py) para no dejar un flag viejo activo la próxima vez
+    -- que vuelva a entrar a mantenimiento. Sin CHECK: es un booleano simple
+    -- (0/1), igual que "paid"/"double_driver" en trips.
+    available_for_scheduling INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

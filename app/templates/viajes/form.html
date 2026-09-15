@@ -82,7 +82,7 @@
         <select name="vehicle_id" id="trip-vehicle">
           <option value="">-- Selecciona --</option>
           {% for v in vehicles %}
-          <option value="{{ v.id }}" {{ 'selected' if trip and (trip.vehicle_id|string) == (v.id|string) }}>{{ v.plate }} ({{ v.brand or '' }} {{ v.model or '' }})</option>
+          <option value="{{ v.id }}" {{ 'selected' if trip and (trip.vehicle_id|string) == (v.id|string) }}>{{ v.plate }} ({{ v.brand or '' }} {{ v.model or '' }}){{ ' — EN MANTENIMIENTO' if v.status == 'MANTENIMIENTO' }}</option>
           {% endfor %}
         </select>
       </label>
@@ -90,11 +90,12 @@
         <select name="trailer_vehicle_id" id="trip-trailer">
           <option value="">-- Selecciona --</option>
           {% for v in trailers %}
-          <option value="{{ v.id }}" {{ 'selected' if trip and (trip.trailer_vehicle_id|string) == (v.id|string) }}>{{ v.plate }} ({{ v.brand or '' }} {{ v.model or '' }})</option>
+          <option value="{{ v.id }}" {{ 'selected' if trip and (trip.trailer_vehicle_id|string) == (v.id|string) }}>{{ v.plate }} ({{ v.brand or '' }} {{ v.model or '' }}){{ ' — EN MANTENIMIENTO' if v.status == 'MANTENIMIENTO' }}</option>
           {% endfor %}
         </select>
       </label>
     </div>
+    <p class="muted" style="margin-top:-8px;">Una unidad "EN MANTENIMIENTO" solo aparece aquí si Administrador o Mantenimiento ya la marcaron como disponible para programar — igual puede tener órdenes de trabajo abiertas, revisa el aviso al guardar.</p>
     {% if not trailers %}
     <p class="flash flash-error" style="margin-top:-8px;">No hay carretas activas registradas en Flota. <a href="{{ url_for('flota.new_vehicle') }}" target="_blank">Registra una unidad de tipo Carreta</a> y vuelve a esta pantalla.</p>
     {% endif %}
@@ -189,7 +190,7 @@
       <select name="vehicle_id" required>
         <option value="">-- Selecciona --</option>
         {% for v in vehicles %}
-        <option value="{{ v.id }}" {{ 'selected' if trip and (trip.vehicle_id|string) == (v.id|string) }}>{{ v.plate }} ({{ v.brand or '' }} {{ v.model or '' }})</option>
+        <option value="{{ v.id }}" {{ 'selected' if trip and (trip.vehicle_id|string) == (v.id|string) }}>{{ v.plate }} ({{ v.brand or '' }} {{ v.model or '' }}){{ ' — EN MANTENIMIENTO' if v.status == 'MANTENIMIENTO' }}</option>
         {% endfor %}
       </select>
     </label>
@@ -197,11 +198,12 @@
       <select name="trailer_vehicle_id" required>
         <option value="">-- Selecciona --</option>
         {% for v in trailers %}
-        <option value="{{ v.id }}" {{ 'selected' if trip and (trip.trailer_vehicle_id|string) == (v.id|string) }}>{{ v.plate }} ({{ v.brand or '' }} {{ v.model or '' }})</option>
+        <option value="{{ v.id }}" {{ 'selected' if trip and (trip.trailer_vehicle_id|string) == (v.id|string) }}>{{ v.plate }} ({{ v.brand or '' }} {{ v.model or '' }}){{ ' — EN MANTENIMIENTO' if v.status == 'MANTENIMIENTO' }}</option>
         {% endfor %}
       </select>
     </label>
   </div>
+  <p class="muted" style="margin-top:-8px;">Una unidad "EN MANTENIMIENTO" solo aparece aquí si Administrador o Mantenimiento ya la marcaron como disponible para programar — igual puede tener órdenes de trabajo abiertas, revisa el aviso al guardar.</p>
   {% if not trailers %}
   <p class="flash flash-error" style="margin-top:-8px;">No hay carretas activas registradas en Flota. <a href="{{ url_for('flota.new_vehicle') }}" target="_blank">Registra una unidad de tipo Carreta</a> y vuelve a esta pantalla.</p>
   {% endif %}

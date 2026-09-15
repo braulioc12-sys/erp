@@ -218,9 +218,14 @@
   </label>
 
   <label style="flex-direction: row; align-items: center; gap: 8px;">
-    <input type="checkbox" name="mark_in_maintenance" value="1" style="width:auto;">
+    <input type="checkbox" name="mark_in_maintenance" value="1" id="mark-in-maintenance-check" style="width:auto;">
     Marcar la unidad como "En mantenimiento" ahora
   </label>
+  <label style="flex-direction: row; align-items: center; gap: 8px; margin-top:-8px;">
+    <input type="checkbox" name="available_for_scheduling" value="1" style="width:auto;">
+    Ya está disponible para programar viajes mientras se le hace mantenimiento
+  </label>
+  <p class="muted" style="margin-top:-8px;">Solo tiene efecto si marcas la casilla de arriba. Solo Administrador o el personal de Mantenimiento pueden marcar esta opción — sin ella, la unidad no se puede elegir al crear un viaje mientras esté en mantenimiento. Se puede cambiar después desde Mantenimiento → Por unidad.</p>
 
   <div class="btn-group">
     <button type="submit" class="btn btn-primary">Guardar</button>
