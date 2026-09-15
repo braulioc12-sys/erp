@@ -247,6 +247,24 @@ CREATE TABLE IF NOT EXISTS trips (
     -- los comprobantes de Liquidaciones, ver app/storage.py).
     carrier_waybill_number TEXT,
     carrier_waybill_filename TEXT,
+    -- 15 sep, pedido de Braulio: "Una vez iniciado el viaje, a la hora de
+    -- crear o subir guia primero debe especificarse si la guia de remision
+    -- figura nuestros datos como transportista. Si figuran, no es necesario
+    -- emitir una guia nueva, solo adjuntar la de remitente. Si no figuran,
+    -- ahi es necesario crear la guia de transportista." Campos NUEVOS y
+    -- separados de carrier_waybill_* de arriba a propósito: carrier_waybill_*
+    -- es un documento genérico del transportista (no ligado a esta pregunta
+    -- de "¿el remitente ya nos puso como transportista?"); aquí se guarda
+    -- específicamente la guía de remisión que emitió el REMITENTE (el
+    -- cliente/dueño de la carga), cuando esa guía ya trae los datos de
+    -- Harraso/BRMS como transportista y por eso no hace falta emitir una
+    -- guía de transportista nueva. NULL = todavía no se respondió la
+    -- pregunta; 'SI'/'NO' = respuesta. Sin CHECK (mismo criterio que
+    -- ownership/issuer cuando la columna se agrega después vía
+    -- COLUMN_MIGRATIONS) -- se valida en Python.
+    shipper_waybill_shows_carrier TEXT,
+    shipper_waybill_number TEXT,
+    shipper_waybill_filename TEXT,
     -- Conformidad de entrega (4 sep, pedido de Braulio): foto o PDF del
     -- comprobante de entrega firmado, adjuntado mientras el viaje está
     -- EN_CURSO. Adjuntarla es lo que marca el viaje como ENTREGADO (ver

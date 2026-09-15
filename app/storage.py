@@ -253,6 +253,35 @@ def carrier_waybill_url(filename):
     return _presigned_url(_s3_carrier_waybills_prefix(), filename)
 
 
+def local_shipper_waybills_dir():
+    """Igual que local_carrier_waybills_dir() pero para la guía de remisión
+    que emitió el REMITENTE (15 sep, pedido de Braulio) — carpeta separada
+    en disco. Documento distinto de carrier_waybill_* (ver comentario en
+    schema.sql junto a shipper_waybill_shows_carrier)."""
+    return _local_dir("shipper_waybills")
+
+
+def _s3_shipper_waybills_prefix():
+    return (current_app.config.get("AWS_S3_SHIPPER_WAYBILLS_PREFIX") or "guias-remitente").strip("/")
+
+
+def save_shipper_waybill(filename, raw_bytes):
+    """Igual que save_carrier_waybill(), pero para la guía de remisión del
+    remitente adjunta a un viaje (15 sep) — carpeta/prefijo separado."""
+    if using_s3():
+        _put_object(_s3_shipper_waybills_prefix(), filename, raw_bytes)
+    else:
+        with open(os.path.join(local_shipper_waybills_dir(), filename), "wb") as f:
+            f.write(raw_bytes)
+
+
+def shipper_waybill_url(filename):
+    """Igual que carrier_waybill_url(), pero para una guía del remitente
+    guardada en S3. En disco local, usar local_shipper_waybills_dir() +
+    send_from_directory."""
+    return _presigned_url(_s3_shipper_waybills_prefix(), filename)
+
+
 def save_delivery_proof(filename, raw_bytes):
     """Igual que save_carrier_waybill(), pero para la conformidad de entrega
     adjunta a un viaje (4 sep) — carpeta/prefijo separado."""

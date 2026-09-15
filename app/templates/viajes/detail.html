@@ -88,8 +88,17 @@
      del servidor -- funciona para un viaje en cualquier estado -- era solo
      este botón el que la imponía. Se quita la restricción salvo para
      CANCELADO (no tiene sentido emitir una guía de un viaje cancelado). #}
+  {# 15 sep, pedido de Braulio: si el viaje es propio (no TERCERO), primero
+     hay que responder si la guía de remisión del remitente ya figura con
+     nuestros datos como transportista -- si "SI", no hace falta este botón
+     (ver el panel "Guía de remisión" más abajo). Si ya existe una guía de
+     transportista generada para este viaje, o la respuesta fue "NO", o es
+     un viaje TERCERO (la pregunta no aplica), el botón se muestra igual
+     que antes. #}
+  {% if trip.ownership == 'TERCERO' or existing_waybills or trip.shipper_waybill_shows_carrier == 'NO' %}
   {% if can(current_user.roles, 'guias', 'edit') and trip.status != 'CANCELADO' %}
   <a href="{{ url_for('guias.new', trip_id=trip.id) }}" class="btn btn-secondary btn-sm">📄 Generar guía de remisión (SUNAT)</a>
+  {% endif %}
   {% endif %}
   {# 4 sep, pedido de Braulio: los viajes con terceros no registran
      liquidación — sin inspección, sin anticipo de viáticos ni gastos de
@@ -109,6 +118,80 @@
 </div>
 {% if trip.ownership == 'TERCERO' %}
 <p class="muted" style="margin-top:-8px; margin-bottom:16px;">Los viajes con terceros no registran liquidación (sin anticipo de viáticos, gastos de viaje ni inspección) — el costo de este viaje es el flete acordado.</p>
+{% endif %}
+
+{# 15 sep, pedido de Braulio: "a la hora de crear o subir guia primero debe
+   especificarse si la guia de remision figura nuestros datos como
+   transportista". Solo para viajes propios (ownership != 'TERCERO') -- en
+   un viaje con tercero, el transportista de la guía del remitente sería
+   ese tercero subcontratado, no Harraso/BRMS, así que la pregunta no
+   aplica (ver comentario junto al botón "Generar guía de remisión" arriba
+   y en schema.sql junto a shipper_waybill_shows_carrier). #}
+{% if trip.ownership != 'TERCERO' %}
+  {% if not existing_waybills and trip.shipper_waybill_shows_carrier is none %}
+  <div class="panel">
+    <h2 class="mt-0">Guía de remisión</h2>
+    <p class="mt-0">¿La guía de remisión del remitente ya figura con los datos de <strong>{{ 'BRMS' if trip.issuer == 'BRMS' else 'Harraso Transport' }}</strong> como transportista?</p>
+    {% if can(current_user.roles, 'viajes', 'edit') %}
+    <div class="btn-group">
+      <form method="post" action="{{ url_for('viajes.set_shipper_waybill_decision', trip_id=trip.id) }}" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="decision" value="SI">
+        <button type="submit" class="btn btn-secondary btn-sm">Sí, ya figuran nuestros datos</button>
+      </form>
+      <form method="post" action="{{ url_for('viajes.set_shipper_waybill_decision', trip_id=trip.id) }}" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="decision" value="NO">
+        <button type="submit" class="btn btn-secondary btn-sm">No figuran / no hay guía del remitente</button>
+      </form>
+    </div>
+    <p class="muted mt-0">Si figuran, adjunta esa guía en vez de generar una nueva. Si no figuran (o el remitente no emitió guía), genera la guía de transportista.</p>
+    {% endif %}
+  </div>
+  {% elif trip.shipper_waybill_shows_carrier == 'SI' %}
+  <div class="panel">
+    <h2 class="mt-0">Guía del remitente</h2>
+    <p class="muted mt-0">Esta guía del remitente ya trae los datos de {{ 'BRMS' if trip.issuer == 'BRMS' else 'Harraso Transport' }} como transportista — no hace falta generar una guía de transportista nueva para este viaje, solo adjuntar la que emitió el remitente.</p>
+    <div class="detail-grid" style="margin-bottom:12px;">
+      <div class="detail-item"><div class="label">Número de guía</div><div class="value">{{ trip.shipper_waybill_number or '—' }}</div></div>
+      <div class="detail-item">
+        <div class="label">Archivo</div>
+        <div class="value">
+          {% if trip.shipper_waybill_filename %}
+          <a href="{{ url_for('viajes.shipper_waybill_file', trip_id=trip.id) }}" target="_blank">Ver guía adjunta</a>
+          {% else %}— (todavía no se adjunta){% endif %}
+        </div>
+      </div>
+    </div>
+    {% if can(current_user.roles, 'viajes', 'edit') %}
+    <form method="post" action="{{ url_for('viajes.save_shipper_waybill', trip_id=trip.id) }}" enctype="multipart/form-data" class="form" style="max-width:520px;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="form-row">
+        <label>Número de guía
+          <input type="text" name="shipper_waybill_number" value="{{ trip.shipper_waybill_number or '' }}">
+        </label>
+        <label>Archivo (foto o PDF)
+          <input type="file" name="shipper_waybill_file" accept=".png,.jpg,.jpeg,.pdf,.webp,.heic,.heif" class="js-scan-input">
+        </label>
+      </div>
+      <div class="btn-group">
+        <button type="submit" class="btn btn-secondary btn-sm">Guardar guía del remitente</button>
+      </div>
+    </form>
+    <form method="post" action="{{ url_for('viajes.set_shipper_waybill_decision', trip_id=trip.id) }}" style="margin-top:8px;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="decision" value="">
+      <button type="submit" class="btn btn-secondary btn-sm">¿Fue un error? Cambiar respuesta</button>
+    </form>
+    {% endif %}
+  </div>
+  {% elif trip.shipper_waybill_shows_carrier == 'NO' and can(current_user.roles, 'viajes', 'edit') %}
+  <form method="post" action="{{ url_for('viajes.set_shipper_waybill_decision', trip_id=trip.id) }}" style="margin: -8px 0 16px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="decision" value="">
+    <button type="submit" class="btn btn-secondary btn-sm">¿La guía del remitente sí figura con nuestros datos? Cambiar respuesta</button>
+  </form>
+  {% endif %}
 {% endif %}
 
 {% if trip.notes %}

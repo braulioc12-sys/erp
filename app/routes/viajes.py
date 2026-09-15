@@ -601,10 +601,19 @@ def detail(trip_id):
     advance = query_one("SELECT id, status FROM expense_advances WHERE trip_id = ?", (trip_id,))
     payment_term_labels = dict(PAYMENT_TERMS)
     cargo_type_labels = dict(CARGO_TYPES)
+    # 15 sep, pedido de Braulio: si el viaje ya tiene una guía de
+    # transportista generada (módulo Guías), la pregunta de "¿la guía del
+    # remitente ya figura con nuestros datos?" ya no aplica -- no se le
+    # vuelve a pedir la respuesta a un viaje ya procesado.
+    existing_waybills = query_all(
+        "SELECT id, series, series_number, sunat_status FROM waybills WHERE trip_id = ? ORDER BY id DESC",
+        (trip_id,),
+    )
     return render_template(
         "viajes/detail.html", trip=trip, expenses=expenses,
         total_expenses=total_expenses, next_statuses=next_statuses, advance=advance,
         payment_term_labels=payment_term_labels, cargo_type_labels=cargo_type_labels,
+        existing_waybills=existing_waybills,
     )
 
 
@@ -728,6 +737,78 @@ def waybill_file(trip_id):
     if storage.using_s3():
         return redirect(storage.carrier_waybill_url(trip["carrier_waybill_filename"]))
     return send_from_directory(storage.local_carrier_waybills_dir(), trip["carrier_waybill_filename"])
+
+
+# --- Guía de remisión del remitente (15 sep, pedido de Braulio) -----------
+#
+# "Una vez iniciado el viaje, a la hora de crear o subir guia primero debe
+# especificarse si la guia de remision figura nuestros datos como
+# transportista. Si figuran, no es necesario emitir una guia nueva, solo
+# adjuntar la de remitente. Si no figuran, ahi es necesario crear la guia de
+# transportista." Documento distinto de "Guía de transportista" de arriba
+# (carrier_waybill_*) -- ver el comentario en schema.sql junto a
+# shipper_waybill_shows_carrier. Solo aplica a viajes con ownership !=
+# 'TERCERO' (si el viaje lo hizo un tercero subcontratado, el transportista
+# de la guía del remitente sería ese tercero, no Harraso/BRMS -- la
+# pregunta no tiene sentido, ver viajes/detail.html).
+
+
+@bp.route("/<int:trip_id>/guia-remitente/decision", methods=["POST"])
+@permission_required("viajes", "edit")
+def set_shipper_waybill_decision(trip_id):
+    if not validate_csrf():
+        abort(400)
+    trip = query_one("SELECT id FROM trips WHERE id = ?", (trip_id,))
+    if trip is None:
+        abort(404)
+    decision = request.form.get("decision", "").strip().upper()
+    if decision not in ("SI", "NO", ""):
+        abort(400)
+    execute(
+        "UPDATE trips SET shipper_waybill_shows_carrier=? WHERE id=?",
+        (decision or None, trip_id),
+    )
+    if decision == "SI":
+        flash("Guía del remitente: ya figura con nuestros datos como transportista.", "success")
+    elif decision == "NO":
+        flash("Guía del remitente: no figura con nuestros datos -- genera la guía de transportista.", "success")
+    else:
+        flash("Respuesta reiniciada.", "success")
+    return redirect(url_for("viajes.detail", trip_id=trip_id))
+
+
+def _save_shipper_waybill_file(file_storage):
+    return _save_binary_attachment(file_storage, storage.save_shipper_waybill)
+
+
+@bp.route("/<int:trip_id>/guia-remitente", methods=["POST"])
+@permission_required("viajes", "edit")
+def save_shipper_waybill(trip_id):
+    if not validate_csrf():
+        abort(400)
+    trip = query_one("SELECT shipper_waybill_filename FROM trips WHERE id = ?", (trip_id,))
+    if trip is None:
+        abort(404)
+    number = request.form.get("shipper_waybill_number", "").strip() or None
+    new_filename = _save_shipper_waybill_file(request.files.get("shipper_waybill_file"))
+    filename = new_filename if new_filename else trip["shipper_waybill_filename"]
+    execute(
+        "UPDATE trips SET shipper_waybill_number=?, shipper_waybill_filename=? WHERE id=?",
+        (number, filename, trip_id),
+    )
+    flash("Guía del remitente guardada.", "success")
+    return redirect(url_for("viajes.detail", trip_id=trip_id))
+
+
+@bp.route("/<int:trip_id>/guia-remitente/archivo")
+@permission_required("viajes", "view")
+def shipper_waybill_file(trip_id):
+    trip = query_one("SELECT shipper_waybill_filename FROM trips WHERE id = ?", (trip_id,))
+    if trip is None or not trip["shipper_waybill_filename"]:
+        abort(404)
+    if storage.using_s3():
+        return redirect(storage.shipper_waybill_url(trip["shipper_waybill_filename"]))
+    return send_from_directory(storage.local_shipper_waybills_dir(), trip["shipper_waybill_filename"])
 
 
 # --- Conformidad de entrega (4 sep, pedido de Braulio) ---------------------

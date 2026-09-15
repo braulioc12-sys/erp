@@ -353,6 +353,15 @@ COLUMN_MIGRATIONS = [
     ("trips", "carrier_waybill_number", "TEXT"),
     ("trips", "carrier_waybill_filename", "TEXT"),
     ("trips", "paid", "INTEGER NOT NULL DEFAULT 0"),
+    # 15 sep, pedido de Braulio: ¿la guía de remisión del remitente ya
+    # figura con los datos de Harraso/BRMS como transportista? Si "SI", no
+    # hace falta emitir una guía de transportista nueva (ver
+    # viajes/detail.html y set_shipper_waybill_decision() en
+    # app/routes/viajes.py). Sin CHECK -- se valida en Python (mismo
+    # criterio que "ownership"/"issuer" arriba).
+    ("trips", "shipper_waybill_shows_carrier", "TEXT"),
+    ("trips", "shipper_waybill_number", "TEXT"),
+    ("trips", "shipper_waybill_filename", "TEXT"),
     # 4 sep, pedido de Braulio: conformidad de entrega (foto/PDF) adjuntada
     # mientras el viaje está EN_CURSO — adjuntarla es lo que marca el viaje
     # como ENTREGADO (ver save_delivery_proof() en app/routes/viajes.py).
