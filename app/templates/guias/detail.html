@@ -14,13 +14,22 @@
 
 <div class="detail-grid">
   <div class="detail-item"><div class="label">Viaje</div><div class="value"><a href="{{ url_for('viajes.detail', trip_id=waybill.trip_id) }}">{{ waybill.trip_code }}</a></div></div>
-  <div class="detail-item"><div class="label">Cliente</div><div class="value">{{ waybill.client_name }}</div></div>
+  <div class="detail-item"><div class="label">Cliente / Remitente</div><div class="value">{{ waybill.client_name }}</div></div>
+  <div class="detail-item"><div class="label">Destinatario</div><div class="value">{% if waybill.recipient_ruc %}{{ waybill.recipient_name }} ({{ waybill.recipient_ruc }}){% else %}{{ waybill.client_name }} (igual al remitente){% endif %}</div></div>
+  <div class="detail-item"><div class="label">Subcontratado</div><div class="value">{% if waybill.subcontractor_ruc %}{{ waybill.subcontractor_name }} ({{ waybill.subcontractor_ruc }}){% else %}—{% endif %}</div></div>
+  <div class="detail-item"><div class="label">Pagador del flete</div><div class="value">
+    {%- if waybill.payer_type == 'TERCERO' and waybill.payer_ruc %}{{ waybill.payer_name }} ({{ waybill.payer_ruc }})
+    {%- elif waybill.payer_type == 'REMITENTE' %}Remitente — {{ waybill.client_name }}
+    {%- else %}Destinatario — {{ waybill.recipient_name or waybill.client_name }}
+    {%- endif %}
+  </div></div>
   <div class="detail-item"><div class="label">Empresa que emite</div><div class="value">{{ 'BRMS' if waybill.issuer == 'BRMS' else 'Harraso Transport' }}</div></div>
   <div class="detail-item"><div class="label">Ruta</div><div class="value">{{ waybill.origin_address }} → {{ waybill.destination_address }}</div></div>
   <div class="detail-item"><div class="label">Fecha de emisión</div><div class="value">{{ waybill.issue_date }}</div></div>
   <div class="detail-item"><div class="label">Fecha de entrega</div><div class="value">{{ waybill.delivery_date or waybill.issue_date }}</div></div>
   <div class="detail-item"><div class="label">Peso / bultos</div><div class="value">{{ waybill.weight_kg or '—' }} kg / {{ waybill.packages or '—' }}</div></div>
   <div class="detail-item"><div class="label">Vehículo</div><div class="value">{{ waybill.vehicle_plate or '—' }}</div></div>
+  <div class="detail-item"><div class="label">Carreta (vehículo secundario)</div><div class="value">{{ waybill.trailer_plate or '—' }}</div></div>
   <div class="detail-item"><div class="label">Conductor</div><div class="value">{{ waybill.driver_name or '—' }} ({{ waybill.driver_document or 'sin DNI' }})</div></div>
   <div class="detail-item"><div class="label">Ubigeo partida / llegada</div><div class="value">{{ waybill.origin_ubigeo or '—' }} / {{ waybill.destination_ubigeo or '—' }}</div></div>
   <div class="detail-item"><div class="label">Motivo de traslado</div><div class="value">{{ waybill.transfer_reason or 'OTROS' }}</div></div>

@@ -1087,9 +1087,33 @@ CREATE TABLE IF NOT EXISTS waybills (
     -- necesariamente conocen el motivo comercial de la carga del cliente.
     transfer_reason TEXT NOT NULL DEFAULT 'OTROS',
     vehicle_plate TEXT,
+    -- 15 sep, pedido de Braulio (una guía real aceptada trae un bloque
+    -- "VEHICULO Y CONDUCTOR SECUNDARIO" con placa + tarjeta de circulación
+    -- de la carreta): placa de la carreta/semirremolque, para mandarla
+    -- como segundo elemento de "vehiculos" en el JSON de tefacturo.pe. Se
+    -- precarga desde trips.trailer_vehicle_id al crear la guía, editable
+    -- igual que vehicle_plate/driver_* -- ver build_waybill_payload().
+    trailer_plate TEXT,
     driver_document TEXT,
     driver_name TEXT,
     driver_license TEXT,
+    -- 15 sep, pedido de Braulio ("hay que especificar remitente,
+    -- destinatario, subcontratado, pagador"): una guía real aceptada trae
+    -- bloques separados de DESTINATARIO, SUBCONTRATADO y PAGADOR con su
+    -- propio RUC/razón social -- no siempre coinciden con el remitente
+    -- (cliente del viaje). remitente sigue siendo el cliente del viaje (sin
+    -- cambios); estos campos son opcionales, editables al crear la guía
+    -- (igual que vehicle_plate/driver_*) -- ver la nota larga en
+    -- build_waybill_payload() sobre qué tan confirmado está cada uno contra
+    -- el servidor real de tefacturo.pe (destinatario sí, subcontratado y
+    -- pagador NO todavía).
+    recipient_ruc TEXT,
+    recipient_name TEXT,
+    subcontractor_ruc TEXT,
+    subcontractor_name TEXT,
+    payer_type TEXT NOT NULL DEFAULT 'DESTINATARIO' CHECK (payer_type IN ('REMITENTE', 'DESTINATARIO', 'TERCERO')),
+    payer_ruc TEXT,
+    payer_name TEXT,
     notes TEXT,
     sunat_status TEXT NOT NULL DEFAULT 'NO_ENVIADA' CHECK (sunat_status IN ('NO_ENVIADA', 'ACEPTADO', 'RECHAZADO', 'ERROR')),
     sunat_message TEXT,

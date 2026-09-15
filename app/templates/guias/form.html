@@ -80,8 +80,51 @@
     <label>Placa del vehículo
       <input type="text" name="vehicle_plate" value="{{ form_values.vehicle_plate if form_values else (trip.vehicle_plate or '') }}">
     </label>
+    <label>Placa de la carreta (vehículo secundario)
+      <input type="text" name="trailer_plate" value="{{ form_values.trailer_plate if form_values else (trip.trailer_plate or '') }}">
+    </label>
+  </div>
+
+  <div class="form-row">
     <label>Conductor
       <input type="text" name="driver_name" value="{{ form_values.driver_name if form_values else (trip.driver_name or '') }}">
+    </label>
+  </div>
+
+  <p class="muted" style="margin-top:-8px;">El remitente es siempre el cliente de este viaje{{ ' (' + trip.client_name + ')' if trip.client_name else '' }}. Completa los siguientes campos solo si el destinatario, el subcontratado o el pagador del flete son una empresa distinta — si los dejas en blanco, se usa el cliente del viaje.</p>
+
+  <div class="form-row">
+    <label>RUC del destinatario
+      <input type="text" name="recipient_ruc" value="{{ form_values.recipient_ruc if form_values else '' }}" placeholder="Si es distinto del cliente del viaje">
+    </label>
+    <label>Razón social del destinatario
+      <input type="text" name="recipient_name" value="{{ form_values.recipient_name if form_values else '' }}">
+    </label>
+  </div>
+
+  <div class="form-row">
+    <label>RUC de la empresa subcontratada
+      <input type="text" name="subcontractor_ruc" value="{{ form_values.subcontractor_ruc if form_values else '' }}" placeholder="Solo si se subcontrató a otra empresa de transporte">
+    </label>
+    <label>Razón social de la empresa subcontratada
+      <input type="text" name="subcontractor_name" value="{{ form_values.subcontractor_name if form_values else (trip.third_party_name or '') }}">
+    </label>
+  </div>
+
+  <div class="form-row">
+    <label>¿Quién paga el flete?
+      {% set current_payer_type = form_values.payer_type if form_values else 'DESTINATARIO' %}
+      <select name="payer_type">
+        <option value="REMITENTE" {{ 'selected' if current_payer_type == 'REMITENTE' }}>Remitente</option>
+        <option value="DESTINATARIO" {{ 'selected' if current_payer_type == 'DESTINATARIO' }}>Destinatario</option>
+        <option value="TERCERO" {{ 'selected' if current_payer_type == 'TERCERO' }}>Un tercero</option>
+      </select>
+    </label>
+    <label>RUC del pagador (si es un tercero)
+      <input type="text" name="payer_ruc" value="{{ form_values.payer_ruc if form_values else '' }}">
+    </label>
+    <label>Razón social del pagador (si es un tercero)
+      <input type="text" name="payer_name" value="{{ form_values.payer_name if form_values else '' }}">
     </label>
   </div>
 

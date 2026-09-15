@@ -39,13 +39,41 @@ que reemplaza al primer intento del mismo día basado en un PDF suelto de
 
 SIMPLIFICACIONES pendientes de confirmar con Braulio (quedan documentadas
 para no perder el rastro; ver también README):
-- **`destinatario` = mismo dato que `remitente`** en la guía transportista:
-  el formato de tefacturo.pe distingue quién ENVÍA la carga (remitente) de
-  quién la RECIBE en destino (destinatario) — hoy el ERP solo conoce un
-  cliente por viaje (`trips.client_id`), así que se usa el mismo para
-  ambos. Si en la práctica el destinatario suele ser una empresa distinta
-  (ej. la sucursal de destino del cliente), avisar para agregar un campo
-  aparte en Guías.
+- **`destinatario` ya NO es siempre igual a `remitente`** (15 sep, patch
+  0037): Braulio confirmó que remitente y destinatario no siempre
+  coinciden. `remitente` sigue siendo el cliente del viaje
+  (`trips.client_id`). `destinatario` usa `waybills.recipient_ruc`/
+  `recipient_name` cuando se completan al crear la guía; si se dejan en
+  blanco, sigue cayendo al cliente del viaje (mismo comportamiento que
+  antes de este patch, para no romper guías simples donde de verdad son la
+  misma empresa). La ESTRUCTURA de `destinatario` (mismo formato que
+  `remitente`: correo/nombreComercial/nombreLegal/
+  numeroDocumentoIdentidad/tipoDocumentoIdentidad) sí está confirmada
+  contra el servidor real (patch 0032, Jorge) — solo estaba hardcodeado a
+  ser igual a `remitente`, eso es lo que cambia acá.
+- **`subcontratado` y `pagador` (15 sep, patch 0037) — SIN CONFIRMAR,
+  adivinados de buena fe:** Braulio pidió poder especificar también el
+  subcontratado (empresa de transporte con RUC propio que no usa las
+  unidades de Harraso/BRMS — `waybills.subcontractor_ruc`/
+  `subcontractor_name`, se precarga con `trips.third_party_name` cuando el
+  viaje es de un tercero) y el pagador de flete (quién paga: remitente,
+  destinatario o un tercero con su propio RUC —
+  `waybills.payer_type`/`payer_ruc`/`payer_name`). Se revisó de nuevo la
+  documentación pública de tefacturo.pe (guía transportista y la página de
+  ejemplos) el 15 sep y NINGUNA de las dos muestra un campo para esto:
+  la única pista real es `datosEnvio.transporteSubcontratado` (booleano,
+  ya mapeado desde `trip["ownership"] == "TERCERO"`, sin detalle de la
+  empresa). Aun así, se agregan acá dos claves nuevas a nivel raíz,
+  `subcontratado` y `pagador`, con la MISMA forma que `remitente`/
+  `destinatario`/`transportista` (es el patrón más consistente del resto
+  de este payload) — es una apuesta razonada, no una confirmación. Como
+  tefacturo.pe tolera claves desconocidas sin error (confirmado en el
+  patch 0032: un deserializador que ignora campos que no reconoce), esto
+  no debería romper el envío aunque el nombre esté mal — en el peor caso,
+  simplemente no le llega a SUNAT. **Braulio: la próxima guía con
+  subcontratado y/o pagador distinto del destinatario, revisa si el PDF de
+  SUNAT sale con esos datos correctos o vacíos, y avísame — si hace falta,
+  hay que preguntarle a Jorge el nombre real de estos campos.**
 - **Ubigeo de partida/llegada**: SUNAT exige el código INEI de 6 dígitos
   del distrito de origen/destino en la guía — el ERP no tiene un catálogo
   de ubigeos, así que se pide como campo de texto manual en el formulario
@@ -585,15 +613,60 @@ def build_waybill_payload(waybill, trip, company, client):
             "No se puede enviar la guía a SUNAT todavía: " + "; ".join(missing) + "."
         )
 
-    party = {
+    # remitente = siempre el cliente del viaje (sin cambios). destinatario
+    # usa recipient_ruc/recipient_name si se completaron al crear la guía;
+    # si se dejaron en blanco, cae al mismo cliente (15 sep, patch 0037 —
+    # ver la nota de "destinatario" al inicio del archivo).
+    remitente = {
         "correo": client["email"] or "",
         "nombreComercial": client["name"],
         "nombreLegal": client["name"],
         "numeroDocumentoIdentidad": client["ruc"],
         "tipoDocumentoIdentidad": "RUC",
     }
+    if waybill["recipient_ruc"]:
+        destinatario = {
+            "correo": "",
+            "nombreComercial": waybill["recipient_name"] or "",
+            "nombreLegal": waybill["recipient_name"] or "",
+            "numeroDocumentoIdentidad": waybill["recipient_ruc"],
+            "tipoDocumentoIdentidad": "RUC",
+        }
+    else:
+        destinatario = dict(remitente)
 
-    return {
+    # subcontratado/pagador (15 sep, patch 0037) — SIN CONFIRMAR contra
+    # tefacturo.pe, ver la nota larga al inicio del archivo. subcontratado
+    # solo se incluye si de verdad se cargó un RUC (si no, se omite la
+    # clave entera en vez de mandar un bloque vacío).
+    subcontratado = None
+    if waybill["subcontractor_ruc"]:
+        subcontratado = {
+            "correo": "",
+            "nombreComercial": waybill["subcontractor_name"] or "",
+            "nombreLegal": waybill["subcontractor_name"] or "",
+            "numeroDocumentoIdentidad": waybill["subcontractor_ruc"],
+            "tipoDocumentoIdentidad": "RUC",
+        }
+
+    payer_type = waybill["payer_type"] or "DESTINATARIO"
+    if payer_type == "REMITENTE":
+        pagador = dict(remitente)
+    elif payer_type == "TERCERO" and waybill["payer_ruc"]:
+        pagador = {
+            "correo": "",
+            "nombreComercial": waybill["payer_name"] or "",
+            "nombreLegal": waybill["payer_name"] or "",
+            "numeroDocumentoIdentidad": waybill["payer_ruc"],
+            "tipoDocumentoIdentidad": "RUC",
+        }
+    else:
+        # DESTINATARIO (default) o TERCERO sin RUC cargado todavía -- cae
+        # al destinatario, igual que en la guía real que compartió Braulio
+        # (pagador == destinatario en ese ejemplo).
+        pagador = dict(destinatario)
+
+    payload = {
         "close2u": {
             "tipoIntegracion": "OFFLINE",
             "tipoPlantilla": "01",
@@ -604,8 +677,11 @@ def build_waybill_payload(waybill, trip, company, client):
             "fechaEmision": waybill["issue_date"],
             "glosa": waybill["notes"] or trip["cargo_description"] or "",
         },
-        "remitente": party,
-        "destinatario": dict(party),
+        "remitente": remitente,
+        "destinatario": destinatario,
+        # 15 sep, patch 0037: "pagador" agregado como apuesta razonada, sin
+        # confirmar -- ver la nota larga al inicio del archivo.
+        "pagador": pagador,
         # 14 sep, patch 0032 (ver la nota larga arriba): CONFIRMADO por
         # soporte técnico de tefacturo.pe (201 Created real) — estos campos
         # van anidados acá, no sueltos en la raíz como se mandaban desde el
@@ -668,9 +744,20 @@ def build_waybill_payload(waybill, trip, company, client):
                 "liscenciaConducir": waybill["driver_license"] or "",
             }
         ],
-        "vehiculos": [
-            {"placa": waybill["vehicle_plate"] or ""},
-        ],
+        # 15 sep, pedido de Braulio: una guía real aceptada por tefacturo.pe
+        # trae un bloque "VEHICULO Y CONDUCTOR SECUNDARIO" (la carreta) con
+        # su propia placa, además del vehículo principal. "vehiculos" ya es
+        # una lista (confirmado en el JSON real de Jorge, aunque su caso de
+        # prueba solo tenía un elemento) -- se agrega la carreta como
+        # segundo elemento cuando la guía tiene una registrada. A
+        # diferencia del resto de este payload, esta parte NO está
+        # confirmada contra un envío real con dos vehículos: si tefacturo.pe
+        # la rechaza o pide algo más (p.ej. tarjeta de circulación, dato que
+        # este sistema no tiene todavía), avisar con el error exacto.
+        "vehiculos": (
+            [{"placa": waybill["vehicle_plate"] or ""}]
+            + ([{"placa": waybill["trailer_plate"]}] if waybill["trailer_plate"] else [])
+        ),
         "detalleGuia": [
             {
                 "numeroOrden": 1,
@@ -682,6 +769,12 @@ def build_waybill_payload(waybill, trip, company, client):
             }
         ],
     }
+    # 15 sep, patch 0037: "subcontratado" solo se manda si de verdad hay un
+    # RUC cargado -- una guía sin subcontratado (la mayoría, ownership
+    # PROPIA) no debe mandar un bloque vacío/inventado.
+    if subcontratado:
+        payload["subcontratado"] = subcontratado
+    return payload
 
 
 def build_client_from_config(app_config, issuer="HARRASO"):

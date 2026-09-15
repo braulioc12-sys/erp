@@ -441,6 +441,21 @@ COLUMN_MIGRATIONS = [
     # después del patch 0028 de ubigeo). Opcional en el formulario: si se
     # deja en blanco, se usa la misma fecha de emisión.
     ("waybills", "delivery_date", "TEXT"),
+    # 15 sep, pedido de Braulio: una guía real aceptada trae un bloque
+    # "VEHICULO Y CONDUCTOR SECUNDARIO" con la placa de la carreta -- ver
+    # la nota larga en build_waybill_payload() y app/routes/guias.py.
+    ("waybills", "trailer_plate", "TEXT"),
+    # 15 sep, pedido de Braulio ("hay que especificar remitente,
+    # destinatario, subcontratado, pagador"): campos opcionales para los 3
+    # bloques que no siempre coinciden con el cliente del viaje -- ver la
+    # nota larga en build_waybill_payload() y schema.sql.
+    ("waybills", "recipient_ruc", "TEXT"),
+    ("waybills", "recipient_name", "TEXT"),
+    ("waybills", "subcontractor_ruc", "TEXT"),
+    ("waybills", "subcontractor_name", "TEXT"),
+    ("waybills", "payer_type", "TEXT NOT NULL DEFAULT 'DESTINATARIO'"),
+    ("waybills", "payer_ruc", "TEXT"),
+    ("waybills", "payer_name", "TEXT"),
 ]
 
 

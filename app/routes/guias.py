@@ -86,11 +86,19 @@ def list_view():
 @permission_required("guias", "edit")
 def new(trip_id):
     trip = query_one(
-        """SELECT t.*, v.plate as vehicle_plate, d.name as driver_name,
-                  d.document_number as driver_document, d.license_number as driver_license
+        # 15 sep, pedido de Braulio: precargar también la placa de la
+        # carreta (trailer_vehicle_id) -- ver la nota larga en
+        # build_waybill_payload() sobre "vehículo secundario". c.name se
+        # agrega solo para mostrarle a Braulio, en el formulario, quién es
+        # el remitente (el cliente del viaje) -- no se guarda en la guía.
+        """SELECT t.*, v.plate as vehicle_plate, tv.plate as trailer_plate, d.name as driver_name,
+                  d.document_number as driver_document, d.license_number as driver_license,
+                  c.name as client_name
            FROM trips t
            LEFT JOIN vehicles v ON v.id = t.vehicle_id
+           LEFT JOIN vehicles tv ON tv.id = t.trailer_vehicle_id
            LEFT JOIN drivers d ON d.id = t.driver_id
+           LEFT JOIN clients c ON c.id = t.client_id
            WHERE t.id = ?""",
         (trip_id,),
     )
@@ -131,12 +139,24 @@ def new(trip_id):
         # emisión.
         issue_date_value = parse_date(request.form.get("issue_date")) or today_str()
         delivery_date_value = parse_date(request.form.get("delivery_date")) or issue_date_value
+        # 15 sep, pedido de Braulio ("hay que especificar remitente,
+        # destinatario, subcontratado, pagador"): igual que vehicle_plate/
+        # trailer_plate/driver_*, estos campos son editables al crear la
+        # guía y opcionales -- si se dejan en blanco, build_waybill_payload()
+        # usa el cliente del viaje como remitente Y destinatario (mismo
+        # comportamiento que antes de este patch). El pagador por defecto es
+        # DESTINATARIO (el caso más común visto en una guía real aceptada).
+        payer_type = (request.form.get("payer_type") or "DESTINATARIO").strip().upper()
+        if payer_type not in ("REMITENTE", "DESTINATARIO", "TERCERO"):
+            payer_type = "DESTINATARIO"
         waybill_id = execute(
             """INSERT INTO waybills (trip_id, series, series_number, issuer, issue_date, delivery_date,
                weight_kg, packages,
                origin_address, destination_address, origin_ubigeo, destination_ubigeo, transfer_reason,
-               vehicle_plate, driver_document, driver_name, driver_license, notes, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               vehicle_plate, trailer_plate, driver_document, driver_name, driver_license,
+               recipient_ruc, recipient_name, subcontractor_ruc, subcontractor_name,
+               payer_type, payer_ruc, payer_name, notes, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 trip_id,
                 series,
@@ -159,9 +179,22 @@ def new(trip_id):
                 request.form.get("destination_ubigeo", "").strip(),
                 request.form.get("transfer_reason") or "OTROS",
                 request.form.get("vehicle_plate", "").strip() or trip["vehicle_plate"],
+                # 15 sep, pedido de Braulio: placa de la carreta (vehículo
+                # secundario) -- opcional (un viaje TERCERO o un camión
+                # simple no tienen carreta).
+                request.form.get("trailer_plate", "").strip() or trip["trailer_plate"],
                 request.form.get("driver_document", "").strip() or trip["driver_document"],
                 request.form.get("driver_name", "").strip() or trip["driver_name"],
                 request.form.get("driver_license", "").strip() or trip["driver_license"],
+                request.form.get("recipient_ruc", "").strip(),
+                request.form.get("recipient_name", "").strip(),
+                request.form.get("subcontractor_ruc", "").strip(),
+                # Si el viaje es TERCERO, se precarga con trips.third_party_name
+                # (no hay RUC guardado ahí todavía -- se pide a mano acá).
+                request.form.get("subcontractor_name", "").strip() or (trip["third_party_name"] or ""),
+                payer_type,
+                request.form.get("payer_ruc", "").strip(),
+                request.form.get("payer_name", "").strip(),
                 request.form.get("notes", "").strip(),
                 None,
             ),
