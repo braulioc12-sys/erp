@@ -80,7 +80,15 @@
 {% endif %}
 
 <div class="btn-group" style="margin-bottom:16px;">
-  {% if can(current_user.roles, 'guias', 'edit') and trip.status in ('EN_CURSO', 'ENTREGADO') %}
+  {# 15 sep, pedido de Braulio: "Cuando creo un viaje, ahi me debe salir la
+     opcion de poder crear la guia de remision transportista" — antes este
+     botón solo aparecía con el viaje EN_CURSO/ENTREGADO, así que un viaje
+     recién creado (PENDIENTE, el estado por defecto) no lo mostraba.
+     guias.new() (app/routes/guias.py) nunca tuvo esa restricción del lado
+     del servidor -- funciona para un viaje en cualquier estado -- era solo
+     este botón el que la imponía. Se quita la restricción salvo para
+     CANCELADO (no tiene sentido emitir una guía de un viaje cancelado). #}
+  {% if can(current_user.roles, 'guias', 'edit') and trip.status != 'CANCELADO' %}
   <a href="{{ url_for('guias.new', trip_id=trip.id) }}" class="btn btn-secondary btn-sm">📄 Generar guía de remisión (SUNAT)</a>
   {% endif %}
   {# 4 sep, pedido de Braulio: los viajes con terceros no registran
