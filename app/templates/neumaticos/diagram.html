@@ -38,7 +38,7 @@
         {% if row.tire %}
         <a href="{{ url_for('neumaticos.detail', tire_id=row.tire.id) }}">
           <rect x="{{ p.x }}" y="{{ p.y }}" width="20" height="34" rx="4" class="tire-rect {{ row.status_class }}"></rect>
-          <title>{{ p.label }} — {{ row.tire.brand or 'Sin marca' }}{% if row.percent is not none %} ({{ row.percent }}% de vida útil){% endif %}</title>
+          <title>{{ p.label }} — {{ row.inventory_code or (row.tire.brand or 'Sin marca') }}{% if row.percent is not none %} ({{ row.percent }}% de vida útil){% endif %}</title>
         </a>
         {% else %}
         <a href="{{ url_for('neumaticos.new_tire', vehicle_id=vehicle.id, position_code=p.code) }}">
@@ -62,12 +62,13 @@
   <h2>Llantas instaladas</h2>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Posición</th><th>Marca</th><th>Fecha instalación</th><th class="text-right">Km instalación</th><th class="text-right">Km acumulado</th><th>Vida útil</th><th></th></tr></thead>
+      <thead><tr><th>Posición</th><th>Código</th><th>Marca</th><th>Fecha instalación</th><th class="text-right">Km instalación</th><th class="text-right">Km acumulado</th><th>Vida útil</th><th></th></tr></thead>
       <tbody>
         {% for row in rows %}
         <tr>
           <td>{{ row.position.label }}</td>
           {% if row.tire %}
+          <td>{{ row.inventory_code or '—' }}</td>
           <td>{{ row.tire.brand or '—' }}</td>
           <td>{{ row.tire.install_date }}</td>
           <td class="text-right">{{ '{:,.0f}'.format(row.tire.km_at_install) }}</td>
@@ -79,7 +80,7 @@
           </td>
           <td><a href="{{ url_for('neumaticos.detail', tire_id=row.tire.id) }}" class="btn btn-secondary btn-sm">Ver detalle</a></td>
           {% else %}
-          <td colspan="4" class="muted">Posición vacía</td>
+          <td colspan="5" class="muted">Posición vacía</td>
           <td></td>
           <td>
             {% if can(current_user.roles, 'neumaticos', 'edit') %}

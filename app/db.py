@@ -24,6 +24,7 @@ el modo Postgres está realmente activo, para no exigir esa dependencia en
 desarrollo local con SQLite."""
 import re
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 from flask import current_app, g
@@ -647,6 +648,134 @@ def _fix_boleta_account_codes_postgres(conn):
         )
 
 
+# 15 sep, pedido de Braulio: "no tenemos marcadas las llantas aun y recien
+# vamos a marcar las nuevas, para empezar vamos a codificar por primera y
+# unica vez todas las llantas de cada tracto y carreta por default
+# 'PLACA-1' ... de 1 al 12 en carreta, y de 1 al 10 en tracto. Esto para
+# poder inicialmente ver las rotaciones y cuando se vayan descartando
+# llantas." Hoy ningún TRACTO/CARRETA tiene llantas cargadas porque
+# neumaticos.new_tire() EXIGE elegir una llanta ya registrada en
+# tire_inventory (con su código) -- sin códigos, no había forma de cargar
+# ninguna. Este seed crea, para cada POSICIÓN sin llanta ACTIVO de cada
+# unidad TRACTO/CARRETA, una llanta de inventario con código
+# "<placa>-<n>" (n = 1..10 para tracto, 1..12 para carreta, numeradas en
+# el mismo orden que devuelve app.tire_positions.get_positions() -- de
+# adelante hacia atrás, izquierda antes que derecha) y la asigna de
+# inmediato a esa posición, con fecha de instalación de hoy y el
+# kilometraje actual de la unidad. Así Braulio puede usar rotación y
+# descarte desde ya, y reemplazar cada código default por el código real
+# de fábrica a medida que se vayan marcando las llantas físicas de verdad
+# (con "Reemplazar" desde el detalle de cada llanta).
+#
+# Corre en cada arranque, mismo patrón que
+# _ensure_combustible_concept_sqlite/_fix_boleta_account_codes_sqlite --
+# pero solo llena POSICIONES que todavía no tienen ninguna llanta ACTIVO,
+# así que en la práctica es "primera y única vez": una vez sembrada una
+# posición, el próximo arranque ya no la toca (tampoco después de que
+# Braulio reemplace ese código default por uno real, porque en ese momento
+# la posición ya tiene una llanta ACTIVO distinta). Aviso importante: si
+# más adelante se da de alta un TRACTO/CARRETA nuevo y queda con
+# posiciones sin llanta, este mismo seed le va a poner códigos default
+# "<placa>-<n>" en el siguiente arranque del servidor -- si se prefiere
+# que las unidades nuevas NO reciban códigos default (para forzar cargar
+# siempre llantas reales desde el principio), avisar para agregar esa
+# excepción.
+_DEFAULT_TIRE_CODE_NOTE = (
+    "Código provisional asignado en bloque (15 sep) -- reemplazar por el "
+    "código real de la llanta física cuando se la marque, usando "
+    "'Reemplazar' desde el detalle de esta llanta."
+)
+
+
+def _default_tire_codes_for_vehicle(get_positions_fn, vehicle_type):
+    """Lista [(position_code, n)] en el mismo orden que el diagrama, n
+    empezando en 1 -- ese "n" es el número que va en el código default
+    "<placa>-n"."""
+    return [(p["code"], i) for i, p in enumerate(get_positions_fn(vehicle_type), start=1)]
+
+
+def _seed_default_tire_codes_sqlite(conn):
+    from app.tire_positions import DEFAULT_EXPECTED_LIFE_KM, get_positions
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    vehicles = conn.execute(
+        "SELECT id, plate, vehicle_type, current_km FROM vehicles WHERE vehicle_type IN ('TRACTO', 'CARRETA')"
+    ).fetchall()
+    for vehicle_id, plate, vehicle_type, current_km in vehicles:
+        for position_code, n in _default_tire_codes_for_vehicle(get_positions, vehicle_type):
+            has_active = conn.execute(
+                "SELECT 1 FROM tires WHERE vehicle_id = ? AND position_code = ? AND status = 'ACTIVO'",
+                (vehicle_id, position_code),
+            ).fetchone()
+            if has_active:
+                continue
+            code = f"{plate}-{n}"
+            inv_row = conn.execute(
+                "SELECT id, status FROM tire_inventory WHERE code = ?", (code,)
+            ).fetchone()
+            if inv_row is None:
+                cur = conn.execute(
+                    """INSERT INTO tire_inventory (code, expected_life_km, status, notes)
+                       VALUES (?, ?, 'ASIGNADA', ?)""",
+                    (code, DEFAULT_EXPECTED_LIFE_KM, _DEFAULT_TIRE_CODE_NOTE),
+                )
+                inv_id = cur.lastrowid
+            elif inv_row[1] == "DISPONIBLE":
+                conn.execute("UPDATE tire_inventory SET status = 'ASIGNADA' WHERE id = ?", (inv_row[0],))
+                inv_id = inv_row[0]
+            else:
+                # Ya existe un código igual y está ASIGNADA/RETIRADA por otro
+                # motivo (caso raro) -- no se sabe a qué corresponde, se deja
+                # esta posición sin sembrar en vez de arriesgar pisar algo.
+                continue
+            conn.execute(
+                """INSERT INTO tires (vehicle_id, position_code, install_date, km_at_install,
+                   expected_life_km, tire_inventory_id, notes)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (vehicle_id, position_code, today, current_km or 0, DEFAULT_EXPECTED_LIFE_KM, inv_id, _DEFAULT_TIRE_CODE_NOTE),
+            )
+
+
+def _seed_default_tire_codes_postgres(conn):
+    from app.tire_positions import DEFAULT_EXPECTED_LIFE_KM, get_positions
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, plate, vehicle_type, current_km FROM vehicles WHERE vehicle_type IN ('TRACTO', 'CARRETA')"
+    )
+    vehicles = cur.fetchall()
+    for vehicle_id, plate, vehicle_type, current_km in vehicles:
+        for position_code, n in _default_tire_codes_for_vehicle(get_positions, vehicle_type):
+            cur.execute(
+                "SELECT 1 FROM tires WHERE vehicle_id = %s AND position_code = %s AND status = 'ACTIVO'",
+                (vehicle_id, position_code),
+            )
+            if cur.fetchone():
+                continue
+            code = f"{plate}-{n}"
+            cur.execute("SELECT id, status FROM tire_inventory WHERE code = %s", (code,))
+            inv_row = cur.fetchone()
+            if inv_row is None:
+                cur.execute(
+                    """INSERT INTO tire_inventory (code, expected_life_km, status, notes)
+                       VALUES (%s, %s, 'ASIGNADA', %s) RETURNING id""",
+                    (code, DEFAULT_EXPECTED_LIFE_KM, _DEFAULT_TIRE_CODE_NOTE),
+                )
+                inv_id = cur.fetchone()[0]
+            elif inv_row[1] == "DISPONIBLE":
+                cur.execute("UPDATE tire_inventory SET status = 'ASIGNADA' WHERE id = %s", (inv_row[0],))
+                inv_id = inv_row[0]
+            else:
+                continue
+            cur.execute(
+                """INSERT INTO tires (vehicle_id, position_code, install_date, km_at_install,
+                   expected_life_km, tire_inventory_id, notes)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                (vehicle_id, position_code, today, current_km or 0, DEFAULT_EXPECTED_LIFE_KM, inv_id, _DEFAULT_TIRE_CODE_NOTE),
+            )
+
+
 _PRAGMA_LINE_RE = re.compile(r"^\s*PRAGMA\s[^\n]*;\s*$", re.MULTILINE | re.IGNORECASE)
 _CREATE_TABLE_START_RE = re.compile(r"CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\(")
 _COL_REFERENCES_RE = re.compile(r"\s+REFERENCES\s+(\w+)\s*\(([^)]+)\)")
@@ -767,6 +896,7 @@ def init_db(app):
             _backfill_user_roles_postgres(conn)
             _ensure_combustible_concept_postgres(conn)
             _fix_boleta_account_codes_postgres(conn)
+            _seed_default_tire_codes_postgres(conn)
             conn.commit()
         finally:
             conn.close()
@@ -780,6 +910,7 @@ def init_db(app):
         _backfill_user_roles_sqlite(conn)
         _ensure_combustible_concept_sqlite(conn)
         _fix_boleta_account_codes_sqlite(conn)
+        _seed_default_tire_codes_sqlite(conn)
         conn.commit()
         conn.close()
 

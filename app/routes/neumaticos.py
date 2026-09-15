@@ -415,9 +415,19 @@ def diagram(vehicle_id):
         row = {"position": p}
         if tire:
             accumulated, percent, stage, status_class, badge_class = _tire_metrics(tire, vehicle["current_km"])
+            # 15 sep, pedido de Braulio (códigos default en bloque): se
+            # muestra el código de inventario acá también (antes solo
+            # aparecía en el detalle de cada llanta) para poder identificar
+            # de un vistazo qué código quedó en cada posición, sin tener que
+            # entrar una por una.
+            inventory_code = None
+            if tire["tire_inventory_id"]:
+                inv = query_one("SELECT code FROM tire_inventory WHERE id = ?", (tire["tire_inventory_id"],))
+                inventory_code = inv["code"] if inv else None
             row.update(
                 {
                     "tire": tire,
+                    "inventory_code": inventory_code,
                     "accumulated_km": accumulated,
                     "percent": percent,
                     "stage": stage,
