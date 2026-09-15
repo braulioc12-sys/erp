@@ -50,6 +50,7 @@ def create_app(config_object=Config):
         usuarios,
         catalogos,
         integraciones,
+        tarifario,
     )
 
     app.register_blueprint(dashboard.bp)
@@ -72,6 +73,7 @@ def create_app(config_object=Config):
     app.register_blueprint(usuarios.bp)
     app.register_blueprint(catalogos.bp)
     app.register_blueprint(integraciones.bp)
+    app.register_blueprint(tarifario.bp)
 
     @app.route("/")
     def index():

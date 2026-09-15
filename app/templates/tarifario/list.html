@@ -1,0 +1,59 @@
+{% extends 'base.html' %}
+{% block title %}Tarifario{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Tarifario</h1>
+  <div class="page-actions">
+    {% if can(current_user.roles, 'tarifario', 'edit') %}
+    <a href="{{ url_for('tarifario.new') }}" class="btn btn-primary">+ Agregar ruta y tarifa</a>
+    {% endif %}
+  </div>
+</div>
+<p class="muted mt-0">Tarifas de referencia por cliente y ruta. Si el cliente que buscas no aparece en el desplegable al agregar una ruta, créalo primero en <a href="{{ url_for('clientes.list_view') }}">Clientes</a>.</p>
+
+<form class="filters" method="get">
+  <label>Buscar
+    <input type="text" name="q" value="{{ q }}" placeholder="Cliente, origen o destino">
+  </label>
+  <button class="btn btn-secondary" type="submit">Filtrar</button>
+</form>
+
+{% for group in groups %}
+<div class="panel">
+  <h2 class="mt-0">{{ group.client_name }}</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Origen</th><th>Destino</th><th>Tarifas</th><th></th></tr></thead>
+      <tbody>
+        {% for entry in group.routes %}
+        <tr>
+          <td>{{ entry.route.origin }}</td>
+          <td>{{ entry.route.destination }}</td>
+          <td>
+            {% for it in entry.tariff_items %}
+            <div>{{ it.label }}: <strong>{{ it.amount|money }}</strong></div>
+            {% endfor %}
+          </td>
+          <td>
+            {% if can(current_user.roles, 'tarifario', 'edit') %}
+            <div class="btn-group">
+              <a href="{{ url_for('tarifario.edit', route_id=entry.route.id) }}" class="btn btn-secondary btn-sm">Editar</a>
+              <form method="post" action="{{ url_for('tarifario.delete', route_id=entry.route.id) }}" onsubmit="return confirm('¿Eliminar esta ruta del tarifario?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-danger btn-sm" type="submit">Eliminar</button>
+              </form>
+            </div>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="panel">
+  <p class="table-empty">{{ 'No hay tarifas que coincidan con la búsqueda.' if q else 'Todavía no hay rutas en el tarifario.' }}</p>
+</div>
+{% endfor %}
+{% endblock %}

@@ -791,6 +791,122 @@ def _seed_default_tire_codes_postgres(conn):
             )
 
 
+# Tarifario (15 sep, pedido de Braulio: "un menu que se llame tarifario...
+# uses este excel para los datos" -- carga, UNA SOLA VEZ, las tarifas del
+# Excel "Tarifario clientes corporativos.xlsx" que compartió, para Backus y
+# Lindley. Backus: 2 tarifas por ruta ("PT + ENVASES"/"PT + VACIO", pedido
+# explícito de Braulio) -- son PT+ENV y PT+VACIO tal cual venían en el
+# Excel (ya sumados ahí, no se recalculan acá). Lindley: 1 tarifa
+# ("Tarifa"). Un duplicado EXACTO en la hoja de Lindley (Planta Pucusana ->
+# Cusco, S/ 11000, aparecía 2 veces con el mismo monto) se omitió acá por
+# ser un duplicado sin ambigüedad. Un duplicado con montos DISTINTOS en la
+# hoja de Backus (Pucallpa -> Chanchamayo: S/ 9899.81/9742.81 vs S/
+# 13943/13080) SÍ se cargan ambas filas tal cual -- no hay forma de saber
+# cuál es la correcta sin preguntarle a Braulio (ver la nota de entrega del
+# patch), así que se deja que él la revise/borre en la pantalla de
+# Tarifario en vez de que este código decida por su cuenta.
+_TARIFARIO_SEED_DATA = {
+    "Backus": [
+        ("PUCALLPA", "AGUAYTIA", [("PT + ENVASES", 3068.63), ("PT + VACIO", 3068.63)]),
+        ("PUCALLPA", "TINGOMARIA", [("PT + ENVASES", 4462.56), ("PT + VACIO", 4267.56)]),
+        ("PUCALLPA", "TOCACHE", [("PT + ENVASES", 6067.6), ("PT + VACIO", 5895.6)]),
+        ("PUCALLPA", "HUANUCO OLARTE", [("PT + ENVASES", 5776.87), ("PT + VACIO", 5616.87)]),
+        ("PUCALLPA", "HUANUCO CD", [("PT + ENVASES", 5788.22), ("PT + VACIO", 5628.22)]),
+        ("PUCALLPA", "JUANJUI", [("PT + ENVASES", 8289.35), ("PT + VACIO", 7619.35)]),
+        ("PUCALLPA", "CHANCHAMAYO", [("PT + ENVASES", 9899.81), ("PT + VACIO", 9742.81)]),
+        ("PUCALLPA", "TARAPOTO", [("PT + ENVASES", 9653.67), ("PT + VACIO", 8765.67)]),
+        ("PUCALLPA", "YURIMAGUAS", [("PT + ENVASES", 11471.59), ("PT + VACIO", 10794.59)]),
+        ("PUCALLPA", "SATIPO", [("PT + ENVASES", 11123.24), ("PT + VACIO", 10769.24)]),
+        ("PUCALLPA", "MOYOBAMBA", [("PT + ENVASES", 11582.34), ("PT + VACIO", 11434.34)]),
+        ("PUCALLPA", "BAGUA", [("PT + ENVASES", 14199), ("PT + VACIO", 13325)]),
+        ("PUCALLPA", "SAN IGNACIO", [("PT + ENVASES", 16417), ("PT + VACIO", 15408)]),
+        ("PUCALLPA", "PUCARA", [("PT + ENVASES", 16609), ("PT + VACIO", 15629)]),
+        ("PUCALLPA", "JAEN", [("PT + ENVASES", 15284), ("PT + VACIO", 14348)]),
+        # Duplicado con montos distintos frente a la fila de arriba -- ver
+        # la nota grande al inicio de este bloque.
+        ("PUCALLPA", "CHANCHAMAYO", [("PT + ENVASES", 13943), ("PT + VACIO", 13080)]),
+        ("PUCALLPA", "PUERTO (LOCAL)", [("PT + ENVASES", 590.4), ("PT + VACIO", 544)]),
+    ],
+    "Lindley": [
+        ("Planta Pucusana", "Tarma", [("Tarifa", 4800)]),
+        ("Planta Pucusana", "Cerro Pasco", [("Tarifa", 5400)]),
+        ("Planta Pucusana", "OL Huánuco", [("Tarifa", 7400)]),
+        ("Planta Pucusana", "La Merced", [("Tarifa", 6000)]),
+        ("Planta Pucusana", "Pucallpa", [("Tarifa", 11000)]),
+        ("Planta Pucusana", "Tingo María", [("Tarifa", 7800)]),
+        ("Planta Pucusana", "Tocache", [("Tarifa", 10500)]),
+        ("Planta Pucusana", "Huánuco", [("Tarifa", 7400)]),
+        ("Planta Pucusana", "Satipo", [("Tarifa", 7575)]),
+        ("Planta Pucusana", "OL Pucallpa", [("Tarifa", 11000)]),
+        ("Planta Pucusana", "Huancavelica", [("Tarifa", 7100)]),
+        ("Planta Pucusana", "Planta Trujillo", [("Tarifa", 6600)]),
+        ("Planta Pucusana", "Cusco", [("Tarifa", 11000)]),
+        ("Planta Pucusana", "Planta Cusco", [("Tarifa", 11000)]),
+        ("Planta Pucusana", "OL Cusco", [("Tarifa", 11000)]),
+        ("Planta Pucusana", "Planta Arequipa", [("Tarifa", 9500)]),
+        ("Planta Pucusana", "Arequipa", [("Tarifa", 9500)]),
+        ("Planta Pucusana", "OL Juliaca", [("Tarifa", 11000)]),
+        ("Planta Pucusana", "OL Arequipa", [("Tarifa", 9500)]),
+        ("Planta Pucusana", "Juliaca", [("Tarifa", 11000)]),
+    ],
+}
+
+
+def _seed_tarifario_sqlite(conn):
+    for client_name, routes in _TARIFARIO_SEED_DATA.items():
+        row = conn.execute("SELECT id FROM clients WHERE name = ?", (client_name,)).fetchone()
+        if row is None:
+            cur = conn.execute("INSERT INTO clients (name) VALUES (?)", (client_name,))
+            client_id = cur.lastrowid
+        else:
+            client_id = row[0]
+        # Si el cliente ya tiene alguna ruta en el tarifario, no se vuelve a
+        # sembrar -- evita duplicar filas en cada reinicio y respeta lo que
+        # Braulio ya haya editado/borrado a mano desde entonces.
+        has_routes = conn.execute(
+            "SELECT 1 FROM tariff_routes WHERE client_id = ?", (client_id,)
+        ).fetchone()
+        if has_routes:
+            continue
+        for origin, destination, items in routes:
+            cur = conn.execute(
+                "INSERT INTO tariff_routes (client_id, origin, destination) VALUES (?, ?, ?)",
+                (client_id, origin, destination),
+            )
+            route_id = cur.lastrowid
+            for order, (label, amount) in enumerate(items):
+                conn.execute(
+                    "INSERT INTO tariff_items (tariff_route_id, label, amount, sort_order) VALUES (?, ?, ?, ?)",
+                    (route_id, label, amount, order),
+                )
+
+
+def _seed_tarifario_postgres(conn):
+    cur = conn.cursor()
+    for client_name, routes in _TARIFARIO_SEED_DATA.items():
+        cur.execute("SELECT id FROM clients WHERE name = %s", (client_name,))
+        row = cur.fetchone()
+        if row is None:
+            cur.execute("INSERT INTO clients (name) VALUES (%s) RETURNING id", (client_name,))
+            client_id = cur.fetchone()[0]
+        else:
+            client_id = row[0]
+        cur.execute("SELECT 1 FROM tariff_routes WHERE client_id = %s", (client_id,))
+        if cur.fetchone():
+            continue
+        for origin, destination, items in routes:
+            cur.execute(
+                "INSERT INTO tariff_routes (client_id, origin, destination) VALUES (%s, %s, %s) RETURNING id",
+                (client_id, origin, destination),
+            )
+            route_id = cur.fetchone()[0]
+            for order, (label, amount) in enumerate(items):
+                cur.execute(
+                    "INSERT INTO tariff_items (tariff_route_id, label, amount, sort_order) VALUES (%s, %s, %s, %s)",
+                    (route_id, label, amount, order),
+                )
+
+
 _PRAGMA_LINE_RE = re.compile(r"^\s*PRAGMA\s[^\n]*;\s*$", re.MULTILINE | re.IGNORECASE)
 _CREATE_TABLE_START_RE = re.compile(r"CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\(")
 _COL_REFERENCES_RE = re.compile(r"\s+REFERENCES\s+(\w+)\s*\(([^)]+)\)")
@@ -912,6 +1028,7 @@ def init_db(app):
             _ensure_combustible_concept_postgres(conn)
             _fix_boleta_account_codes_postgres(conn)
             _seed_default_tire_codes_postgres(conn)
+            _seed_tarifario_postgres(conn)
             conn.commit()
         finally:
             conn.close()
@@ -926,6 +1043,7 @@ def init_db(app):
         _ensure_combustible_concept_sqlite(conn)
         _fix_boleta_account_codes_sqlite(conn)
         _seed_default_tire_codes_sqlite(conn)
+        _seed_tarifario_sqlite(conn)
         conn.commit()
         conn.close()
 

@@ -1,0 +1,104 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Editar tarifa' if mode == 'edit' else 'Agregar ruta y tarifa' }} — Tarifario{% endblock %}
+{% block content %}
+<div class="page-header"><h1>{{ 'Editar ruta y tarifa' if mode == 'edit' else 'Agregar ruta y tarifa' }}</h1></div>
+
+<form class="form panel" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <div class="form-row">
+    <label>Cliente *
+      <select name="client_id" required>
+        <option value="">-- Selecciona --</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}" {{ 'selected' if route and (route.client_id|string) == (c.id|string) }}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+  <p class="muted" style="margin-top:-8px;">¿El cliente no aparece? <a href="{{ url_for('clientes.new') }}" target="_blank" rel="noopener">Créalo primero en Clientes</a> y vuelve a esta pantalla.</p>
+
+  <div class="form-row">
+    <label>Origen *
+      <input type="text" name="origin" value="{{ route.origin if route else '' }}" required>
+    </label>
+    <label>Destino *
+      <input type="text" name="destination" value="{{ route.destination if route else '' }}" required>
+    </label>
+  </div>
+
+  <label>Observaciones (opcional)
+    <textarea name="notes">{{ route.notes if route else '' }}</textarea>
+  </label>
+
+  <label>Tarifas de esta ruta *</label>
+  <p class="muted" style="margin-top:-8px;">Agrega una línea por cada tarifa (ej. Backus: "PT + ENVASES" y "PT + VACIO"; Lindley: "Tarifa").</p>
+  <div class="table-wrap">
+    <table id="items-table">
+      <thead>
+        <tr>
+          <th>Etiqueta</th>
+          <th style="width:20%;">Monto (S/)</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="items-tbody">
+        {% for it in items %}
+        <tr class="item-row">
+          <td><input type="text" name="item_label" value="{{ it.label }}" placeholder="Ej. PT + ENVASES" required></td>
+          <td><input type="number" name="item_amount" min="0" step="0.01" value="{{ it.amount }}" required></td>
+          <td><button type="button" class="btn btn-secondary btn-remove-row">✕</button></td>
+        </tr>
+        {% endfor %}
+        {% if not items %}
+        <tr class="item-row">
+          <td><input type="text" name="item_label" placeholder="Ej. Tarifa" required></td>
+          <td><input type="number" name="item_amount" min="0" step="0.01" value="0" required></td>
+          <td><button type="button" class="btn btn-secondary btn-remove-row">✕</button></td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+  <div class="btn-group" style="margin-top:-8px;">
+    <button type="button" class="btn btn-secondary" id="btn-add-row">+ Agregar tarifa</button>
+  </div>
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">{{ 'Guardar cambios' if mode == 'edit' else 'Agregar al tarifario' }}</button>
+    <a href="{{ url_for('tarifario.list_view') }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+
+<script>
+(function () {
+  var tbody = document.getElementById('items-tbody');
+
+  function rowTemplate() {
+    var tr = document.createElement('tr');
+    tr.className = 'item-row';
+    tr.innerHTML =
+      '<td><input type="text" name="item_label" placeholder="Ej. PT + VACIO" required></td>' +
+      '<td><input type="number" name="item_amount" min="0" step="0.01" value="0" required></td>' +
+      '<td><button type="button" class="btn btn-secondary btn-remove-row">✕</button></td>';
+    return tr;
+  }
+
+  function bindRow(tr) {
+    tr.querySelector('.btn-remove-row').addEventListener('click', function () {
+      if (tbody.querySelectorAll('.item-row').length > 1) {
+        tr.remove();
+      }
+    });
+  }
+
+  document.getElementById('btn-add-row').addEventListener('click', function () {
+    var tr = rowTemplate();
+    tbody.appendChild(tr);
+    bindRow(tr);
+  });
+
+  tbody.querySelectorAll('.item-row').forEach(bindRow);
+})();
+</script>
+{% endblock %}

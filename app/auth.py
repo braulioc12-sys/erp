@@ -50,6 +50,9 @@ PERMISSIONS = {
         # 10 sep: módulo RRHH (ver app/routes/rrhh.py) — mismo grupo de
         # acceso que Liquidaciones, solo Contabilidad/Admin.
         "rrhh": set(),
+        # 15 sep: Tarifario (ver app/routes/tarifario.py) — mismo grupo de
+        # acceso que Cotizaciones (datos comerciales), solo Contabilidad/Admin.
+        "tarifario": set(),
     },
     # Programa unidades/conductores y da seguimiento a los viajes del día a
     # día — sin acceso a montos de Facturación/Liquidaciones/Cotizaciones ni
@@ -73,6 +76,7 @@ PERMISSIONS = {
         "catalogos": set(),
         "integraciones": set(),
         "rrhh": set(),
+        "tarifario": set(),
     },
     # Solo el módulo de Inventarios (repuestos, proveedores, compras) — la
     # AUTORIZACIÓN de una orden de compra sigue siendo exclusiva de
@@ -97,6 +101,7 @@ PERMISSIONS = {
         "catalogos": set(),
         "integraciones": set(),
         "rrhh": set(),
+        "tarifario": set(),
     },
     # Documentos con montos: Liquidaciones, Facturación, Cotizaciones. Ve
     # Viajes/Clientes (para ubicar a qué viaje o cliente corresponde cada
@@ -127,6 +132,9 @@ PERMISSIONS = {
         # ve el reporte, pero el OK en sí lo sigue dando solo Administrador
         # (ver rrhh_approve() en app/routes/liquidaciones.py).
         "rrhh": {"view"},
+        # 15 sep: Tarifario (ver app/routes/tarifario.py) — mismo acceso que
+        # Cotizaciones (datos comerciales de precios).
+        "tarifario": {"view", "edit"},
     },
     # Solo el módulo de Mantenimiento (órdenes, trabajos) y ver Neumáticos.
     "MECANICO": {
@@ -148,6 +156,7 @@ PERMISSIONS = {
         "catalogos": set(),
         "integraciones": set(),
         "rrhh": set(),
+        "tarifario": set(),
     },
 }
 

@@ -55,6 +55,9 @@
       {% if can(current_user.roles, 'cotizaciones', 'view') %}
       <a href="{{ url_for('cotizaciones.list_view') }}" class="{{ 'active' if request.blueprint == 'cotizaciones' }}">Cotizaciones</a>
       {% endif %}
+      {% if can(current_user.roles, 'tarifario', 'view') %}
+      <a href="{{ url_for('tarifario.list_view') }}" class="{{ 'active' if request.blueprint == 'tarifario' }}">Tarifario</a>
+      {% endif %}
       {% if can(current_user.roles, 'guias', 'view') %}
       <a href="{{ url_for('guias.list_view') }}" class="{{ 'active' if request.blueprint == 'guias' }}">Guías de Remisión</a>
       {% endif %}

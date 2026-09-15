@@ -58,6 +58,36 @@ CREATE TABLE IF NOT EXISTS clients (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Tarifario (15 sep, pedido de Braulio: "un menu que se llame tarifario,
+-- este agrupado por clientes y uses este excel para los datos. Aparte de
+-- estos 2 clientes quiero que dejes la opcion de poder agregar luego
+-- manualmente otros"). Cada ruta (origen/destino) de un cliente puede
+-- tener una o más tarifas con su propia etiqueta -- Backus trae 2 por
+-- ruta ("PT + ENVASES"/"PT + VACIO", pedido explícito de Braulio) y
+-- Lindley trae 1 ("Tarifa"); un cliente nuevo puede tener cualquier
+-- cantidad (ver tariff_items). Sin UNIQUE(client_id, origen, destino) a
+-- propósito: la planilla real de Backus que compartió Braulio trae
+-- PUCALLPA -> CHANCHAMAYO dos veces con montos distintos (S/ 9899.81/
+-- 9742.81 vs S/ 13943/13080) -- se importan ambas filas tal cual hasta
+-- que confirme cuál es la correcta (ver la nota de entrega del patch).
+CREATE TABLE IF NOT EXISTS tariff_routes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL REFERENCES clients(id),
+    origin TEXT NOT NULL,
+    destination TEXT NOT NULL,
+    notes TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS tariff_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tariff_route_id INTEGER NOT NULL REFERENCES tariff_routes(id),
+    label TEXT NOT NULL,
+    amount REAL NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS vehicles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     plate TEXT NOT NULL UNIQUE,
