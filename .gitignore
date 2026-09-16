@@ -4,3 +4,11 @@ __pycache__/
 instance/
 .venv/
 venv/
+
+# Entregas de patches (zips/patches sueltos) -- no son parte del código
+*.zip
+*.patch
+*-patch-stage/
+
+# Archivos de trabajo que no van en el repo
+Tarifario clientes corporativos.xlsx
