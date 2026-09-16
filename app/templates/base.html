@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}{{ company_name }}{% endblock %} · ERP Transporte</title>
+  <title>{% block title %}{{ system_name }}{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
   <meta name="theme-color" content="#1d4ed8">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
   <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
   <script>
     if ('serviceWorker' in navigator) {
@@ -24,8 +25,11 @@
   <aside class="sidebar">
     <div class="sidebar-brand">
       <div class="brand-logos">
-        <img src="{{ url_for('static', filename='img/logo-lockup.png') }}" alt="{{ company_name }}" class="sidebar-brand-logo">
-        <img src="{{ url_for('static', filename='img/logo-brms.png') }}" alt="BRMS" class="sidebar-brand-logo secondary">
+        <!-- 16 sep: el software se llama "Harris" (system_name) -- distinto
+             de las empresas reales (Harraso/BRMS), que siguen apareciendo
+             tal cual en los documentos comerciales (facturas/guías/
+             cotizaciones/checklists), nunca en este chrome del sistema. -->
+        <img src="{{ url_for('static', filename='img/harris-logo-lockup.png') }}" alt="{{ system_name }}" class="sidebar-brand-logo">
       </div>
     </div>
     <nav class="sidebar-nav">

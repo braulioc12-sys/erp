@@ -3,12 +3,17 @@
 // dinámicas (formularios con CSRF, sesión), así que a propósito NO se
 // cachean — siempre se piden a la red para no romper el login ni los
 // formularios con datos desactualizados.
-const CACHE_NAME = "erp-transporte-static-v1";
+// v2 (16 sep): los íconos cambiaron a la marca de Harris -- subir la
+// versión fuerza que activate() borre el caché viejo con los íconos
+// anteriores en vez de servirlos indefinidamente a quien ya tenía la PWA
+// instalada.
+const CACHE_NAME = "erp-transporte-static-v2";
 const STATIC_ASSETS = [
   "/static/css/style.css",
   "/static/icons/icon-192.png",
   "/static/icons/icon-512.png",
   "/static/manifest.webmanifest",
+  "/static/img/harris-logo-lockup.png",
 ];
 
 self.addEventListener("install", (event) => {

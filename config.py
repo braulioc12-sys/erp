@@ -28,6 +28,14 @@ class Config:
     # En producción detrás de HTTPS, activa esto en tu entorno:
     SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "0") == "1"
     COMPANY_NAME = os.environ.get("COMPANY_NAME", "Harraso Transport")
+    # Nombre del SOFTWARE/sistema (16 sep, pedido de Braulio: "el programa
+    # se llamará Harris") -- a propósito distinto de COMPANY_NAME: este se
+    # usa solo en el "chrome" del sistema (pestaña del navegador, menú
+    # lateral, login, PWA) y NUNCA en documentos comerciales/legales
+    # (facturas, guías, cotizaciones, checklists de inspección, órdenes de
+    # compra), que siguen mostrando la razón social real (Harraso/BRMS) vía
+    # COMPANY_NAME/company_info_for_issuer -- ver app/helpers.py.
+    SYSTEM_NAME = os.environ.get("SYSTEM_NAME", "Harris")
 
     # Integración con Frotcom (GPS). Ver README, sección "Integración con
     # Frotcom (GPS)" para cómo obtener estas credenciales.

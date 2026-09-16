@@ -1,7 +1,7 @@
 {
-  "name": "ERP Harraso Transport",
-  "short_name": "Harraso ERP",
-  "description": "Sistema de gestión para Harraso Transport (transporte de carga)",
+  "name": "Harris",
+  "short_name": "Harris",
+  "description": "Harris — sistema de gestión de transporte de carga",
   "start_url": "/dashboard",
   "scope": "/",
   "display": "standalone",
