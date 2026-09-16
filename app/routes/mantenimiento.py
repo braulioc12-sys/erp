@@ -761,6 +761,34 @@ def by_vehicle():
     return render_template("mantenimiento/by_vehicle.html", summary=summary)
 
 
+@bp.route("/unidad/<int:vehicle_id>/ingresar-mantenimiento", methods=["POST"])
+@permission_required("mantenimiento", "edit")
+def set_vehicle_maintenance_status(vehicle_id):
+    """16 sep, pedido de Braulio: "Hay que activar la opcion de ingresar a
+    mantenimiento tambien luego de crear la orden, sin necesidad de editar
+    unidad desde flota." Antes, si no se marcaba la casilla
+    "mark_in_maintenance" al registrar la orden (ver new()), la única forma
+    de pasar la unidad a estado MANTENIMIENTO era por Flota -> Editar
+    unidad -- ahora se puede hacer también desde acá (detalle de la orden,
+    o Por unidad), sin salir del módulo de Mantenimiento. No toca
+    available_for_scheduling (queda en 0, como ya lo deja
+    flota.edit_vehicle() para cualquier unidad que no esté en
+    mantenimiento) -- se marca disponible aparte, con
+    set_vehicle_available_for_scheduling, una vez que esto ya está hecho."""
+    if not validate_csrf():
+        abort(400)
+    vehicle = query_one("SELECT id, plate, status FROM vehicles WHERE id = ?", (vehicle_id,))
+    if vehicle is None:
+        abort(404)
+    next_url = request.form.get("next") or url_for("mantenimiento.by_vehicle")
+    if vehicle["status"] == "MANTENIMIENTO":
+        flash("Esa unidad ya está en mantenimiento.", "info")
+        return redirect(next_url)
+    execute("UPDATE vehicles SET status = 'MANTENIMIENTO' WHERE id = ?", (vehicle_id,))
+    flash(f'"{vehicle["plate"]}" marcada como en mantenimiento.', "success")
+    return redirect(next_url)
+
+
 @bp.route("/unidad/<int:vehicle_id>/disponible-programar", methods=["POST"])
 @permission_required("mantenimiento", "edit")
 def set_vehicle_available_for_scheduling(vehicle_id):

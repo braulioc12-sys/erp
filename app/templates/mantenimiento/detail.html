@@ -27,6 +27,16 @@
       </form>
       {% endif %}
     </div>
+    {% elif can(current_user.roles, 'mantenimiento', 'edit') %}
+    <div>
+      <span class="muted">Disponible para programar</span><br>
+      <span class="muted">La unidad no está marcada "en mantenimiento".</span>
+      <form method="post" action="{{ url_for('mantenimiento.set_vehicle_maintenance_status', vehicle_id=record.vehicle_id) }}" style="margin-top:4px;" onsubmit="return confirm('¿Marcar esta unidad como EN MANTENIMIENTO?');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="next" value="{{ url_for('mantenimiento.detail', record_id=record.id) }}">
+        <button type="submit" class="btn btn-secondary btn-sm">Marcar unidad en mantenimiento</button>
+      </form>
+    </div>
     {% endif %}
     <div><span class="muted">Costo total</span><br>{{ record.cost|money }}</div>
     <div><span class="muted">Costo de materiales (incluido en el total)</span><br>{{ materials_total|money }}</div>

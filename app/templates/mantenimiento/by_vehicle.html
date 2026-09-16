@@ -27,6 +27,13 @@
             <button type="submit" class="btn btn-secondary btn-sm">{{ 'Marcar NO disponible' if s.available_for_scheduling else 'Marcar disponible' }}</button>
           </form>
           {% endif %}
+          {% elif can(current_user.roles, 'mantenimiento', 'edit') %}
+          <span class="muted">— (no está en mantenimiento)</span>
+          <form method="post" action="{{ url_for('mantenimiento.set_vehicle_maintenance_status', vehicle_id=s.id) }}" style="margin-top:4px;" onsubmit="return confirm('¿Marcar esta unidad como EN MANTENIMIENTO?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="next" value="{{ url_for('mantenimiento.by_vehicle') }}">
+            <button type="submit" class="btn btn-secondary btn-sm">Marcar en mantenimiento</button>
+          </form>
           {% else %}
           <span class="muted">— (no está en mantenimiento)</span>
           {% endif %}
