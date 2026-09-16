@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ system_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
+  <meta name="theme-color" content="#1d4ed8">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register("{{ url_for('static', filename='sw.js') }}").catch(function () {});
+      });
+    }
+  </script>
+  <!-- 10 sep: recorte "tipo escáner" al subir fotos de documentos (ver app/static/js/doc-scanner.js) -->
+  <script src="{{ url_for('static', filename='js/doc-scanner.js') }}" defer></script>
+</head>
+<body>
+{% if current_user %}
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-logos">
+        <!-- 16 sep: el software se llama "Harris" (system_name) -- distinto
+             de las empresas reales (Harraso/BRMS), que siguen apareciendo
+             tal cual en los documentos comerciales (facturas/guías/
+             cotizaciones/checklists), nunca en este chrome del sistema. -->
+        <img src="{{ url_for('static', filename='img/harris-logo-lockup.png') }}" alt="{{ system_name }}" class="sidebar-brand-logo">
+      </div>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="{{ url_for('dashboard.index') }}" class="{{ 'active' if request.blueprint == 'dashboard' }}">Panel</a>
+      <a href="{{ url_for('viajes.list_view') }}" class="{{ 'active' if request.blueprint == 'viajes' }}">Viajes</a>
+      <a href="{{ url_for('clientes.list_view') }}" class="{{ 'active' if request.blueprint == 'clientes' }}">Clientes</a>
+      <a href="{{ url_for('flota.list_view') }}" class="{{ 'active' if request.blueprint == 'flota' }}">Flota</a>
+      <a href="{{ url_for('conductores.list_view') }}" class="{{ 'active' if request.blueprint == 'conductores' }}">Conductores</a>
+      <a href="{{ url_for('liquidaciones.list_view') }}" class="{{ 'active' if request.blueprint == 'liquidaciones' }}">Liquidaciones</a>
+      {% if can(current_user.roles, 'rrhh', 'view') %}
+      <a href="{{ url_for('rrhh.list_view') }}" class="{{ 'active' if request.blueprint == 'rrhh' }}">RRHH</a>
+      {% endif %}
+      <a href="{{ url_for('mantenimiento.list_view') }}" class="{{ 'active' if request.blueprint == 'mantenimiento' }}">Mantenimiento</a>
+      {% if can(current_user.roles, 'inventarios', 'view') %}
+      <a href="{{ url_for('inventarios.list_view') }}" class="{{ 'active' if request.blueprint == 'inventarios' }}">Inventarios</a>
+      {% endif %}
+      <a href="{{ url_for('neumaticos.list_view') }}" class="{{ 'active' if request.blueprint == 'neumaticos' }}">Neumáticos</a>
+      {% if can(current_user.roles, 'inspecciones', 'view') %}
+      <a href="{{ url_for('inspecciones.list_view') }}" class="{{ 'active' if request.blueprint == 'inspecciones' }}">Inspecciones</a>
+      {% endif %}
+      {% if can(current_user.roles, 'rutas', 'view') %}
+      <a href="{{ url_for('rutas.list_view') }}" class="{{ 'active' if request.blueprint == 'rutas' }}">Rutas</a>
+      {% endif %}
+      {% if can(current_user.roles, 'facturacion', 'view') %}
+      <a href="{{ url_for('facturacion.list_view') }}" class="{{ 'active' if request.blueprint == 'facturacion' }}">Facturación</a>
+      {% endif %}
+      {% if can(current_user.roles, 'cotizaciones', 'view') %}
+      <a href="{{ url_for('cotizaciones.list_view') }}" class="{{ 'active' if request.blueprint == 'cotizaciones' }}">Cotizaciones</a>
+      {% endif %}
+      {% if can(current_user.roles, 'tarifario', 'view') %}
+      <a href="{{ url_for('tarifario.list_view') }}" class="{{ 'active' if request.blueprint == 'tarifario' }}">Tarifario</a>
+      {% endif %}
+      {% if can(current_user.roles, 'guias', 'view') %}
+      <a href="{{ url_for('guias.list_view') }}" class="{{ 'active' if request.blueprint == 'guias' }}">Guías de Remisión</a>
+      {% endif %}
+      {% if can(current_user.roles, 'usuarios', 'view') %}
+      <a href="{{ url_for('usuarios.list_view') }}" class="{{ 'active' if request.blueprint == 'usuarios' }}">Usuarios</a>
+      {% endif %}
+      {% if can(current_user.roles, 'integraciones', 'view') %}
+      <a href="{{ url_for('integraciones.index') }}" class="{{ 'active' if request.blueprint == 'integraciones' }}">Ubicación GPS</a>
+      {% endif %}
+      {% if can(current_user.roles, 'catalogos', 'view') %}
+      <a href="{{ url_for('catalogos.list_view') }}" class="{{ 'active' if request.blueprint == 'catalogos' }}">Catálogos</a>
+      {% endif %}
+    </nav>
+    <div class="sidebar-user">
+      <div class="sidebar-user-name">{{ current_user.name }}</div>
+      <div class="sidebar-user-role">{{ role_labels_join(current_user.roles) }}</div>
+      <a href="{{ url_for('auth.logout') }}" class="logout-link">Cerrar sesión</a>
+    </div>
+  </aside>
+  <main class="content">
+    {% include 'partials/flashes.html' %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+{% else %}
+  {% include 'partials/flashes.html' %}
+  {% block content_guest %}{% endblock %}
+{% endif %}
+</body>
+</html>
