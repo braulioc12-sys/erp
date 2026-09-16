@@ -304,6 +304,26 @@ def _vehicle_open_orders_warning(vehicle_id):
     return f'La unidad "{vehicle["plate"]}" todavía tiene órdenes de trabajo abiertas en Mantenimiento — deben atenderse cuanto antes.'
 
 
+def _vehicles_with_open_maintenance_orders():
+    """15 sep, pedido de Braulio (ajuste): la alerta de "trabajos
+    pendientes a atender a su retorno" ya no debe salir recién después de
+    guardar el viaje (ver _vehicle_open_orders_warning, que sigue estando
+    como respaldo del lado del servidor) sino apenas el operador ELIGE la
+    unidad en el desplegable, como un aviso que hay que cerrar para poder
+    seguir. Esto se hace con JS en viajes/form.html, así que acá se arma
+    el conjunto de ids de TODAS las unidades con al menos una orden de
+    mantenimiento "abierta" (mismo criterio que _vehicle_open_orders_warning
+    -- sin trabajos cargados, o con algún trabajo que no esté TERMINADO) y
+    se lo pasa al formulario para que el JS lo consulte por unidad, sin
+    tener que ir al servidor por cada cambio de selección."""
+    rows = query_all(
+        """SELECT DISTINCT m.vehicle_id FROM maintenance_records m
+           WHERE NOT EXISTS (SELECT 1 FROM maintenance_record_jobs j WHERE j.maintenance_record_id = m.id)
+              OR EXISTS (SELECT 1 FROM maintenance_record_jobs j WHERE j.maintenance_record_id = m.id AND j.status != 'TERMINADO')"""
+    )
+    return [r["vehicle_id"] for r in rows]
+
+
 def _resolve_route_selection(form, current_trip=None):
     """Resuelve la ruta elegida en el desplegable del formulario de viajes.
     Devuelve (origin, destination, route_row_o_None, error_o_None).
@@ -468,6 +488,7 @@ def new():
                 clients=clients, vehicles=vehicles, trailers=trailers, drivers=drivers, routes=routes,
                 selected_route_id=request.form.get("route_id", ""),
                 cargo_types=CARGO_TYPES, payment_terms=PAYMENT_TERMS,
+                open_maintenance_vehicle_ids=_vehicles_with_open_maintenance_orders(),
             )
 
         code = _next_trip_code(issuer)
@@ -528,6 +549,7 @@ def new():
         clients=clients, vehicles=vehicles, trailers=trailers, drivers=drivers, routes=routes, today=today_str(),
         selected_route_id="", cargo_types=CARGO_TYPES, payment_terms=PAYMENT_TERMS,
         preset_issuer=_parse_issuer(request.args), preset_ownership=_parse_ownership(request.args),
+        open_maintenance_vehicle_ids=_vehicles_with_open_maintenance_orders(),
     )
 
 
@@ -606,6 +628,7 @@ def edit(trip_id):
                 clients=clients, vehicles=vehicles, trailers=trailers, drivers=drivers, routes=routes,
                 selected_route_id=request.form.get("route_id", ""),
                 cargo_types=CARGO_TYPES, payment_terms=PAYMENT_TERMS,
+                open_maintenance_vehicle_ids=_vehicles_with_open_maintenance_orders(),
             )
         driver_commission = _resolve_commission(
             request.form, origin, destination, route,
@@ -660,6 +683,7 @@ def edit(trip_id):
         clients=clients, vehicles=vehicles, trailers=trailers, drivers=drivers, routes=routes,
         selected_route_id=_selected_route_id_for_edit(trip),
         cargo_types=CARGO_TYPES, payment_terms=PAYMENT_TERMS,
+        open_maintenance_vehicle_ids=_vehicles_with_open_maintenance_orders(),
     )
 
 

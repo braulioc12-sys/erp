@@ -82,7 +82,7 @@
         <select name="vehicle_id" id="trip-vehicle">
           <option value="">-- Selecciona --</option>
           {% for v in vehicles %}
-          <option value="{{ v.id }}" {{ 'selected' if trip and (trip.vehicle_id|string) == (v.id|string) }}>{{ v.plate }} ({{ v.brand or '' }} {{ v.model or '' }}){{ ' — EN MANTENIMIENTO' if v.status == 'MANTENIMIENTO' }}</option>
+          <option value="{{ v.id }}" data-plate="{{ v.plate }}" data-status="{{ v.status }}" data-open-orders="{{ '1' if v.id in open_maintenance_vehicle_ids else '0' }}" {{ 'selected' if trip and (trip.vehicle_id|string) == (v.id|string) }}>{{ v.plate }} ({{ v.brand or '' }} {{ v.model or '' }}){{ ' — EN MANTENIMIENTO' if v.status == 'MANTENIMIENTO' }}</option>
           {% endfor %}
         </select>
       </label>
@@ -90,7 +90,7 @@
         <select name="trailer_vehicle_id" id="trip-trailer">
           <option value="">-- Selecciona --</option>
           {% for v in trailers %}
-          <option value="{{ v.id }}" {{ 'selected' if trip and (trip.trailer_vehicle_id|string) == (v.id|string) }}>{{ v.plate }} ({{ v.brand or '' }} {{ v.model or '' }}){{ ' — EN MANTENIMIENTO' if v.status == 'MANTENIMIENTO' }}</option>
+          <option value="{{ v.id }}" data-plate="{{ v.plate }}" data-status="{{ v.status }}" data-open-orders="{{ '1' if v.id in open_maintenance_vehicle_ids else '0' }}" {{ 'selected' if trip and (trip.trailer_vehicle_id|string) == (v.id|string) }}>{{ v.plate }} ({{ v.brand or '' }} {{ v.model or '' }}){{ ' — EN MANTENIMIENTO' if v.status == 'MANTENIMIENTO' }}</option>
           {% endfor %}
         </select>
       </label>
@@ -187,18 +187,18 @@
   {% else %}
   <div class="form-row">
     <label>Unidad tracto *
-      <select name="vehicle_id" required>
+      <select name="vehicle_id" id="trip-vehicle" required>
         <option value="">-- Selecciona --</option>
         {% for v in vehicles %}
-        <option value="{{ v.id }}" {{ 'selected' if trip and (trip.vehicle_id|string) == (v.id|string) }}>{{ v.plate }} ({{ v.brand or '' }} {{ v.model or '' }}){{ ' — EN MANTENIMIENTO' if v.status == 'MANTENIMIENTO' }}</option>
+        <option value="{{ v.id }}" data-plate="{{ v.plate }}" data-status="{{ v.status }}" data-open-orders="{{ '1' if v.id in open_maintenance_vehicle_ids else '0' }}" {{ 'selected' if trip and (trip.vehicle_id|string) == (v.id|string) }}>{{ v.plate }} ({{ v.brand or '' }} {{ v.model or '' }}){{ ' — EN MANTENIMIENTO' if v.status == 'MANTENIMIENTO' }}</option>
         {% endfor %}
       </select>
     </label>
     <label>Carreta *
-      <select name="trailer_vehicle_id" required>
+      <select name="trailer_vehicle_id" id="trip-trailer" required>
         <option value="">-- Selecciona --</option>
         {% for v in trailers %}
-        <option value="{{ v.id }}" {{ 'selected' if trip and (trip.trailer_vehicle_id|string) == (v.id|string) }}>{{ v.plate }} ({{ v.brand or '' }} {{ v.model or '' }}){{ ' — EN MANTENIMIENTO' if v.status == 'MANTENIMIENTO' }}</option>
+        <option value="{{ v.id }}" data-plate="{{ v.plate }}" data-status="{{ v.status }}" data-open-orders="{{ '1' if v.id in open_maintenance_vehicle_ids else '0' }}" {{ 'selected' if trip and (trip.trailer_vehicle_id|string) == (v.id|string) }}>{{ v.plate }} ({{ v.brand or '' }} {{ v.model or '' }}){{ ' — EN MANTENIMIENTO' if v.status == 'MANTENIMIENTO' }}</option>
         {% endfor %}
       </select>
     </label>
@@ -370,6 +370,30 @@
       cargoTypeSelect.addEventListener('change', toggleContainerFields);
       toggleContainerFields();
     }
+
+    // 15 sep, pedido de Braulio (ajuste): al elegir una unidad "EN
+    // MANTENIMIENTO" (disponible para programar) que todavía tiene
+    // trabajos pendientes, debe salir una alerta que haya que cerrar para
+    // seguir -- no basta con el aviso que ya se muestra recién después de
+    // guardar el viaje (ver flash "info" en viajes.py, que sigue ahí como
+    // respaldo). El mismo id trip-vehicle/trip-trailer se usa en las 2
+    // ramas mutuamente excluyentes de este formulario (mode == 'edit' y
+    // mode == 'new'), así que alcanza con buscarlos una sola vez acá.
+    function warnIfMaintenanceWithOpenOrders(select) {
+      if (!select) { return; }
+      select.addEventListener('change', function () {
+        var option = select.options[select.selectedIndex];
+        if (!option || !option.value) { return; }
+        if (option.getAttribute('data-status') === 'MANTENIMIENTO' && option.getAttribute('data-open-orders') === '1') {
+          alert(
+            'Atención: la unidad "' + option.getAttribute('data-plate') + '" está en mantenimiento y ' +
+            'todavía tiene trabajos pendientes — deben atenderse a su retorno.'
+          );
+        }
+      });
+    }
+    warnIfMaintenanceWithOpenOrders(document.getElementById('trip-vehicle'));
+    warnIfMaintenanceWithOpenOrders(document.getElementById('trip-trailer'));
   })();
 </script>
 {% endblock %}

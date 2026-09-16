@@ -313,8 +313,17 @@ def delete(record_id):
 @bp.route("/<int:record_id>")
 @permission_required("mantenimiento", "view")
 def detail(record_id):
+    # 15 sep, pedido de Braulio (ajuste): "una vez creada la orden, ahi es
+    # donde el administrador y personal de mantenimiento... pueden
+    # habilitarla como disponible para programar" -- se agrega
+    # vehicle_status/vehicle_available_for_scheduling acá para poder
+    # mostrar y togglear la opción directamente desde el detalle de la
+    # orden (además de seguir estando en Mantenimiento -> Por unidad y en
+    # la casilla al registrar el ingreso a mantenimiento).
     record = query_one(
-        """SELECT m.*, v.plate as vehicle_plate FROM maintenance_records m
+        """SELECT m.*, v.plate as vehicle_plate, v.status as vehicle_status,
+                  v.available_for_scheduling as vehicle_available_for_scheduling
+           FROM maintenance_records m
            JOIN vehicles v ON v.id = m.vehicle_id WHERE m.id = ?""",
         (record_id,),
     )
