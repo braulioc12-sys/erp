@@ -36,6 +36,7 @@ from app.integrations.sunat_exchange_rate import get_rate_for_date
 from app.integrations.sunat_ruc import get_company_for_ruc
 from app.reports import build_expenses_workbook, build_liquidacion_workbook
 from app.routes.rutas import find_route
+from app.routes.viajes import ISSUER_CHOICES
 from app import storage
 
 bp = Blueprint("liquidaciones", __name__, url_prefix="/liquidaciones")
@@ -193,17 +194,30 @@ def budget_alerts():
 @bp.route("")
 @permission_required("liquidaciones", "view")
 def list_view():
+    """16 sep, pedido de Braulio: "separemos tanto los viajes y
+    liquidaciones por empresa... debe haber un cuadro arriba de cada uno de
+    sus menus en el cual se elija la empresa para evitar confusiones" --
+    mismo motivo y mismo criterio (obligatorio, no un filtro con "Todas")
+    que en viajes.list_view/list_terceros — ver ese comentario."""
+    issuer = request.args.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        return render_template("liquidaciones/list.html", advances=None, issuer=None, whatsapp_pending_count=0)
+
     advances = query_all(
         """SELECT a.*, t.code as trip_code, t.origin, t.destination,
                   (SELECT COALESCE(SUM(e.amount), 0) FROM expenses e WHERE e.trip_id = a.trip_id) as spent
            FROM expense_advances a
            JOIN trips t ON t.id = a.trip_id
-           ORDER BY a.given_date DESC, a.id DESC"""
+           WHERE t.issuer = ?
+           ORDER BY a.given_date DESC, a.id DESC""",
+        (issuer,),
     )
     whatsapp_pending_count = query_one(
         "SELECT COUNT(*) n FROM whatsapp_expense_drafts WHERE status = 'PENDIENTE'"
     )["n"]
-    return render_template("liquidaciones/list.html", advances=advances, whatsapp_pending_count=whatsapp_pending_count)
+    return render_template(
+        "liquidaciones/list.html", advances=advances, issuer=issuer, whatsapp_pending_count=whatsapp_pending_count
+    )
 
 
 # 4 sep, pedido de Braulio: "cuando el operador sea BRMS deben empezar

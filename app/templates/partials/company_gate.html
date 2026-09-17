@@ -1,0 +1,23 @@
+{# 16 sep, pedido de Braulio: "separemos tanto los viajes y liquidaciones
+   por empresa... debe haber un cuadro arriba de cada uno de sus menus en
+   el cual se elija la empresa para evitar confusiones" -- selector
+   compartido entre viajes/list.html, viajes/list_terceros.html y
+   liquidaciones/list.html. `endpoint` es el nombre de la vista actual
+   (para armar el link con ?issuer=...), `purpose_text` es la frase que
+   sigue a "Elige la empresa " (ej. "para ver sus viajes con unidad
+   propia"). #}
+{% macro company_gate(endpoint, purpose_text) %}
+<div class="company-gate">
+  <p>Elige la empresa {{ purpose_text }}:</p>
+  <div class="company-gate-options">
+    <a href="{{ url_for(endpoint, issuer='HARRASO') }}" class="company-gate-option">
+      <strong>Harraso Transport</strong>
+      <span class="muted">Códigos H-0001, H-0002…</span>
+    </a>
+    <a href="{{ url_for(endpoint, issuer='BRMS') }}" class="company-gate-option">
+      <strong>BRMS</strong>
+      <span class="muted">Códigos B-0001, B-0002…</span>
+    </a>
+  </div>
+</div>
+{% endmacro %}

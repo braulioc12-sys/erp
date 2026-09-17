@@ -147,7 +147,22 @@ def _billing_permission_required(view):
 def list_view():
     """3 sep, pedido de Braulio: por defecto el panel general de Viajes solo
     muestra los de unidad propia — los de terceros tienen su propio listado
-    (ver list_terceros), con otras columnas relevantes para ese caso."""
+    (ver list_terceros), con otras columnas relevantes para ese caso.
+
+    16 sep, pedido de Braulio: "separemos tanto los viajes y liquidaciones
+    por empresa... debe haber un cuadro arriba de cada uno de sus menus en
+    el cual se elija la empresa para evitar confusiones" -- surgió de que
+    viajes y liquidaciones usan el mismo prefijo B-/H- pero con
+    correlativos independientes (ver _next_trip_code), lo que puede
+    confundir si se ven mezclados. Se decidió con Braulio que elegir
+    empresa sea OBLIGATORIO (no un filtro opcional con "Todas"): sin
+    ?issuer=HARRASO|BRMS en la URL no se consulta ni se muestra ningún
+    viaje, solo el selector (ver viajes/list.html)."""
+    issuer = request.args.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        terceros_count = query_one("SELECT COUNT(*) n FROM trips WHERE ownership = 'TERCERO'")["n"]
+        return render_template("viajes/list.html", trips=None, issuer=None, terceros_count=terceros_count)
+
     status = request.args.get("status", "")
     q = request.args.get("q", "").strip()
 
@@ -159,8 +174,8 @@ def list_view():
               LEFT JOIN vehicles tv ON tv.id = t.trailer_vehicle_id
               LEFT JOIN drivers d ON d.id = t.driver_id
               LEFT JOIN drivers d2 ON d2.id = t.driver2_id
-              WHERE t.ownership = 'PROPIA'"""
-    params = []
+              WHERE t.ownership = 'PROPIA' AND t.issuer = ?"""
+    params = [issuer]
     if status:
         sql += " AND t.status = ?"
         params.append(status)
@@ -170,8 +185,12 @@ def list_view():
     sql += " ORDER BY t.scheduled_date DESC, t.id DESC"
 
     trips = query_all(sql, params)
-    terceros_count = query_one("SELECT COUNT(*) n FROM trips WHERE ownership = 'TERCERO'")["n"]
-    return render_template("viajes/list.html", trips=trips, status=status, q=q, terceros_count=terceros_count)
+    terceros_count = query_one(
+        "SELECT COUNT(*) n FROM trips WHERE ownership = 'TERCERO' AND issuer = ?", (issuer,)
+    )["n"]
+    return render_template(
+        "viajes/list.html", trips=trips, issuer=issuer, status=status, q=q, terceros_count=terceros_count
+    )
 
 
 @bp.route("/terceros")
@@ -180,15 +199,25 @@ def list_terceros():
     """3 sep, pedido de Braulio: listado aparte para viajes subcontratados a
     terceros, con las columnas que pidió — fecha de viaje, estado, periodo
     de pago y cancelado (sí/no) — además de lo mínimo para identificar cada
-    viaje (código, cliente, tercero)."""
+    viaje (código, cliente, tercero).
+
+    16 sep: mismo selector de empresa obligatorio que list_view (ver
+    comentario ahí)."""
+    issuer = request.args.get("issuer", "").strip().upper()
+    payment_term_labels = dict(PAYMENT_TERMS)
+    if issuer not in ISSUER_CHOICES:
+        return render_template(
+            "viajes/list_terceros.html", trips=None, issuer=None, payment_term_labels=payment_term_labels
+        )
+
     status = request.args.get("status", "")
     q = request.args.get("q", "").strip()
 
     sql = """SELECT t.*, c.name as client_name
               FROM trips t
               JOIN clients c ON c.id = t.client_id
-              WHERE t.ownership = 'TERCERO'"""
-    params = []
+              WHERE t.ownership = 'TERCERO' AND t.issuer = ?"""
+    params = [issuer]
     if status:
         sql += " AND t.status = ?"
         params.append(status)
@@ -199,9 +228,13 @@ def list_terceros():
     sql += " ORDER BY t.scheduled_date DESC, t.id DESC"
 
     trips = query_all(sql, params)
-    payment_term_labels = dict(PAYMENT_TERMS)
     return render_template(
-        "viajes/list_terceros.html", trips=trips, status=status, q=q, payment_term_labels=payment_term_labels
+        "viajes/list_terceros.html",
+        trips=trips,
+        issuer=issuer,
+        status=status,
+        q=q,
+        payment_term_labels=payment_term_labels,
     )
 
 

@@ -1,19 +1,28 @@
 {% extends 'base.html' %}
 {% import 'partials/macros.html' as m %}
+{% import 'partials/company_gate.html' as cg %}
 {% block title %}Viajes{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>Viajes / Órdenes de servicio — Unidad propia</h1>
+  <h1>Viajes / Órdenes de servicio — Unidad propia{% if issuer %} — {{ 'BRMS' if issuer == 'BRMS' else 'Harraso Transport' }}{% endif %}</h1>
+  {% if issuer %}
   <div class="page-actions">
-    <a href="{{ url_for('viajes.list_terceros') }}" class="btn btn-secondary">Viajes con terceros{% if terceros_count %} ({{ terceros_count }}){% endif %}</a>
+    <a href="{{ url_for('viajes.list_terceros', issuer=issuer) }}" class="btn btn-secondary">Viajes con terceros{% if terceros_count %} ({{ terceros_count }}){% endif %}</a>
     <a href="{{ url_for('viajes.commissions_report') }}" class="btn btn-secondary">Comisiones por mes</a>
     {% if can(current_user.roles, 'viajes', 'edit') %}
-    <a href="{{ url_for('viajes.new') }}" class="btn btn-primary">+ Nuevo viaje</a>
+    <a href="{{ url_for('viajes.new', issuer=issuer) }}" class="btn btn-primary">+ Nuevo viaje</a>
     {% endif %}
   </div>
+  {% endif %}
 </div>
 
+{% if not issuer %}
+{{ cg.company_gate('viajes.list_view', 'para ver sus viajes con unidad propia') }}
+{% else %}
+<p class="company-switch"><a href="{{ url_for('viajes.list_view') }}">↺ Cambiar de empresa</a></p>
+
 <form class="filters" method="get">
+  <input type="hidden" name="issuer" value="{{ issuer }}">
   <label>Estado
     <select name="status">
       <option value="">Todos</option>
@@ -53,4 +62,5 @@
     </tbody>
   </table>
 </div>
+{% endif %}
 {% endblock %}
