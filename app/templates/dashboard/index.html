@@ -40,10 +40,12 @@
      varias decenas de alertas se volvía interminable. Ahora cada tipo va
      en su propio grupo colapsable (<details>), con el total entre
      paréntesis en el título — así se ve de un vistazo cuántas hay de cada
-     tipo sin tener que desplazarse por todas. Un grupo con al menos una
-     alerta YA VENCIDA se abre expandido de entrada (y su título se marca
-     en rojo) para que lo urgente no quede escondido; el resto arranca
-     colapsado. #}
+     tipo sin tener que desplazarse por todas.
+     16 sep, ajuste pedido por Braulio: "por default todas las alertas del
+     panel deben salir contraídas" — antes un grupo con alguna alerta YA
+     VENCIDA se abría expandido de entrada; ahora TODOS los grupos arrancan
+     colapsados por igual (se sigue marcando el título en rojo si hay
+     vencidas, para que se note sin tener que abrir el grupo). #}
   {% set alert_groups = [
     ('Documentos de conductores', driver_document_alerts),
     ('Documentos de unidades', vehicle_document_alerts),
@@ -56,7 +58,7 @@
     {% for group_label, group_alerts in alert_groups %}
       {% if group_alerts %}
       {% set group_overdue = group_alerts|selectattr('overdue')|list|length if group_label != 'Presupuestos de gastos' else group_alerts|selectattr('over')|list|length %}
-      <details class="alert-group" {% if group_overdue %}open{% endif %}>
+      <details class="alert-group">
         <summary class="{{ 'alert-group-overdue' if group_overdue else '' }}">
           <span>{{ group_label }}</span>
           <span class="alert-count">{{ group_alerts|length }}{% if group_overdue %} · {{ group_overdue }} vencida(s){% endif %}</span>
