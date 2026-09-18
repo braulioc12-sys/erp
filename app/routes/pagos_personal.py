@@ -19,14 +19,17 @@ Dos partes:
    solo tipo a la vez — planilla y honorarios nunca van en el mismo
    archivo.
 
-Sobre el export a Telecrédito (18 sep, 2da ronda): BCP tiene formatos
-DISTINTOS de archivo de texto según el servicio (Planilla de Haberes vs.
-Planilla de Proveedores/honorarios), cada uno con sus propias posiciones y
-un checksum obligatorio. `telecredito_configure()` pide los datos de la
-cabecera (cuenta de cargo, fecha, referencia) y `telecredito_generate()`
+Sobre el export a Telecrédito (18 sep, 2da y 3ra ronda): BCP arma el
+archivo de texto de ancho fijo de la Planilla de Haberes, con checksum
+obligatorio, y ese MISMO formato sirve tanto para Planilla como para
+Recibo por honorarios — lo único que cambia entre los dos es el "Subtipo
+de planilla" de la cabecera (corrección de Braulio tras un primer intento
+fallido con un formato "Proveedores" distinto — ver la nota grande al
+inicio de app/telecredito.py). `telecredito_configure()` pide los datos de
+la cabecera (cuenta de cargo, fecha, referencia) y `telecredito_generate()`
 arma el .txt exacto con `app/telecredito.py` — verificado byte a byte
-contra un archivo real que mandó Braulio antes de darlo por bueno (ver la
-nota grande al inicio de ese módulo)."""
+contra un archivo real de Planilla que mandó Braulio antes de darlo por
+bueno (ver la nota grande al inicio de ese módulo)."""
 import os
 import uuid
 from datetime import datetime
@@ -313,7 +316,7 @@ def telecredito_configure():
     de esto el botón generaba directo un Excel "borrador"; ahora que se
     tiene la ficha real de BCP y un archivo de ejemplo de Braulio, se
     genera el .txt exacto que pide el banco."""
-    from app.telecredito import DEFAULT_SUBTIPO_PLANILLA, SUBTIPO_PLANILLA_CHOICES
+    from app.telecredito import DEFAULT_SUBTIPO_HONORARIOS, DEFAULT_SUBTIPO_PLANILLA, SUBTIPO_PLANILLA_CHOICES
 
     period, staff_id, payment_type, status, q = _filters_from_args(request.args)
     if payment_type not in PAYMENT_TYPE_LABELS:
@@ -340,6 +343,7 @@ def telecredito_configure():
         period=period, staff_id=staff_id, payment_type=payment_type, status=status, q=q,
         payment_type_labels=PAYMENT_TYPE_LABELS, accounts=accounts,
         subtipo_choices=SUBTIPO_PLANILLA_CHOICES, default_subtipo=DEFAULT_SUBTIPO_PLANILLA,
+        subtipo_honorarios=DEFAULT_SUBTIPO_HONORARIOS,
         default_reference=f"{PAYMENT_TYPE_LABELS[payment_type].upper()} {period}", today=today_str(),
     )
 
@@ -354,12 +358,11 @@ def telecredito_generate():
     archivo sea de una sola moneda), o cuyo tipo de documento no sea válido
     para este servicio (Planilla no admite RUC)."""
     from app.telecredito import (
+        DEFAULT_SUBTIPO_HONORARIOS,
         DEFAULT_SUBTIPO_PLANILLA,
         DOCUMENT_TYPE_CODES_HABERES,
-        DOCUMENT_TYPE_CODES_PROVEEDORES,
         abono_bank_fields,
         build_haberes_txt,
-        build_proveedores_txt,
     )
 
     if not validate_csrf():
@@ -394,7 +397,10 @@ def telecredito_generate():
         or f"{PAYMENT_TYPE_LABELS[payment_type].upper()} {period}"
     )
 
-    valid_doc_codes = DOCUMENT_TYPE_CODES_HABERES if payment_type == "PLANILLA" else DOCUMENT_TYPE_CODES_PROVEEDORES
+    # Mismo formato de archivo (Planilla de Haberes) para los dos tipos de
+    # pago — ver app/telecredito.py — así que el documento del beneficiario
+    # siempre queda limitado a DNI/CE, sin RUC, en ambos casos.
+    valid_doc_codes = DOCUMENT_TYPE_CODES_HABERES
 
     excluded_bank, excluded_currency, excluded_doc = [], [], []
     prepared = []
@@ -428,19 +434,21 @@ def telecredito_generate():
     default_company_name = cuenta_cargo["company_name"]
     if payment_type == "PLANILLA":
         subtipo = request.form.get("subtipo_planilla") or DEFAULT_SUBTIPO_PLANILLA
-        content = build_haberes_txt(
-            prepared, cuenta_cargo=cuenta_cargo, fecha_proceso=fecha_proceso,
-            subtipo_planilla=subtipo, referencia_planilla=referencia_planilla,
-            default_company_name=default_company_name,
-        )
+        default_concept = "PAGO DE HABERES"
         tipo_slug = "haberes"
     else:
-        content = build_proveedores_txt(
-            prepared, cuenta_cargo=cuenta_cargo, fecha_proceso=fecha_proceso,
-            referencia_planilla=referencia_planilla, exonerar_itf=(request.form.get("exonerar_itf") == "1"),
-            default_company_name=default_company_name,
-        )
-        tipo_slug = "proveedores"
+        # Recibo por honorarios: mismo archivo que Planilla, con el
+        # subtipo fijo en "4" (Cuarta categoría) — corrección de Braulio,
+        # ver app/telecredito.py.
+        subtipo = DEFAULT_SUBTIPO_HONORARIOS
+        default_concept = "PAGO HONORARIOS"
+        tipo_slug = "honorarios"
+
+    content = build_haberes_txt(
+        prepared, cuenta_cargo=cuenta_cargo, fecha_proceso=fecha_proceso,
+        subtipo_planilla=subtipo, referencia_planilla=referencia_planilla,
+        default_company_name=default_company_name, default_concept=default_concept,
+    )
 
     now = datetime.now().strftime("%Y%m%d%H%M")
     execute(

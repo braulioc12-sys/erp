@@ -1,5 +1,6 @@
 """Generador del archivo de texto de ancho fijo para Telecrédito Web (BCP)
-— Planilla de Haberes y Planilla de Proveedores.
+— Planilla de Haberes, usada tanto para Planilla como para Recibo por
+honorarios.
 
 18 sep (pedido de Braulio, en dos partes):
 
@@ -17,24 +18,38 @@ incluido) — verificado byte a byte contra el archivo real que mandó
 Braulio (CUMBAZAGOSTO26.TXT, 23 abonos): se decodificaron sus posiciones a
 mano, se confirmaron contra la ficha oficial de BCP, y se recalculó el
 checksum de sus 23 cuentas + la cuenta de cargo dando EXACTO el mismo
-valor que trae el archivo real (1705882738935). Con esa verificación, el
-archivo que genera este módulo ya no lleva ninguna advertencia de
-"borrador".
+valor que trae el archivo real (1705882738935).
 
-Dos formatos (fichas oficiales BCP, ambas de julio 2024), los dos con 113
-caracteres de cabecera pero con las filas de pago y algunos campos de la
-cabecera en posiciones distintas:
+18 sep, 3ra ronda (corrección de Braulio, patch 0054): al principio se
+había armado también un formato "Proveedores" distinto (196 caracteres de
+fila, con "Modalidad de pago" y flag de exoneración ITF) para los pagos de
+RECIBO_HONORARIOS, leyendo la ficha "Estructura planilla Proveedores NTLC
+2.pdf" — pero al subirlo a Telecrédito real dio error. Braulio aclaró:
 
-- HABERES (planilla de sueldos, PLANILLA en el sistema): fila de pago de
-  195 caracteres. Lleva "Subtipo de planilla" en la cabecera (ej. "X" =
-  Quinta categoría, el caso normal de un sueldo mensual — es el que usa
-  Braulio en su archivo real). Tipo de documento del trabajador: solo
-  DNI/CE (no admite RUC).
-- PROVEEDORES (honorarios/terceros, RECIBO_HONORARIOS en el sistema): fila
-  de pago de 196 caracteres (un campo más que Haberes: "Modalidad de
-  pago", siempre "1" = Efectivo, la única implementada). Lleva "Flag de
-  exoneración ITF" en la cabecera en vez del subtipo. Tipo de documento
-  del proveedor: DNI/CE/RUC.
+    "A la hora de generar el pago de honorarios lo estas usandi como si
+    usara el formato de proveedores, pero es igual el mismo formato que
+    haberes solo cambia el campo 4 tipo de subtipo."
+
+Es decir: BCP factura los honorarios como una PLANILLA DE HABERES más,
+solo que con el campo 4 de la cabecera ("Subtipo de planilla de haberes")
+en "4" (CUARTA CATEGORÍA) en vez de "X" (QUINTA CATEGORÍA, el sueldo
+regular). Por eso ya no existe una función aparte para Proveedores: tanto
+Planilla como Recibo por honorarios arman el archivo con
+`build_haberes_txt()`, y lo único que cambia entre los dos es el valor del
+subtipo (ver DEFAULT_SUBTIPO_PLANILLA vs. DEFAULT_SUBTIPO_HONORARIOS más
+abajo) y el texto por defecto del concepto/referencia. Como consecuencia,
+el documento del beneficiario también queda limitado a DNI/CE igual que
+Planilla (la ficha de Haberes no tiene código de RUC) — si algún
+proveedor de honorarios tiene RUC en vez de DNI/CE, ese pago se excluye
+del archivo con aviso (mismo criterio que ya existía para moneda
+distinta), igual que antes.
+
+Único formato (ficha oficial BCP, julio 2024): 113 caracteres de cabecera
++ filas de pago de 195 caracteres. Lleva "Subtipo de planilla de haberes"
+en la cabecera (ej. "X" = Quinta categoría para un sueldo mensual normal —
+es el que usa Braulio en su archivo real de Planilla — o "4" = Cuarta
+categoría para honorarios). Tipo de documento del beneficiario: solo
+DNI/CE (no admite RUC).
 
 Todos los campos de texto libre (nombre, referencias) se sanitizan
 --mayúsculas, sin tildes-- porque las recomendaciones generales de BCP
@@ -56,11 +71,13 @@ ACCOUNT_TYPE_CODES_ABONO = {"AHORROS": "A", "CORRIENTE": "C", "MAESTRA": "M"}
 ACCOUNT_TYPE_CODES_CARGO = {"CORRIENTE": "C", "MAESTRA": "M"}
 
 DOCUMENT_TYPE_CODES_HABERES = {"DNI": "1", "CE": "3"}
-DOCUMENT_TYPE_CODES_PROVEEDORES = {"DNI": "1", "CE": "3", "RUC": "6"}
 
 # G/V/M/P/T/4/O/X/Z tal cual la ficha "Estructura de la Planilla de
 # Haberes" de BCP. "X" es el default (Quinta categoría) porque es el que
-# usa Braulio en su archivo real para el sueldo mensual normal.
+# usa Braulio en su archivo real para el sueldo mensual normal de
+# Planilla; "4" (Cuarta categoría) es el que corresponde a Recibo por
+# honorarios (ver DEFAULT_SUBTIPO_HONORARIOS) — mismo listado, se ofrece
+# completo por si algún día se necesita otro subtipo (ej. Gratificación).
 SUBTIPO_PLANILLA_CHOICES = [
     ("X", "Quinta categoría (sueldo regular)"),
     ("G", "Gratificación"),
@@ -73,6 +90,7 @@ SUBTIPO_PLANILLA_CHOICES = [
     ("Z", "Otros inafectos"),
 ]
 DEFAULT_SUBTIPO_PLANILLA = "X"
+DEFAULT_SUBTIPO_HONORARIOS = "4"
 
 _ACCENTS = str.maketrans("áéíóúÁÉÍÓÚ", "aeiouAEIOU")
 # Caracteres permitidos por BCP en nombre/referencia (ficha oficial):
@@ -177,14 +195,19 @@ def _crlf_bytes(lines):
     return ("\r\n".join(lines) + "\r\n").encode("latin-1", errors="replace")
 
 
-def build_haberes_txt(payments, *, cuenta_cargo, fecha_proceso, subtipo_planilla, referencia_planilla, default_company_name):
+def build_haberes_txt(payments, *, cuenta_cargo, fecha_proceso, subtipo_planilla, referencia_planilla, default_company_name, default_concept="PAGO DE HABERES"):
     """payments: filas ya resueltas con bank_type/bank_value/bank_is_interbank
     (ver _prepare_export_rows en app/routes/pagos_personal.py) además de
     document_type, document_number, staff_name, staff_company,
     staff_currency, amount, concept. cuenta_cargo: fila de
     company_bank_accounts (account_number, account_type, currency).
-    Devuelve bytes listos para descargar como .txt (latin-1, CRLF, igual
-    que el archivo real de Braulio)."""
+    Usada tanto para Planilla (subtipo_planilla="X" por defecto) como para
+    Recibo por honorarios (subtipo_planilla="4") — es el mismo formato de
+    archivo, lo único que cambia es ese campo de la cabecera y el texto
+    por defecto del concepto (ver DEFAULT_SUBTIPO_PLANILLA /
+    DEFAULT_SUBTIPO_HONORARIOS y el docstring del módulo). Devuelve bytes
+    listos para descargar como .txt (latin-1, CRLF, igual que el archivo
+    real de Braulio)."""
     total_amount = sum(p["amount"] or 0 for p in payments)
     abonos_checksum = [(p["bank_value"], p["bank_is_interbank"]) for p in payments]
 
@@ -201,7 +224,7 @@ def build_haberes_txt(payments, *, cuenta_cargo, fecha_proceso, subtipo_planilla
             + " " * 3
             + _text_field(p["staff_name"], 75)
             + _text_field(company_name, 40)
-            + _text_field(p["concept"] or "PAGO DE HABERES", 20)
+            + _text_field(p["concept"] or default_concept, 20)
             + CURRENCY_CODES.get(p["staff_currency"], "0001")
             + _amount_field(p["amount"])
             + "S"
@@ -218,51 +241,6 @@ def build_haberes_txt(payments, *, cuenta_cargo, fecha_proceso, subtipo_planilla
         + _account_field(cuenta_cargo["account_number"])
         + _amount_field(total_amount)
         + _text_field(referencia_planilla, 40)
-        + _num_field(compute_checksum(cuenta_cargo["account_number"], abonos_checksum), 15)
-    )
-
-    return _crlf_bytes([header] + rows)
-
-
-def build_proveedores_txt(payments, *, cuenta_cargo, fecha_proceso, referencia_planilla, exonerar_itf, default_company_name):
-    """Igual que build_haberes_txt pero con la estructura de la Planilla
-    de Proveedores: sin subtipo de planilla, con flag de exoneración ITF
-    en la cabecera, y "modalidad de pago" (siempre Efectivo) + documento
-    RUC habilitado en cada fila de pago."""
-    total_amount = sum(p["amount"] or 0 for p in payments)
-    abonos_checksum = [(p["bank_value"], p["bank_is_interbank"]) for p in payments]
-
-    rows = []
-    for p in payments:
-        doc_code = DOCUMENT_TYPE_CODES_PROVEEDORES.get(p["document_type"], "1")
-        company_name = p["staff_company"] or default_company_name
-        row = (
-            "2"
-            + p["bank_type"]
-            + _account_field(p["bank_value"])
-            + "1"  # Modalidad de pago: 1 = Efectivo (única implementada por BCP)
-            + doc_code
-            + _alnum_field(p["document_number"], 12)
-            + " " * 3
-            + _text_field(p["staff_name"], 75)
-            + _text_field(company_name, 40)
-            + _text_field(p["concept"] or "PAGO HONORARIOS", 20)
-            + CURRENCY_CODES.get(p["staff_currency"], "0001")
-            + _amount_field(p["amount"])
-            + "S"
-        )
-        rows.append(row)
-
-    header = (
-        "1"
-        + _num_field(len(payments), 6)
-        + _date_field(fecha_proceso)
-        + ACCOUNT_TYPE_CODES_CARGO.get(cuenta_cargo["account_type"], "C")
-        + CURRENCY_CODES.get(cuenta_cargo["currency"], "0001")
-        + _account_field(cuenta_cargo["account_number"])
-        + _amount_field(total_amount)
-        + _text_field(referencia_planilla, 40)
-        + ("S" if exonerar_itf else "N")
         + _num_field(compute_checksum(cuenta_cargo["account_number"], abonos_checksum), 15)
     )
 

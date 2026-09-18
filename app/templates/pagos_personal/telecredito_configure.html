@@ -47,10 +47,7 @@
     </select>
   </label>
   {% else %}
-  <label style="flex-direction: row; align-items: center; gap: 8px;">
-    <input type="checkbox" name="exonerar_itf" value="1" style="width:auto;">
-    Exonerar ITF (marcar solo si la cuenta de abono es del mismo titular que la cuenta de cargo)
-  </label>
+  <p class="muted" style="margin-top:0;">Este archivo va a salir con el subtipo de planilla fijo en <strong>"{{ subtipo_honorarios }}" (Cuarta categoría)</strong> — es el mismo formato de Planilla de Haberes, solo cambia ese campo de la cabecera.</p>
   {% endif %}
 
   <div class="btn-group">
