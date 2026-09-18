@@ -505,6 +505,14 @@ COLUMN_MIGRATIONS = [
     # TABLE de forma simple) -- se valida en app/routes/pagos_personal.py.
     ("staff", "company", "TEXT"),
     ("staff", "account_type", "TEXT NOT NULL DEFAULT 'AHORROS'"),
+    # 18 sep, 5ta ronda (pedido de Braulio: papelera para constancias de
+    # pago, con quién la eliminó) -- ver el comentario largo junto a estas
+    # columnas en schema.sql (CREATE TABLE payment_vouchers). Sin
+    # "REFERENCES" en deleted_by a propósito -- mismo motivo que
+    # authorized_by_user_id/driver2_id más arriba: la FK la agrega el paso
+    # dedicado de init_db() (Postgres) una vez que la columna ya existe.
+    ("payment_vouchers", "deleted_at", "TEXT"),
+    ("payment_vouchers", "deleted_by", "INTEGER"),
 ]
 
 
@@ -532,7 +540,12 @@ def _apply_column_migrations_postgres(conn):
 # forma: el rol se guarda y se usa tal cual como clave de PERMISSIONS, así
 # que las funciones de abajo migran el CHECK constraint existente en vez de
 # solo agregar una columna.
-USER_ROLES = ("ADMIN", "OPERADOR", "DESPACHADOR", "ALMACEN", "CONTABILIDAD", "MECANICO")
+#
+# 18 sep, 5ta ronda: se agregó RRHH (pedido de Braulio: "en el menu de
+# usuarios tambien hay que poner rol RRHH, el cual tenga acceso a RRHH,
+# pagos personal, conductores y liquidaciones") — ver PERMISSIONS en
+# app/auth.py para el detalle de qué puede ver/editar.
+USER_ROLES = ("ADMIN", "OPERADOR", "DESPACHADOR", "ALMACEN", "CONTABILIDAD", "MECANICO", "RRHH")
 
 
 def _apply_role_check_migration_sqlite(conn):
@@ -550,9 +563,15 @@ def _apply_role_check_migration_sqlite(conn):
     una FK "colgada" mientras la enforcement está activa. Con las dos
     pragmas en el estado correcto, la tabla nueva solo necesita seguir
     llamándose "users" para que esas 9 FK sigan apuntando bien, sin tener
-    que tocar ninguna de esas otras tablas."""
+    que tocar ninguna de esas otras tablas.
+
+    18 sep, 5ta ronda: el centinela de "ya migrada" pasó de "DESPACHADOR" a
+    "RRHH" para que esto corra una vez más y recree el CHECK con el rol
+    nuevo en una base que ya tenía la primera tanda de roles — sigue siendo
+    la misma función/mecanismo, solo se corrió el centinela hacia el rol
+    agregado más reciente."""
     row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").fetchone()
-    if not row or not row[0] or "DESPACHADOR" in row[0]:
+    if not row or not row[0] or "RRHH" in row[0]:
         return  # ya migrada, o todavía no existe (base nueva: schema.sql ya trae el CHECK actualizado)
     fk_was_on = conn.execute("PRAGMA foreign_keys").fetchone()[0]
     conn.execute("PRAGMA foreign_keys = OFF")

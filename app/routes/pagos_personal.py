@@ -58,7 +58,7 @@ from flask import Blueprint, Response, abort, current_app, flash, g, redirect, r
 from app import storage
 from app.auth import permission_required, validate_csrf
 from app.db import execute, query_all, query_one
-from app.helpers import parse_date, parse_float, today_str
+from app.helpers import now_str, parse_date, parse_float, today_str
 from app.payment_vouchers_import import MONTH_LABELS, classify_zip_entry
 
 bp = Blueprint("pagos_personal", __name__, url_prefix="/pagos-personal")
@@ -642,7 +642,7 @@ def _voucher_period_context(period):
 @permission_required("pagos_personal", "view")
 def constancias_years():
     rows = query_all(
-        "SELECT substr(period, 1, 4) AS year, COUNT(*) AS n FROM payment_vouchers GROUP BY year ORDER BY year DESC"
+        "SELECT substr(period, 1, 4) AS year, COUNT(*) AS n FROM payment_vouchers WHERE deleted_at IS NULL GROUP BY year ORDER BY year DESC"
     )
     years = {int(r["year"]): r["n"] for r in rows}
     current_year = int(today_str()[:4])
@@ -731,7 +731,7 @@ def constancias_import_zip():
 @permission_required("pagos_personal", "view")
 def constancias_months(year):
     rows = query_all(
-        "SELECT substr(period, 6, 2) AS month, COUNT(*) AS n FROM payment_vouchers WHERE substr(period, 1, 4) = ? GROUP BY month",
+        "SELECT substr(period, 6, 2) AS month, COUNT(*) AS n FROM payment_vouchers WHERE substr(period, 1, 4) = ? AND deleted_at IS NULL GROUP BY month",
         (f"{year:04d}",),
     )
     counts = {int(r["month"]): r["n"] for r in rows}
@@ -748,7 +748,7 @@ def constancias_month_detail(year, month):
     files = query_all(
         """SELECT v.*, a.company_name, a.bank_name, a.alias
            FROM payment_vouchers v LEFT JOIN company_bank_accounts a ON a.id = v.bank_account_id
-           WHERE v.period = ? ORDER BY v.created_at DESC, v.id DESC""",
+           WHERE v.period = ? AND v.deleted_at IS NULL ORDER BY v.created_at DESC, v.id DESC""",
         (period,),
     )
     return render_template(
@@ -812,12 +812,49 @@ def constancias_file(voucher_id):
 @bp.route("/constancias/archivo/<int:voucher_id>/eliminar", methods=["POST"])
 @permission_required("pagos_personal", "edit")
 def constancias_delete(voucher_id):
+    """18 sep, 5ta ronda (pedido de Braulio: "hay manera que se envie
+    primero a una papelera antes que se elimine de la base de datos ...
+    y saber que usuario lo hizo?"): esto ya NO borra la fila — la marca
+    como eliminada (deleted_at/deleted_by) y desaparece de la vista normal
+    del mes, pero se puede recuperar desde la Papelera
+    (constancias_papelera()/constancias_restore()) sabiendo quién y
+    cuándo la mandó ahí. El archivo en sí (disco/S3) tampoco se borra."""
     if not validate_csrf():
         abort(400)
-    voucher = query_one("SELECT period FROM payment_vouchers WHERE id = ?", (voucher_id,))
+    voucher = query_one("SELECT period FROM payment_vouchers WHERE id = ? AND deleted_at IS NULL", (voucher_id,))
     if voucher is None:
         abort(404)
     year, month = voucher["period"].split("-")
-    execute("DELETE FROM payment_vouchers WHERE id = ?", (voucher_id,))
-    flash("Constancia eliminada.", "success")
+    execute(
+        "UPDATE payment_vouchers SET deleted_at = ?, deleted_by = ? WHERE id = ?",
+        (now_str(), g.user["id"], voucher_id),
+    )
+    flash("Constancia enviada a la papelera.", "success")
     return redirect(url_for("pagos_personal.constancias_month_detail", year=int(year), month=int(month)))
+
+
+@bp.route("/constancias/papelera")
+@permission_required("pagos_personal", "edit")
+def constancias_papelera():
+    """Lista todo lo enviado a la papelera (de cualquier año/mes), más
+    reciente primero, con quién lo eliminó y cuándo — para recuperarlo por
+    error o confirmar que ya no hace falta."""
+    files = query_all(
+        """SELECT v.*, u.name AS deleted_by_name
+           FROM payment_vouchers v LEFT JOIN users u ON u.id = v.deleted_by
+           WHERE v.deleted_at IS NOT NULL ORDER BY v.deleted_at DESC, v.id DESC"""
+    )
+    return render_template("pagos_personal/constancias_papelera.html", files=files)
+
+
+@bp.route("/constancias/archivo/<int:voucher_id>/restaurar", methods=["POST"])
+@permission_required("pagos_personal", "edit")
+def constancias_restore(voucher_id):
+    if not validate_csrf():
+        abort(400)
+    voucher = query_one("SELECT id FROM payment_vouchers WHERE id = ? AND deleted_at IS NOT NULL", (voucher_id,))
+    if voucher is None:
+        abort(404)
+    execute("UPDATE payment_vouchers SET deleted_at = NULL, deleted_by = NULL WHERE id = ?", (voucher_id,))
+    flash("Constancia restaurada.", "success")
+    return redirect(url_for("pagos_personal.constancias_papelera"))

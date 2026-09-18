@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+{% block title %}Papelera de constancias{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Papelera de constancias</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('pagos_personal.constancias_years') }}" class="btn btn-secondary">← Volver</a>
+  </div>
+</div>
+<p class="muted mt-0">Constancias eliminadas — se pueden restaurar a su mes original. No se borran de verdad, así que si eliminaste algo por error lo puedes recuperar acá.</p>
+
+<div class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Archivo</th><th>Periodo</th><th>Eliminado por</th><th>Eliminado el</th><th></th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for f in files %}
+        <tr>
+          <td>{{ f.original_filename or f.filename }}</td>
+          <td>{{ f.period }}</td>
+          <td>{{ f.deleted_by_name or '—' }}</td>
+          <td>{{ f.deleted_at }}</td>
+          <td><a href="{{ url_for('pagos_personal.constancias_file', voucher_id=f.id) }}" target="_blank">Ver / descargar</a></td>
+          <td>
+            <form method="post" action="{{ url_for('pagos_personal.constancias_restore', voucher_id=f.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-secondary btn-sm" type="submit">Restaurar</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="table-empty">La papelera está vacía.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

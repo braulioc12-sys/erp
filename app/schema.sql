@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS users (
     -- propósito en vez de borrarla: users.id es referenciado por 9 tablas
     -- y no aporta nada tocar esa columna; con user_roles ya alcanza para
     -- que un usuario tenga 2+ roles a la vez.
-    role TEXT NOT NULL CHECK (role IN ('ADMIN', 'OPERADOR', 'DESPACHADOR', 'ALMACEN', 'CONTABILIDAD', 'MECANICO')),
+    role TEXT NOT NULL CHECK (role IN ('ADMIN', 'OPERADOR', 'DESPACHADOR', 'ALMACEN', 'CONTABILIDAD', 'MECANICO', 'RRHH')),
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS user_roles (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
-    role TEXT NOT NULL CHECK (role IN ('ADMIN', 'OPERADOR', 'DESPACHADOR', 'ALMACEN', 'CONTABILIDAD', 'MECANICO')),
+    role TEXT NOT NULL CHECK (role IN ('ADMIN', 'OPERADOR', 'DESPACHADOR', 'ALMACEN', 'CONTABILIDAD', 'MECANICO', 'RRHH')),
     UNIQUE (user_id, role)
 );
 
@@ -1540,7 +1540,16 @@ CREATE TABLE IF NOT EXISTS payment_vouchers (
     filename TEXT NOT NULL,
     original_filename TEXT,
     uploaded_by INTEGER REFERENCES users(id),
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    -- 18 sep, 5ta ronda (pedido de Braulio: "si se elimina un archivo desde
+    -- el menu de constancias, hay manera que se envie primero a una
+    -- papelera... y saber que usuario lo hizo?") -- "eliminar" una
+    -- constancia ahora es un soft-delete: se marcan estas 2 columnas en vez
+    -- de borrar la fila, así se puede restaurar y queda quién la mandó a la
+    -- papelera. Ver constancias_delete()/constancias_restore() y
+    -- constancias_papelera() en app/routes/pagos_personal.py.
+    deleted_at TEXT,
+    deleted_by INTEGER REFERENCES users(id)
 );
 CREATE INDEX IF NOT EXISTS idx_payment_vouchers_period ON payment_vouchers(period);
 

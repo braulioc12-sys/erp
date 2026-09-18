@@ -6,6 +6,7 @@
   <div class="page-actions">
     {% if can(current_user.roles, 'pagos_personal', 'edit') %}
     <a href="{{ url_for('pagos_personal.constancias_import_zip') }}" class="btn btn-secondary">⬆ Importar carpeta .zip</a>
+    <a href="{{ url_for('pagos_personal.constancias_papelera') }}" class="btn btn-secondary">🗑 Papelera</a>
     {% endif %}
     <a href="{{ url_for('pagos_personal.list_view') }}" class="btn btn-secondary">← Volver a Pagos personal</a>
   </div>

@@ -169,6 +169,33 @@ PERMISSIONS = {
         "tarifario": set(),
         "pagos_personal": set(),
     },
+    # 18 sep, 5ta ronda (pedido de Braulio: "en el menu de usuarios tambien
+    # hay que poner rol RRHH, el cual tenga acceso a RRHH, pagos personal,
+    # conductores y liquidaciones") — los 4 módulos que pidió, con
+    # view+edit en cada uno; el resto queda sin acceso, igual que los demás
+    # roles especializados de arriba.
+    "RRHH": {
+        "dashboard": {"view"},
+        "rrhh": {"view", "edit"},
+        "pagos_personal": {"view", "edit"},
+        "conductores": {"view", "edit"},
+        "liquidaciones": {"view", "edit"},
+        "viajes": set(),
+        "clientes": set(),
+        "flota": set(),
+        "rutas": set(),
+        "mantenimiento": set(),
+        "neumaticos": set(),
+        "facturacion": set(),
+        "cotizaciones": set(),
+        "inventarios": set(),
+        "guias": set(),
+        "inspecciones": set(),
+        "usuarios": set(),
+        "catalogos": set(),
+        "integraciones": set(),
+        "tarifario": set(),
+    },
 }
 
 # Nombre legible de cada rol, para mostrar en Usuarios (list.html/form.html)
@@ -180,6 +207,7 @@ ROLE_LABELS = {
     "ALMACEN": "Almacén",
     "CONTABILIDAD": "Contabilidad",
     "MECANICO": "Mecánico",
+    "RRHH": "RRHH",
 }
 
 
