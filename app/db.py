@@ -513,6 +513,14 @@ COLUMN_MIGRATIONS = [
     # dedicado de init_db() (Postgres) una vez que la columna ya existe.
     ("payment_vouchers", "deleted_at", "TEXT"),
     ("payment_vouchers", "deleted_by", "INTEGER"),
+    # 18 sep, 7ma ronda (pedido de Braulio, sobre la plantilla de
+    # honorarios: "agrega la columna Nro de comprobante que sera el numero
+    # de recibo emitido que cada mes cambiara") -- el N° de recibo por
+    # honorarios que emite cada persona (natural persona con RUC de
+    # cuarta categoría) es distinto cada mes, así que se guarda por pago
+    # (staff_payments), no en la plantilla (honorarios_template_items),
+    # que solo guarda los valores por defecto reusables mes a mes.
+    ("staff_payments", "receipt_number", "TEXT"),
 ]
 
 

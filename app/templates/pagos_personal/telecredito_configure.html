@@ -4,12 +4,16 @@
 <div class="page-header">
   <h1>Generar archivo Telecrédito — {{ payment_type_labels.get(payment_type, payment_type) }}</h1>
   <div class="page-actions">
-    <a href="{{ url_for('pagos_personal.list_view', period=period, staff_id=staff_id, payment_type=payment_type, status=status, q=q) }}" class="btn btn-secondary">← Volver</a>
+    <a href="{{ back_url }}" class="btn btn-secondary">← Volver</a>
   </div>
 </div>
 <p class="muted mt-0">
+  {% if origin == 'honorarios_plantilla' %}
+  Se van a incluir <strong>{{ count }}</strong> pago(s) del periodo {{ period }} por un total de <strong>{{ total_amount|money }}</strong> — los que elegiste en la Plantilla de honorarios.
+  {% else %}
   Se van a incluir <strong>{{ count }}</strong> pago(s) del periodo {{ period }} por un total de <strong>{{ total_amount|money }}</strong>.
   El archivo sale siempre de un solo tipo (planilla u honorarios nunca van mezclados) y solo de los pagos que calcen con los filtros que tenías puestos.
+  {% endif %}
 </p>
 
 <form class="form panel" method="post" action="{{ url_for('pagos_personal.telecredito_generate') }}" style="max-width:560px;">
@@ -19,6 +23,12 @@
   <input type="hidden" name="payment_type" value="{{ payment_type }}">
   <input type="hidden" name="status" value="{{ status }}">
   <input type="hidden" name="q" value="{{ q }}">
+  {% for pid in payment_ids %}
+  <input type="hidden" name="payment_ids" value="{{ pid }}">
+  {% endfor %}
+  <input type="hidden" name="origin" value="{{ origin }}">
+  <input type="hidden" name="plantilla_q" value="{{ plantilla_q }}">
+  <input type="hidden" name="plantilla_concept" value="{{ plantilla_concept }}">
 
   <label>Cuenta de cargo (desde la que se paga) *
     <select name="cuenta_cargo_id" required>
@@ -52,7 +62,7 @@
 
   <div class="btn-group">
     <button type="submit" class="btn btn-primary">Generar y descargar .txt</button>
-    <a href="{{ url_for('pagos_personal.list_view', period=period, staff_id=staff_id, payment_type=payment_type, status=status, q=q) }}" class="btn btn-secondary">Cancelar</a>
+    <a href="{{ back_url }}" class="btn btn-secondary">Cancelar</a>
   </div>
 </form>
 {% endblock %}

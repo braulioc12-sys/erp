@@ -57,17 +57,31 @@ bueno (ver la nota grande al inicio de ese módulo).
    de telecredito, los que ya se crearon que se marquen como pagados."):
    lista reusable de personas de RECIBO_HONORARIOS con su monto por
    defecto — `honorarios_plantilla()` la administra (agregar/editar
-   monto/activar-desactivar/quitar), `honorarios_plantilla_import()` la
-   carga en bloque desde un Excel (motor genérico de app/bulk_import.py,
+   monto/activar-desactivar/quitar) y también es, en la misma pantalla,
+   la pantalla mensual (7ma ronda, mismo día — pedido de Braulio de
+   agregar ahí mismo filtro por concepto, buscador por nombre, columna de
+   N° de comprobante, selección + generar archivo de Telecrédito y marca
+   de pagado sin salir de la plantilla): ofrece la plantilla activa,
+   filtrable por nombre/concepto, con casillas + montos + N° de
+   comprobante editables para ESE mes (sin tocar el default guardado) —
+   `_honorarios_month_rows()` arma esas filas y las reusa tanto para
+   mostrarlas (GET) como para saber, en `honorarios_plantilla_guardar_mes()`
+   (POST), exactamente qué filas están dentro del filtro actual, así un
+   filtro puesto nunca borra ni toca el pago de alguien que quedó fuera
+   de la vista por el filtro. Ese mismo POST, según el botón que se use,
+   guarda nomás (crea/actualiza/quita `staff_payments` según lo marcado)
+   o de una vez redirige a `telecredito_configure()` ya con la lista
+   exacta de pagos elegidos (`payment_ids`) para generar y descargar el
+   archivo sin salir del flujo — al volver a la Plantilla (mismo periodo),
+   lo que se acaba de exportar aparece marcado como "Pagado" y bloqueado
+   para editar. `honorarios_plantilla_import()` carga la plantilla en
+   bloque desde un Excel (motor genérico de app/bulk_import.py,
    HONORARIOS_TEMPLATE_COLUMNS) creando o actualizando personas en el
-   Catálogo de Personal según haga falta, y `honorarios_generar()` es la
-   pantalla mensual: ofrece la plantilla activa con casillas + montos
-   editables para ESE mes (sin tocar el default guardado), y al confirmar
-   sincroniza `staff_payments` (crea/actualiza/quita según lo marcado) —
-   de ahí en más se usa el flujo de Telecrédito normal para generar el
-   archivo. Ese mismo pedido también hizo que `telecredito_generate()`
-   ahora marque como PAGADO los pagos que incluye en el archivo, en vez
-   de dejarlos pendientes.
+   Catálogo de Personal según haga falta. Ese mismo pedido original
+   también hizo que `telecredito_generate()` marque como PAGADO los
+   pagos que incluye en el archivo, en vez de dejarlos pendientes — y
+   ahora acepta opcionalmente `payment_ids` para limitarse a una
+   selección puntual en vez de "todo lo pendiente del periodo/filtros".
 
    Además, `staff_import_txt()` (sección "Catálogo de Personal" más abajo)
    lee uno o más .txt de Telecrédito YA GENERADOS (de este sistema o del
@@ -165,7 +179,12 @@ def _filters_from_args(args):
     return period, staff_id, payment_type, status, q
 
 
-def _filtered_payments(period, staff_id, payment_type, status, q):
+def _filtered_payments(period, staff_id, payment_type, status, q, payment_ids=None):
+    """payment_ids (18 sep, 7ma ronda — flujo de "seleccionar de la
+    Plantilla de honorarios y generar el archivo") acota el resultado a
+    esa lista puntual de IDs de staff_payments en vez de "todo lo que
+    calce con los filtros" — usado cuando el archivo de Telecrédito se
+    genera desde una selección puntual en vez de desde la lista general."""
     sql = """SELECT p.*, s.name as staff_name, s.document_type, s.document_number,
                     s.bank_name, s.account_number, s.account_type, s.cci,
                     s.currency as staff_currency, s.company as staff_company
@@ -184,6 +203,9 @@ def _filtered_payments(period, staff_id, payment_type, status, q):
     if q:
         sql += " AND s.name LIKE ?"
         params.append(f"%{q}%")
+    if payment_ids:
+        sql += f" AND p.id IN ({','.join('?' * len(payment_ids))})"
+        params.extend(payment_ids)
     sql += " ORDER BY s.name, p.id"
     return query_all(sql, params)
 
@@ -384,23 +406,42 @@ def telecredito_configure():
     from app.telecredito import DEFAULT_SUBTIPO_HONORARIOS, DEFAULT_SUBTIPO_PLANILLA, SUBTIPO_PLANILLA_CHOICES
 
     period, staff_id, payment_type, status, q = _filters_from_args(request.args)
+    # payment_ids/origin (18 sep, 7ma ronda): cuando se llega acá desde la
+    # Plantilla de honorarios con una selección puntual de personas, en vez
+    # de "todo lo pendiente del periodo/filtros" — ver honorarios_plantilla_guardar_mes().
+    payment_ids = request.args.getlist("payment_ids", type=int)
+    origin = request.args.get("origin", "")
+    plantilla_q = request.args.get("plantilla_q", "")
+    plantilla_concept = request.args.get("plantilla_concept", "")
+
+    def _back_to_origin():
+        if origin == "honorarios_plantilla":
+            return redirect(url_for("pagos_personal.honorarios_plantilla", period=period, q=plantilla_q, concept=plantilla_concept))
+        return redirect(url_for("pagos_personal.list_view", period=period, staff_id=staff_id, status=status, q=q))
+
     if payment_type not in PAYMENT_TYPE_LABELS:
         flash("Para generar el archivo de Telecrédito, primero filtra por un solo tipo: Planilla o Recibo por honorarios.", "error")
-        return redirect(url_for("pagos_personal.list_view", period=period, staff_id=staff_id, status=status, q=q))
+        return _back_to_origin()
 
     # Por defecto, solo los pendientes (los que todavía no se pagaron) —
     # si se quiere incluir los ya pagados también, se puede filtrar
     # status=PAGADO o dejarlo vacío desde la pantalla.
     effective_status = status or "PENDIENTE"
-    payments = _filtered_payments(period, staff_id, payment_type, effective_status, q)
+    payments = _filtered_payments(period, staff_id, payment_type, effective_status, q, payment_ids=payment_ids or None)
     if not payments:
         flash("No hay pagos con esos filtros para generar el archivo.", "error")
-        return redirect(url_for("pagos_personal.list_view", period=period, staff_id=staff_id, payment_type=payment_type, status=status, q=q))
+        return _back_to_origin()
 
     accounts = query_all("SELECT * FROM company_bank_accounts WHERE active = 1 ORDER BY company_name, sort_order")
     if not accounts:
         flash("Todavía no hay ninguna cuenta de cargo registrada — agrégala primero en Catálogos > Bancos.", "error")
         return redirect(url_for("catalogos.bancos_list"))
+
+    back_url = (
+        url_for("pagos_personal.honorarios_plantilla", period=period, q=plantilla_q, concept=plantilla_concept)
+        if origin == "honorarios_plantilla"
+        else url_for("pagos_personal.list_view", period=period, staff_id=staff_id, payment_type=payment_type, status=status, q=q)
+    )
 
     return render_template(
         "pagos_personal/telecredito_configure.html",
@@ -410,6 +451,8 @@ def telecredito_configure():
         subtipo_choices=SUBTIPO_PLANILLA_CHOICES, default_subtipo=DEFAULT_SUBTIPO_PLANILLA,
         subtipo_honorarios=DEFAULT_SUBTIPO_HONORARIOS,
         default_reference=f"{PAYMENT_TYPE_LABELS[payment_type].upper()} {period}", today=today_str(),
+        payment_ids=payment_ids, origin=origin, plantilla_q=plantilla_q, plantilla_concept=plantilla_concept,
+        back_url=back_url,
     )
 
 
@@ -443,15 +486,20 @@ def telecredito_generate():
         abort(400)
 
     period, staff_id, payment_type, status, q = _filters_from_args(request.form)
+    payment_ids = request.form.getlist("payment_ids", type=int)
+    origin = request.form.get("origin", "")
+    plantilla_q = request.form.get("plantilla_q", "")
+    plantilla_concept = request.form.get("plantilla_concept", "")
     if payment_type not in PAYMENT_TYPE_LABELS:
         abort(400)
     redirect_to_configure = lambda: redirect(url_for(
         "pagos_personal.telecredito_configure", period=period, staff_id=staff_id,
         payment_type=payment_type, status=status, q=q,
+        payment_ids=payment_ids, origin=origin, plantilla_q=plantilla_q, plantilla_concept=plantilla_concept,
     ))
 
     effective_status = status or "PENDIENTE"
-    payments = _filtered_payments(period, staff_id, payment_type, effective_status, q)
+    payments = _filtered_payments(period, staff_id, payment_type, effective_status, q, payment_ids=payment_ids or None)
     if not payments:
         flash("No hay pagos con esos filtros para generar el archivo.", "error")
         return redirect_to_configure()
@@ -1054,16 +1102,132 @@ def _honorarios_template_items():
     )
 
 
+def _honorarios_month_rows(period, q="", concept_filter=""):
+    """Arma las filas de la plantilla activa para UN periodo puntual —
+    monto/concepto/N° de comprobante de ESE mes (si ya hay un
+    staff_payments para esa persona+periodo) o el default de la plantilla
+    si todavía no se generó nada. Se usa tanto para mostrar la pantalla
+    (GET honorarios_plantilla) como, con los MISMOS q/concept_filter, para
+    saber en el POST (honorarios_plantilla_guardar_mes) exactamente qué
+    filas estaban a la vista — así un filtro puesto nunca crea, actualiza
+    ni borra el pago de alguien que quedó fuera de la vista por el filtro,
+    solo de quien sí se ve y se desmarca a propósito."""
+    items = _honorarios_template_items()
+    existing_payments = {
+        p["staff_id"]: p for p in query_all(
+            "SELECT * FROM staff_payments WHERE period = ? AND payment_type = 'RECIBO_HONORARIOS'", (period,)
+        )
+    }
+    q_lower = q.strip().lower()
+    concept_lower = concept_filter.strip().lower()
+    rows = []
+    for item in items:
+        if not item["active"]:
+            continue
+        payment = existing_payments.get(item["staff_id"])
+        effective_concept = (payment["concept"] if payment else item["default_concept"]) or ""
+        if q_lower and q_lower not in item["staff_name"].lower():
+            continue
+        if concept_lower and concept_lower not in effective_concept.lower():
+            continue
+        rows.append({
+            "item": item,
+            "payment": payment,
+            "amount": payment["amount"] if payment else item["default_amount"],
+            "concept": effective_concept,
+            "receipt_number": (payment["receipt_number"] if payment else "") or "",
+            "locked": payment is not None and payment["status"] == "PAGADO",
+        })
+    return rows
+
+
 @bp.route("/honorarios/plantilla")
 @permission_required("pagos_personal", "edit")
 def honorarios_plantilla():
+    period = request.args.get("period") or today_str()[:7]
+    q = request.args.get("q", "").strip()
+    concept_filter = request.args.get("concept", "").strip()
+
     items = _honorarios_template_items()
     template_staff_ids = {i["staff_id"] for i in items}
     available_staff = [s for s in get_active_staff() if s["id"] not in template_staff_ids]
+    all_concepts = sorted({
+        (i["default_concept"] or "").strip() for i in items if (i["default_concept"] or "").strip()
+    })
+    month_rows = _honorarios_month_rows(period, q, concept_filter)
+
     return render_template(
         "pagos_personal/honorarios_plantilla.html",
         items=items, available_staff=available_staff, currency_labels=CURRENCY_LABELS,
+        period=period, q=q, concept_filter=concept_filter, all_concepts=all_concepts,
+        month_rows=month_rows,
     )
+
+
+@bp.route("/honorarios/plantilla/mes", methods=["POST"])
+@permission_required("pagos_personal", "edit")
+def honorarios_plantilla_guardar_mes():
+    """Guarda los pagos de RECIBO_HONORARIOS del periodo elegido según lo
+    marcado/editado en la pantalla (crea/actualiza/quita), y según el
+    botón que se usó ("guardar" o "generar") se queda en la Plantilla o
+    redirige de una vez a telecredito_configure() con la selección exacta
+    de pagos para armar y descargar el archivo (ver el docstring grande
+    al inicio del módulo, sección 4). Solo toca las filas que estaban
+    dentro del filtro (q/concept) que tenía puesto la pantalla — ver
+    _honorarios_month_rows()."""
+    if not validate_csrf():
+        abort(400)
+    period = request.form.get("period") or today_str()[:7]
+    q = request.form.get("q", "")
+    concept_filter = request.form.get("concept", "")
+    action = request.form.get("action") or "guardar"
+
+    rows = _honorarios_month_rows(period, q, concept_filter)
+    checked_ids = {int(v) for v in request.form.getlist("incluir")}
+    created, updated, removed = 0, 0, 0
+    synced_payment_ids = []
+
+    for row in rows:
+        item = row["item"]
+        existing = row["payment"]
+        if item["id"] not in checked_ids:
+            if existing and existing["status"] == "PENDIENTE":
+                execute("DELETE FROM staff_payments WHERE id = ?", (existing["id"],))
+                removed += 1
+            continue
+        if existing and existing["status"] == "PAGADO":
+            continue  # ya pagado, no se vuelve a tocar ni a incluir en un nuevo archivo
+        amount = parse_float(request.form.get(f"amount_{item['id']}"), item["default_amount"])
+        concept = (request.form.get(f"concept_{item['id']}", "") or "").strip() or item["default_concept"]
+        receipt_number = (request.form.get(f"receipt_{item['id']}", "") or "").strip() or None
+        if existing:
+            execute(
+                "UPDATE staff_payments SET amount = ?, concept = ?, receipt_number = ? WHERE id = ?",
+                (amount, concept, receipt_number, existing["id"]),
+            )
+            updated += 1
+            synced_payment_ids.append(existing["id"])
+        else:
+            new_id = execute(
+                """INSERT INTO staff_payments (staff_id, payment_type, period, amount, concept, receipt_number, status)
+                   VALUES (?, 'RECIBO_HONORARIOS', ?, ?, ?, ?, 'PENDIENTE')""",
+                (item["staff_id"], period, amount, concept, receipt_number),
+            )
+            created += 1
+            synced_payment_ids.append(new_id)
+
+    if action == "generar":
+        if not synced_payment_ids:
+            flash("Elige al menos una persona (todavía sin pagar) para generar el archivo de Telecrédito.", "error")
+            return redirect(url_for("pagos_personal.honorarios_plantilla", period=period, q=q, concept=concept_filter))
+        return redirect(url_for(
+            "pagos_personal.telecredito_configure", period=period, payment_type="RECIBO_HONORARIOS",
+            payment_ids=synced_payment_ids, origin="honorarios_plantilla",
+            plantilla_q=q, plantilla_concept=concept_filter,
+        ))
+
+    flash(f"Listo: {created} pago(s) nuevo(s), {updated} actualizado(s), {removed} quitado(s).", "success")
+    return redirect(url_for("pagos_personal.honorarios_plantilla", period=period, q=q, concept=concept_filter))
 
 
 @bp.route("/honorarios/plantilla/agregar", methods=["POST"])
@@ -1211,76 +1375,11 @@ def honorarios_plantilla_import():
 @bp.route("/honorarios/generar", methods=["GET", "POST"])
 @permission_required("pagos_personal", "edit")
 def honorarios_generar():
-    """Pantalla mensual (pedido de Braulio: "cada mes se use esta [la
-    plantilla] por default y se editen los montos, agreguen o borren
-    personas. Luego seleccione de esta plantilla a quienes les voy a
-    pagar"): ofrece la plantilla activa con casilla + monto (precargado
-    con el default, editable solo para este mes) y al confirmar
-    sincroniza staff_payments de ese periodo con lo marcado — crea un
-    pago PENDIENTE nuevo por cada casilla marcada que todavía no lo
-    tenía, actualiza el monto del que ya existía y sigue PENDIENTE, deja
-    intacto el que ya está PAGADO, y elimina el PENDIENTE de quien se
-    desmarcó. De ahí en más se sigue el flujo normal de Telecrédito
-    (botón "Generar archivo Telecrédito — Honorarios" en la lista) para
-    armar el archivo — que ahora además marca como pagado lo que
-    incluya (ver telecredito_generate())."""
-    period = request.args.get("period") or today_str()[:7]
-
-    if request.method == "POST":
-        if not validate_csrf():
-            abort(400)
-        period = request.form.get("period") or period
-        items = _honorarios_template_items()
-        checked_ids = {int(v) for v in request.form.getlist("incluir")}
-        created, updated, removed = 0, 0, 0
-        for item in items:
-            existing = query_one(
-                "SELECT * FROM staff_payments WHERE staff_id = ? AND period = ? AND payment_type = 'RECIBO_HONORARIOS'",
-                (item["staff_id"], period),
-            )
-            if item["id"] not in checked_ids:
-                if existing and existing["status"] == "PENDIENTE":
-                    execute("DELETE FROM staff_payments WHERE id = ?", (existing["id"],))
-                    removed += 1
-                continue
-            amount = parse_float(request.form.get(f"amount_{item['id']}"), item["default_amount"])
-            concept = (request.form.get(f"concept_{item['id']}", "") or "").strip() or item["default_concept"]
-            if existing:
-                if existing["status"] == "PENDIENTE":
-                    execute(
-                        "UPDATE staff_payments SET amount = ?, concept = ? WHERE id = ?",
-                        (amount, concept, existing["id"]),
-                    )
-                    updated += 1
-                # si ya está PAGADO se deja intacto — no se vuelve a tocar solo por re-generar la pantalla.
-                continue
-            execute(
-                """INSERT INTO staff_payments (staff_id, payment_type, period, amount, concept, status)
-                   VALUES (?, 'RECIBO_HONORARIOS', ?, ?, ?, 'PENDIENTE')""",
-                (item["staff_id"], period, amount, concept),
-            )
-            created += 1
-
-        flash(f"Listo: {created} pago(s) nuevo(s), {updated} actualizado(s), {removed} quitado(s).", "success")
-        return redirect(url_for("pagos_personal.list_view", period=period, payment_type="RECIBO_HONORARIOS"))
-
-    items = _honorarios_template_items()
-    existing_payments = {
-        p["staff_id"]: p for p in query_all(
-            "SELECT * FROM staff_payments WHERE period = ? AND payment_type = 'RECIBO_HONORARIOS'", (period,)
-        )
-    }
-    rows = []
-    for item in items:
-        if not item["active"]:
-            continue
-        payment = existing_payments.get(item["staff_id"])
-        rows.append({
-            "item": item,
-            "payment": payment,
-            "checked": payment is not None or item["active"],
-            "amount": payment["amount"] if payment else item["default_amount"],
-            "concept": payment["concept"] if payment else (item["default_concept"] or ""),
-            "locked": payment is not None and payment["status"] == "PAGADO",
-        })
-    return render_template("pagos_personal/honorarios_generar.html", period=period, rows=rows)
+    """18 sep, 7ma ronda: esta pantalla separada se fusionó dentro de
+    honorarios_plantilla() (que ahora ya trae, en la misma vista, el
+    filtro por nombre/concepto, casillas + monto + N° de comprobante del
+    mes y el botón para generar el archivo de Telecrédito — ver el
+    docstring grande al inicio del módulo). Se deja esta ruta como
+    redirección para no romper accesos directos/marcadores viejos."""
+    period = request.args.get("period") or request.form.get("period") or today_str()[:7]
+    return redirect(url_for("pagos_personal.honorarios_plantilla", period=period))

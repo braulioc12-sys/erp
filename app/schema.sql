@@ -1454,6 +1454,10 @@ CREATE TABLE IF NOT EXISTS staff_payments (
     -- mismo mecanismo de almacenamiento que el resto de archivos del
     -- sistema (ver app/storage.py, save_staff_payment_receipt()).
     receipt_filename TEXT,
+    -- N° del recibo por honorarios emitido por la persona ese mes (texto
+    -- libre, no un archivo) -- distinto cada mes, así que va por pago y no
+    -- en la plantilla reusable (ver COLUMN_MIGRATIONS en app/db.py).
+    receipt_number TEXT,
     exported_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

@@ -4,13 +4,108 @@
 <div class="page-header">
   <h1>Plantilla de honorarios</h1>
   <div class="page-actions">
-    <a href="{{ url_for('pagos_personal.honorarios_generar') }}" class="btn btn-primary">▶ Generar el mes</a>
     <a href="{{ url_for('pagos_personal.list_view') }}" class="btn btn-secondary">← Volver a Pagos personal</a>
   </div>
 </div>
 <p class="muted mt-0">
-  Lista fija de personas a las que normalmente se les paga recibo por honorarios, con el monto y concepto que se usan por defecto cada mes. Desde acá se agregan, editan o quitan personas de la plantilla; cada mes, en "Generar el mes", se elige a quiénes se les paga y se pueden ajustar los montos solo para ese mes sin tocar el default.
+  Arriba, los pagos de recibo por honorarios del mes elegido: filtra, marca a quiénes se les paga, ajusta el monto o el N° de comprobante solo para este mes, y genera el archivo de Telecrédito sin salir de acá. Abajo, la plantilla en sí — la lista fija de personas con su monto y concepto por defecto (se administra por separado, no cambia según el mes).
 </p>
+
+<!-- ============ Pagos del mes ============ -->
+<div class="panel" style="margin-bottom:24px;">
+  <h2 style="margin-top:0;">Pagos de {{ period }}</h2>
+
+  <form class="filters" method="get">
+    <label>Periodo
+      <input type="month" name="period" value="{{ period }}" onchange="this.form.submit()">
+    </label>
+    <label>Buscar
+      <input type="text" name="q" value="{{ q }}" placeholder="Nombre de la persona">
+    </label>
+    <label>Concepto
+      <select name="concept">
+        <option value="">Todos</option>
+        {% for c in all_concepts %}
+        <option value="{{ c }}" {{ 'selected' if concept_filter == c }}>{{ c }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button class="btn btn-secondary" type="submit">Filtrar</button>
+  </form>
+
+  {% if not month_rows %}
+  <p class="muted" style="margin-top:16px; margin-bottom:0;">
+    {% if q or concept_filter %}
+    Ningún pago de la plantilla calza con ese filtro.
+    {% else %}
+    No hay personas activas en la plantilla todavía — agrégalas más abajo.
+    {% endif %}
+  </p>
+  {% else %}
+  <form method="post" action="{{ url_for('pagos_personal.honorarios_plantilla_guardar_mes') }}" style="margin-top:16px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="period" value="{{ period }}">
+    <input type="hidden" name="q" value="{{ q }}">
+    <input type="hidden" name="concept" value="{{ concept_filter }}">
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th></th><th>Persona</th><th>Documento</th>
+            <th class="text-right">Monto</th><th>Concepto</th><th>N° de comprobante</th><th>Estado</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in month_rows %}
+          <tr>
+            <td>
+              <input type="checkbox" name="incluir" value="{{ row.item.id }}" checked {{ 'disabled' if row.locked }}>
+            </td>
+            <td>{{ row.item.staff_name }}</td>
+            <td>{{ row.item.document_type }} {{ row.item.document_number or '—' }}</td>
+            <td class="text-right">
+              <input type="number" step="0.01" min="0" name="amount_{{ row.item.id }}" value="{{ row.amount }}"
+                     style="width:110px;" {{ 'disabled' if row.locked }}>
+            </td>
+            <td>
+              <input type="text" name="concept_{{ row.item.id }}" value="{{ row.concept or '' }}"
+                     style="width:170px;" {{ 'disabled' if row.locked }}>
+            </td>
+            <td>
+              <input type="text" name="receipt_{{ row.item.id }}" value="{{ row.receipt_number or '' }}"
+                     placeholder="Ej: E001-123" style="width:130px;" {{ 'disabled' if row.locked }}>
+            </td>
+            <td>
+              {% if row.locked %}
+              <span class="badge badge-activo">Pagado</span>
+              {% elif row.payment %}
+              <span class="badge badge-pendiente">Pendiente</span>
+              {% else %}
+              <span class="muted">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="muted" style="margin-top:12px; margin-bottom:0;">
+      Si desmarcas a alguien que todavía está pendiente, se elimina su pago pendiente de este periodo. Lo que ya está pagado no se puede editar ni desmarcar desde acá. El botón "Generar archivo Telecrédito" primero guarda lo marcado/editado y de ahí pasa directo a elegir la cuenta de cargo y descargar el archivo — al volver acá, lo que se acaba de generar va a aparecer como "Pagado".
+    </p>
+    <div class="btn-group" style="margin-top:16px;">
+      <button class="btn btn-secondary" type="submit" name="action" value="guardar">Guardar</button>
+      <button class="btn btn-primary" type="submit" name="action" value="generar">▶ Generar archivo Telecrédito</button>
+    </div>
+  </form>
+  {% endif %}
+</div>
+
+<!-- ============ Administrar plantilla ============ -->
+<div class="page-header" style="margin-bottom:8px;">
+  <h2 style="margin:0;">Administrar plantilla</h2>
+</div>
+<p class="muted mt-0">Lista fija de personas y su monto/concepto por defecto — agregar, editar el default, activar/desactivar o quitar de acá no afecta ningún pago ya generado.</p>
 
 <div class="btn-group" style="margin-bottom:16px;">
   <a href="{{ url_for('pagos_personal.honorarios_plantilla_template') }}" class="btn btn-secondary">⬇ Descargar plantilla Excel</a>
@@ -39,6 +134,9 @@
           <td class="text-right">
             <form method="post" action="{{ url_for('pagos_personal.honorarios_plantilla_edit', item_id=item.id) }}" style="display:flex; gap:6px; align-items:center; justify-content:flex-end;">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="period" value="{{ period }}">
+              <input type="hidden" name="q" value="{{ q }}">
+              <input type="hidden" name="concept" value="{{ concept_filter }}">
               <input type="number" step="0.01" min="0" name="default_amount" value="{{ item.default_amount }}" style="width:110px;">
               <input type="text" name="default_concept" value="{{ item.default_concept or '' }}" placeholder="Concepto" style="width:150px;">
               <button class="btn btn-secondary btn-sm" type="submit">Guardar</button>
@@ -51,12 +149,18 @@
           <td>
             <form method="post" action="{{ url_for('pagos_personal.honorarios_plantilla_toggle', item_id=item.id) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="period" value="{{ period }}">
+              <input type="hidden" name="q" value="{{ q }}">
+              <input type="hidden" name="concept" value="{{ concept_filter }}">
               <button class="btn btn-secondary btn-sm" type="submit">{{ 'Desactivar' if item.active else 'Reactivar' }}</button>
             </form>
           </td>
           <td>
             <form method="post" action="{{ url_for('pagos_personal.honorarios_plantilla_remove', item_id=item.id) }}" onsubmit="return confirm('¿Quitar a {{ item.staff_name }} de la plantilla? No se borra del Catálogo de Personal ni se toca ningún pago ya registrado.');">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="period" value="{{ period }}">
+              <input type="hidden" name="q" value="{{ q }}">
+              <input type="hidden" name="concept" value="{{ concept_filter }}">
               <button class="btn btn-secondary btn-sm" type="submit">Quitar</button>
             </form>
           </td>
@@ -68,7 +172,7 @@
     </table>
   </div>
   <p class="muted" style="margin-top:12px; margin-bottom:0;">
-    "Desactivar" saca a la persona de "Generar el mes" sin borrarla de la plantilla (por si vuelve más adelante). Una persona inactiva en el Catálogo de Personal no se puede pagar aunque siga en la plantilla — reactívala primero en Catálogo de Personal.
+    "Desactivar" saca a la persona de "Pagos del mes" sin borrarla de la plantilla (por si vuelve más adelante). Una persona inactiva en el Catálogo de Personal no se puede pagar aunque siga en la plantilla — reactívala primero en Catálogo de Personal.
   </p>
 </div>
 
