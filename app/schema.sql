@@ -1516,6 +1516,34 @@ CREATE TABLE IF NOT EXISTS company_bank_accounts (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- 18 sep, 4ta ronda (pedido de Braulio: "quiero que el menu de Pagos
+-- personal este agrupado por año y luego mes, y una vez que se entra a
+-- cada mes pueda ver pdfs de constancias de pago antiguas, asi mismo para
+-- los meses de ahora en adelante quiero poder subir las constancias que
+-- me brindara cada banco.") -- una "constancia de pago" es el comprobante
+-- que da el BANCO de que un lote de Telecrédito se procesó (distinto del
+-- receipt_filename de staff_payments, que es la boleta/recibo de CADA
+-- persona). Se sube por periodo (año-mes), opcionalmente ligada a la
+-- cuenta de cargo (company_bank_accounts) y/o al tipo de pago (Planilla u
+-- Honorarios) que generó el lote -- ambos opcionales porque un mismo
+-- periodo puede tener varias constancias (una por banco/cuenta, o una por
+-- tipo) o, para el historial viejo, ninguna clasificación puntual, solo
+-- el PDF y una etiqueta libre. Se sirve con el mismo mecanismo de
+-- almacenamiento que el resto del sistema (ver app/storage.py,
+-- save_payment_voucher()).
+CREATE TABLE IF NOT EXISTS payment_vouchers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    period TEXT NOT NULL,
+    bank_account_id INTEGER REFERENCES company_bank_accounts(id),
+    payment_type TEXT CHECK (payment_type IS NULL OR payment_type IN ('PLANILLA', 'RECIBO_HONORARIOS')),
+    label TEXT,
+    filename TEXT NOT NULL,
+    original_filename TEXT,
+    uploaded_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_payment_vouchers_period ON payment_vouchers(period);
+
 CREATE INDEX IF NOT EXISTS idx_trips_status ON trips(status);
 CREATE INDEX IF NOT EXISTS idx_trips_client ON trips(client_id);
 CREATE INDEX IF NOT EXISTS idx_expenses_trip ON expenses(trip_id);

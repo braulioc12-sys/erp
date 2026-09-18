@@ -1,0 +1,76 @@
+{% extends 'base.html' %}
+{% block title %}Constancias {{ month_label }} {{ year }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Constancias de pago — {{ month_label }} {{ year }}</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('pagos_personal.constancias_months', year=year) }}" class="btn btn-secondary">← Volver a {{ year }}</a>
+  </div>
+</div>
+
+{% if can(current_user.roles, 'pagos_personal', 'edit') %}
+<form class="form panel" method="post" action="{{ url_for('pagos_personal.constancias_upload', year=year, month=month) }}" enctype="multipart/form-data" style="max-width:640px; margin-bottom:20px;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label>Archivo(s) *
+    <input type="file" name="archivos" multiple required>
+  </label>
+  <p class="muted" style="margin-top:-8px;">Se pueden subir varios a la vez. Admite PDF, imagen, Excel, Word o texto.</p>
+  <label>Cuenta relacionada (opcional)
+    <select name="bank_account_id">
+      <option value="">-- Sin especificar --</option>
+      {% for a in accounts %}
+      <option value="{{ a.id }}">{{ a.company_name }} — {{ a.bank_name }} {{ a.account_type|title }} ...{{ a.account_number[-4:] }}{{ ' (' ~ a.alias ~ ')' if a.alias }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Tipo relacionado (opcional)
+    <select name="payment_type">
+      <option value="">-- Sin especificar --</option>
+      {% for code, label in payment_type_labels.items() %}
+      <option value="{{ code }}">{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Etiqueta / nota (opcional)
+    <input type="text" name="label" maxlength="120" placeholder="Ej. BCP lote 2, Interbancarios">
+  </label>
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Subir</button>
+  </div>
+</form>
+{% endif %}
+
+<div class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Archivo</th><th>Cuenta</th><th>Tipo</th><th>Etiqueta</th><th>Subido</th><th></th>{% if can(current_user.roles, 'pagos_personal', 'edit') %}<th></th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for f in files %}
+        <tr>
+          <td>{{ f.original_filename or f.filename }}</td>
+          <td>{{ (f.company_name ~ ' — ' ~ f.bank_name) if f.company_name else '—' }}</td>
+          <td>{{ payment_type_labels.get(f.payment_type, '—') }}</td>
+          <td>{{ f.label or '—' }}</td>
+          <td>{{ f.created_at[:10] if f.created_at else '—' }}</td>
+          <td><a href="{{ url_for('pagos_personal.constancias_file', voucher_id=f.id) }}" target="_blank">Ver / descargar</a></td>
+          {% if can(current_user.roles, 'pagos_personal', 'edit') %}
+          <td>
+            <form method="post" action="{{ url_for('pagos_personal.constancias_delete', voucher_id=f.id) }}" onsubmit="return confirm('¿Eliminar esta constancia?');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-secondary btn-sm" type="submit">Eliminar</button>
+            </form>
+          </td>
+          {% endif %}
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="table-empty">Todavía no hay constancias subidas para este mes.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

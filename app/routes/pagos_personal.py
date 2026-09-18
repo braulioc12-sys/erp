@@ -29,17 +29,37 @@ inicio de app/telecredito.py). `telecredito_configure()` pide los datos de
 la cabecera (cuenta de cargo, fecha, referencia) y `telecredito_generate()`
 arma el .txt exacto con `app/telecredito.py` — verificado byte a byte
 contra un archivo real de Planilla que mandó Braulio antes de darlo por
-bueno (ver la nota grande al inicio de ese módulo)."""
+bueno (ver la nota grande al inicio de ese módulo).
+
+3. Constancias de pago (tabla `payment_vouchers`, 18 sep 4ta ronda —
+   "quiero que el menu de Pagos personal este agrupado por año y luego
+   mes, y una vez que se entra a cada mes pueda ver pdfs de constancias de
+   pago antiguas, asi mismo para los meses de ahora en adelante quiero
+   poder subir las constancias que me brindara cada banco"): un archivador
+   por año -> mes de los comprobantes que da cada BANCO de que un lote de
+   Telecrédito se procesó (distinto de receipt_filename en staff_payments,
+   que es la boleta/recibo de cada persona). `constancias_years()` /
+   `constancias_months()` / `constancias_month_detail()` arman la
+   navegación; `constancias_upload()` sube uno o más archivos sueltos a un
+   mes puntual; `constancias_import_zip()` es la carga inicial masiva —
+   acepta el mismo .zip con carpetas "AÑO/MES AÑO/archivo" que ya venía
+   usando Braulio para guardar esto a mano, y clasifica cada archivo por
+   año/mes con app/payment_vouchers_import.py (ver ese módulo para el
+   detalle de las reglas y su verificación contra un zip real de 314
+   archivos)."""
+import io
 import os
 import uuid
+import zipfile
 from datetime import datetime
 
-from flask import Blueprint, Response, abort, current_app, flash, redirect, render_template, request, send_from_directory, url_for
+from flask import Blueprint, Response, abort, current_app, flash, g, redirect, render_template, request, send_from_directory, url_for
 
 from app import storage
 from app.auth import permission_required, validate_csrf
 from app.db import execute, query_all, query_one
 from app.helpers import parse_date, parse_float, today_str
+from app.payment_vouchers_import import MONTH_LABELS, classify_zip_entry
 
 bp = Blueprint("pagos_personal", __name__, url_prefix="/pagos-personal")
 
@@ -57,6 +77,15 @@ RECEIPT_MIME_TO_EXTENSION = {
     "image/png": ".png",
     "image/webp": ".webp",
     "application/pdf": ".pdf",
+}
+
+# Las constancias que da cada banco no son solo PDFs — el archivo real que
+# mandó Braulio para la carga inicial trae también .txt (el propio archivo
+# de Telecrédito ya generado), .xlsx (reportes de pendientes/interbancarios)
+# y .docx — por eso esta lista es más amplia que ALLOWED_RECEIPT_EXTENSIONS.
+ALLOWED_VOUCHER_EXTENSIONS = {
+    ".pdf", ".png", ".jpg", ".jpeg", ".webp",
+    ".txt", ".xlsx", ".xls", ".docx", ".doc", ".csv",
 }
 
 
@@ -568,3 +597,227 @@ def staff_toggle(staff_id):
     execute("UPDATE staff SET status = ? WHERE id = ?", (new_status, staff_id))
     flash("Actualizado." if new_status == "INACTIVO" else "Reactivado.", "success")
     return redirect(url_for("pagos_personal.staff_list"))
+
+
+# --- Constancias de pago (archivador por año -> mes) ---
+
+def _voucher_extension(file_storage):
+    ext = os.path.splitext(file_storage.filename)[1].lower()
+    return ext if ext in ALLOWED_VOUCHER_EXTENSIONS else None
+
+
+def _save_voucher_file(file_storage):
+    """Igual que _save_receipt_file(), pero validando contra
+    ALLOWED_VOUCHER_EXTENSIONS (más amplia) y guardando con
+    storage.save_payment_voucher(). Devuelve el nombre guardado, o None si
+    no se subió nada válido."""
+    if not file_storage or not file_storage.filename:
+        return None
+    ext = _voucher_extension(file_storage)
+    if not ext:
+        return None
+    raw_bytes = file_storage.read()
+    if not raw_bytes:
+        return None
+    filename = f"{uuid.uuid4().hex}{ext}"
+    storage.save_payment_voucher(filename, raw_bytes)
+    return filename
+
+
+def _period_str(year, month):
+    return f"{year:04d}-{month:02d}"
+
+
+def _voucher_period_context(period):
+    """company_bank_accounts activas + payment_type_labels, usados por el
+    formulario de subida (para etiquetar opcionalmente de qué cuenta/tipo
+    es cada constancia)."""
+    return {
+        "accounts": query_all("SELECT * FROM company_bank_accounts WHERE active = 1 ORDER BY company_name, sort_order"),
+        "payment_type_labels": PAYMENT_TYPE_LABELS,
+    }
+
+
+@bp.route("/constancias")
+@permission_required("pagos_personal", "view")
+def constancias_years():
+    rows = query_all(
+        "SELECT substr(period, 1, 4) AS year, COUNT(*) AS n FROM payment_vouchers GROUP BY year ORDER BY year DESC"
+    )
+    years = {int(r["year"]): r["n"] for r in rows}
+    current_year = int(today_str()[:4])
+    years.setdefault(current_year, 0)
+    years_sorted = sorted(years.items(), key=lambda kv: kv[0], reverse=True)
+    return render_template("pagos_personal/constancias_years.html", years=years_sorted, current_year=current_year)
+
+
+@bp.route("/constancias/importar-zip", methods=["GET", "POST"])
+@permission_required("pagos_personal", "edit")
+def constancias_import_zip():
+    """Carga inicial masiva: acepta un .zip con la misma organización de
+    carpetas por año/mes que ya usaba Braulio a mano ("2025/junio
+    2025/archivo.pdf", o variantes — ver app/payment_vouchers_import.py
+    para el detalle de qué formas de carpeta/nombre reconoce). Cada
+    archivo que sí se pueda ubicar en un año/mes se guarda y queda
+    disponible en su mes correspondiente; los que no se puedan clasificar
+    se listan al final para subirlos a mano desde el mes que corresponda."""
+    if request.method == "POST":
+        if not validate_csrf():
+            abort(400)
+        file_storage = request.files.get("archivo_zip")
+        if not file_storage or not file_storage.filename:
+            flash("Elige un archivo .zip para importar.", "error")
+            return redirect(url_for("pagos_personal.constancias_import_zip"))
+        if not file_storage.filename.lower().endswith(".zip"):
+            flash("El archivo tiene que ser un .zip.", "error")
+            return redirect(url_for("pagos_personal.constancias_import_zip"))
+
+        raw = file_storage.read()
+        try:
+            zf = zipfile.ZipFile(io.BytesIO(raw))
+        except zipfile.BadZipFile:
+            flash("No se pudo leer el .zip — revisa que el archivo no esté dañado.", "error")
+            return redirect(url_for("pagos_personal.constancias_import_zip"))
+
+        imported = 0
+        skipped_unclassified = []
+        skipped_extension = []
+        for name in zf.namelist():
+            if name.endswith("/") or "/__MACOSX/" in name or name.startswith("__MACOSX/"):
+                continue
+            base = name.rsplit("/", 1)[-1]
+            if base.startswith("."):
+                continue  # .DS_Store y similares
+            ext = os.path.splitext(base)[1].lower()
+            if ext not in ALLOWED_VOUCHER_EXTENSIONS:
+                skipped_extension.append(name)
+                continue
+            year, month = classify_zip_entry(name)
+            if not year or not month:
+                skipped_unclassified.append(name)
+                continue
+            raw_bytes = zf.read(name)
+            if not raw_bytes:
+                continue
+            stored_filename = f"{uuid.uuid4().hex}{ext}"
+            storage.save_payment_voucher(stored_filename, raw_bytes)
+            execute(
+                """INSERT INTO payment_vouchers (period, filename, original_filename, uploaded_by)
+                   VALUES (?, ?, ?, ?)""",
+                (_period_str(year, month), stored_filename, base, g.user["id"]),
+            )
+            imported += 1
+
+        flash(f"Se importaron {imported} archivo(s) al archivador de constancias.", "success")
+        if skipped_unclassified:
+            flash(
+                f"{len(skipped_unclassified)} archivo(s) no se pudieron ubicar en un año/mes y no se importaron — "
+                f"súbelos a mano desde el mes que corresponda: {', '.join(skipped_unclassified[:15])}"
+                + (f" y {len(skipped_unclassified) - 15} más." if len(skipped_unclassified) > 15 else "."),
+                "error",
+            )
+        if skipped_extension:
+            flash(
+                f"{len(skipped_extension)} archivo(s) con un tipo no admitido no se importaron: "
+                f"{', '.join(skipped_extension[:15])}" + (f" y {len(skipped_extension) - 15} más." if len(skipped_extension) > 15 else "."),
+                "error",
+            )
+        return redirect(url_for("pagos_personal.constancias_years"))
+
+    return render_template("pagos_personal/constancias_import.html")
+
+
+@bp.route("/constancias/<int:year>")
+@permission_required("pagos_personal", "view")
+def constancias_months(year):
+    rows = query_all(
+        "SELECT substr(period, 6, 2) AS month, COUNT(*) AS n FROM payment_vouchers WHERE substr(period, 1, 4) = ? GROUP BY month",
+        (f"{year:04d}",),
+    )
+    counts = {int(r["month"]): r["n"] for r in rows}
+    months = [(m, MONTH_LABELS[m], counts.get(m, 0)) for m in range(1, 13)]
+    return render_template("pagos_personal/constancias_months.html", year=year, months=months)
+
+
+@bp.route("/constancias/<int:year>/<int:month>")
+@permission_required("pagos_personal", "view")
+def constancias_month_detail(year, month):
+    if month < 1 or month > 12:
+        abort(404)
+    period = _period_str(year, month)
+    files = query_all(
+        """SELECT v.*, a.company_name, a.bank_name, a.alias
+           FROM payment_vouchers v LEFT JOIN company_bank_accounts a ON a.id = v.bank_account_id
+           WHERE v.period = ? ORDER BY v.created_at DESC, v.id DESC""",
+        (period,),
+    )
+    return render_template(
+        "pagos_personal/constancias_month_detail.html",
+        year=year, month=month, month_label=MONTH_LABELS[month], period=period, files=files,
+        **_voucher_period_context(period),
+    )
+
+
+@bp.route("/constancias/<int:year>/<int:month>/subir", methods=["POST"])
+@permission_required("pagos_personal", "edit")
+def constancias_upload(year, month):
+    if not validate_csrf():
+        abort(400)
+    if month < 1 or month > 12:
+        abort(404)
+    period = _period_str(year, month)
+    bank_account_id = request.form.get("bank_account_id", type=int) or None
+    payment_type = request.form.get("payment_type") or None
+    if payment_type not in PAYMENT_TYPE_LABELS:
+        payment_type = None
+    label = request.form.get("label", "").strip() or None
+
+    files = [f for f in request.files.getlist("archivos") if f and f.filename]
+    if not files:
+        flash("Elige al menos un archivo para subir.", "error")
+        return redirect(url_for("pagos_personal.constancias_month_detail", year=year, month=month))
+
+    saved, rejected = 0, []
+    for file_storage in files:
+        filename = _save_voucher_file(file_storage)
+        if not filename:
+            rejected.append(file_storage.filename)
+            continue
+        execute(
+            """INSERT INTO payment_vouchers (period, bank_account_id, payment_type, label, filename, original_filename, uploaded_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (period, bank_account_id, payment_type, label, filename, file_storage.filename, g.user["id"]),
+        )
+        saved += 1
+
+    if saved:
+        flash(f"Se subieron {saved} archivo(s).", "success")
+    if rejected:
+        flash(f"No se pudieron subir (tipo de archivo no admitido): {', '.join(rejected)}.", "error")
+    return redirect(url_for("pagos_personal.constancias_month_detail", year=year, month=month))
+
+
+@bp.route("/constancias/archivo/<int:voucher_id>")
+@permission_required("pagos_personal", "view")
+def constancias_file(voucher_id):
+    voucher = query_one("SELECT filename FROM payment_vouchers WHERE id = ?", (voucher_id,))
+    if voucher is None:
+        abort(404)
+    filename = voucher["filename"]
+    if storage.using_s3():
+        return redirect(storage.payment_voucher_url(filename))
+    return send_from_directory(storage.local_payment_vouchers_dir(), filename)
+
+
+@bp.route("/constancias/archivo/<int:voucher_id>/eliminar", methods=["POST"])
+@permission_required("pagos_personal", "edit")
+def constancias_delete(voucher_id):
+    if not validate_csrf():
+        abort(400)
+    voucher = query_one("SELECT period FROM payment_vouchers WHERE id = ?", (voucher_id,))
+    if voucher is None:
+        abort(404)
+    year, month = voucher["period"].split("-")
+    execute("DELETE FROM payment_vouchers WHERE id = ?", (voucher_id,))
+    flash("Constancia eliminada.", "success")
+    return redirect(url_for("pagos_personal.constancias_month_detail", year=int(year), month=int(month)))

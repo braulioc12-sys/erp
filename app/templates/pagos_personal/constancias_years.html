@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% block title %}Constancias de pago{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Constancias de pago</h1>
+  <div class="page-actions">
+    {% if can(current_user.roles, 'pagos_personal', 'edit') %}
+    <a href="{{ url_for('pagos_personal.constancias_import_zip') }}" class="btn btn-secondary">⬆ Importar carpeta .zip</a>
+    {% endif %}
+    <a href="{{ url_for('pagos_personal.list_view') }}" class="btn btn-secondary">← Volver a Pagos personal</a>
+  </div>
+</div>
+<p class="muted mt-0">Los comprobantes que da cada banco de que un lote de Telecrédito se procesó, organizados por año y mes. Elige un año para ver sus meses.</p>
+
+<div class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Año</th><th class="text-right">Archivos</th><th></th></tr></thead>
+      <tbody>
+        {% for year, n in years %}
+        <tr>
+          <td>{{ year }}</td>
+          <td class="text-right">{{ n }}</td>
+          <td><a href="{{ url_for('pagos_personal.constancias_months', year=year) }}" class="btn btn-secondary btn-sm">Ver meses →</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3" class="table-empty">Todavía no hay constancias subidas.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

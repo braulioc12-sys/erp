@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+{% block title %}Importar constancias{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Importar carpeta de constancias (.zip)</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('pagos_personal.constancias_years') }}" class="btn btn-secondary">← Volver</a>
+  </div>
+</div>
+<p class="muted mt-0">
+  Para la carga inicial de tu historial: sube un .zip con tus carpetas de años y meses (ej. "2025/junio 2025/archivo.pdf").
+  Cada archivo se va a ubicar en su año/mes automáticamente, buscando el nombre del mes en la carpeta o en el propio nombre del archivo.
+  Los que no se puedan ubicar con seguridad NO se importan — se listan al final para subirlos a mano desde el mes que corresponda.
+</p>
+<p class="muted">Admite los mismos tipos de archivo que la subida normal (PDF, imagen, Excel, Word, texto). Se puede repetir esta importación más de una vez sin problema — cada corrida solo agrega archivos nuevos, no revisa duplicados por nombre.</p>
+
+<form class="form panel" method="post" action="{{ url_for('pagos_personal.constancias_import_zip') }}" enctype="multipart/form-data" style="max-width:560px;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label>Archivo .zip *
+    <input type="file" name="archivo_zip" accept=".zip" required>
+  </label>
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Importar</button>
+  </div>
+</form>
+{% endblock %}

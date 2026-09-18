@@ -93,6 +93,14 @@ def local_staff_payment_receipts_dir():
     return _local_dir("staff_payment_receipts")
 
 
+def local_payment_vouchers_dir():
+    """Igual que local_staff_payment_receipts_dir(), pero para las
+    constancias de pago que da cada BANCO por un lote de Telecrédito (18
+    sep, 4ta ronda — distinto del comprobante de cada persona) — carpeta
+    separada en disco."""
+    return _local_dir("payment_vouchers")
+
+
 def _s3_bucket():
     return current_app.config["AWS_S3_BUCKET"]
 
@@ -130,6 +138,10 @@ def _s3_vehicle_documents_prefix():
 
 def _s3_staff_payment_receipts_prefix():
     return (current_app.config.get("AWS_S3_STAFF_PAYMENT_RECEIPTS_PREFIX") or "comprobantes-personal").strip("/")
+
+
+def _s3_payment_vouchers_prefix():
+    return (current_app.config.get("AWS_S3_PAYMENT_VOUCHERS_PREFIX") or "constancias-pago").strip("/")
 
 
 def _s3_key(filename, prefix):
@@ -383,3 +395,21 @@ def staff_payment_receipt_url(filename):
     de personal guardado en S3. En disco local, usar
     local_staff_payment_receipts_dir() + send_from_directory."""
     return _presigned_url(_s3_staff_payment_receipts_prefix(), filename)
+
+
+def save_payment_voucher(filename, raw_bytes):
+    """Igual que save_staff_payment_receipt(), pero para la constancia de
+    pago que da el banco por un lote de Telecrédito (18 sep, 4ta ronda) —
+    carpeta/prefijo separado."""
+    if using_s3():
+        _put_object(_s3_payment_vouchers_prefix(), filename, raw_bytes)
+    else:
+        with open(os.path.join(local_payment_vouchers_dir(), filename), "wb") as f:
+            f.write(raw_bytes)
+
+
+def payment_voucher_url(filename):
+    """Igual que staff_payment_receipt_url(), pero para una constancia de
+    pago guardada en S3. En disco local, usar local_payment_vouchers_dir()
+    + send_from_directory."""
+    return _presigned_url(_s3_payment_vouchers_prefix(), filename)
