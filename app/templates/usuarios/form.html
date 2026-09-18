@@ -38,6 +38,36 @@
     <input type="checkbox" name="active" value="1" {{ 'checked' if user.active }} style="width:auto;">
     Usuario activo
   </label>
+
+  <h2 style="margin-top:20px;">Permisos específicos</h2>
+  <p class="muted" style="margin-top:-8px;">
+    Por defecto, {{ user.name }} tiene el acceso que le dan sus roles (arriba). Acá se puede forzar una
+    excepción puntual solo para esta persona, sin afectar a nadie más que tenga el mismo rol — por
+    ejemplo, dejarla operar en campo en Neumáticos pero bloquearle la gestión de inventario.
+  </p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Módulo</th><th>Acción</th><th>Acceso</th></tr></thead>
+      <tbody>
+        {% for module, actions in permission_catalog.items() %}
+        {% for action, label in actions %}
+        <tr>
+          <td>{{ module_labels.get(module, module) }}</td>
+          <td>{{ label }}</td>
+          <td>
+            {% set current = current_overrides.get((module, action), 'inherit') %}
+            <select name="{{ override_field_name(module, action) }}">
+              <option value="inherit" {{ 'selected' if current == 'inherit' }}>Según su rol</option>
+              <option value="allow" {{ 'selected' if current == 'allow' }}>Permitir siempre</option>
+              <option value="deny" {{ 'selected' if current == 'deny' }}>Bloquear siempre</option>
+            </select>
+          </td>
+        </tr>
+        {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
   {% endif %}
 
   <div class="btn-group">

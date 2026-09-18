@@ -5,7 +5,7 @@
 <div class="page-header">
   <h1>Llanta {{ tire.code }} <span class="badge {{ badge_class }}">{{ status_label }}</span></h1>
   <div class="page-actions">
-    {% if can(current_user.roles, 'neumaticos', 'edit') %}
+    {% if can(current_user.roles, 'neumaticos', 'inventario') %}
     <a href="{{ url_for('neumaticos.inventory_edit', tire_inventory_id=tire.id) }}" class="btn btn-secondary">Editar datos</a>
     {% endif %}
     <a href="{{ url_for('neumaticos.inventory_list') }}" class="btn btn-secondary">← Volver al inventario</a>
@@ -50,7 +50,7 @@
   </div>
   {% endif %}
 
-  {% if can(current_user.roles, 'neumaticos', 'edit') %}
+  {% if can(current_user.roles, 'neumaticos', 'campo') %}
   <details style="margin-top:14px;">
     <summary style="cursor:pointer;">+ Registrar medición nueva</summary>
     <form class="form" method="post" action="{{ url_for('neumaticos.inventory_add_inspection', tire_inventory_id=tire.id) }}" style="max-width:420px; margin-top:10px;">

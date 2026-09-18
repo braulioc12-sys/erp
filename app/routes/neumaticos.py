@@ -486,7 +486,7 @@ def record_tire_inspection(db, tire_inventory_id, inspection_date, tread_depth_m
 
 
 @bp.route("/inventario/<int:tire_inventory_id>/inspeccion", methods=["POST"])
-@permission_required("neumaticos", "edit")
+@permission_required("neumaticos", "campo")
 def inventory_add_inspection(tire_inventory_id):
     """18 sep, pedido de Braulio: "debe haber un historial de fecha de la
     inspeccion y medida encontrada" -- registra una medición nueva de
@@ -522,7 +522,7 @@ def _tire_type_or_none(raw):
 
 
 @bp.route("/inventario/nueva", methods=["GET", "POST"])
-@permission_required("neumaticos", "edit")
+@permission_required("neumaticos", "inventario")
 def inventory_new():
     next_url = request.args.get("next") or request.form.get("next") or ""
     if request.method == "POST":
@@ -572,7 +572,7 @@ def inventory_new():
 
 
 @bp.route("/inventario/<int:tire_inventory_id>/editar", methods=["GET", "POST"])
-@permission_required("neumaticos", "edit")
+@permission_required("neumaticos", "inventario")
 def inventory_edit(tire_inventory_id):
     """18 sep, pedido de Braulio: poder completar/corregir Marca, Modelo y
     Tipo de llanta de una llanta ya registrada (antes solo se podía fijar
@@ -759,7 +759,7 @@ def print_diagram(vehicle_id):
 
 
 @bp.route("/unidad/<int:vehicle_id>/posicion/<position_code>/nueva", methods=["GET", "POST"])
-@permission_required("neumaticos", "edit")
+@permission_required("neumaticos", "campo")
 def new_tire(vehicle_id, position_code):
     vehicle = _get_vehicle_or_404(vehicle_id)
     valid_codes = {p["code"] for p in get_positions(vehicle["vehicle_type"])}
@@ -868,7 +868,7 @@ def detail(tire_id):
 
 
 @bp.route("/llanta/<int:tire_id>/reemplazar", methods=["GET", "POST"])
-@permission_required("neumaticos", "edit")
+@permission_required("neumaticos", "campo")
 def replace_tire(tire_id):
     old_tire = query_one("SELECT * FROM tires WHERE id = ?", (tire_id,))
     if old_tire is None:
@@ -973,7 +973,7 @@ def replace_tire(tire_id):
 
 
 @bp.route("/llanta/<int:tire_id>/retirar", methods=["GET", "POST"])
-@permission_required("neumaticos", "edit")
+@permission_required("neumaticos", "campo")
 def retire_tire(tire_id):
     tire = query_one("SELECT * FROM tires WHERE id = ?", (tire_id,))
     if tire is None:
@@ -1025,7 +1025,7 @@ def retire_tire(tire_id):
 
 
 @bp.route("/unidad/<int:vehicle_id>/rotar", methods=["GET", "POST"])
-@permission_required("neumaticos", "edit")
+@permission_required("neumaticos", "campo")
 def rotate_tires(vehicle_id):
     """Rota llantas ACTIVAS entre posiciones de la misma unidad para parejar
     el desgaste. No toca km_at_install ni expected_life_km de cada llanta

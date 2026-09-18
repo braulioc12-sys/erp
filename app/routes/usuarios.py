@@ -5,6 +5,7 @@ from werkzeug.security import generate_password_hash
 
 from app.auth import ROLE_LABELS, permission_required, validate_csrf
 from app.db import USER_ROLES, execute, get_db, query_all, query_one
+from app.permissions_catalog import MODULE_LABELS, PERMISSION_CATALOG
 
 bp = Blueprint("usuarios", __name__, url_prefix="/usuarios")
 
@@ -33,6 +34,56 @@ def _save_user_roles(user_id, roles):
     db.execute("DELETE FROM user_roles WHERE user_id = ?", (user_id,))
     for role in roles:
         db.execute("INSERT INTO user_roles (user_id, role) VALUES (?, ?)", (user_id, role))
+    db.commit()
+
+
+# 18 sep (pedido de Braulio: "podemos ser mas especificos a la hora de dar
+# accesos a los usuarios?") — "Permisos específicos" en la ficha de cada
+# usuario: por cada (módulo, acción) del catálogo (ver
+# app/permissions_catalog.py) se puede dejar "Según su rol" (sin
+# excepción, el comportamiento de siempre), "Permitir siempre" o
+# "Bloquear siempre" para ESA persona en particular. Ver can() en
+# app/auth.py, que es quien realmente aplica la excepción al decidir el
+# acceso.
+OVERRIDE_FIELD_PREFIX = "override__"
+OVERRIDE_CHOICES = {"inherit", "allow", "deny"}
+
+
+def _override_field_name(module, action):
+    return f"{OVERRIDE_FIELD_PREFIX}{module}__{action}"
+
+
+def _current_overrides(user_id):
+    """dict {(module, action): 'allow'|'deny'} con las excepciones ya
+    guardadas de este usuario, para precargar los <select> del formulario
+    (si no hay fila, no aparece en el dict y el <select> queda en "Según su
+    rol", el default)."""
+    rows = query_all(
+        "SELECT module, action, allowed FROM user_permission_overrides WHERE user_id = ?",
+        (user_id,),
+    )
+    return {(r["module"], r["action"]): ("allow" if r["allowed"] else "deny") for r in rows}
+
+
+def _save_user_overrides(user_id, form):
+    """Reemplaza por completo las excepciones de este usuario a partir de
+    los <select> "override__<módulo>__<acción>" del formulario — mismo
+    criterio que _save_user_roles (borrar todo y reinsertar es más simple
+    y el volumen de filas no lo justifica). Los módulos/acciones que no
+    están en PERMISSION_CATALOG, o un valor que no sea "allow"/"deny", se
+    ignoran en vez de fallar — así un catálogo viejo en un formulario
+    cacheado no rompe el guardado."""
+    db = get_db()
+    db.execute("DELETE FROM user_permission_overrides WHERE user_id = ?", (user_id,))
+    for module, actions in PERMISSION_CATALOG.items():
+        for action, _label in actions:
+            value = form.get(_override_field_name(module, action), "inherit")
+            if value not in ("allow", "deny"):
+                continue
+            db.execute(
+                "INSERT INTO user_permission_overrides (user_id, module, action, allowed) VALUES (?, ?, ?, ?)",
+                (user_id, module, action, 1 if value == "allow" else 0),
+            )
     db.commit()
 
 
@@ -123,12 +174,24 @@ def edit(user_id):
         roles = _selected_roles(request.form)
         active = 1 if request.form.get("active") else 0
         new_password = request.form.get("password", "")
+        # Se recalcula de una desde el propio form (no de la base) para que,
+        # si hay un error de validación más abajo, el formulario se vuelva a
+        # mostrar con lo que la persona acababa de marcar, no con lo viejo.
+        current_overrides = {
+            (module, action): form_value
+            for module, actions in PERMISSION_CATALOG.items()
+            for action, _label in actions
+            for form_value in [request.form.get(_override_field_name(module, action), "inherit")]
+            if form_value in ("allow", "deny")
+        }
 
         if not roles:
             flash("Selecciona al menos un rol.", "error")
             return render_template(
                 "usuarios/form.html", user=user, mode="edit", user_id=user_id,
                 role_choices=ROLE_CHOICES, selected_roles=current_roles,
+                permission_catalog=PERMISSION_CATALOG, module_labels=MODULE_LABELS,
+                current_overrides=current_overrides, override_field_name=_override_field_name,
             )
 
         if new_password and len(new_password) < 6:
@@ -136,6 +199,8 @@ def edit(user_id):
             return render_template(
                 "usuarios/form.html", user=user, mode="edit", user_id=user_id,
                 role_choices=ROLE_CHOICES, selected_roles=current_roles,
+                permission_catalog=PERMISSION_CATALOG, module_labels=MODULE_LABELS,
+                current_overrides=current_overrides, override_field_name=_override_field_name,
             )
 
         db = get_db()
@@ -148,6 +213,7 @@ def edit(user_id):
             db.execute("UPDATE users SET name=?, role=?, active=? WHERE id=?", (name, roles[0], active, user_id))
         db.commit()
         _save_user_roles(user_id, roles)
+        _save_user_overrides(user_id, request.form)
 
         flash("Usuario actualizado.", "success")
         return redirect(url_for("usuarios.list_view"))
@@ -155,4 +221,6 @@ def edit(user_id):
     return render_template(
         "usuarios/form.html", user=user, mode="edit", user_id=user_id,
         role_choices=ROLE_CHOICES, selected_roles=current_roles,
+        permission_catalog=PERMISSION_CATALOG, module_labels=MODULE_LABELS,
+        current_overrides=_current_overrides(user_id), override_field_name=_override_field_name,
     )

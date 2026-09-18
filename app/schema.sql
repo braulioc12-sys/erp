@@ -1444,6 +1444,35 @@ CREATE TABLE IF NOT EXISTS staff_payments (
 CREATE INDEX IF NOT EXISTS idx_staff_payments_staff ON staff_payments(staff_id);
 CREATE INDEX IF NOT EXISTS idx_staff_payments_period ON staff_payments(period);
 
+-- 18 sep (pedido de Braulio: "el usuario Gustavo Lopez puede entrar a
+-- neumatico pero no puede agregar llantas al inventario, a pesar de tener
+-- permiso... podemos ser mas especificos a la hora de dar accesos a los
+-- usuarios?") -- hasta ahora el acceso solo salía del/los rol(es) del
+-- usuario (PERMISSIONS en app/auth.py), "editar" un módulo era todo o
+-- nada, y no había forma de darle o quitarle una acción puntual a UNA
+-- persona sin afectar a todos los que comparten su rol.
+--
+-- Esta tabla guarda excepciones puntuales por usuario, por módulo y por
+-- acción (ver app/permissions_catalog.py para el catálogo de acciones de
+-- cada módulo -- Neumáticos, por ejemplo, ahora tiene "campo" e
+-- "inventario" en vez de un solo "edit"). Si existe una fila para
+-- (user_id, module, action), esa fila GANA por encima de lo que diga su
+-- rol (allowed=1 permite aunque su rol no lo haga, allowed=0 bloquea
+-- aunque su rol sí lo permita); si no existe fila, se usa el rol como
+-- siempre. Se edita desde Usuarios > editar > "Permisos específicos" --
+-- ver app/routes/usuarios.py (_current_overrides/_save_user_overrides) y
+-- app/auth.py (can(), que ahora revisa esta tabla antes que el rol).
+CREATE TABLE IF NOT EXISTS user_permission_overrides (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    module TEXT NOT NULL,
+    action TEXT NOT NULL,
+    allowed INTEGER NOT NULL CHECK (allowed IN (0, 1)),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (user_id, module, action)
+);
+CREATE INDEX IF NOT EXISTS idx_user_permission_overrides_user ON user_permission_overrides(user_id);
+
 CREATE INDEX IF NOT EXISTS idx_trips_status ON trips(status);
 CREATE INDEX IF NOT EXISTS idx_trips_client ON trips(client_id);
 CREATE INDEX IF NOT EXISTS idx_expenses_trip ON expenses(trip_id);

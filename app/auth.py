@@ -190,15 +190,42 @@ def can(roles, module, action):
     permisos son la UNIÓN de lo que permite cada rol asignado (si CUALQUIERA
     de sus roles da acceso, puede). Se acepta también un string suelto (un
     solo rol) por compatibilidad — algún llamado directo, o código viejo que
-    no se haya migrado a la lista."""
+    no se haya migrado a la lista.
+
+    18 sep (pedido de Braulio: "podemos ser mas especificos a la hora de
+    dar accesos a los usuarios?"): antes de mirar el rol, se revisa si el
+    usuario ACTUALMENTE logueado tiene una excepción puntual guardada en
+    user_permission_overrides para este (module, action) — ver
+    load_logged_in_user() más abajo, que la deja precargada en
+    g.user["permission_overrides"] para no consultar la base en cada
+    llamado (can() se invoca muchas veces por página, sobre todo desde
+    templates). La excepción, si existe, GANA sobre el rol — tanto para
+    permitir algo que el rol no daría como para bloquear algo que sí
+    daría. Apoyarse en g.user acá es seguro porque, en todo el código,
+    `can()` siempre se llama con los roles del usuario logueado
+    (current_user.roles / g.user["roles"]) — no hay ningún llamado que
+    evalúe el permiso de OTRO usuario distinto al que hizo la petición."""
     if isinstance(roles, str):
         roles = (roles,)
+
+    try:
+        current = g.user
+    except RuntimeError:
+        current = None  # fuera de un contexto de petición (ej. algún script)
+    if current is not None:
+        override = current.get("permission_overrides", {}).get((module, action))
+        if override is not None:
+            return override
+
     for role in roles or ():
         role_perms = PERMISSIONS.get(role, {})
         if "*" in role_perms:
-            if action in role_perms["*"]:
-                return True
-        elif action in role_perms.get(module, set()):
+            # ADMIN: acceso total sin importar el nombre exacto de la
+            # acción — antes solo cubría "view"/"edit" tal cual, lo que
+            # habría bloqueado a un administrador apenas un módulo (como
+            # Neumáticos) sumara acciones más finas (p.ej. "campo").
+            return True
+        if action in role_perms.get(module, set()):
             return True
     return False
 
@@ -233,6 +260,18 @@ def load_logged_in_user():
                 roles = [user["role"]]
             user_dict = dict(user)
             user_dict["roles"] = roles
+            # 18 sep: excepciones puntuales de este usuario (ver
+            # user_permission_overrides en schema.sql y can() más arriba).
+            # Se cargan una sola vez por petición, como (module, action) ->
+            # bool, para que can() no tenga que consultar la base cada vez
+            # que se llama (puede ser varias veces en una sola página).
+            override_rows = query_all(
+                "SELECT module, action, allowed FROM user_permission_overrides WHERE user_id = ?",
+                (user_id,),
+            )
+            user_dict["permission_overrides"] = {
+                (r["module"], r["action"]): bool(r["allowed"]) for r in override_rows
+            }
             g.user = user_dict
 
 
