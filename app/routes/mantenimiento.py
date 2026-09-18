@@ -157,6 +157,14 @@ def _insert_selected_materials(db, record_id, selected_materials):
 @permission_required("mantenimiento", "view")
 def list_view():
     vehicle_id = request.args.get("vehicle_id", type=int)
+    # 18 sep, pedido de Braulio: entrando desde "Historial y costos por
+    # unidad" (mantenimiento.by_vehicle) el listado de órdenes debe quedar
+    # solo de lectura -- ni abiertas ni terminadas se deben poder editar
+    # desde ahí, es un reporte. Entrando por otro lado (ej. el botón
+    # "Mantenimiento" del detalle de la unidad en Flota, que también manda
+    # vehicle_id) sigue editable como siempre -- por eso esto depende de un
+    # parámetro explícito (?readonly=1) y no de si vehicle_id está presente.
+    readonly = request.args.get("readonly") == "1"
     sql = """SELECT m.*, v.plate as vehicle_plate FROM maintenance_records m
               JOIN vehicles v ON v.id = m.vehicle_id WHERE 1=1"""
     params = []
@@ -188,7 +196,7 @@ def list_view():
     return render_template(
         "mantenimiento/list.html", records=records, jobs_by_record=jobs_by_record,
         status_by_record=status_by_record, order_status_labels=ORDER_STATUS_LABELS,
-        vehicle_id=vehicle_id, filtered_vehicle=filtered_vehicle,
+        vehicle_id=vehicle_id, filtered_vehicle=filtered_vehicle, readonly=readonly,
     )
 
 
@@ -329,6 +337,9 @@ def detail(record_id):
     )
     if record is None:
         abort(404)
+    # 18 sep, pedido de Braulio: ver nota en list_view() -- mismo flag,
+    # propagado desde ahí cuando se entra a la orden por "Ver historial".
+    readonly = request.args.get("readonly") == "1"
     jobs = query_all(
         "SELECT * FROM maintenance_record_jobs WHERE maintenance_record_id = ? ORDER BY job_name",
         (record_id,),
@@ -354,7 +365,7 @@ def detail(record_id):
         order_status=_order_status(jobs), order_status_labels=ORDER_STATUS_LABELS,
         mechanic_types=MECHANIC_TYPES, available_job_types=available_job_types,
         available_materials=available_materials, labor_costs=labor_costs, materials_total=materials_total,
-        crew_by_job=crew_by_job, labor_cost_by_job=labor_cost_by_job,
+        crew_by_job=crew_by_job, labor_cost_by_job=labor_cost_by_job, readonly=readonly,
     )
 
 

@@ -56,7 +56,7 @@
         <td class="text-right">{{ s.n_records }}</td>
         <td class="text-right">{{ s.total_cost|money }}</td>
         <td>{{ s.last_date or '—' }}</td>
-        <td><a href="{{ url_for('mantenimiento.list_view', vehicle_id=s.id) }}" class="btn btn-secondary btn-sm">Ver historial</a></td>
+        <td><a href="{{ url_for('mantenimiento.list_view', vehicle_id=s.id, readonly=1) }}" class="btn btn-secondary btn-sm">Ver historial</a></td>
       </tr>
       {% else %}
       <tr><td colspan="7" class="table-empty">No hay unidades registradas.</td></tr>
