@@ -51,6 +51,7 @@ def create_app(config_object=Config):
         catalogos,
         integraciones,
         tarifario,
+        pagos_personal,
     )
 
     app.register_blueprint(dashboard.bp)
@@ -74,6 +75,7 @@ def create_app(config_object=Config):
     app.register_blueprint(catalogos.bp)
     app.register_blueprint(integraciones.bp)
     app.register_blueprint(tarifario.bp)
+    app.register_blueprint(pagos_personal.bp)
 
     @app.route("/")
     def index():
@@ -99,6 +101,9 @@ def create_app(config_object=Config):
             "role_labels_join": lambda roles: " + ".join(ROLE_LABELS.get(r, r) for r in (roles or [])),
             "csrf_token": get_csrf_token,
             "company_name": app.config["COMPANY_NAME"],
+            # 16 sep: nombre del software (distinto de company_name, ver
+            # config.py) -- solo para el chrome del sistema.
+            "system_name": app.config["SYSTEM_NAME"],
         }
 
     @app.errorhandler(404)

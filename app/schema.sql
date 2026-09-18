@@ -1375,6 +1375,75 @@ CREATE TABLE IF NOT EXISTS whatsapp_expense_drafts (
 );
 CREATE INDEX IF NOT EXISTS idx_whatsapp_expense_drafts_status ON whatsapp_expense_drafts(status);
 
+-- Módulo "Pagos personal" (18 sep, pedido de Braulio: "creemos un modulo
+-- mas que se llame Pagos personal. En este modulo vamos a subir los
+-- comprobantes de pagos del personal tanto de planilla como recibo de
+-- honorario. Quiero que haya la opcion de que cree un excel con los
+-- formatos que usa la plataforma Telecredito de BCP.") -- ver
+-- app/routes/pagos_personal.py.
+--
+-- Catálogo de personal (administrativos, choferes, etc.) al que se le
+-- registran pagos. driver_id (opcional) enlaza esta fila con su registro
+-- ya existente en Conductores, para los choferes que también reciben
+-- pagos por este módulo -- así no se duplican sus datos en dos catálogos
+-- (pedido explícito de Braulio al elegir entre las opciones que se le
+-- dieron). Los datos bancarios (banco/cuenta/CCI) son los que se usan
+-- luego para armar el archivo de Telecrédito.
+CREATE TABLE IF NOT EXISTS staff (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    document_type TEXT NOT NULL DEFAULT 'DNI' CHECK (document_type IN ('DNI', 'CE', 'RUC')),
+    document_number TEXT,
+    position TEXT,
+    -- Sin "REFERENCES drivers(id)" aquí a propósito, mismo motivo que en
+    -- otras columnas de este esquema (ver nota junto a mechanic_id en
+    -- maintenance_record_jobs, más arriba): la FK la agrega el paso
+    -- dedicado de init_db() (Postgres) una vez que la columna ya existe.
+    -- No aplica en este caso porque la tabla es nueva (se crea con la FK
+    -- declarada tal cual, sin pasar por ALTER TABLE), se deja la nota
+    -- igual por si algún día se necesita agregar otra columna así acá.
+    driver_id INTEGER REFERENCES drivers(id),
+    bank_name TEXT,
+    account_number TEXT,
+    -- Código de Cuenta Interbancario (20 dígitos) -- con esto se puede
+    -- pagar a una cuenta de cualquier banco, no solo BCP.
+    cci TEXT,
+    currency TEXT NOT NULL DEFAULT 'S' CHECK (currency IN ('S', 'D')),
+    status TEXT NOT NULL DEFAULT 'ACTIVO' CHECK (status IN ('ACTIVO', 'INACTIVO')),
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Un comprobante de pago (boleta de planilla o recibo por honorarios) por
+-- persona y periodo. payment_type se elige POR COMPROBANTE, no queda fijo
+-- por persona (pedido explícito de Braulio: "puede variar pago a pago,
+-- pero la planilla y honorarios son distintas nunca van a estar mezcladas
+-- en el mismo archivo de pago") -- por eso el export a Telecrédito
+-- (pagos_personal.export_telecredito) siempre filtra por un solo
+-- payment_type a la vez, nunca junta los dos en un mismo archivo.
+-- exported_at (18 sep) es solo informativo -- queda marcado cuando ese
+-- pago ya se incluyó en un archivo de Telecrédito generado, para poder
+-- avisar en pantalla "ya se exportó" sin impedir volver a exportarlo si
+-- hace falta (ej. si el banco rechazó el lote).
+CREATE TABLE IF NOT EXISTS staff_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id INTEGER NOT NULL REFERENCES staff(id),
+    payment_type TEXT NOT NULL CHECK (payment_type IN ('PLANILLA', 'RECIBO_HONORARIOS')),
+    period TEXT NOT NULL,
+    amount REAL NOT NULL DEFAULT 0,
+    concept TEXT,
+    status TEXT NOT NULL DEFAULT 'PENDIENTE' CHECK (status IN ('PENDIENTE', 'PAGADO')),
+    payment_date TEXT,
+    -- Comprobante subido (boleta de pago o recibo por honorarios) --
+    -- mismo mecanismo de almacenamiento que el resto de archivos del
+    -- sistema (ver app/storage.py, save_staff_payment_receipt()).
+    receipt_filename TEXT,
+    exported_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_staff_payments_staff ON staff_payments(staff_id);
+CREATE INDEX IF NOT EXISTS idx_staff_payments_period ON staff_payments(period);
+
 CREATE INDEX IF NOT EXISTS idx_trips_status ON trips(status);
 CREATE INDEX IF NOT EXISTS idx_trips_client ON trips(client_id);
 CREATE INDEX IF NOT EXISTS idx_expenses_trip ON expenses(trip_id);

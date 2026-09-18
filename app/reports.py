@@ -588,3 +588,173 @@ def build_gps_daily_workbook(rows, company_name, date):
     wb.save(buffer)
     buffer.seek(0)
     return buffer
+
+
+# Persona, Documento, Tipo, Banco, Cuenta, CCI, Moneda, Monto, Concepto,
+# Estado, Fecha de pago.
+STAFF_PAYMENTS_COLUMNS = [
+    "Persona", "Documento", "Tipo", "Banco", "Cuenta", "CCI", "Moneda",
+    "Monto", "Concepto", "Estado", "Fecha de pago",
+]
+STAFF_PAYMENTS_COLUMN_WIDTHS = [26, 16, 20, 18, 18, 22, 9, 14, 30, 12, 14]
+
+
+def build_staff_payments_workbook(payments, company_name, period, payment_type_labels):
+    """Reporte de Pagos personal (18 sep, módulo nuevo — ver
+    app/routes/pagos_personal.py): un Excel con estilo, igual que los demás
+    reportes de la app, con todos los pagos del periodo/filtros elegidos.
+    Distinto del export a Telecrédito (build_telecredito_workbook) — este
+    es un reporte para revisar/archivar, no un archivo para cargar al
+    banco."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Pagos personal"
+
+    last_col_letter = get_column_letter(len(STAFF_PAYMENTS_COLUMNS))
+
+    ws.merge_cells(f"A1:{last_col_letter}1")
+    ws["A1"] = f"{company_name} — Pagos personal"
+    ws["A1"].font = Font(bold=True, size=14, color=COLOR_PRIMARY)
+
+    ws.merge_cells(f"A2:{last_col_letter}2")
+    generated = datetime.now().strftime("%d/%m/%Y %H:%M")
+    ws["A2"] = f"Generado el {generated}  ·  Periodo: {period}"
+    ws["A2"].font = Font(italic=True, size=10, color=COLOR_GRAY)
+
+    header_row = 4
+    for idx, title in enumerate(STAFF_PAYMENTS_COLUMNS, start=1):
+        cell = ws.cell(row=header_row, column=idx, value=title)
+        cell.font = Font(bold=True, color=COLOR_HEADER_TEXT)
+        cell.fill = PatternFill("solid", fgColor=COLOR_PRIMARY)
+        cell.alignment = Alignment(horizontal="right" if title == "Monto" else "left", vertical="center")
+        cell.border = _thin_border("all")
+    ws.freeze_panes = f"A{header_row + 1}"
+
+    row = header_row + 1
+    total = 0.0
+    for p in payments:
+        ws.cell(row=row, column=1, value=p["staff_name"])
+        ws.cell(row=row, column=2, value=f"{p['document_type']} {p['document_number'] or ''}".strip())
+        ws.cell(row=row, column=3, value=payment_type_labels.get(p["payment_type"], p["payment_type"]))
+        ws.cell(row=row, column=4, value=p["bank_name"] or "—")
+        ws.cell(row=row, column=5, value=p["account_number"] or "—")
+        ws.cell(row=row, column=6, value=p["cci"] or "—")
+        ws.cell(row=row, column=7, value="Soles" if p["staff_currency"] == "S" else "Dólares")
+        amount_cell = ws.cell(row=row, column=8, value=float(p["amount"] or 0))
+        amount_cell.number_format = CURRENCY_FORMAT
+        amount_cell.alignment = Alignment(horizontal="right")
+        ws.cell(row=row, column=9, value=p["concept"] or "—")
+        ws.cell(row=row, column=10, value="Pagado" if p["status"] == "PAGADO" else "Pendiente")
+        ws.cell(row=row, column=11, value=p["payment_date"] or "—")
+        for col in range(1, len(STAFF_PAYMENTS_COLUMNS) + 1):
+            ws.cell(row=row, column=col).border = _thin_border("bottom")
+        total += p["amount"] or 0
+        row += 1
+
+    if not payments:
+        ws.cell(row=row, column=1, value="No hay pagos con estos filtros.").font = Font(italic=True, color=COLOR_GRAY)
+        row += 1
+
+    row += 1
+    ws.merge_cells(f"A{row}:G{row}")
+    total_label = ws.cell(row=row, column=1, value=f"TOTAL ({len(payments)} pago(s))")
+    total_label.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
+    total_label.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
+    total_label.alignment = Alignment(horizontal="right", vertical="center")
+    total_cell = ws.cell(row=row, column=8, value=total)
+    total_cell.number_format = CURRENCY_FORMAT
+    total_cell.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
+    total_cell.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
+    total_cell.alignment = Alignment(horizontal="right", vertical="center")
+
+    for idx, width in enumerate(STAFF_PAYMENTS_COLUMN_WIDTHS, start=1):
+        ws.column_dimensions[get_column_letter(idx)].width = width
+    ws.sheet_view.showGridLines = False
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+
+# 18 sep: columnas "borrador" para el archivo de carga masiva de
+# Telecrédito BCP -- pendiente de calzar exacto con la plantilla real que
+# entrega el banco para cada servicio (pago de planilla vs. pago a
+# terceros/honorarios tienen formatos distintos). Ver la nota grande al
+# inicio de app/routes/pagos_personal.py.
+TELECREDITO_COLUMNS = [
+    "Tipo Doc.", "Nro. Documento", "Nombres y Apellidos / Razón Social",
+    "Banco", "Nro. de Cuenta", "CCI", "Moneda", "Importe", "Concepto",
+]
+TELECREDITO_COLUMN_WIDTHS = [10, 16, 34, 18, 18, 22, 9, 14, 30]
+
+
+def build_telecredito_workbook(payments, payment_type, payment_type_labels):
+    """Archivo "borrador" para cargar pagos masivos en Telecrédito BCP, ya
+    sea de planilla o de honorarios/terceros -- SIEMPRE de un solo
+    payment_type (nunca junta los dos, pedido explícito de Braulio). Sin
+    el estilo de los demás reportes a propósito (sin logo/encabezado de
+    empresa, sin fusionar celdas) -- una tabla lo más simple posible, más
+    parecida a lo que suelen pedir los formatos de carga masiva de bancos.
+
+    OJO: las columnas de acá son las que Braulio necesita ver (persona,
+    documento, banco, cuenta/CCI, moneda, monto, concepto) pero el orden y
+    los encabezados EXACTOS que exige Telecrédito pueden ser distintos --
+    hay que confirmarlos con la plantilla real del banco antes de subir
+    este archivo. Por eso la primera fila del archivo trae una advertencia
+    visible en rojo."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Telecredito"
+
+    last_col_letter = get_column_letter(len(TELECREDITO_COLUMNS))
+
+    ws.merge_cells(f"A1:{last_col_letter}1")
+    warning_cell = ws["A1"]
+    warning_cell.value = (
+        "BORRADOR — verifica el orden y los encabezados exactos con la plantilla real de Telecrédito "
+        "antes de subir este archivo al banco. Tipo: " + payment_type_labels.get(payment_type, payment_type)
+    )
+    warning_cell.font = Font(bold=True, color="C0392B")
+    warning_cell.fill = PatternFill("solid", fgColor="FDECEA")
+
+    header_row = 2
+    for idx, title in enumerate(TELECREDITO_COLUMNS, start=1):
+        cell = ws.cell(row=header_row, column=idx, value=title)
+        cell.font = Font(bold=True, color=COLOR_HEADER_TEXT)
+        cell.fill = PatternFill("solid", fgColor=COLOR_PRIMARY)
+        cell.border = _thin_border("all")
+    ws.freeze_panes = f"A{header_row + 1}"
+
+    row = header_row + 1
+    total = 0.0
+    for p in payments:
+        ws.cell(row=row, column=1, value=p["document_type"])
+        ws.cell(row=row, column=2, value=p["document_number"] or "")
+        ws.cell(row=row, column=3, value=p["staff_name"])
+        ws.cell(row=row, column=4, value=p["bank_name"] or "")
+        ws.cell(row=row, column=5, value=p["account_number"] or "")
+        ws.cell(row=row, column=6, value=p["cci"] or "")
+        ws.cell(row=row, column=7, value="Soles" if p["staff_currency"] == "S" else "Dólares")
+        amount_cell = ws.cell(row=row, column=8, value=float(p["amount"] or 0))
+        amount_cell.number_format = CURRENCY_FORMAT
+        ws.cell(row=row, column=9, value=p["concept"] or "")
+        for col in range(1, len(TELECREDITO_COLUMNS) + 1):
+            ws.cell(row=row, column=col).border = _thin_border("all")
+        total += p["amount"] or 0
+        row += 1
+
+    row += 1
+    ws.cell(row=row, column=7, value="TOTAL").font = Font(bold=True)
+    total_cell = ws.cell(row=row, column=8, value=total)
+    total_cell.number_format = CURRENCY_FORMAT
+    total_cell.font = Font(bold=True)
+
+    for idx, width in enumerate(TELECREDITO_COLUMN_WIDTHS, start=1):
+        ws.column_dimensions[get_column_letter(idx)].width = width
+    ws.sheet_view.showGridLines = False
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer

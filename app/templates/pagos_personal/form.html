@@ -1,0 +1,72 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Editar pago' if payment and payment.id else 'Registrar pago' }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>{{ 'Editar pago' if payment and payment.id else 'Registrar pago de personal' }}</h1></div>
+
+{% if not all_staff %}
+<p class="flash flash-error">Todavía no hay personas activas en el catálogo — <a href="{{ url_for('pagos_personal.staff_new') }}">agrega una primero</a>.</p>
+{% endif %}
+
+<form class="form panel" method="post" enctype="multipart/form-data">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <div class="form-row">
+    <label>Persona *
+      <select name="staff_id" required>
+        <option value="">-- Selecciona --</option>
+        {% for s in all_staff %}
+        <option value="{{ s.id }}" {{ 'selected' if payment and (payment.staff_id|string) == (s.id|string) }}>{{ s.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Tipo de comprobante *
+      <select name="payment_type" required>
+        <option value="">-- Selecciona --</option>
+        {% for code, label in payment_type_labels.items() %}
+        <option value="{{ code }}" {{ 'selected' if payment and payment.payment_type == code }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+
+  <div class="form-row">
+    <label>Periodo (mes) *
+      <input type="month" name="period" value="{{ default_period }}" required>
+    </label>
+    <label>Monto *
+      <input type="number" step="0.01" name="amount" value="{{ payment.amount if payment else '' }}" required>
+    </label>
+  </div>
+
+  <label>Concepto
+    <input type="text" name="concept" value="{{ payment.concept if payment else '' }}" placeholder="Ej. Sueldo de setiembre, Honorarios por asesoría...">
+  </label>
+
+  <label>Comprobante — foto o PDF (opcional)
+    <input type="file" name="receipt" accept=".png,.jpg,.jpeg,.pdf,.webp">
+  </label>
+  {% if payment and payment.receipt_filename %}
+  <p class="muted" style="margin-top:-8px;">Ya tiene un comprobante adjunto — sube uno nuevo solo si quieres reemplazarlo.</p>
+  {% endif %}
+
+  <label style="flex-direction: row; align-items: center; gap: 8px;">
+    <input type="checkbox" name="mark_paid" value="1" id="mark-paid-check" style="width:auto;" {{ 'checked' if payment and payment.status == 'PAGADO' }}>
+    Ya se pagó
+  </label>
+  <label id="payment-date-label" style="margin-top:-8px; {{ '' if payment and payment.status == 'PAGADO' else 'display:none;' }}">Fecha de pago
+    <input type="date" name="payment_date" value="{{ payment.payment_date if payment and payment.payment_date else today }}">
+  </label>
+  <script>
+    (function () {
+      var check = document.getElementById('mark-paid-check');
+      var label = document.getElementById('payment-date-label');
+      check.addEventListener('change', function () { label.style.display = check.checked ? '' : 'none'; });
+    })();
+  </script>
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Guardar</button>
+    <a href="{{ url_for('pagos_personal.list_view') }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+{% endblock %}

@@ -85,6 +85,14 @@ def local_vehicle_documents_dir():
     return _local_dir("vehicle_documents")
 
 
+def local_staff_payment_receipts_dir():
+    """Igual que las anteriores, pero para los comprobantes de pago de
+    personal (boleta de planilla o recibo por honorarios — 18 sep, módulo
+    nuevo "Pagos personal", ver app/routes/pagos_personal.py) — carpeta
+    separada en disco."""
+    return _local_dir("staff_payment_receipts")
+
+
 def _s3_bucket():
     return current_app.config["AWS_S3_BUCKET"]
 
@@ -118,6 +126,10 @@ def _s3_sunat_documents_prefix():
 
 def _s3_vehicle_documents_prefix():
     return (current_app.config.get("AWS_S3_VEHICLE_DOCUMENTS_PREFIX") or "documentos-flota").strip("/")
+
+
+def _s3_staff_payment_receipts_prefix():
+    return (current_app.config.get("AWS_S3_STAFF_PAYMENT_RECEIPTS_PREFIX") or "comprobantes-personal").strip("/")
 
 
 def _s3_key(filename, prefix):
@@ -353,3 +365,21 @@ def vehicle_document_url(filename):
     documento de Flota guardado en S3. En disco local, usar
     local_vehicle_documents_dir() + send_from_directory."""
     return _presigned_url(_s3_vehicle_documents_prefix(), filename)
+
+
+def save_staff_payment_receipt(filename, raw_bytes):
+    """Igual que save_vehicle_document(), pero para el comprobante de un
+    pago de personal (boleta de planilla o recibo por honorarios — 18 sep,
+    módulo "Pagos personal") — carpeta/prefijo separado."""
+    if using_s3():
+        _put_object(_s3_staff_payment_receipts_prefix(), filename, raw_bytes)
+    else:
+        with open(os.path.join(local_staff_payment_receipts_dir(), filename), "wb") as f:
+            f.write(raw_bytes)
+
+
+def staff_payment_receipt_url(filename):
+    """Igual que vehicle_document_url(), pero para un comprobante de pago
+    de personal guardado en S3. En disco local, usar
+    local_staff_payment_receipts_dir() + send_from_directory."""
+    return _presigned_url(_s3_staff_payment_receipts_prefix(), filename)

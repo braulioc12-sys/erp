@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+{% block title %}Personal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Pagos personal — Catálogo de Personal</h1>
+  <div class="page-actions">
+    {% if can(current_user.roles, 'pagos_personal', 'edit') %}
+    <a href="{{ url_for('pagos_personal.staff_new') }}" class="btn btn-primary">+ Agregar persona</a>
+    {% endif %}
+    <a href="{{ url_for('pagos_personal.list_view') }}" class="btn btn-secondary">← Volver a Pagos personal</a>
+  </div>
+</div>
+<p class="muted mt-0">Nombre, documento, cargo y datos bancarios de cada persona a la que se le registran pagos (planilla o recibo por honorarios). Si la persona también es conductor, se puede enlazar con su registro en Conductores para no duplicar sus datos.</p>
+
+<form class="filters" method="get">
+  <label>Buscar
+    <input type="text" name="q" value="{{ q }}" placeholder="Nombre o documento">
+  </label>
+  <button class="btn btn-secondary" type="submit">Filtrar</button>
+  {% if show_inactive %}
+  <a href="{{ url_for('pagos_personal.staff_list') }}" class="btn btn-secondary">Ver activos</a>
+  {% else %}
+  <a href="{{ url_for('pagos_personal.staff_list', ver='inactivos') }}" class="btn btn-secondary">Ver inactivos</a>
+  {% endif %}
+</form>
+
+<div class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Nombre</th><th>Documento</th><th>Cargo</th><th>Conductor vinculado</th>
+          <th>Banco</th><th>Cuenta</th><th>CCI</th><th>Moneda</th><th></th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in staff %}
+        <tr>
+          <td>{{ s.name }}</td>
+          <td>{{ s.document_type }} {{ s.document_number or '—' }}</td>
+          <td>{{ s.position or '—' }}</td>
+          <td>{{ s.driver_name or '—' }}</td>
+          <td>{{ s.bank_name or '—' }}</td>
+          <td>{{ s.account_number or '—' }}</td>
+          <td>{{ s.cci or '—' }}</td>
+          <td>{{ 'Soles' if s.currency == 'S' else 'Dólares' }}</td>
+          <td>
+            {% if can(current_user.roles, 'pagos_personal', 'edit') %}
+            <a href="{{ url_for('pagos_personal.staff_edit', staff_id=s.id) }}" class="btn btn-secondary btn-sm">Editar</a>
+            {% endif %}
+          </td>
+          <td>
+            {% if can(current_user.roles, 'pagos_personal', 'edit') %}
+            <form method="post" action="{{ url_for('pagos_personal.staff_toggle', staff_id=s.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-secondary btn-sm" type="submit">{{ 'Desactivar' if s.status == 'ACTIVO' else 'Reactivar' }}</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="table-empty">No hay personas registradas todavía.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if not staff %}
+  <p class="muted" style="margin-top:12px; margin-bottom:0;">Sin datos bancarios (banco/cuenta o CCI) no se va a poder incluir a esa persona en el archivo de Telecrédito.</p>
+  {% endif %}
+</div>
+{% endblock %}

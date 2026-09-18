@@ -1,0 +1,74 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Editar persona' if staff and staff.id else 'Agregar persona' }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>{{ 'Editar persona' if staff and staff.id else 'Agregar persona al catálogo' }}</h1></div>
+
+<form class="form panel" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <label>Nombre completo *
+    <input type="text" name="name" value="{{ staff.name if staff else '' }}" required>
+  </label>
+
+  <div class="form-row">
+    <label>Tipo de documento
+      <select name="document_type">
+        {% for t in document_type_choices %}
+        <option value="{{ t }}" {{ 'selected' if staff and staff.document_type == t }}>{{ t }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Número de documento
+      <input type="text" name="document_number" value="{{ staff.document_number if staff else '' }}">
+    </label>
+  </div>
+
+  <label>Cargo
+    <input type="text" name="position" value="{{ staff.position if staff else '' }}" placeholder="Ej. Asistente contable, Chofer, Practicante...">
+  </label>
+
+  <label>Conductor vinculado (opcional)
+    <select name="driver_id">
+      <option value="">-- Ninguno --</option>
+      {% for d in drivers %}
+      <option value="{{ d.id }}" {{ 'selected' if staff and (staff.driver_id|string) == (d.id|string) }}>{{ d.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <p class="muted" style="margin-top:-8px;">Si esta persona también es chofer, enlázala con su registro de Conductores — así no se duplican sus datos entre los dos catálogos.</p>
+
+  <h2 style="margin-top:20px;">Datos bancarios</h2>
+  <p class="muted" style="margin-top:-8px;">Se usan para armar el archivo de Telecrédito — sin CCI, esta persona no se puede incluir ahí.</p>
+
+  <div class="form-row">
+    <label>Banco
+      <input type="text" name="bank_name" value="{{ staff.bank_name if staff else '' }}" placeholder="Ej. BCP, Interbank, BBVA...">
+    </label>
+    <label>Moneda
+      <select name="currency">
+        {% for code, label in currency_labels.items() %}
+        <option value="{{ code }}" {{ 'selected' if staff and staff.currency == code or (not staff and code == 'S') }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+
+  <div class="form-row">
+    <label>Número de cuenta
+      <input type="text" name="account_number" value="{{ staff.account_number if staff else '' }}">
+    </label>
+    <label>CCI (Código de Cuenta Interbancario)
+      <input type="text" name="cci" value="{{ staff.cci if staff else '' }}" placeholder="20 dígitos">
+    </label>
+  </div>
+
+  <label>Notas
+    <textarea name="notes">{{ staff.notes if staff else '' }}</textarea>
+  </label>
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Guardar</button>
+    <a href="{{ url_for('pagos_personal.staff_list') }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+{% endblock %}

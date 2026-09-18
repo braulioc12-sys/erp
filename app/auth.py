@@ -53,6 +53,10 @@ PERMISSIONS = {
         # 15 sep: Tarifario (ver app/routes/tarifario.py) — mismo grupo de
         # acceso que Cotizaciones (datos comerciales), solo Contabilidad/Admin.
         "tarifario": set(),
+        # 18 sep: Pagos personal (ver app/routes/pagos_personal.py) — mismo
+        # grupo de acceso que RRHH/Liquidaciones, solo Contabilidad/Admin
+        # (datos de pagos y cuentas bancarias del personal).
+        "pagos_personal": set(),
     },
     # Programa unidades/conductores y da seguimiento a los viajes del día a
     # día — sin acceso a montos de Facturación/Liquidaciones/Cotizaciones ni
@@ -77,6 +81,7 @@ PERMISSIONS = {
         "integraciones": set(),
         "rrhh": set(),
         "tarifario": set(),
+        "pagos_personal": set(),
     },
     # Solo el módulo de Inventarios (repuestos, proveedores, compras) — la
     # AUTORIZACIÓN de una orden de compra sigue siendo exclusiva de
@@ -102,6 +107,7 @@ PERMISSIONS = {
         "integraciones": set(),
         "rrhh": set(),
         "tarifario": set(),
+        "pagos_personal": set(),
     },
     # Documentos con montos: Liquidaciones, Facturación, Cotizaciones. Ve
     # Viajes/Clientes (para ubicar a qué viaje o cliente corresponde cada
@@ -135,6 +141,10 @@ PERMISSIONS = {
         # 15 sep: Tarifario (ver app/routes/tarifario.py) — mismo acceso que
         # Cotizaciones (datos comerciales de precios).
         "tarifario": {"view", "edit"},
+        # 18 sep: Pagos personal (ver app/routes/pagos_personal.py) — mismo
+        # acceso que RRHH/Liquidaciones: Contabilidad ve y edita los pagos
+        # y genera los archivos de Telecrédito.
+        "pagos_personal": {"view", "edit"},
     },
     # Solo el módulo de Mantenimiento (órdenes, trabajos) y ver Neumáticos.
     "MECANICO": {
@@ -157,6 +167,7 @@ PERMISSIONS = {
         "integraciones": set(),
         "rrhh": set(),
         "tarifario": set(),
+        "pagos_personal": set(),
     },
 }
 
