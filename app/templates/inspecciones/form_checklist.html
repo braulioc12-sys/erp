@@ -109,13 +109,15 @@
 
   <h2 style="margin-top:22px;">{{ tire_meta.title }}</h2>
   <p class="muted" style="margin-top:-8px;">{{ tire_meta.note }}</p>
+  <p class="muted" style="margin-top:-8px;">La cocada (mm) que anotes acá se guarda también en el historial de esa llanta en Neumáticos — Inventario de llantas, y actualiza su medida más reciente.</p>
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
           <th>Posición</th>
           {% if tire_meta.has_pressure %}<th style="width:110px;">Presión</th>{% endif %}
-          <th style="width:180px;">Código de llanta</th>
+          <th style="width:150px;">Código de llanta</th>
+          <th style="width:110px;">Cocada (mm)</th>
           <th>Observación</th>
         </tr>
       </thead>
@@ -124,7 +126,8 @@
         <tr>
           <td>{{ p.label }}</td>
           {% if tire_meta.has_pressure %}<td><input type="text" name="tire_{{ p.code }}_presion" placeholder="Opcional"></td>{% endif %}
-          <td><input type="text" name="tire_{{ p.code }}_codigo" placeholder="Código"></td>
+          <td><input type="text" name="tire_{{ p.code }}_codigo" placeholder="Código" value="{{ tire_codes_by_position.get(p.code, '') }}"></td>
+          <td><input type="number" step="0.1" min="0" name="tire_{{ p.code }}_cocada" placeholder="mm"></td>
           <td><input type="text" name="tire_{{ p.code }}_obs" placeholder="Opcional"></td>
         </tr>
         {% endfor %}
@@ -132,11 +135,13 @@
           <td>{{ spare_tire_item }}</td>
           {% if tire_meta.has_pressure %}<td><input type="text" name="tire_spare_presion" placeholder="Opcional"></td>{% endif %}
           <td><input type="text" name="tire_spare_codigo" placeholder="Código"></td>
+          <td><input type="number" step="0.1" min="0" name="tire_spare_cocada" placeholder="mm"></td>
           <td><input type="text" name="tire_spare_obs" placeholder="Opcional"></td>
         </tr>
       </tbody>
     </table>
   </div>
+  <p class="muted" style="margin-top:-8px;">En la llanta de repuesto, la cocada solo se enlaza a su historial si el código coincide con una llanta ya registrada en el inventario (no tiene una posición fija como las demás).</p>
 
   <label style="margin-top:16px;">Observaciones generales
     <textarea name="notes"></textarea>

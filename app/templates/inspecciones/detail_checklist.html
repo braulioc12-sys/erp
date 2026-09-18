@@ -54,12 +54,13 @@
   <p class="muted mt-0">{{ tire_section_note }}</p>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Posición</th><th>Código de llanta</th><th>Observación</th></tr></thead>
+      <thead><tr><th>Posición</th><th>Código de llanta</th><th>Cocada</th><th>Observación</th></tr></thead>
       <tbody>
         {% for row in tire_rows %}
         <tr>
           <td>{{ row.item_name }}</td>
           <td>{{ row.extra_value or '—' }}</td>
+          <td>{{ '%.1f mm'|format(row.tread_depth_mm) if row.tread_depth_mm is not none else '—' }}</td>
           <td class="wrap">{{ row.observation or '—' }}</td>
         </tr>
         {% endfor %}
@@ -67,6 +68,7 @@
         <tr>
           <td>{{ spare_tire.item_name }}</td>
           <td>{{ spare_tire.extra_value or '—' }}</td>
+          <td>{{ '%.1f mm'|format(spare_tire.tread_depth_mm) if spare_tire.tread_depth_mm is not none else '—' }}</td>
           <td class="wrap">{{ spare_tire.observation or '—' }}</td>
         </tr>
         {% endif %}

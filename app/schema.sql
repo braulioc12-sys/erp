@@ -766,7 +766,18 @@ CREATE TABLE IF NOT EXISTS inspection_items (
     -- valor extra puntual (cantidad de recarga, "sopleteado" sí/no, o el
     -- código de llanta según posición). NULL en el checklist genérico.
     section TEXT,
-    extra_value TEXT
+    extra_value TEXT,
+    -- 18 sep, pedido de Braulio ("la altura de la cocada... tiene que
+    -- estar enlazado con las inspecciones... cada vez que se realice una
+    -- inspeccion nueva actualizar la medida de la llanta en el
+    -- inventario"): solo se llena en las filas de la sección de llantas
+    -- (section = REVISION_LLANTAS) del checklist detallado. Al guardar la
+    -- inspección, si esta posición tiene una llanta ACTIVA instalada (ver
+    -- "tires" en app/routes/neumaticos.py), este valor se copia también
+    -- como una fila nueva de "tire_inspections" para esa llanta -- ver
+    -- record_tire_inspection() en app/routes/neumaticos.py, usado desde
+    -- _save_detailed_inspection() en app/routes/inspecciones.py.
+    tread_depth_mm REAL
 );
 
 -- Presupuesto mensual de gastos por unidad o por tipo de gasto, para

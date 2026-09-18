@@ -17,6 +17,11 @@ from app.detailed_checklists import (
 )
 from app.helpers import next_code, parse_date, parse_float, today_str
 from app.routes.catalogos import get_catalog
+from app.routes.neumaticos import (
+    active_tire_inventory_id_at,
+    record_tire_inspection,
+    tire_inventory_id_by_code,
+)
 from app.tire_positions import get_positions
 
 bp = Blueprint("inspecciones", __name__, url_prefix="/inspecciones")
@@ -59,14 +64,6 @@ def new(trip_id=None):
         )
         if trip is None:
             abort(404)
-        # 4 sep, pedido de Braulio: "los viajes con terceros no deben
-        # registrar liquidación, por lo tanto no tienen anticipo de
-        # viáticos, inspección ni gastos de viaje" — la unidad de un viaje
-        # con terceros ni siquiera es de Flota (third_party_unit es texto
-        # libre), así que no hay a qué unidad asociar el checklist.
-        if trip["ownership"] == "TERCERO":
-            flash("Los viajes con terceros no registran inspección.", "error")
-            return redirect(url_for("viajes.detail", trip_id=trip_id))
 
     vehicles = query_all("SELECT id, plate, vehicle_type FROM vehicles ORDER BY plate")
     drivers = query_all("SELECT id, name FROM drivers WHERE status = 'ACTIVO' ORDER BY name")
@@ -95,12 +92,30 @@ def new(trip_id=None):
         return _save_generic_inspection(trip_id, trip, vehicle_id)
 
     if is_detailed:
+        # 18 sep, pedido de Braulio: se precarga el código de inventario de
+        # la llanta que Neumáticos ya tiene registrada como ACTIVA en cada
+        # posición (editable igual que antes) -- así el que hace el
+        # checklist en papel/pantalla ve de entrada qué llanta debería
+        # estar ahí, y la medición de cocada que anote más abajo queda
+        # enlazada a esa llanta correcta al guardar (ver
+        # _save_detailed_inspection() y active_tire_inventory_id_at() en
+        # app/routes/neumaticos.py).
+        tire_codes_by_position = {}
+        active_tires = query_all(
+            """SELECT t.position_code, ti.code FROM tires t
+               JOIN tire_inventory ti ON ti.id = t.tire_inventory_id
+               WHERE t.vehicle_id = ? AND t.status = 'ACTIVO'""",
+            (vehicle["id"],),
+        )
+        for row in active_tires:
+            tire_codes_by_position[row["position_code"]] = row["code"]
         return render_template(
             "inspecciones/form_checklist.html", trip=trip, vehicle=vehicle, vehicles=vehicles, drivers=drivers,
             vehicle_type=vehicle_type, checklist_label=CHECKLIST_LABELS[vehicle_type],
             vehicle_field_label=VEHICLE_FIELD_LABELS[vehicle_type], has_odometer=HAS_ODOMETER[vehicle_type],
             sections=sections_for(vehicle_type), tire_positions=get_positions(vehicle_type),
             tire_meta=tire_meta_for(vehicle_type), spare_tire_item=SPARE_TIRE_ITEM,
+            tire_codes_by_position=tire_codes_by_position,
             locations=LOCATIONS, today=today_str(),
         )
 
@@ -203,21 +218,51 @@ def _save_detailed_inspection(trip_id, trip, vehicle):
                 observation = f"Presión: {presion}." + (f" {observation}" if observation else "")
         return observation
 
+    # 18 sep, pedido de Braulio: "la altura de la cocada... tiene que estar
+    # enlazado con las inspecciones... cada vez que se realice una
+    # inspeccion nueva actualizar la medida de la llanta en el
+    # inventario". Para las posiciones de eje se busca la llanta por
+    # unidad+posición (lo que Neumáticos ya tiene como ACTIVA ahí) en vez
+    # de por el "código" tipeado a mano, para no depender de que ese texto
+    # coincida exactamente con tire_inventory.code -- ver
+    # active_tire_inventory_id_at() en app/routes/neumaticos.py.
     for p in get_positions(vehicle_type):
         codigo = request.form.get(f"tire_{p['code']}_codigo", "").strip() or None
         observation = _tire_observation(f"tire_{p['code']}")
+        tread_depth_mm = parse_float(request.form.get(f"tire_{p['code']}_cocada"), None)
         db.execute(
-            """INSERT INTO inspection_items (inspection_id, item_name, status, observation, section, extra_value)
-               VALUES (?, ?, 'NA', ?, ?, ?)""",
-            (inspection_id, p["label"], observation, TIRE_SECTION_KEY, codigo),
+            """INSERT INTO inspection_items (inspection_id, item_name, status, observation, section,
+               extra_value, tread_depth_mm) VALUES (?, ?, 'NA', ?, ?, ?, ?)""",
+            (inspection_id, p["label"], observation, TIRE_SECTION_KEY, codigo, tread_depth_mm),
         )
+        if tread_depth_mm is not None:
+            tire_inventory_id = active_tire_inventory_id_at(vehicle["id"], p["code"])
+            if tire_inventory_id:
+                record_tire_inspection(
+                    db, tire_inventory_id, inspection_date, tread_depth_mm,
+                    vehicle_plate_at_inspection=vehicle["plate"],
+                    notes=f"Checklist {checklist_code} ({p['label']})",
+                )
+
     spare_codigo = request.form.get("tire_spare_codigo", "").strip() or None
     spare_obs = _tire_observation("tire_spare")
+    spare_tread_depth_mm = parse_float(request.form.get("tire_spare_cocada"), None)
     db.execute(
-        """INSERT INTO inspection_items (inspection_id, item_name, status, observation, section, extra_value)
-           VALUES (?, ?, 'NA', ?, ?, ?)""",
-        (inspection_id, SPARE_TIRE_ITEM, spare_obs, TIRE_SECTION_KEY, spare_codigo),
+        """INSERT INTO inspection_items (inspection_id, item_name, status, observation, section,
+           extra_value, tread_depth_mm) VALUES (?, ?, 'NA', ?, ?, ?, ?)""",
+        (inspection_id, SPARE_TIRE_ITEM, spare_obs, TIRE_SECTION_KEY, spare_codigo, spare_tread_depth_mm),
     )
+    if spare_tread_depth_mm is not None:
+        # La llanta de repuesto no tiene posición en Neumáticos (no se
+        # rastrea ahí) -- para esta sí hace falta el código tipeado a mano,
+        # contra tire_inventory.code.
+        spare_inventory_id = tire_inventory_id_by_code(spare_codigo)
+        if spare_inventory_id:
+            record_tire_inspection(
+                db, spare_inventory_id, inspection_date, spare_tread_depth_mm,
+                vehicle_plate_at_inspection=vehicle["plate"],
+                notes=f"Checklist {checklist_code} (llanta de repuesto)",
+            )
     db.commit()
 
     flash(f"{CHECKLIST_LABELS.get(vehicle_type, 'Checklist')} {checklist_code} registrado.", "success")

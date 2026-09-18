@@ -486,6 +486,11 @@ COLUMN_MIGRATIONS = [
     ("tire_inventory", "model", "TEXT"),
     ("tire_inventory", "tire_type", "TEXT"),
     ("tire_inventory", "tread_depth_mm", "REAL"),
+    # 18 sep, pedido de Braulio ("la cocada tiene que estar enlazado con
+    # las inspecciones... actualizar la medida de la llanta en el
+    # inventario") -- ver el comentario largo junto a esta columna en
+    # schema.sql (CREATE TABLE inspection_items).
+    ("inspection_items", "tread_depth_mm", "REAL"),
 ]
 
 

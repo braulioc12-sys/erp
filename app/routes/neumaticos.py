@@ -132,6 +132,36 @@ def _inventory_current_assignment(tire_inventory_id):
     return row
 
 
+def active_tire_inventory_id_at(vehicle_id, position_code):
+    """18 sep, pedido de Braulio: usada desde el checklist de Inspecciones
+    (app/routes/inspecciones.py) para saber, al guardar una medición de
+    cocada en una posición, a qué llanta de inventario corresponde -- se
+    busca por unidad+posición (lo que ya es la fuente de verdad de qué
+    llanta está instalada ahí, según Neumáticos) en vez de por el "código"
+    que se tipeó a mano en el checklist, para no depender de que ese texto
+    coincida exactamente con tire_inventory.code. Devuelve None si esa
+    posición no tiene una llanta ACTIVA registrada en Neumáticos."""
+    row = query_one(
+        "SELECT tire_inventory_id FROM tires WHERE vehicle_id = ? AND position_code = ? AND status = 'ACTIVO'",
+        (vehicle_id, position_code),
+    )
+    return row["tire_inventory_id"] if row else None
+
+
+def tire_inventory_id_by_code(code):
+    """18 sep, pedido de Braulio: para la llanta de repuesto del checklist
+    de Inspecciones -- a diferencia de las posiciones de eje, el repuesto
+    no tiene una fila en "tires" (Neumáticos no lo rastrea por posición),
+    así que ahí sí hace falta buscarla por el código que se tipeó a mano
+    contra tire_inventory.code. None si no hay código o no hay ninguna
+    llanta con ese código."""
+    code = (code or "").strip()
+    if not code:
+        return None
+    row = query_one("SELECT id FROM tire_inventory WHERE code = ?", (code,))
+    return row["id"] if row else None
+
+
 def _available_inventory_tires():
     return query_all("SELECT * FROM tire_inventory WHERE status = 'DISPONIBLE' ORDER BY code")
 
@@ -429,14 +459,40 @@ def inventory_detail(tire_inventory_id):
     )
 
 
+def record_tire_inspection(db, tire_inventory_id, inspection_date, tread_depth_mm, vehicle_plate_at_inspection=None, notes=None):
+    """Inserta una fila nueva en `tire_inspections` para esta llanta de
+    inventario y actualiza `tire_inventory.tread_depth_mm` a la medición
+    más reciente por fecha (no necesariamente la que se acaba de ingresar,
+    si se está registrando una medición atrasada fuera de orden). No hace
+    commit -- eso lo decide quien llama, junto con el resto de lo que esté
+    guardando en la misma operación (ver inventory_add_inspection() acá
+    mismo, y _save_detailed_inspection() en app/routes/inspecciones.py --
+    18 sep, pedido de Braulio: "la altura de la cocada... tiene que estar
+    enlazado con las inspecciones... actualizar la medida de la llanta en
+    el inventario")."""
+    db.execute(
+        """INSERT INTO tire_inspections (tire_inventory_id, inspection_date, tread_depth_mm,
+           vehicle_plate_at_inspection, notes) VALUES (?, ?, ?, ?, ?)""",
+        (tire_inventory_id, inspection_date, tread_depth_mm, vehicle_plate_at_inspection, notes or None),
+    )
+    latest = query_one(
+        "SELECT tread_depth_mm FROM tire_inspections WHERE tire_inventory_id = ? ORDER BY inspection_date DESC, id DESC LIMIT 1",
+        (tire_inventory_id,),
+    )
+    db.execute(
+        "UPDATE tire_inventory SET tread_depth_mm = ? WHERE id = ?",
+        (latest["tread_depth_mm"] if latest else tread_depth_mm, tire_inventory_id),
+    )
+
+
 @bp.route("/inventario/<int:tire_inventory_id>/inspeccion", methods=["POST"])
 @permission_required("neumaticos", "edit")
 def inventory_add_inspection(tire_inventory_id):
     """18 sep, pedido de Braulio: "debe haber un historial de fecha de la
     inspeccion y medida encontrada" -- registra una medición nueva de
-    cocada y actualiza tire_inventory.tread_depth_mm a la medición más
-    reciente por fecha (no necesariamente la que se acaba de ingresar, si
-    se está registrando una medición atrasada fuera de orden)."""
+    cocada a mano, desde el propio inventario (ver record_tire_inspection()
+    arriba; esta misma función se usa también desde el checklist de
+    Inspecciones cuando se mide la cocada ahí)."""
     tire = query_one("SELECT * FROM tire_inventory WHERE id = ?", (tire_inventory_id,))
     if tire is None:
         abort(404)
@@ -454,19 +510,7 @@ def inventory_add_inspection(tire_inventory_id):
     vehicle_plate_at_inspection = current_assignment["vehicle_plate"] if current_assignment else None
 
     db = get_db()
-    db.execute(
-        """INSERT INTO tire_inspections (tire_inventory_id, inspection_date, tread_depth_mm,
-           vehicle_plate_at_inspection, notes) VALUES (?, ?, ?, ?, ?)""",
-        (tire_inventory_id, inspection_date, tread_depth_mm, vehicle_plate_at_inspection, notes or None),
-    )
-    latest = query_one(
-        "SELECT tread_depth_mm FROM tire_inspections WHERE tire_inventory_id = ? ORDER BY inspection_date DESC, id DESC LIMIT 1",
-        (tire_inventory_id,),
-    )
-    db.execute(
-        "UPDATE tire_inventory SET tread_depth_mm = ? WHERE id = ?",
-        (latest["tread_depth_mm"] if latest else tread_depth_mm, tire_inventory_id),
-    )
+    record_tire_inspection(db, tire_inventory_id, inspection_date, tread_depth_mm, vehicle_plate_at_inspection, notes)
     db.commit()
     flash("Medición de cocada registrada.", "success")
     return redirect(url_for("neumaticos.inventory_detail", tire_inventory_id=tire_inventory_id))
