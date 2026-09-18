@@ -1,0 +1,61 @@
+{% extends 'base.html' %}
+{% block title %}Generar archivo Telecrédito{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Generar archivo Telecrédito — {{ payment_type_labels.get(payment_type, payment_type) }}</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('pagos_personal.list_view', period=period, staff_id=staff_id, payment_type=payment_type, status=status, q=q) }}" class="btn btn-secondary">← Volver</a>
+  </div>
+</div>
+<p class="muted mt-0">
+  Se van a incluir <strong>{{ count }}</strong> pago(s) del periodo {{ period }} por un total de <strong>{{ total_amount|money }}</strong>.
+  El archivo sale siempre de un solo tipo (planilla u honorarios nunca van mezclados) y solo de los pagos que calcen con los filtros que tenías puestos.
+</p>
+
+<form class="form panel" method="post" action="{{ url_for('pagos_personal.telecredito_generate') }}" style="max-width:560px;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="period" value="{{ period }}">
+  <input type="hidden" name="staff_id" value="{{ staff_id or '' }}">
+  <input type="hidden" name="payment_type" value="{{ payment_type }}">
+  <input type="hidden" name="status" value="{{ status }}">
+  <input type="hidden" name="q" value="{{ q }}">
+
+  <label>Cuenta de cargo (desde la que se paga) *
+    <select name="cuenta_cargo_id" required>
+      <option value="">-- Elige --</option>
+      {% for a in accounts %}
+      <option value="{{ a.id }}">{{ a.company_name }} — {{ a.bank_name }} {{ a.account_type|title }} {{ 'S/' if a.currency == 'S' else 'US$' }} ...{{ a.account_number[-4:] }}{{ ' (' ~ a.alias ~ ')' if a.alias }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <p class="muted" style="margin-top:-8px;">Solo se van a incluir los pagos cuya moneda coincida con la de la cuenta elegida — si hay pagos en otra moneda, se avisa y se dejan fuera. Si te falta una cuenta, agrégala en <a href="{{ url_for('catalogos.bancos_list') }}">Catálogos &gt; Bancos</a>.</p>
+
+  <label>Fecha de proceso (fecha de pago de la planilla) *
+    <input type="date" name="fecha_proceso" value="{{ today }}" min="{{ today }}" required>
+  </label>
+
+  <label>Referencia de la planilla
+    <input type="text" name="referencia_planilla" value="{{ default_reference }}" maxlength="40">
+  </label>
+
+  {% if payment_type == 'PLANILLA' %}
+  <label>Subtipo de planilla de haberes
+    <select name="subtipo_planilla">
+      {% for code, label in subtipo_choices %}
+      <option value="{{ code }}" {{ 'selected' if code == default_subtipo }}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% else %}
+  <label style="flex-direction: row; align-items: center; gap: 8px;">
+    <input type="checkbox" name="exonerar_itf" value="1" style="width:auto;">
+    Exonerar ITF (marcar solo si la cuenta de abono es del mismo titular que la cuenta de cargo)
+  </label>
+  {% endif %}
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Generar y descargar .txt</button>
+    <a href="{{ url_for('pagos_personal.list_view', period=period, staff_id=staff_id, payment_type=payment_type, status=status, q=q) }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+{% endblock %}

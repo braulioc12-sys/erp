@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+{% block title %}Bancos{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Bancos</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('catalogos.list_view') }}" class="btn btn-secondary">← Volver a Catálogos</a>
+  </div>
+</div>
+<p class="muted mt-0">Cuentas de cargo (desde las que se paga) por cada empresa del grupo. Se usan al generar el archivo de Telecrédito en Pagos personal — ahí se elige una de estas cuentas y sus datos completan la cabecera del archivo automáticamente.</p>
+
+<div class="panel" style="max-width:760px;">
+  <form method="post" action="{{ url_for('catalogos.bancos_add') }}" class="filters" style="margin-bottom:18px; flex-wrap:wrap;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label style="flex:1; min-width:180px;">Empresa
+      <input type="text" name="company_name" placeholder="Ej. Harraso Transport" required>
+    </label>
+    <label>Banco
+      <input type="text" name="bank_name" placeholder="BCP" value="BCP">
+    </label>
+    <label>Tipo de cuenta
+      <select name="account_type" required>
+        <option value="">-- Elige --</option>
+        <option value="CORRIENTE">Cuenta Corriente</option>
+        <option value="MAESTRA">Cuenta Maestra</option>
+      </select>
+    </label>
+    <label>Moneda
+      <select name="currency" required>
+        <option value="">-- Elige --</option>
+        <option value="S">Soles</option>
+        <option value="D">Dólares</option>
+      </select>
+    </label>
+    <label>Número de cuenta
+      <input type="text" name="account_number" placeholder="Solo dígitos" required>
+    </label>
+    <label style="flex:1; min-width:160px;">Alias (opcional)
+      <input type="text" name="alias" placeholder="Ej. Cuenta planilla">
+    </label>
+    <button type="submit" class="btn btn-primary">+ Agregar</button>
+  </form>
+  <p class="muted" style="margin-top:-10px; margin-bottom:14px;">Telecrédito exige que la cuenta de cargo sea Corriente o Maestra — no admite Ahorros.</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Empresa</th><th>Banco</th><th>Tipo</th><th>Moneda</th><th>Cuenta</th><th>Alias</th><th>Estado</th><th></th></tr></thead>
+      <tbody>
+        {% for a in accounts %}
+        <tr>
+          <td>{{ a.company_name }}</td>
+          <td>{{ a.bank_name }}</td>
+          <td>{{ account_type_labels.get(a.account_type, a.account_type) }}</td>
+          <td>{{ currency_labels.get(a.currency, a.currency) }}</td>
+          <td>{{ a.account_number }}</td>
+          <td>{{ a.alias or '—' }}</td>
+          <td><span class="badge {{ 'badge-activo' if a.active else 'badge-inactivo' }}">{{ 'Activo' if a.active else 'Inactivo' }}</span></td>
+          <td>
+            <form method="post" action="{{ url_for('catalogos.bancos_toggle', account_id=a.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-secondary btn-sm" type="submit">{{ 'Desactivar' if a.active else 'Reactivar' }}</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="table-empty">No hay cuentas registradas todavía.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted" style="margin-top:12px; margin-bottom:0;">Desactivar una cuenta la quita de las opciones al generar un archivo nuevo de Telecrédito, pero no afecta los archivos ya generados con ella.</p>
+</div>
+{% endblock %}

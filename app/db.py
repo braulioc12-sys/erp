@@ -498,6 +498,13 @@ COLUMN_MIGRATIONS = [
     # -- mismo motivo que mechanic_id en maintenance_record_jobs más arriba.
     ("maintenance_record_job_crew", "mechanic_id", "INTEGER"),
     ("maintenance_record_job_crew", "mechanic_name", "TEXT"),
+    # 18 sep, 2da ronda (archivo real de Telecrédito de Braulio) -- ver el
+    # comentario largo junto a estas columnas en schema.sql (CREATE TABLE
+    # staff). Sin CHECK acá a propósito, mismo criterio que el resto de
+    # esta lista (SQLite no deja agregar un CHECK constraint vía ALTER
+    # TABLE de forma simple) -- se valida en app/routes/pagos_personal.py.
+    ("staff", "company", "TEXT"),
+    ("staff", "account_type", "TEXT NOT NULL DEFAULT 'AHORROS'"),
 ]
 
 

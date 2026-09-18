@@ -29,8 +29,8 @@
     <table>
       <thead>
         <tr>
-          <th>Nombre</th><th>Documento</th><th>Cargo</th><th>Conductor vinculado</th>
-          <th>Banco</th><th>Cuenta</th><th>CCI</th><th>Moneda</th><th></th><th></th>
+          <th>Nombre</th><th>Documento</th><th>Cargo</th><th>Empresa</th><th>Conductor vinculado</th>
+          <th>Banco</th><th>Cuenta</th><th>Tipo</th><th>CCI</th><th>Moneda</th><th></th><th></th>
         </tr>
       </thead>
       <tbody>
@@ -39,9 +39,11 @@
           <td>{{ s.name }}</td>
           <td>{{ s.document_type }} {{ s.document_number or '—' }}</td>
           <td>{{ s.position or '—' }}</td>
+          <td>{{ s.company or '—' }}</td>
           <td>{{ s.driver_name or '—' }}</td>
           <td>{{ s.bank_name or '—' }}</td>
           <td>{{ s.account_number or '—' }}</td>
+          <td>{{ s.account_type|title if s.account_number else '—' }}</td>
           <td>{{ s.cci or '—' }}</td>
           <td>{{ 'Soles' if s.currency == 'S' else 'Dólares' }}</td>
           <td>
@@ -59,7 +61,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="10" class="table-empty">No hay personas registradas todavía.</td></tr>
+        <tr><td colspan="12" class="table-empty">No hay personas registradas todavía.</td></tr>
         {% endfor %}
       </tbody>
     </table>

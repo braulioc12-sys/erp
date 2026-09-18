@@ -19,14 +19,14 @@ Dos partes:
    solo tipo a la vez — planilla y honorarios nunca van en el mismo
    archivo.
 
-IMPORTANTE sobre el export a Telecrédito: BCP tiene formatos DISTINTOS
-según el servicio (pago de planilla/sueldos vs. pago a terceros/
-honorarios), con columnas y códigos específicos de su plantilla real. El
-export de acá (`export_telecredito`) genera un Excel con los datos
-correctos (persona, documento, banco, cuenta/CCI, moneda, monto, concepto)
-pero en un formato "borrador" — falta calzarlo exacto con la plantilla que
-entrega BCP para cada servicio. Se marca así en el propio archivo hasta que
-Braulio la mande."""
+Sobre el export a Telecrédito (18 sep, 2da ronda): BCP tiene formatos
+DISTINTOS de archivo de texto según el servicio (Planilla de Haberes vs.
+Planilla de Proveedores/honorarios), cada uno con sus propias posiciones y
+un checksum obligatorio. `telecredito_configure()` pide los datos de la
+cabecera (cuenta de cargo, fecha, referencia) y `telecredito_generate()`
+arma el .txt exacto con `app/telecredito.py` — verificado byte a byte
+contra un archivo real que mandó Braulio antes de darlo por bueno (ver la
+nota grande al inicio de ese módulo)."""
 import os
 import uuid
 from datetime import datetime
@@ -46,6 +46,7 @@ PAYMENT_TYPE_LABELS = {
 }
 DOCUMENT_TYPE_CHOICES = ["DNI", "CE", "RUC"]
 CURRENCY_LABELS = {"S": "Soles", "D": "Dólares"}
+ACCOUNT_TYPE_LABELS = {"AHORROS": "Ahorros", "CORRIENTE": "Corriente", "MAESTRA": "Maestra"}
 
 ALLOWED_RECEIPT_EXTENSIONS = {".png", ".jpg", ".jpeg", ".pdf", ".webp"}
 RECEIPT_MIME_TO_EXTENSION = {
@@ -98,7 +99,8 @@ def _filters_from_args(args):
 
 def _filtered_payments(period, staff_id, payment_type, status, q):
     sql = """SELECT p.*, s.name as staff_name, s.document_type, s.document_number,
-                    s.bank_name, s.account_number, s.cci, s.currency as staff_currency
+                    s.bank_name, s.account_number, s.account_type, s.cci,
+                    s.currency as staff_currency, s.company as staff_company
              FROM staff_payments p JOIN staff s ON s.id = p.staff_id
              WHERE p.period = ?"""
     params = [period]
@@ -301,15 +303,17 @@ def export_excel():
     )
 
 
-@bp.route("/exportar/telecredito")
+@bp.route("/exportar/telecredito/configurar")
 @permission_required("pagos_personal", "edit")
-def export_telecredito():
-    """Genera el Excel para cargar en Telecrédito BCP — SIEMPRE de un solo
-    payment_type a la vez (planilla y honorarios nunca van en el mismo
-    archivo, pedido explícito de Braulio). Ver la nota grande al inicio de
-    este archivo: el formato de acá es un borrador con los datos correctos
-    mientras se confirma la plantilla exacta que da el banco."""
-    from app.reports import build_telecredito_workbook
+def telecredito_configure():
+    """Paso previo a generar el archivo de Telecrédito: se eligen los
+    datos que van en la cabecera (cuenta de cargo, fecha de proceso,
+    referencia, y para Planilla el subtipo) antes de armar el .txt — ver
+    telecredito_generate() y app/telecredito.py. 18 sep, 2da ronda: antes
+    de esto el botón generaba directo un Excel "borrador"; ahora que se
+    tiene la ficha real de BCP y un archivo de ejemplo de Braulio, se
+    genera el .txt exacto que pide el banco."""
+    from app.telecredito import DEFAULT_SUBTIPO_PLANILLA, SUBTIPO_PLANILLA_CHOICES
 
     period, staff_id, payment_type, status, q = _filters_from_args(request.args)
     if payment_type not in PAYMENT_TYPE_LABELS:
@@ -321,33 +325,133 @@ def export_telecredito():
     # status=PAGADO o dejarlo vacío desde la pantalla.
     effective_status = status or "PENDIENTE"
     payments = _filtered_payments(period, staff_id, payment_type, effective_status, q)
-
-    missing_bank_data = [p for p in payments if not p["cci"]]
-    if missing_bank_data:
-        names = ", ".join(p["staff_name"] for p in missing_bank_data)
-        flash(
-            f"Estas personas no tienen CCI registrado en el catálogo de Personal, así que no se pudieron incluir: {names}.",
-            "error",
-        )
-        payments = [p for p in payments if p["cci"]]
-
     if not payments:
         flash("No hay pagos con esos filtros para generar el archivo.", "error")
         return redirect(url_for("pagos_personal.list_view", period=period, staff_id=staff_id, payment_type=payment_type, status=status, q=q))
 
-    buffer = build_telecredito_workbook(payments, payment_type=payment_type, payment_type_labels=PAYMENT_TYPE_LABELS)
+    accounts = query_all("SELECT * FROM company_bank_accounts WHERE active = 1 ORDER BY company_name, sort_order")
+    if not accounts:
+        flash("Todavía no hay ninguna cuenta de cargo registrada — agrégala primero en Catálogos > Bancos.", "error")
+        return redirect(url_for("catalogos.bancos_list"))
+
+    return render_template(
+        "pagos_personal/telecredito_configure.html",
+        payments=payments, total_amount=sum(p["amount"] or 0 for p in payments), count=len(payments),
+        period=period, staff_id=staff_id, payment_type=payment_type, status=status, q=q,
+        payment_type_labels=PAYMENT_TYPE_LABELS, accounts=accounts,
+        subtipo_choices=SUBTIPO_PLANILLA_CHOICES, default_subtipo=DEFAULT_SUBTIPO_PLANILLA,
+        default_reference=f"{PAYMENT_TYPE_LABELS[payment_type].upper()} {period}", today=today_str(),
+    )
+
+
+@bp.route("/exportar/telecredito/generar", methods=["POST"])
+@permission_required("pagos_personal", "edit")
+def telecredito_generate():
+    """Arma y descarga el .txt de Telecrédito con los datos elegidos en
+    telecredito_configure(). Excluye (con aviso, sin bloquear el resto)
+    cualquier pago cuya persona no tenga cuenta/CCI, cuya moneda no
+    coincida con la cuenta de cargo elegida (el banco exige que todo el
+    archivo sea de una sola moneda), o cuyo tipo de documento no sea válido
+    para este servicio (Planilla no admite RUC)."""
+    from app.telecredito import (
+        DEFAULT_SUBTIPO_PLANILLA,
+        DOCUMENT_TYPE_CODES_HABERES,
+        DOCUMENT_TYPE_CODES_PROVEEDORES,
+        abono_bank_fields,
+        build_haberes_txt,
+        build_proveedores_txt,
+    )
+
+    if not validate_csrf():
+        abort(400)
+
+    period, staff_id, payment_type, status, q = _filters_from_args(request.form)
+    if payment_type not in PAYMENT_TYPE_LABELS:
+        abort(400)
+    redirect_to_configure = lambda: redirect(url_for(
+        "pagos_personal.telecredito_configure", period=period, staff_id=staff_id,
+        payment_type=payment_type, status=status, q=q,
+    ))
+
+    effective_status = status or "PENDIENTE"
+    payments = _filtered_payments(period, staff_id, payment_type, effective_status, q)
+    if not payments:
+        flash("No hay pagos con esos filtros para generar el archivo.", "error")
+        return redirect_to_configure()
+
+    account_id = request.form.get("cuenta_cargo_id", type=int)
+    cuenta_cargo = query_one("SELECT * FROM company_bank_accounts WHERE id = ? AND active = 1", (account_id,))
+    if cuenta_cargo is None:
+        flash("Elige una cuenta de cargo válida.", "error")
+        return redirect_to_configure()
+
+    fecha_proceso = request.form.get("fecha_proceso") or today_str()
+    if fecha_proceso < today_str():
+        flash("La fecha de proceso no puede ser anterior a hoy — lo exige el banco.", "error")
+        return redirect_to_configure()
+    referencia_planilla = (
+        request.form.get("referencia_planilla", "").strip()
+        or f"{PAYMENT_TYPE_LABELS[payment_type].upper()} {period}"
+    )
+
+    valid_doc_codes = DOCUMENT_TYPE_CODES_HABERES if payment_type == "PLANILLA" else DOCUMENT_TYPE_CODES_PROVEEDORES
+
+    excluded_bank, excluded_currency, excluded_doc = [], [], []
+    prepared = []
+    for row in payments:
+        p = dict(row)
+        if p["staff_currency"] != cuenta_cargo["currency"]:
+            excluded_currency.append(p["staff_name"])
+            continue
+        if p["document_type"] not in valid_doc_codes:
+            excluded_doc.append(p["staff_name"])
+            continue
+        bank_type, bank_value, is_interbank = abono_bank_fields(p["cci"], p["account_number"], p["account_type"])
+        if not bank_value:
+            excluded_bank.append(p["staff_name"])
+            continue
+        p["bank_type"], p["bank_value"], p["bank_is_interbank"] = bank_type, bank_value, is_interbank
+        prepared.append(p)
+
+    if excluded_bank:
+        flash(f"Sin cuenta ni CCI registrado en el catálogo de Personal, no se pudieron incluir: {', '.join(excluded_bank)}.", "error")
+    if excluded_currency:
+        moneda = CURRENCY_LABELS.get(cuenta_cargo["currency"], cuenta_cargo["currency"])
+        flash(f"Su moneda no coincide con la cuenta de cargo elegida ({moneda}), no se pudieron incluir: {', '.join(excluded_currency)}.", "error")
+    if excluded_doc:
+        flash(f"Su tipo de documento no es válido para este servicio de Telecrédito, no se pudieron incluir: {', '.join(excluded_doc)}.", "error")
+
+    if not prepared:
+        flash("No quedó ningún pago para incluir en el archivo — revisa los avisos de arriba.", "error")
+        return redirect_to_configure()
+
+    default_company_name = cuenta_cargo["company_name"]
+    if payment_type == "PLANILLA":
+        subtipo = request.form.get("subtipo_planilla") or DEFAULT_SUBTIPO_PLANILLA
+        content = build_haberes_txt(
+            prepared, cuenta_cargo=cuenta_cargo, fecha_proceso=fecha_proceso,
+            subtipo_planilla=subtipo, referencia_planilla=referencia_planilla,
+            default_company_name=default_company_name,
+        )
+        tipo_slug = "haberes"
+    else:
+        content = build_proveedores_txt(
+            prepared, cuenta_cargo=cuenta_cargo, fecha_proceso=fecha_proceso,
+            referencia_planilla=referencia_planilla, exonerar_itf=(request.form.get("exonerar_itf") == "1"),
+            default_company_name=default_company_name,
+        )
+        tipo_slug = "proveedores"
 
     now = datetime.now().strftime("%Y%m%d%H%M")
     execute(
-        f"UPDATE staff_payments SET exported_at = ? WHERE id IN ({','.join('?' * len(payments))})",
-        [today_str()] + [p["id"] for p in payments],
+        f"UPDATE staff_payments SET exported_at = ? WHERE id IN ({','.join('?' * len(prepared))})",
+        [today_str()] + [p["id"] for p in prepared],
     )
 
-    tipo_slug = "planilla" if payment_type == "PLANILLA" else "honorarios"
-    filename = f"telecredito_{tipo_slug}_{period}_{now}.xlsx"
+    filename = f"telecredito_{tipo_slug}_{period}_{now}.txt"
     return Response(
-        buffer.getvalue(),
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        content,
+        mimetype="text/plain",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
@@ -376,6 +480,7 @@ def _staff_form_context(staff=None):
         "drivers": query_all("SELECT id, name FROM drivers WHERE status = 'ACTIVO' ORDER BY name"),
         "document_type_choices": DOCUMENT_TYPE_CHOICES,
         "currency_labels": CURRENCY_LABELS,
+        "account_type_labels": ACCOUNT_TYPE_LABELS,
     }
 
 
@@ -390,15 +495,18 @@ def staff_new():
             flash("El nombre es obligatorio.", "error")
             return render_template("pagos_personal/staff_form.html", **_staff_form_context())
         driver_id = request.form.get("driver_id", type=int) or None
+        account_type = request.form.get("account_type") or "AHORROS"
+        if account_type not in ACCOUNT_TYPE_LABELS:
+            account_type = "AHORROS"
         execute(
-            """INSERT INTO staff (name, document_type, document_number, position, driver_id,
-               bank_name, account_number, cci, currency, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO staff (name, document_type, document_number, position, company, driver_id,
+               bank_name, account_number, account_type, cci, currency, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 name, request.form.get("document_type") or "DNI", request.form.get("document_number", "").strip() or None,
-                request.form.get("position", "").strip() or None, driver_id,
+                request.form.get("position", "").strip() or None, request.form.get("company", "").strip() or None, driver_id,
                 request.form.get("bank_name", "").strip() or None, request.form.get("account_number", "").strip() or None,
-                request.form.get("cci", "").strip() or None, request.form.get("currency") or "S",
+                account_type, request.form.get("cci", "").strip() or None, request.form.get("currency") or "S",
                 request.form.get("notes", "").strip() or None,
             ),
         )
@@ -421,14 +529,17 @@ def staff_edit(staff_id):
             flash("El nombre es obligatorio.", "error")
             return render_template("pagos_personal/staff_form.html", **_staff_form_context(staff))
         driver_id = request.form.get("driver_id", type=int) or None
+        account_type = request.form.get("account_type") or "AHORROS"
+        if account_type not in ACCOUNT_TYPE_LABELS:
+            account_type = "AHORROS"
         execute(
-            """UPDATE staff SET name = ?, document_type = ?, document_number = ?, position = ?, driver_id = ?,
-               bank_name = ?, account_number = ?, cci = ?, currency = ?, notes = ? WHERE id = ?""",
+            """UPDATE staff SET name = ?, document_type = ?, document_number = ?, position = ?, company = ?, driver_id = ?,
+               bank_name = ?, account_number = ?, account_type = ?, cci = ?, currency = ?, notes = ? WHERE id = ?""",
             (
                 name, request.form.get("document_type") or "DNI", request.form.get("document_number", "").strip() or None,
-                request.form.get("position", "").strip() or None, driver_id,
+                request.form.get("position", "").strip() or None, request.form.get("company", "").strip() or None, driver_id,
                 request.form.get("bank_name", "").strip() or None, request.form.get("account_number", "").strip() or None,
-                request.form.get("cci", "").strip() or None, request.form.get("currency") or "S",
+                account_type, request.form.get("cci", "").strip() or None, request.form.get("currency") or "S",
                 request.form.get("notes", "").strip() or None, staff_id,
             ),
         )

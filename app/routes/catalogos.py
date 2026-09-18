@@ -156,3 +156,78 @@ def grifos_toggle(station_id):
     execute("UPDATE fuel_stations SET active = ? WHERE id = ?", (0 if station["active"] else 1, station_id))
     flash("Actualizado." if station["active"] else "Reactivado.", "success")
     return redirect(url_for("catalogos.grifos_list"))
+
+
+# --- Bancos (18 sep, 2da ronda, pedido de Braulio al armar el archivo real
+# de Telecrédito: "Hay que crear archivos por empresa, Harraso y BRMS
+# tienen cuentas distintas. En el menu de catalogos pon la parte de bancos
+# en la cual yo pueda registrar las cuentas de cada empresa y estas se
+# seleccionen a la hora de crear el archivo y se llenen sus datos.") --
+# cuentas de cargo (la cuenta desde la que se paga) por empresa del grupo,
+# usadas al generar el archivo de Telecrédito en Pagos personal (ver
+# app/routes/pagos_personal.py telecredito_configure/telecredito_generate
+# y app/telecredito.py). Mismo patrón que Grifos arriba (tabla propia,
+# activar/desactivar en vez de borrar). ---
+
+BANK_ACCOUNT_TYPE_LABELS = {"CORRIENTE": "Cuenta Corriente", "MAESTRA": "Cuenta Maestra"}
+BANK_CURRENCY_LABELS = {"S": "Soles", "D": "Dólares"}
+
+
+@bp.route("/bancos")
+@permission_required("catalogos", "view")
+def bancos_list():
+    accounts = query_all("SELECT * FROM company_bank_accounts ORDER BY company_name, sort_order")
+    return render_template(
+        "catalogos/bancos.html", accounts=accounts,
+        account_type_labels=BANK_ACCOUNT_TYPE_LABELS, currency_labels=BANK_CURRENCY_LABELS,
+    )
+
+
+@bp.route("/bancos/agregar", methods=["POST"])
+@permission_required("catalogos", "edit")
+def bancos_add():
+    if not validate_csrf():
+        abort(400)
+    company_name = request.form.get("company_name", "").strip()
+    bank_name = request.form.get("bank_name", "").strip() or "BCP"
+    account_type = request.form.get("account_type", "")
+    currency = request.form.get("currency", "")
+    account_number = "".join(ch for ch in request.form.get("account_number", "") if ch.isdigit())
+    alias = request.form.get("alias", "").strip() or None
+
+    errors = []
+    if not company_name:
+        errors.append("Indica la empresa dueña de la cuenta.")
+    if account_type not in BANK_ACCOUNT_TYPE_LABELS:
+        errors.append("Elige el tipo de cuenta (Corriente o Maestra) — Telecrédito no admite Ahorros como cuenta de cargo.")
+    if currency not in BANK_CURRENCY_LABELS:
+        errors.append("Elige la moneda de la cuenta.")
+    if not account_number:
+        errors.append("Indica el número de cuenta (solo dígitos).")
+    if errors:
+        for e in errors:
+            flash(e, "error")
+        return redirect(url_for("catalogos.bancos_list"))
+
+    max_order = query_one("SELECT COALESCE(MAX(sort_order), -1) m FROM company_bank_accounts")["m"]
+    execute(
+        """INSERT INTO company_bank_accounts
+           (company_name, bank_name, account_type, currency, account_number, alias, sort_order)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (company_name, bank_name, account_type, currency, account_number, alias, max_order + 1),
+    )
+    flash(f'Cuenta de "{company_name}" agregada.', "success")
+    return redirect(url_for("catalogos.bancos_list"))
+
+
+@bp.route("/bancos/<int:account_id>/alternar", methods=["POST"])
+@permission_required("catalogos", "edit")
+def bancos_toggle(account_id):
+    if not validate_csrf():
+        abort(400)
+    account = query_one("SELECT * FROM company_bank_accounts WHERE id = ?", (account_id,))
+    if account is None:
+        abort(404)
+    execute("UPDATE company_bank_accounts SET active = ? WHERE id = ?", (0 if account["active"] else 1, account_id))
+    flash("Actualizado." if account["active"] else "Reactivado.", "success")
+    return redirect(url_for("catalogos.bancos_list"))

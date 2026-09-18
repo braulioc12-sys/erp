@@ -603,9 +603,8 @@ def build_staff_payments_workbook(payments, company_name, period, payment_type_l
     """Reporte de Pagos personal (18 sep, módulo nuevo — ver
     app/routes/pagos_personal.py): un Excel con estilo, igual que los demás
     reportes de la app, con todos los pagos del periodo/filtros elegidos.
-    Distinto del export a Telecrédito (build_telecredito_workbook) — este
-    es un reporte para revisar/archivar, no un archivo para cargar al
-    banco."""
+    Distinto del export a Telecrédito (app/telecredito.py) — este es un
+    reporte para revisar/archivar, no el archivo que se sube al banco."""
     wb = Workbook()
     ws = wb.active
     ws.title = "Pagos personal"
@@ -676,85 +675,3 @@ def build_staff_payments_workbook(payments, company_name, period, payment_type_l
     buffer.seek(0)
     return buffer
 
-
-# 18 sep: columnas "borrador" para el archivo de carga masiva de
-# Telecrédito BCP -- pendiente de calzar exacto con la plantilla real que
-# entrega el banco para cada servicio (pago de planilla vs. pago a
-# terceros/honorarios tienen formatos distintos). Ver la nota grande al
-# inicio de app/routes/pagos_personal.py.
-TELECREDITO_COLUMNS = [
-    "Tipo Doc.", "Nro. Documento", "Nombres y Apellidos / Razón Social",
-    "Banco", "Nro. de Cuenta", "CCI", "Moneda", "Importe", "Concepto",
-]
-TELECREDITO_COLUMN_WIDTHS = [10, 16, 34, 18, 18, 22, 9, 14, 30]
-
-
-def build_telecredito_workbook(payments, payment_type, payment_type_labels):
-    """Archivo "borrador" para cargar pagos masivos en Telecrédito BCP, ya
-    sea de planilla o de honorarios/terceros -- SIEMPRE de un solo
-    payment_type (nunca junta los dos, pedido explícito de Braulio). Sin
-    el estilo de los demás reportes a propósito (sin logo/encabezado de
-    empresa, sin fusionar celdas) -- una tabla lo más simple posible, más
-    parecida a lo que suelen pedir los formatos de carga masiva de bancos.
-
-    OJO: las columnas de acá son las que Braulio necesita ver (persona,
-    documento, banco, cuenta/CCI, moneda, monto, concepto) pero el orden y
-    los encabezados EXACTOS que exige Telecrédito pueden ser distintos --
-    hay que confirmarlos con la plantilla real del banco antes de subir
-    este archivo. Por eso la primera fila del archivo trae una advertencia
-    visible en rojo."""
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Telecredito"
-
-    last_col_letter = get_column_letter(len(TELECREDITO_COLUMNS))
-
-    ws.merge_cells(f"A1:{last_col_letter}1")
-    warning_cell = ws["A1"]
-    warning_cell.value = (
-        "BORRADOR — verifica el orden y los encabezados exactos con la plantilla real de Telecrédito "
-        "antes de subir este archivo al banco. Tipo: " + payment_type_labels.get(payment_type, payment_type)
-    )
-    warning_cell.font = Font(bold=True, color="C0392B")
-    warning_cell.fill = PatternFill("solid", fgColor="FDECEA")
-
-    header_row = 2
-    for idx, title in enumerate(TELECREDITO_COLUMNS, start=1):
-        cell = ws.cell(row=header_row, column=idx, value=title)
-        cell.font = Font(bold=True, color=COLOR_HEADER_TEXT)
-        cell.fill = PatternFill("solid", fgColor=COLOR_PRIMARY)
-        cell.border = _thin_border("all")
-    ws.freeze_panes = f"A{header_row + 1}"
-
-    row = header_row + 1
-    total = 0.0
-    for p in payments:
-        ws.cell(row=row, column=1, value=p["document_type"])
-        ws.cell(row=row, column=2, value=p["document_number"] or "")
-        ws.cell(row=row, column=3, value=p["staff_name"])
-        ws.cell(row=row, column=4, value=p["bank_name"] or "")
-        ws.cell(row=row, column=5, value=p["account_number"] or "")
-        ws.cell(row=row, column=6, value=p["cci"] or "")
-        ws.cell(row=row, column=7, value="Soles" if p["staff_currency"] == "S" else "Dólares")
-        amount_cell = ws.cell(row=row, column=8, value=float(p["amount"] or 0))
-        amount_cell.number_format = CURRENCY_FORMAT
-        ws.cell(row=row, column=9, value=p["concept"] or "")
-        for col in range(1, len(TELECREDITO_COLUMNS) + 1):
-            ws.cell(row=row, column=col).border = _thin_border("all")
-        total += p["amount"] or 0
-        row += 1
-
-    row += 1
-    ws.cell(row=row, column=7, value="TOTAL").font = Font(bold=True)
-    total_cell = ws.cell(row=row, column=8, value=total)
-    total_cell.number_format = CURRENCY_FORMAT
-    total_cell.font = Font(bold=True)
-
-    for idx, width in enumerate(TELECREDITO_COLUMN_WIDTHS, start=1):
-        ws.column_dimensions[get_column_letter(idx)].width = width
-    ws.sheet_view.showGridLines = False
-
-    buffer = io.BytesIO()
-    wb.save(buffer)
-    buffer.seek(0)
-    return buffer

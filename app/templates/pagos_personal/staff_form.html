@@ -23,9 +23,15 @@
     </label>
   </div>
 
-  <label>Cargo
-    <input type="text" name="position" value="{{ staff.position if staff else '' }}" placeholder="Ej. Asistente contable, Chofer, Practicante...">
-  </label>
+  <div class="form-row">
+    <label>Cargo
+      <input type="text" name="position" value="{{ staff.position if staff else '' }}" placeholder="Ej. Asistente contable, Chofer, Practicante...">
+    </label>
+    <label>Empresa que la emplea (opcional)
+      <input type="text" name="company" value="{{ staff.company if staff else '' }}" placeholder="Ej. Harraso Transport">
+    </label>
+  </div>
+  <p class="muted" style="margin-top:-8px;">Si se deja vacío, el archivo de Telecrédito usa el nombre de la empresa dueña de la cuenta que elijas al generarlo — solo hace falta completarlo si esta persona depende de una empresa distinta a esa.</p>
 
   <label>Conductor vinculado (opcional)
     <select name="driver_id">
@@ -38,7 +44,7 @@
   <p class="muted" style="margin-top:-8px;">Si esta persona también es chofer, enlázala con su registro de Conductores — así no se duplican sus datos entre los dos catálogos.</p>
 
   <h2 style="margin-top:20px;">Datos bancarios</h2>
-  <p class="muted" style="margin-top:-8px;">Se usan para armar el archivo de Telecrédito — sin CCI, esta persona no se puede incluir ahí.</p>
+  <p class="muted" style="margin-top:-8px;">Se usan para armar el archivo de Telecrédito — sin número de cuenta o CCI, esta persona no se puede incluir ahí.</p>
 
   <div class="form-row">
     <label>Banco
@@ -57,10 +63,19 @@
     <label>Número de cuenta
       <input type="text" name="account_number" value="{{ staff.account_number if staff else '' }}">
     </label>
-    <label>CCI (Código de Cuenta Interbancario)
-      <input type="text" name="cci" value="{{ staff.cci if staff else '' }}" placeholder="20 dígitos">
+    <label>Tipo de cuenta
+      <select name="account_type">
+        {% for code, label in account_type_labels.items() %}
+        <option value="{{ code }}" {{ 'selected' if staff and staff.account_type == code or (not staff and code == 'AHORROS') }}>{{ label }}</option>
+        {% endfor %}
+      </select>
     </label>
   </div>
+  <p class="muted" style="margin-top:-8px;">El tipo de cuenta solo se usa si se paga con el número de cuenta de arriba — si hay CCI, el pago siempre sale como cuenta interbancaria.</p>
+
+  <label>CCI (Código de Cuenta Interbancario)
+    <input type="text" name="cci" value="{{ staff.cci if staff else '' }}" placeholder="20 dígitos">
+  </label>
 
   <label>Notas
     <textarea name="notes">{{ staff.notes if staff else '' }}</textarea>

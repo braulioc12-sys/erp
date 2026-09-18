@@ -1403,8 +1403,24 @@ CREATE TABLE IF NOT EXISTS staff (
     -- declarada tal cual, sin pasar por ALTER TABLE), se deja la nota
     -- igual por si algún día se necesita agregar otra columna así acá.
     driver_id INTEGER REFERENCES drivers(id),
+    -- 18 sep, 2da ronda (archivo real de Telecrédito de Braulio: los pagos
+    -- de esta persona se hacen desde la cuenta de OTRA empresa del grupo,
+    -- ej. "pagamos la planilla a traves de nosotros" -- Harraso/BRMS pagan
+    -- por una empresa hermana). Va en el archivo de Telecrédito como
+    -- "Referencia para el beneficiario" -- si queda vacío, se usa el
+    -- nombre de la empresa dueña de la cuenta de cargo elegida al generar
+    -- el archivo (ver app/telecredito.py). NO es la empresa que paga, es
+    -- la que figura como empleadora de esta persona.
+    company TEXT,
     bank_name TEXT,
     account_number TEXT,
+    -- Tipo de la cuenta de ABONO (para el archivo de Telecrédito) --
+    -- Ahorros por defecto porque es lo que usa Braulio para todo su
+    -- personal en el archivo real que mandó de ejemplo. Solo aplica
+    -- cuando se paga con account_number; si hay CCI, el tipo de cuenta es
+    -- siempre "Interbancaria" sin importar este campo (ver
+    -- app/telecredito.py, abono_bank_fields()).
+    account_type TEXT NOT NULL DEFAULT 'AHORROS' CHECK (account_type IN ('AHORROS', 'CORRIENTE', 'MAESTRA')),
     -- Código de Cuenta Interbancario (20 dígitos) -- con esto se puede
     -- pagar a una cuenta de cualquier banco, no solo BCP.
     cci TEXT,
@@ -1472,6 +1488,33 @@ CREATE TABLE IF NOT EXISTS user_permission_overrides (
     UNIQUE (user_id, module, action)
 );
 CREATE INDEX IF NOT EXISTS idx_user_permission_overrides_user ON user_permission_overrides(user_id);
+
+-- 18 sep, 2da ronda (pedido de Braulio, al armar el archivo real de
+-- Telecrédito: "Hay que crear archivos por empresa, Harraso y BRMS tienen
+-- cuentas distintas. En el menu de catalogos pon la parte de bancos en la
+-- cual yo pueda registrar las cuentas de cada empresa y estas se
+-- seleccionen a la hora de crear el archivo y se llenen sus datos.") --
+-- catálogo de "Catálogos > Bancos" (ver app/routes/catalogos.py
+-- bancos_list/bancos_add/bancos_toggle, mismo patrón que fuel_stations
+-- /Grifos). Cada fila es una cuenta de cargo real: al generar el archivo
+-- de Telecrédito (app/routes/pagos_personal.py,
+-- telecredito_configure/telecredito_generate) se elige una de acá y sus
+-- datos completan la cabecera del archivo (ver app/telecredito.py).
+-- account_type NO admite 'AHORROS' -- BCP exige que la cuenta de CARGO
+-- sea Corriente o Maestra (a diferencia de la cuenta de ABONO de cada
+-- persona en staff.account_type, que sí puede ser Ahorros).
+CREATE TABLE IF NOT EXISTS company_bank_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_name TEXT NOT NULL,
+    bank_name TEXT NOT NULL DEFAULT 'BCP',
+    account_type TEXT NOT NULL DEFAULT 'CORRIENTE' CHECK (account_type IN ('CORRIENTE', 'MAESTRA')),
+    currency TEXT NOT NULL DEFAULT 'S' CHECK (currency IN ('S', 'D')),
+    account_number TEXT NOT NULL,
+    alias TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 CREATE INDEX IF NOT EXISTS idx_trips_status ON trips(status);
 CREATE INDEX IF NOT EXISTS idx_trips_client ON trips(client_id);
