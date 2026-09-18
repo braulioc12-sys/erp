@@ -76,7 +76,7 @@
           <td>
             {% for crew in crew_by_job.get(j.job_name, []) %}
             <div style="white-space:nowrap; margin-bottom:2px;">
-              {{ crew.mechanic_count }} × {{ crew.mechanic_type }}
+              {{ crew.mechanic_count }} × {{ crew.mechanic_type }}{% if crew.mechanic_name %} — {{ crew.mechanic_name }}{% endif %}
               {% if can(current_user.roles, 'mantenimiento', 'edit') and not readonly and crew.id %}
               <form method="post" action="{{ url_for('mantenimiento.job_crew_remove', record_id=record.id, crew_id=crew.id) }}" style="display:inline;" onsubmit="return confirm('¿Quitar esta combinación?');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -97,6 +97,12 @@
                   {% for t in mechanic_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
                 </select>
                 <input type="number" name="mechanic_count" min="1" step="1" value="1" style="width:56px;">
+                <select name="mechanic_id" style="width:auto; max-width:160px;" title="Mecánico específico (opcional)">
+                  <option value="">-- Sin asignar --</option>
+                  {% for mech in mechanics %}
+                  <option value="{{ mech.id }}">{{ mech.name }} ({{ mech.mechanic_type }})</option>
+                  {% endfor %}
+                </select>
                 <button type="submit" class="btn btn-secondary btn-sm">Agregar</button>
               </form>
             </details>
@@ -186,6 +192,12 @@
               {% endfor %}
             </select>
             <input type="number" name="crew_count_{{ j.id }}" class="crew-count" min="1" step="1" value="1" style="width:64px;" title="Cantidad de mecánicos">
+            <select name="crew_mechanic_{{ j.id }}" class="crew-mechanic" title="Mecánico específico (opcional)">
+              <option value="">-- Sin asignar --</option>
+              {% for mech in mechanics %}
+              <option value="{{ mech.id }}">{{ mech.name }} ({{ mech.mechanic_type }})</option>
+              {% endfor %}
+            </select>
             <button type="button" class="btn btn-secondary btn-sm remove-crew-row" style="display:none;">✕</button>
           </div>
           <button type="button" class="btn btn-secondary btn-sm add-crew-row" data-job-id="{{ j.id }}">+ Agregar otro tipo de mecánico</button>
@@ -193,6 +205,9 @@
       </div>
       {% endfor %}
       <p class="muted mt-0" id="add-job-search-empty" style="display:none;">Ningún trabajo coincide con la búsqueda.</p>
+      {% if not mechanics %}
+      <p class="muted mt-0">Todavía no hay mecánicos activos en el catálogo — <a href="{{ url_for('mantenimiento.mechanics_list') }}" target="_blank">agrega uno en Mecánicos</a> para poder elegirlo por nombre.</p>
+      {% endif %}
     </div>
     {% endif %}
     {% if available_materials %}
@@ -229,6 +244,7 @@
         var rows = container.querySelectorAll('.crew-row');
         var newRow = rows[0].cloneNode(true);
         newRow.querySelector('.crew-count').value = 1;
+        newRow.querySelector('.crew-mechanic').value = '';
         newRow.querySelector('.remove-crew-row').style.display = '';
         newRow.querySelector('.remove-crew-row').addEventListener('click', function () { newRow.remove(); update(); });
         newRow.querySelector('.crew-type').addEventListener('change', update);

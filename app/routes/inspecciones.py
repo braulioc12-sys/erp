@@ -42,6 +42,17 @@ def list_view():
     return render_template("inspecciones/list.html", inspections=inspections)
 
 
+def _axle_positions(vehicle_type):
+    """18 sep, pedido de Braulio: Neumáticos ahora también rastrea 2
+    posiciones de llanta de repuesto (R1/R2, ver app/tire_positions.py) que
+    no van montadas en ningún eje. La sección de llantas del checklist de
+    Inspecciones ya tiene su propia fila fija de "Llanta de repuesto"
+    (SPARE_TIRE_ITEM, ver app/detailed_checklists.py) -- se sigue usando
+    esa, sin cambios; para no duplicarla con R1/R2, se excluyen acá las
+    posiciones sin coordenada (que son justamente las de repuesto)."""
+    return [p for p in get_positions(vehicle_type) if p.get("x") is not None]
+
+
 def _get_vehicle(vehicle_id):
     if not vehicle_id:
         return None
@@ -113,7 +124,7 @@ def new(trip_id=None):
             "inspecciones/form_checklist.html", trip=trip, vehicle=vehicle, vehicles=vehicles, drivers=drivers,
             vehicle_type=vehicle_type, checklist_label=CHECKLIST_LABELS[vehicle_type],
             vehicle_field_label=VEHICLE_FIELD_LABELS[vehicle_type], has_odometer=HAS_ODOMETER[vehicle_type],
-            sections=sections_for(vehicle_type), tire_positions=get_positions(vehicle_type),
+            sections=sections_for(vehicle_type), tire_positions=_axle_positions(vehicle_type),
             tire_meta=tire_meta_for(vehicle_type), spare_tire_item=SPARE_TIRE_ITEM,
             tire_codes_by_position=tire_codes_by_position,
             locations=LOCATIONS, today=today_str(),
@@ -226,7 +237,7 @@ def _save_detailed_inspection(trip_id, trip, vehicle):
     # de por el "código" tipeado a mano, para no depender de que ese texto
     # coincida exactamente con tire_inventory.code -- ver
     # active_tire_inventory_id_at() en app/routes/neumaticos.py.
-    for p in get_positions(vehicle_type):
+    for p in _axle_positions(vehicle_type):
         codigo = request.form.get(f"tire_{p['code']}_codigo", "").strip() or None
         observation = _tire_observation(f"tire_{p['code']}")
         tread_depth_mm = parse_float(request.form.get(f"tire_{p['code']}_cocada"), None)

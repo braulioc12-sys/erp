@@ -56,6 +56,12 @@
             {% endfor %}
           </select>
           <input type="number" name="crew_count_{{ j.id }}" class="crew-count" min="1" step="1" value="1" style="width:64px;" title="Cantidad de mecánicos">
+          <select name="crew_mechanic_{{ j.id }}" class="crew-mechanic" title="Mecánico específico (opcional)">
+            <option value="">-- Sin asignar --</option>
+            {% for mech in mechanics %}
+            <option value="{{ mech.id }}">{{ mech.name }} ({{ mech.mechanic_type }})</option>
+            {% endfor %}
+          </select>
           <button type="button" class="btn btn-secondary btn-sm remove-crew-row" style="display:none;">✕</button>
         </div>
         <button type="button" class="btn btn-secondary btn-sm add-crew-row" data-job-id="{{ j.id }}">+ Agregar otro tipo de mecánico</button>
@@ -66,6 +72,9 @@
     {% endfor %}
     <p class="muted mt-0" id="job-search-empty" style="display:none;">Ningún trabajo coincide con la búsqueda.</p>
     <p class="mt-0">Tiempo estimado total: <strong id="job-minutes-total">0</strong> min · <a href="{{ url_for('mantenimiento.jobs_list') }}" target="_blank">Registrar un trabajo nuevo</a></p>
+    {% if job_types and not mechanics %}
+    <p class="muted mt-0">Todavía no hay mecánicos activos en el catálogo — <a href="{{ url_for('mantenimiento.mechanics_list') }}" target="_blank">agrega uno en Mecánicos</a> para poder elegirlo por nombre en cada trabajo.</p>
+    {% endif %}
   </div>
 
   <label>Materiales / repuestos usados (opcional)</label>
@@ -99,6 +108,7 @@
           var rows = container.querySelectorAll('.crew-row');
           var newRow = rows[0].cloneNode(true);
           newRow.querySelector('.crew-count').value = 1;
+          newRow.querySelector('.crew-mechanic').value = '';
           newRow.querySelector('.remove-crew-row').style.display = '';
           newRow.querySelector('.remove-crew-row').addEventListener('click', function () {
             newRow.remove();

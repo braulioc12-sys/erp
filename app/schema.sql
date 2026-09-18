@@ -455,12 +455,23 @@ CREATE TABLE IF NOT EXISTS maintenance_record_jobs (
 -- compuesta de dos columnas — declararla igual arriesgaba corromper el
 -- esquema traducido en producción. La integridad se mantiene desde el
 -- código (siempre se inserta/borra a través de las rutas de Mantenimiento).
+-- mechanic_id/mechanic_name (18 sep, pedido de Braulio: "cuando se
+-- selecciona el tipo de mecanico tambien se debe elegir el nombre de la
+-- base de registrados") -- quién específicamente cubre esa fila de
+-- cuadrilla, elegido del catálogo de Mecánicos (mismo patrón que
+-- maintenance_record_jobs.mechanic_id/mechanic_name: se guarda también el
+-- nombre aparte para que el historial no cambie si luego se edita o
+-- desactiva ese mecánico). Es independiente de mechanic_type/mechanic_count
+-- de esta misma fila -- opcional, una fila de cuadrilla puede quedar sin
+-- mecánico específico asignado (solo tipo + cantidad).
 CREATE TABLE IF NOT EXISTS maintenance_record_job_crew (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     maintenance_record_id INTEGER NOT NULL,
     job_name TEXT NOT NULL,
     mechanic_type TEXT NOT NULL DEFAULT 'Otros',
-    mechanic_count INTEGER NOT NULL DEFAULT 1
+    mechanic_count INTEGER NOT NULL DEFAULT 1,
+    mechanic_id INTEGER REFERENCES mechanics(id),
+    mechanic_name TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_maintenance_record_job_crew_job ON maintenance_record_job_crew(maintenance_record_id, job_name);
 

@@ -36,6 +36,7 @@
       {% endif %}
       {% for row in rows %}
         {% set p = row.position %}
+        {% if p.x is not none %}
         {% if row.tire %}
         <a href="{{ url_for('neumaticos.detail', tire_id=row.tire.id) }}">
           <rect x="{{ p.x }}" y="{{ p.y }}" width="20" height="34" rx="4" class="tire-rect {{ row.status_class }}"></rect>
@@ -47,6 +48,7 @@
           <text x="{{ p.x + 10 }}" y="{{ p.y + 21 }}" text-anchor="middle" class="tire-diagram-plus">+</text>
           <title>{{ p.label }} — vacío, clic para agregar</title>
         </a>
+        {% endif %}
         {% endif %}
       {% endfor %}
     </svg>

@@ -134,19 +134,26 @@ DEFAULT_JOB_TYPES = [
     ("Cambio de enfriador de aceite de caja", 120),
 ]
 
-# Tipos de mecánico (pedido de Braulio, 28 ago — 2ª ronda): cada trabajo
-# dentro de una orden de mantenimiento se hace por un tipo de mecánico
-# distinto, y cada tipo tiene su propio costo por minuto (ver
+# Tipos de mecánico (pedido de Braulio, 28 ago — 2ª ronda; ampliado 18 sep
+# con "Soldador, auxiliar soldadura, electricista y auxiliar electricista"):
+# cada trabajo dentro de una orden de mantenimiento se hace por un tipo de
+# mecánico distinto, y cada tipo tiene su propio costo por minuto (ver
 # DEFAULT_LABOR_COST_PER_MINUTE / labor_cost_setting_key abajo). También es
 # el mismo valor que se registra en el catálogo de Mecánicos (columna
 # "Tipo").
-MECHANIC_TYPES = ["Senior", "Junior", "Practicante", "Otros"]
+MECHANIC_TYPES = [
+    "Senior", "Junior", "Practicante",
+    "Soldador", "Auxiliar Soldadura", "Electricista", "Auxiliar Electricista",
+    "Otros",
+]
 
 
 def labor_cost_setting_key(mechanic_type):
     """Clave en app_settings para el costo por minuto de un tipo de
-    mecánico, ej. "Senior" -> "labor_cost_per_minute_senior"."""
-    return f"labor_cost_per_minute_{mechanic_type.lower()}"
+    mecánico, ej. "Senior" -> "labor_cost_per_minute_senior", "Auxiliar
+    Soldadura" -> "labor_cost_per_minute_auxiliar_soldadura" (18 sep: se
+    reemplazan también los espacios, para los tipos de dos palabras)."""
+    return f"labor_cost_per_minute_{mechanic_type.lower().replace(' ', '_')}"
 
 
 # Mecánicos de ejemplo (nombre, tipo), para que la demo muestre de una vez
@@ -172,6 +179,10 @@ DEFAULT_LABOR_COST_PER_MINUTE = {
     "Senior": "4.00",
     "Junior": "3.00",
     "Practicante": "1.50",
+    "Soldador": "4.00",
+    "Auxiliar Soldadura": "2.00",
+    "Electricista": "4.00",
+    "Auxiliar Electricista": "2.00",
     "Otros": "2.50",
 }
 
@@ -569,7 +580,11 @@ def seed_demo_data(log=print):
                    VALUES (?, ?, ?, ?, ?, ?)""",
                 (checklist_inspection_id, item_name, status, observation, section["key"], None),
             )
-    tracto_positions = get_positions("TRACTO")
+    # 18 sep: R1/R2 (llantas de repuesto, ver app/tire_positions.py) se
+    # excluyen acá -- el checklist ya tiene su propia fila fija de
+    # "Llanta de repuesto" (SPARE_TIRE_ITEM, más abajo), igual que en la
+    # app real (ver _axle_positions() en app/routes/inspecciones.py).
+    tracto_positions = [p for p in get_positions("TRACTO") if p.get("x") is not None]
     for i, p in enumerate(tracto_positions):
         execute(
             """INSERT INTO inspection_items (inspection_id, item_name, status, observation, section, extra_value)
@@ -608,7 +623,7 @@ def seed_demo_data(log=print):
                    VALUES (?, ?, ?, ?, ?, ?)""",
                 (carreta_checklist_id, item_name, status, observation, section["key"], None),
             )
-    for i, p in enumerate(get_positions("CARRETA")):
+    for i, p in enumerate(p for p in get_positions("CARRETA") if p.get("x") is not None):
         # Las dos primeras posiciones muestran la presión de ejemplo, tal
         # como se anotaría en el formato físico de carreta.
         observation = "Presión: 100 psi." if i < 2 else ""

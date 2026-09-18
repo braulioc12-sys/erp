@@ -101,9 +101,25 @@ def get_axle_ys(vehicle_type):
     return [_AXLE_Y_START + i * _AXLE_Y_STEP for i in range(len(layout))]
 
 
+# 18 sep, pedido de Braulio: "tambien llevan 2 llantas de repuestos.
+# Posicion serian R1 y R2, no es necesario que salgan en el grafico de
+# posiciones pero si en el inventario." No van montadas en ningún eje, así
+# que no tienen coordenada (x/y = None) -- get_positions() las sigue
+# devolviendo igual que cualquier otra posición (para poder asignarles una
+# llanta del inventario, verlas en la tabla de "Llantas instaladas",
+# incluirlas al rotar, etc.), pero el diagrama SVG (diagram.html /
+# print_diagram.html) se salta las filas sin x/y al dibujar los rectángulos
+# -- son las únicas dos plantillas que usan esas coordenadas.
+SPARE_POSITIONS = [
+    {"code": "R1", "label": "Repuesto 1", "x": None, "y": None},
+    {"code": "R2", "label": "Repuesto 2", "x": None, "y": None},
+]
+
+
 def get_positions(vehicle_type):
     """Devuelve la lista ordenada de posiciones (dicts con code/label/x/y)
-    para el tipo de unidad dado."""
+    para el tipo de unidad dado -- las de eje (con x/y, para el diagrama)
+    seguidas de las 2 de repuesto (sin x/y, ver SPARE_POSITIONS arriba)."""
     layout = _AXLE_LAYOUTS.get(vehicle_type, _AXLE_LAYOUTS["CAMION"])
     positions = []
     for i, kind in enumerate(layout):
@@ -113,6 +129,7 @@ def get_positions(vehicle_type):
             positions.extend(_single_axle(axle_num, y))
         else:
             positions.extend(_dual_axle(axle_num, y))
+    positions.extend(SPARE_POSITIONS)
     return positions
 
 

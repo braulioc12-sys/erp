@@ -491,6 +491,13 @@ COLUMN_MIGRATIONS = [
     # inventario") -- ver el comentario largo junto a esta columna en
     # schema.sql (CREATE TABLE inspection_items).
     ("inspection_items", "tread_depth_mm", "REAL"),
+    # 18 sep, pedido de Braulio ("cuando se selecciona el tipo de mecanico
+    # tambien se debe elegir el nombre de la base de registrados") -- ver
+    # el comentario largo junto a estas columnas en schema.sql (CREATE
+    # TABLE maintenance_record_job_crew). Sin "REFERENCES" aquí a propósito
+    # -- mismo motivo que mechanic_id en maintenance_record_jobs más arriba.
+    ("maintenance_record_job_crew", "mechanic_id", "INTEGER"),
+    ("maintenance_record_job_crew", "mechanic_name", "TEXT"),
 ]
 
 

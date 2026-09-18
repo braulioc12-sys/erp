@@ -38,29 +38,51 @@ ORDER_STATUS_LABELS = {
 }
 
 
+def _lookup_mechanic(raw_mechanic_id):
+    """18 sep, pedido de Braulio: cada fila de cuadrilla ahora también puede
+    llevar el mecánico específico (del catálogo de Mecánicos), no solo el
+    tipo+cantidad. Devuelve (mechanic_id, mechanic_name) o (None, None) si
+    no se mandó nada o el id no existe (mismo criterio silencioso que el
+    resto de esta función: una fila sin mecánico específico sigue siendo
+    válida, solo queda con tipo+cantidad)."""
+    raw_mechanic_id = (raw_mechanic_id or "").strip()
+    if not raw_mechanic_id:
+        return None, None
+    mech = query_one("SELECT id, name FROM mechanics WHERE id = ?", (raw_mechanic_id,))
+    if mech is None:
+        return None, None
+    return mech["id"], mech["name"]
+
+
 def _crew_rows_from_form(job_id):
     """2 sep, pedido de Braulio: un trabajo ya no admite solo un tipo+
     cantidad de mecánico — puede tener varias combinaciones a la vez (ej.
     "1 Senior + 2 Junior" en un mismo cambio de aceite). El formulario manda
     varios campos con el mismo nombre `crew_type_<job_id>`/
-    `crew_count_<job_id>` (uno por fila de cuadrilla agregada en el
-    navegador) — se leen emparejados por posición, igual que ya se hace con
-    `job_type_ids`/`material_ids` (checkboxes repetidos). Filas con
-    cantidad inválida o tipo no reconocido se ignoran; si no llega ninguna
-    fila válida, se usa una sola de "Otros" × 1 como respaldo (nunca se deja
-    un trabajo sin ninguna cuadrilla)."""
+    `crew_count_<job_id>`/`crew_mechanic_<job_id>` (uno por fila de
+    cuadrilla agregada en el navegador) — se leen emparejados por posición,
+    igual que ya se hace con `job_type_ids`/`material_ids` (checkboxes
+    repetidos). Filas con cantidad inválida o tipo no reconocido se
+    ignoran; si no llega ninguna fila válida, se usa una sola de "Otros" × 1
+    (sin mecánico específico) como respaldo (nunca se deja un trabajo sin
+    ninguna cuadrilla). `crew_mechanic_<job_id>` (18 sep, pedido de Braulio:
+    "también se debe elegir el nombre de la base de registrados") es
+    opcional por fila — puede venir vacío si esa fila se deja sin mecánico
+    específico asignado."""
     types = request.form.getlist(f"crew_type_{job_id}")
     counts = request.form.getlist(f"crew_count_{job_id}")
+    mechanic_ids = request.form.getlist(f"crew_mechanic_{job_id}")
     rows = []
-    for t, c in zip(types, counts):
+    for i, (t, c) in enumerate(zip(types, counts)):
         t = t.strip()
         if t not in MECHANIC_TYPES:
             continue
         count = parse_float(c, None)
         if count is None or count < 1:
             continue
-        rows.append((t, max(1, int(count))))
-    return rows or [("Otros", 1)]
+        mechanic_id, mechanic_name = _lookup_mechanic(mechanic_ids[i] if i < len(mechanic_ids) else "")
+        rows.append((t, max(1, int(count)), mechanic_id, mechanic_name))
+    return rows or [("Otros", 1, None, None)]
 
 
 def _insert_selected_jobs(db, record_id, selected_jobs):
@@ -83,23 +105,24 @@ def _insert_selected_jobs(db, record_id, selected_jobs):
         )
         if cur.rowcount:
             total_minutes += j["estimated_minutes"]
-            for mechanic_type, mechanic_count in _crew_rows_from_form(j["id"]):
+            for mechanic_type, mechanic_count, mechanic_id, mechanic_name in _crew_rows_from_form(j["id"]):
                 db.execute(
                     """INSERT INTO maintenance_record_job_crew
-                       (maintenance_record_id, job_name, mechanic_type, mechanic_count)
-                       VALUES (?, ?, ?, ?)""",
-                    (record_id, j["name"], mechanic_type, mechanic_count),
+                       (maintenance_record_id, job_name, mechanic_type, mechanic_count, mechanic_id, mechanic_name)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (record_id, j["name"], mechanic_type, mechanic_count, mechanic_id, mechanic_name),
                 )
     return total_minutes
 
 
-def _job_crew(record_id, job_name, fallback_type=None, fallback_count=1):
-    """Cuadrilla de un trabajo (lista de {mechanic_type, mechanic_count}),
-    desde maintenance_record_job_crew. Si el trabajo no tiene ninguna fila
-    ahí (orden creada antes del 2 sep, cuando el tipo/cantidad vivían
-    directo en maintenance_record_jobs), se arma una cuadrilla de una sola
-    fila a partir de esas columnas viejas — así una orden antigua se ve
-    igual de bien sin necesitar ninguna migración de datos."""
+def _job_crew(record_id, job_name, fallback_type=None, fallback_count=1, fallback_mechanic_id=None, fallback_mechanic_name=None):
+    """Cuadrilla de un trabajo (lista de {mechanic_type, mechanic_count,
+    mechanic_id, mechanic_name}), desde maintenance_record_job_crew. Si el
+    trabajo no tiene ninguna fila ahí (orden creada antes del 2 sep, cuando
+    el tipo/cantidad vivían directo en maintenance_record_jobs), se arma
+    una cuadrilla de una sola fila a partir de esas columnas viejas — así
+    una orden antigua se ve igual de bien sin necesitar ninguna migración
+    de datos."""
     rows = query_all(
         "SELECT * FROM maintenance_record_job_crew WHERE maintenance_record_id = ? AND job_name = ? ORDER BY id",
         (record_id, job_name),
@@ -107,7 +130,10 @@ def _job_crew(record_id, job_name, fallback_type=None, fallback_count=1):
     if rows:
         return rows
     if fallback_type:
-        return [{"id": None, "mechanic_type": fallback_type, "mechanic_count": fallback_count}]
+        return [{
+            "id": None, "mechanic_type": fallback_type, "mechanic_count": fallback_count,
+            "mechanic_id": fallback_mechanic_id, "mechanic_name": fallback_mechanic_name,
+        }]
     return []
 
 
@@ -214,6 +240,9 @@ def new():
     job_types = get_catalog_jobs()
     materials = get_catalog_items()
     labor_costs = {t: get_setting(labor_cost_setting_key(t), "0") for t in MECHANIC_TYPES}
+    # 18 sep, pedido de Braulio: elegir también el mecánico específico (del
+    # catálogo) para cada fila de cuadrilla, no solo su tipo+cantidad.
+    mechanics = get_catalog_mechanics()
 
     if request.method == "POST":
         if not validate_csrf():
@@ -234,7 +263,7 @@ def new():
             return render_template(
                 "mantenimiento/form.html", record=request.form, vehicles=vehicles, vehicles_km=vehicles_km,
                 job_types=job_types, materials=materials, labor_costs=labor_costs,
-                mechanic_types=MECHANIC_TYPES, today=today_str(),
+                mechanic_types=MECHANIC_TYPES, mechanics=mechanics, today=today_str(),
             )
 
         selected_jobs = [j for j in job_types if j["id"] in job_ids]
@@ -300,7 +329,7 @@ def new():
     return render_template(
         "mantenimiento/form.html", record=None, vehicles=vehicles, vehicles_km=vehicles_km,
         job_types=job_types, materials=materials, labor_costs=labor_costs,
-        mechanic_types=MECHANIC_TYPES, today=today_str(),
+        mechanic_types=MECHANIC_TYPES, mechanics=mechanics, today=today_str(),
     )
 
 
@@ -357,7 +386,7 @@ def detail(record_id):
     crew_by_job = {}
     labor_cost_by_job = {}
     for j in jobs:
-        crew = _job_crew(record_id, j["job_name"], j["mechanic_type"], j["mechanic_count"])
+        crew = _job_crew(record_id, j["job_name"], j["mechanic_type"], j["mechanic_count"], j["mechanic_id"], j["mechanic_name"])
         crew_by_job[j["job_name"]] = crew
         labor_cost_by_job[j["job_name"]] = _crew_cost(crew, j["estimated_minutes"], labor_costs)
     return render_template(
@@ -390,6 +419,9 @@ def job_crew_add(record_id):
         return redirect(url_for("mantenimiento.detail", record_id=record_id))
     count = parse_float(request.form.get("mechanic_count"), 1) or 1
     count = max(1, int(count))
+    # 18 sep, pedido de Braulio: además del tipo, esta fila de cuadrilla
+    # también puede llevar el mecánico específico (del catálogo).
+    mechanic_id, mechanic_name = _lookup_mechanic(request.form.get("mechanic_id"))
     # Si el trabajo todavía no tenía ninguna fila propia en la cuadrilla
     # nueva (orden vieja, con el tipo/cantidad guardado directo en
     # maintenance_record_jobs), primero se traslada esa fila implícita acá
@@ -399,16 +431,19 @@ def job_crew_add(record_id):
         (record_id, job_name),
     ) and job["mechanic_type"]:
         execute(
-            """INSERT INTO maintenance_record_job_crew (maintenance_record_id, job_name, mechanic_type, mechanic_count)
-               VALUES (?, ?, ?, ?)""",
-            (record_id, job_name, job["mechanic_type"], job["mechanic_count"] or 1),
+            """INSERT INTO maintenance_record_job_crew
+               (maintenance_record_id, job_name, mechanic_type, mechanic_count, mechanic_id, mechanic_name)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (record_id, job_name, job["mechanic_type"], job["mechanic_count"] or 1, job["mechanic_id"], job["mechanic_name"]),
         )
     execute(
-        """INSERT INTO maintenance_record_job_crew (maintenance_record_id, job_name, mechanic_type, mechanic_count)
-           VALUES (?, ?, ?, ?)""",
-        (record_id, job_name, mechanic_type, count),
+        """INSERT INTO maintenance_record_job_crew
+           (maintenance_record_id, job_name, mechanic_type, mechanic_count, mechanic_id, mechanic_name)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (record_id, job_name, mechanic_type, count, mechanic_id, mechanic_name),
     )
-    flash(f'Se agregó {count} × {mechanic_type} a "{job_name}".', "success")
+    label = f'{count} × {mechanic_type}' + (f' ({mechanic_name})' if mechanic_name else '')
+    flash(f'Se agregó {label} a "{job_name}".', "success")
     return redirect(url_for("mantenimiento.detail", record_id=record_id))
 
 

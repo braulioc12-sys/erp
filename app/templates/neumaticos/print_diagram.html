@@ -124,7 +124,9 @@
       {% endif %}
       {% for row in rows %}
         {% set p = row.position %}
+        {% if p.x is not none %}
         <rect x="{{ p.x }}" y="{{ p.y }}" width="20" height="34" rx="4" class="tire-rect {{ row.status_class }}"></rect>
+        {% endif %}
       {% endfor %}
     </svg>
   </div>
