@@ -10,6 +10,8 @@ con el movimiento real del vehículo (al registrar un mantenimiento, editar
 la unidad en Flota, o sincronizar GPS — ver esos módulos), el acumulado de
 cada llanta queda al día automáticamente sin ningún trabajo extra.
 """
+from datetime import datetime
+
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 
 from app.auth import permission_required, validate_csrf
@@ -63,6 +65,18 @@ INVENTORY_STATUS_BADGE_CLASS = {
     "DISPONIBLE": "badge-activo",
     "ASIGNADA": "badge-en_curso",
     "RETIRADA": "badge-inactivo",
+}
+
+# 18 sep, pedido de Braulio ("Tipo de llanta (donde se eliga si es
+# traccion, mixta o direccion)") -- rol de diseño de la llanta física, ver
+# tire_inventory.tire_type en schema.sql. Independiente de la posición
+# donde esté instalada (una llanta de tracción puede terminar, por
+# necesidad, en cualquier eje -- esto solo documenta para qué se fabricó).
+TIRE_TYPE_CHOICES = ("TRACCION", "MIXTA", "DIRECCION")
+TIRE_TYPE_LABELS = {
+    "TRACCION": "Tracción",
+    "MIXTA": "Mixta",
+    "DIRECCION": "Dirección",
 }
 
 
@@ -354,9 +368,113 @@ def inventory_list():
                     get_position_label(assignment["vehicle_type"], assignment["position_code"])
                     if assignment else None
                 ),
+                "type_label": TIRE_TYPE_LABELS.get(t["tire_type"]),
             }
         )
     return render_template("neumaticos/inventory_list.html", rows=rows)
+
+
+@bp.route("/inventario/<int:tire_inventory_id>")
+@permission_required("neumaticos", "view")
+def inventory_detail(tire_inventory_id):
+    """18 sep, pedido de Braulio: al entrar a una llanta desde el
+    inventario, ver su historial completo de unidades y su historial de
+    mediciones de cocada -- ver la nota larga junto a tire_inventory y
+    tire_inspections en schema.sql."""
+    tire = query_one("SELECT * FROM tire_inventory WHERE id = ?", (tire_inventory_id,))
+    if tire is None:
+        abort(404)
+
+    # Historial de unidades: a diferencia de _tire_journey() (que camina el
+    # encadenado moved_to_tire_id partiendo de una fila puntual de "tires"),
+    # acá ya se parte del tire_inventory_id -- alcanza con traer TODAS las
+    # filas de "tires" con este tire_inventory_id, en orden. Cubre lo mismo
+    # y no depende de que la cadena de moved_to_tire_id esté completa.
+    installations = query_all(
+        "SELECT * FROM tires WHERE tire_inventory_id = ? ORDER BY install_date, id",
+        (tire_inventory_id,),
+    )
+    installation_rows = []
+    for t in installations:
+        v = query_one("SELECT plate, vehicle_type FROM vehicles WHERE id = ?", (t["vehicle_id"],))
+        installation_rows.append(
+            {
+                "tire": t,
+                "plate": v["plate"] if v else "—",
+                "position_label": get_position_label(v["vehicle_type"], t["position_code"]) if v else t["position_code"],
+            }
+        )
+
+    inspections = query_all(
+        "SELECT * FROM tire_inspections WHERE tire_inventory_id = ? ORDER BY inspection_date DESC, id DESC",
+        (tire_inventory_id,),
+    )
+
+    current_assignment = _inventory_current_assignment(tire_inventory_id) if tire["status"] == "ASIGNADA" else None
+
+    return render_template(
+        "neumaticos/inventory_detail.html",
+        tire=tire,
+        status_label=INVENTORY_STATUS_LABELS.get(tire["status"], tire["status"]),
+        badge_class=INVENTORY_STATUS_BADGE_CLASS.get(tire["status"], "badge-activo"),
+        type_label=TIRE_TYPE_LABELS.get(tire["tire_type"]),
+        current_assignment=current_assignment,
+        current_position_label=(
+            get_position_label(current_assignment["vehicle_type"], current_assignment["position_code"])
+            if current_assignment else None
+        ),
+        installation_rows=installation_rows,
+        inspections=inspections,
+        today=today_str(),
+    )
+
+
+@bp.route("/inventario/<int:tire_inventory_id>/inspeccion", methods=["POST"])
+@permission_required("neumaticos", "edit")
+def inventory_add_inspection(tire_inventory_id):
+    """18 sep, pedido de Braulio: "debe haber un historial de fecha de la
+    inspeccion y medida encontrada" -- registra una medición nueva de
+    cocada y actualiza tire_inventory.tread_depth_mm a la medición más
+    reciente por fecha (no necesariamente la que se acaba de ingresar, si
+    se está registrando una medición atrasada fuera de orden)."""
+    tire = query_one("SELECT * FROM tire_inventory WHERE id = ?", (tire_inventory_id,))
+    if tire is None:
+        abort(404)
+    if not validate_csrf():
+        abort(400)
+
+    inspection_date = parse_date(request.form.get("inspection_date")) or today_str()
+    tread_depth_mm = parse_float(request.form.get("tread_depth_mm"), None)
+    notes = request.form.get("notes", "").strip()
+    if tread_depth_mm is None:
+        flash("Ingresa la medida de cocada encontrada (mm).", "error")
+        return redirect(url_for("neumaticos.inventory_detail", tire_inventory_id=tire_inventory_id))
+
+    current_assignment = _inventory_current_assignment(tire_inventory_id) if tire["status"] == "ASIGNADA" else None
+    vehicle_plate_at_inspection = current_assignment["vehicle_plate"] if current_assignment else None
+
+    db = get_db()
+    db.execute(
+        """INSERT INTO tire_inspections (tire_inventory_id, inspection_date, tread_depth_mm,
+           vehicle_plate_at_inspection, notes) VALUES (?, ?, ?, ?, ?)""",
+        (tire_inventory_id, inspection_date, tread_depth_mm, vehicle_plate_at_inspection, notes or None),
+    )
+    latest = query_one(
+        "SELECT tread_depth_mm FROM tire_inspections WHERE tire_inventory_id = ? ORDER BY inspection_date DESC, id DESC LIMIT 1",
+        (tire_inventory_id,),
+    )
+    db.execute(
+        "UPDATE tire_inventory SET tread_depth_mm = ? WHERE id = ?",
+        (latest["tread_depth_mm"] if latest else tread_depth_mm, tire_inventory_id),
+    )
+    db.commit()
+    flash("Medición de cocada registrada.", "success")
+    return redirect(url_for("neumaticos.inventory_detail", tire_inventory_id=tire_inventory_id))
+
+
+def _tire_type_or_none(raw):
+    raw = (raw or "").strip().upper()
+    return raw if raw in TIRE_TYPE_CHOICES else None
 
 
 @bp.route("/inventario/nueva", methods=["GET", "POST"])
@@ -368,6 +486,8 @@ def inventory_new():
             abort(400)
         code = request.form.get("code", "").strip()
         brand = request.form.get("brand", "").strip()
+        model = request.form.get("model", "").strip()
+        tire_type = _tire_type_or_none(request.form.get("tire_type"))
         expected_life_km = parse_float(request.form.get("expected_life_km"), DEFAULT_EXPECTED_LIFE_KM)
         notes = request.form.get("notes", "").strip()
         if not code:
@@ -378,9 +498,9 @@ def inventory_new():
                 flash(f'Ya existe una llanta registrada con el código "{code}".', "error")
             else:
                 execute(
-                    """INSERT INTO tire_inventory (code, brand, expected_life_km, notes)
-                       VALUES (?, ?, ?, ?)""",
-                    (code, brand or None, expected_life_km, notes or None),
+                    """INSERT INTO tire_inventory (code, brand, model, tire_type, expected_life_km, notes)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (code, brand or None, model or None, tire_type, expected_life_km, notes or None),
                 )
                 flash(f'Llanta "{code}" registrada en el inventario.', "success")
                 return redirect(next_url or url_for("neumaticos.inventory_list"))
@@ -388,6 +508,10 @@ def inventory_new():
             "neumaticos/inventory_form.html",
             default_expected_life_km=DEFAULT_EXPECTED_LIFE_KM,
             next_url=next_url,
+            tire_type_choices=TIRE_TYPE_CHOICES,
+            tire_type_labels=TIRE_TYPE_LABELS,
+            mode="new",
+            tire=None,
             form=request.form,
         )
 
@@ -395,13 +519,79 @@ def inventory_new():
         "neumaticos/inventory_form.html",
         default_expected_life_km=DEFAULT_EXPECTED_LIFE_KM,
         next_url=next_url,
+        tire_type_choices=TIRE_TYPE_CHOICES,
+        tire_type_labels=TIRE_TYPE_LABELS,
+        mode="new",
+        tire=None,
         form=None,
     )
 
 
-@bp.route("/unidad/<int:vehicle_id>")
-@permission_required("neumaticos", "view")
-def diagram(vehicle_id):
+@bp.route("/inventario/<int:tire_inventory_id>/editar", methods=["GET", "POST"])
+@permission_required("neumaticos", "edit")
+def inventory_edit(tire_inventory_id):
+    """18 sep, pedido de Braulio: poder completar/corregir Marca, Modelo y
+    Tipo de llanta de una llanta ya registrada (antes solo se podía fijar
+    al crearla) -- útil sobre todo para llenar estos datos en llantas
+    registradas antes de este cambio."""
+    tire = query_one("SELECT * FROM tire_inventory WHERE id = ?", (tire_inventory_id,))
+    if tire is None:
+        abort(404)
+    next_url = request.args.get("next") or request.form.get("next") or ""
+
+    if request.method == "POST":
+        if not validate_csrf():
+            abort(400)
+        code = request.form.get("code", "").strip()
+        brand = request.form.get("brand", "").strip()
+        model = request.form.get("model", "").strip()
+        tire_type = _tire_type_or_none(request.form.get("tire_type"))
+        expected_life_km = parse_float(request.form.get("expected_life_km"), tire["expected_life_km"])
+        notes = request.form.get("notes", "").strip()
+        if not code:
+            flash("Ingresa el código de la llanta.", "error")
+        else:
+            existing = query_one(
+                "SELECT id FROM tire_inventory WHERE code = ? AND id != ?", (code, tire_inventory_id)
+            )
+            if existing:
+                flash(f'Ya existe otra llanta registrada con el código "{code}".', "error")
+            else:
+                execute(
+                    """UPDATE tire_inventory SET code = ?, brand = ?, model = ?, tire_type = ?,
+                       expected_life_km = ?, notes = ? WHERE id = ?""",
+                    (code, brand or None, model or None, tire_type, expected_life_km, notes or None, tire_inventory_id),
+                )
+                flash(f'Llanta "{code}" actualizada.', "success")
+                return redirect(next_url or url_for("neumaticos.inventory_detail", tire_inventory_id=tire_inventory_id))
+        return render_template(
+            "neumaticos/inventory_form.html",
+            default_expected_life_km=DEFAULT_EXPECTED_LIFE_KM,
+            next_url=next_url,
+            tire_type_choices=TIRE_TYPE_CHOICES,
+            tire_type_labels=TIRE_TYPE_LABELS,
+            mode="edit",
+            tire=tire,
+            form=request.form,
+        )
+
+    return render_template(
+        "neumaticos/inventory_form.html",
+        default_expected_life_km=DEFAULT_EXPECTED_LIFE_KM,
+        next_url=next_url,
+        tire_type_choices=TIRE_TYPE_CHOICES,
+        tire_type_labels=TIRE_TYPE_LABELS,
+        mode="edit",
+        tire=tire,
+        form=None,
+    )
+
+
+def _diagram_context(vehicle_id):
+    """Todo lo que necesitan tanto `diagram()` (pantalla normal) como
+    `print_diagram()` (18 sep, pedido de Braulio: "imprimir esta pantalla en
+    pdf") -- se separó de `diagram()` para no repetir esta consulta/armado
+    dos veces."""
     vehicle = _get_vehicle_or_404(vehicle_id)
     positions = get_positions(vehicle["vehicle_type"])
     active_tires = query_all(
@@ -490,18 +680,38 @@ def diagram(vehicle_id):
             }
         )
 
-    return render_template(
-        "neumaticos/diagram.html",
-        vehicle=vehicle,
-        type_label=VEHICLE_TYPE_LABELS.get(vehicle["vehicle_type"], vehicle["vehicle_type"]),
-        rows=rows,
-        retired_rows=retired_rows,
-        rotation_rows=rotation_rows,
-        active_tire_count=len(active_tires),
-        axle_ys=get_axle_ys(vehicle["vehicle_type"]),
-        diagram_height=get_diagram_height(vehicle["vehicle_type"]),
-        vehicle_type=vehicle["vehicle_type"],
-    )
+    return {
+        "vehicle": vehicle,
+        "type_label": VEHICLE_TYPE_LABELS.get(vehicle["vehicle_type"], vehicle["vehicle_type"]),
+        "rows": rows,
+        "retired_rows": retired_rows,
+        "rotation_rows": rotation_rows,
+        "active_tire_count": len(active_tires),
+        "axle_ys": get_axle_ys(vehicle["vehicle_type"]),
+        "diagram_height": get_diagram_height(vehicle["vehicle_type"]),
+        "vehicle_type": vehicle["vehicle_type"],
+    }
+
+
+@bp.route("/unidad/<int:vehicle_id>")
+@permission_required("neumaticos", "view")
+def diagram(vehicle_id):
+    return render_template("neumaticos/diagram.html", **_diagram_context(vehicle_id))
+
+
+@bp.route("/unidad/<int:vehicle_id>/imprimir")
+@permission_required("neumaticos", "view")
+def print_diagram(vehicle_id):
+    """18 sep, pedido de Braulio: "cuando se vea el diagrama de cada carro o
+    carreta, haya la opcion de imprimir esta pantalla en pdf" -- mismo
+    patrón que ya usa Inspecciones (ver inspecciones.print_view): una
+    página independiente (sin menú lateral), pensada para imprimirse o
+    guardarse como PDF desde el propio diálogo de impresión del navegador
+    (Ctrl+P → Guardar como PDF), sin depender de ninguna librería de
+    generación de PDF en el servidor."""
+    context = _diagram_context(vehicle_id)
+    context["generated_at"] = datetime.now().strftime("%d/%m/%Y %H:%M")
+    return render_template("neumaticos/print_diagram.html", **context)
 
 
 @bp.route("/unidad/<int:vehicle_id>/posicion/<position_code>/nueva", methods=["GET", "POST"])

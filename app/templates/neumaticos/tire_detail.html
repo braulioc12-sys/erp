@@ -10,7 +10,7 @@
 </div>
 
 <div class="detail-grid">
-  <div class="detail-item"><div class="label">Código de inventario</div><div class="value">{% if inventory_tire %}<a href="{{ url_for('neumaticos.inventory_list') }}">{{ inventory_tire.code }}</a>{% else %}Sin código (registrada antes del inventario){% endif %}</div></div>
+  <div class="detail-item"><div class="label">Código de inventario</div><div class="value">{% if inventory_tire %}<a href="{{ url_for('neumaticos.inventory_detail', tire_inventory_id=inventory_tire.id) }}">{{ inventory_tire.code }}</a>{% else %}Sin código (registrada antes del inventario){% endif %}</div></div>
   <div class="detail-item"><div class="label">Posición</div><div class="value">{{ position_label }}</div></div>
   <div class="detail-item"><div class="label">Marca</div><div class="value">{{ tire.brand or 'Sin marca' }}</div></div>
   <div class="detail-item"><div class="label">Estado</div><div class="value">{{ m.badge(tire.status) }}</div></div>

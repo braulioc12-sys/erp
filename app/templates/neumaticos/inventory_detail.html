@@ -1,0 +1,102 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Llanta {{ tire.code }} — Inventario{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Llanta {{ tire.code }} <span class="badge {{ badge_class }}">{{ status_label }}</span></h1>
+  <div class="page-actions">
+    {% if can(current_user.roles, 'neumaticos', 'edit') %}
+    <a href="{{ url_for('neumaticos.inventory_edit', tire_inventory_id=tire.id) }}" class="btn btn-secondary">Editar datos</a>
+    {% endif %}
+    <a href="{{ url_for('neumaticos.inventory_list') }}" class="btn btn-secondary">← Volver al inventario</a>
+  </div>
+</div>
+
+<div class="detail-grid">
+  <div class="detail-item"><div class="label">Código</div><div class="value">{{ tire.code }}</div></div>
+  <div class="detail-item"><div class="label">Marca</div><div class="value">{{ tire.brand or '—' }}</div></div>
+  <div class="detail-item"><div class="label">Modelo</div><div class="value">{{ tire.model or '—' }}</div></div>
+  <div class="detail-item"><div class="label">Tipo de llanta</div><div class="value">{{ type_label or 'Sin especificar' }}</div></div>
+  <div class="detail-item"><div class="label">Cocada actual</div><div class="value">{{ '%.1f mm'|format(tire.tread_depth_mm) if tire.tread_depth_mm is not none else 'Sin medición' }}</div></div>
+  <div class="detail-item"><div class="label">Vida útil estimada</div><div class="value">{{ '{:,.0f}'.format(tire.expected_life_km) }} km</div></div>
+  <div class="detail-item"><div class="label">Asignada actualmente a</div><div class="value">
+    {% if current_assignment %}
+    <a href="{{ url_for('neumaticos.detail', tire_id=current_assignment.id) }}">{{ current_assignment.vehicle_plate }} — {{ current_position_label }}</a>
+    {% else %}—{% endif %}
+  </div></div>
+</div>
+{% if tire.notes %}<p><strong>Notas:</strong> {{ tire.notes }}</p>{% endif %}
+
+<div class="panel">
+  <h2>Historial de mediciones de cocada</h2>
+  <p class="muted mt-0">La cocada va disminuyendo con el uso — cada medición nueva actualiza el dato de "Cocada actual" arriba (según la más reciente por fecha, no necesariamente la última registrada).</p>
+  {% if not inspections %}
+  <p class="muted">Todavía no se registró ninguna medición para esta llanta.</p>
+  {% else %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Fecha de inspección</th><th class="text-right">Cocada encontrada</th><th>Unidad en ese momento</th><th>Notas</th></tr></thead>
+      <tbody>
+        {% for insp in inspections %}
+        <tr>
+          <td>{{ insp.inspection_date }}</td>
+          <td class="text-right">{{ '%.1f mm'|format(insp.tread_depth_mm) }}</td>
+          <td>{{ insp.vehicle_plate_at_inspection or '—' }}</td>
+          <td class="wrap">{{ insp.notes or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if can(current_user.roles, 'neumaticos', 'edit') %}
+  <details style="margin-top:14px;">
+    <summary style="cursor:pointer;">+ Registrar medición nueva</summary>
+    <form class="form" method="post" action="{{ url_for('neumaticos.inventory_add_inspection', tire_inventory_id=tire.id) }}" style="max-width:420px; margin-top:10px;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Fecha de inspección
+        <input type="date" name="inspection_date" value="{{ today }}" required>
+      </label>
+      <label>Cocada encontrada (mm)
+        <input type="number" step="0.1" min="0" name="tread_depth_mm" required>
+      </label>
+      <label>Notas (opcional)
+        <textarea name="notes"></textarea>
+      </label>
+      <button type="submit" class="btn btn-primary">Guardar medición</button>
+    </form>
+  </details>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>Historial de unidades</h2>
+  <p class="muted mt-0">Todas las unidades y posiciones por las que pasó esta llanta física.</p>
+  {% if not installation_rows %}
+  <p class="muted">Esta llanta todavía no se asignó a ninguna unidad.</p>
+  {% else %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Unidad</th><th>Posición</th><th>Instalación</th><th>Retiro</th><th>Estado</th><th></th></tr></thead>
+      <tbody>
+        {% for row in installation_rows %}
+        <tr>
+          <td>{{ row.plate }}</td>
+          <td>{{ row.position_label }}</td>
+          <td>{{ row.tire.install_date }}</td>
+          <td>{{ row.tire.removed_date or '—' }}</td>
+          <td>
+            {% if row.tire.status == 'ACTIVO' %}{{ m.badge('ACTIVO') }}
+            {% elif row.tire.disposition %}{{ m.badge(row.tire.disposition) }}
+            {% else %}{{ m.badge('RETIRADO') }}{% endif %}
+          </td>
+          <td><a href="{{ url_for('neumaticos.detail', tire_id=row.tire.id) }}">Ver</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

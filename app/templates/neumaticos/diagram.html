@@ -8,6 +8,7 @@
     {% if active_tire_count >= 2 and can(current_user.roles, 'neumaticos', 'edit') %}
     <a href="{{ url_for('neumaticos.rotate_tires', vehicle_id=vehicle.id) }}" class="btn btn-primary">Rotar llantas</a>
     {% endif %}
+    <a href="{{ url_for('neumaticos.print_diagram', vehicle_id=vehicle.id) }}" class="btn btn-secondary" target="_blank">🖨️ Imprimir / Descargar PDF</a>
     <a href="{{ url_for('neumaticos.list_view') }}" class="btn btn-secondary">← Volver a Neumáticos</a>
   </div>
 </div>

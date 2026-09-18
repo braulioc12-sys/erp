@@ -22,12 +22,15 @@
 
 <div class="table-wrap">
   <table id="tireTable">
-    <thead><tr><th>Código</th><th>Marca</th><th class="text-right">Vida útil estimada</th><th>Estado</th><th>Asignada a</th></tr></thead>
+    <thead><tr><th>Código</th><th>Marca</th><th>Modelo</th><th>Tipo</th><th class="text-right">Cocada</th><th class="text-right">Vida útil estimada</th><th>Estado</th><th>Asignada a</th></tr></thead>
     <tbody>
       {% for r in rows %}
-      <tr data-search="{{ (r.tire.code ~ ' ' ~ (r.tire.brand or ''))|lower }}">
-        <td>{{ r.tire.code }}</td>
+      <tr data-search="{{ (r.tire.code ~ ' ' ~ (r.tire.brand or '') ~ ' ' ~ (r.tire.model or ''))|lower }}">
+        <td><a href="{{ url_for('neumaticos.inventory_detail', tire_inventory_id=r.tire.id) }}">{{ r.tire.code }}</a></td>
         <td>{{ r.tire.brand or '—' }}</td>
+        <td>{{ r.tire.model or '—' }}</td>
+        <td>{{ r.type_label or '—' }}</td>
+        <td class="text-right">{{ '%.1f mm'|format(r.tire.tread_depth_mm) if r.tire.tread_depth_mm is not none else '—' }}</td>
         <td class="text-right">{{ '{:,.0f}'.format(r.tire.expected_life_km) }} km</td>
         <td><span class="badge {{ r.badge_class }}">{{ r.status_label }}</span></td>
         <td>
@@ -37,7 +40,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="5" class="table-empty">No hay llantas registradas en el inventario.</td></tr>
+      <tr><td colspan="8" class="table-empty">No hay llantas registradas en el inventario.</td></tr>
       {% endfor %}
     </tbody>
   </table>

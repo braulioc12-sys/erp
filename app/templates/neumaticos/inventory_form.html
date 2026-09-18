@@ -1,37 +1,53 @@
 {% extends 'base.html' %}
 {% set f = form or {} %}
-{% block title %}Registrar llanta{% endblock %}
+{% set is_edit = mode == 'edit' %}
+{% block title %}{{ 'Editar llanta' if is_edit else 'Registrar llanta' }}{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>Registrar llanta en el inventario</h1>
+  <h1>{{ 'Editar llanta — ' ~ tire.code if is_edit else 'Registrar llanta en el inventario' }}</h1>
 </div>
+{% if not is_edit %}
 <p class="muted mt-0">
   Registra el código de la llanta antes de poder asignarla a una unidad. Una vez guardada, queda
   "Disponible" en el inventario hasta que se asigne a una posición desde el diagrama de una unidad.
 </p>
+{% endif %}
 
 <form class="form panel" method="post" style="max-width:520px;">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <input type="hidden" name="next" value="{{ next_url }}">
   <label>Código <span class="muted">(el grabado en la llanta o el que se le asigna al comprarla)</span>
-    <input type="text" name="code" value="{{ f.get('code', '') }}" placeholder="Ej. LL-0042" required autofocus>
+    <input type="text" name="code" value="{{ f.get('code', tire.code if is_edit else '') }}" placeholder="Ej. LL-0042" required autofocus>
   </label>
   <label>Marca
-    <input type="text" name="brand" value="{{ f.get('brand', '') }}" placeholder="Ej. Michelin, Bridgestone, Goodyear">
+    <input type="text" name="brand" value="{{ f.get('brand', (tire.brand if is_edit else '') or '') }}" placeholder="Ej. Michelin, Bridgestone, Goodyear">
   </label>
+  <label>Modelo
+    <input type="text" name="model" value="{{ f.get('model', (tire.model if is_edit else '') or '') }}" placeholder="Ej. XZY3, R-249">
+  </label>
+  <label>Tipo de llanta
+    {% set current_type = f.get('tire_type', tire.tire_type if is_edit else '') %}
+    <select name="tire_type">
+      <option value="">— Sin especificar —</option>
+      {% for code in tire_type_choices %}
+      <option value="{{ code }}" {{ 'selected' if code == current_type }}>{{ tire_type_labels[code] }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <p class="muted" style="margin-top:-8px;">Para qué eje se diseñó esta llanta: Tracción, Mixta o Dirección.</p>
   <label>Vida útil estimada (km)
-    <input type="number" step="1" name="expected_life_km" value="{{ f.get('expected_life_km', default_expected_life_km) }}" required>
+    <input type="number" step="1" name="expected_life_km" value="{{ f.get('expected_life_km', tire.expected_life_km if is_edit else default_expected_life_km) }}" required>
   </label>
   <p class="muted" style="margin-top:-8px;">
     Define las bandas de desgaste de esta llanta (Bueno / Regular / Grave / Alerta) como tercios de este
     valor — se puede ajustar más adelante, llanta por llanta, desde su detalle.
   </p>
   <label>Notas (opcional)
-    <textarea name="notes">{{ f.get('notes', '') }}</textarea>
+    <textarea name="notes">{{ f.get('notes', (tire.notes if is_edit else '') or '') }}</textarea>
   </label>
   <div class="btn-group">
     <button type="submit" class="btn btn-primary">Guardar</button>
-    <a href="{{ next_url or url_for('neumaticos.inventory_list') }}" class="btn btn-secondary">Cancelar</a>
+    <a href="{{ next_url or (url_for('neumaticos.inventory_detail', tire_inventory_id=tire.id) if is_edit else url_for('neumaticos.inventory_list')) }}" class="btn btn-secondary">Cancelar</a>
   </div>
 </form>
 {% endblock %}

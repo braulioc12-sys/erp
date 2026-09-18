@@ -472,6 +472,20 @@ COLUMN_MIGRATIONS = [
     # _active_vehicles()/_active_trailers() en app/routes/viajes.py). Ver
     # la nota larga junto a esta columna en schema.sql.
     ("vehicles", "available_for_scheduling", "INTEGER NOT NULL DEFAULT 0"),
+    # 17 sep, pedido de Braulio: "documento asociado" en la guía de
+    # remisión (factura/boleta o guía del remitente que sustenta el
+    # traslado) -- ver el comentario largo junto a estas columnas en
+    # schema.sql (CREATE TABLE waybills) y app/routes/guias.py.
+    ("waybills", "related_document_type", "TEXT"),
+    ("waybills", "related_document_number", "TEXT"),
+    # 18 sep, pedido de Braulio ("historial por unidad... Marca, Modelo,
+    # Tipo de llanta... altura de la cocada") -- ver el comentario largo
+    # junto a estas columnas en schema.sql (CREATE TABLE tire_inventory).
+    # tire_inspections no necesita entrada acá: es una tabla nueva, se crea
+    # sola en cada init_db().
+    ("tire_inventory", "model", "TEXT"),
+    ("tire_inventory", "tire_type", "TEXT"),
+    ("tire_inventory", "tread_depth_mm", "REAL"),
 ]
 
 

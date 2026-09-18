@@ -615,6 +615,20 @@ CREATE TABLE IF NOT EXISTS tire_inventory (
     -- comprarla), único para poder ubicarla rápido.
     code TEXT NOT NULL,
     brand TEXT,
+    -- 18 sep, pedido de Braulio ("historial por unidad... debe mostrar los
+    -- datos Marca, Modelo, Tipo de llanta"): datos de la llanta física en
+    -- sí, independientes de en qué unidad esté instalada. tire_type es el
+    -- rol de la llanta (para saber en qué posiciones debería ir según su
+    -- diseño): TRACCION, MIXTA o DIRECCION. Ambos opcionales -- llantas
+    -- registradas antes de este cambio quedan sin dato hasta que se edite.
+    model TEXT,
+    tire_type TEXT CHECK (tire_type IN ('TRACCION', 'MIXTA', 'DIRECCION')),
+    -- Última medida de profundidad de cocada conocida (mm) -- se copia acá
+    -- desde la última fila de tire_inspections (por fecha) cada vez que se
+    -- registra una medición nueva, para poder mostrarla de un vistazo en el
+    -- inventario sin tener que ir al historial de inspecciones cada vez.
+    -- NULL hasta la primera medición.
+    tread_depth_mm REAL,
     -- Vida útil estimada en km — se copia a tires.expected_life_km al
     -- asignar la llanta a una unidad (donde puede ajustarse si hace falta),
     -- pero queda acá como el valor de referencia de la llanta en sí.
@@ -628,6 +642,28 @@ CREATE TABLE IF NOT EXISTS tire_inventory (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tire_inventory_code ON tire_inventory(code);
+
+-- 18 sep, pedido de Braulio: "debe haber un historial de fecha de la
+-- inspeccion y medida encontrada" -- una fila por cada vez que se mide la
+-- profundidad de cocada de una llanta de inventario (con su propio código),
+-- sin importar si en ese momento está Disponible, Asignada o Retirada. Se
+-- guarda por tire_inventory_id (la llanta física en sí) y no por "tires"
+-- (que es la instalación puntual en una unidad) porque la medición es un
+-- dato de la llanta, no de dónde estaba instalada -- aunque sí queda
+-- registrado en qué unidad/posición estaba en ese momento, si aplica, solo
+-- como referencia (vehicle_plate/position_code de texto libre, no FK, para
+-- no perder el dato si esa instalación se borra o cambia después).
+CREATE TABLE IF NOT EXISTS tire_inspections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tire_inventory_id INTEGER NOT NULL REFERENCES tire_inventory(id),
+    inspection_date TEXT NOT NULL,
+    tread_depth_mm REAL NOT NULL,
+    vehicle_plate_at_inspection TEXT,
+    notes TEXT,
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_tire_inspections_tire ON tire_inspections(tire_inventory_id);
 
 CREATE TABLE IF NOT EXISTS tires (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1174,6 +1210,25 @@ CREATE TABLE IF NOT EXISTS waybills (
     payer_type TEXT NOT NULL DEFAULT 'DESTINATARIO' CHECK (payer_type IN ('REMITENTE', 'DESTINATARIO', 'TERCERO')),
     payer_ruc TEXT,
     payer_name TEXT,
+    -- 17 sep, pedido de Braulio: "documento asociado" -- como en el portal
+    -- de SUNAT, donde se referencia la factura/boleta o la guía de
+    -- remisión del REMITENTE (el cliente) que sustenta el traslado.
+    -- related_document_type: NULL/'FACTURA'/'BOLETA'/'GUIA_REMITENTE'/'OTRO'.
+    -- related_document_number es texto libre (ej. "F001-000123") porque
+    -- puede venir de un documento externo (del cliente) que este sistema
+    -- no tiene registrado. Si el viaje ya tiene una factura propia
+    -- (invoice_items) o una guía del remitente (trips.shipper_waybill_*),
+    -- el formulario los sugiere solos (ver app/routes/guias.py) -- pero
+    -- siempre son editables a mano.
+    -- IMPORTANTE: por ahora esto es solo informativo dentro del ERP (se
+    -- guarda y se muestra) -- todavía NO se manda a tefacturo.pe en
+    -- build_waybill_payload() porque su documentación/JSON confirmado para
+    -- la guía TRANSPORTISTA no incluye este campo (mismo criterio que la
+    -- detracción en `invoices`, ver ese comentario) -- hace falta
+    -- confirmar con su soporte técnico el nombre real del campo antes de
+    -- agregarlo al envío real.
+    related_document_type TEXT,
+    related_document_number TEXT,
     notes TEXT,
     sunat_status TEXT NOT NULL DEFAULT 'NO_ENVIADA' CHECK (sunat_status IN ('NO_ENVIADA', 'ACEPTADO', 'RECHAZADO', 'ERROR')),
     sunat_message TEXT,
