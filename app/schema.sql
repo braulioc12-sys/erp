@@ -1460,6 +1460,28 @@ CREATE TABLE IF NOT EXISTS staff_payments (
 CREATE INDEX IF NOT EXISTS idx_staff_payments_staff ON staff_payments(staff_id);
 CREATE INDEX IF NOT EXISTS idx_staff_payments_period ON staff_payments(period);
 
+-- 18 sep, 6ta ronda (pedido de Braulio: "tengo un excel con nombres y
+-- numeros de cuenta que quiero que sea la plantilla default con montos
+-- que se paga cada mes de recibos por honorario, quiero que cada mes se
+-- use esta por default y se editen los montos, agreguen o borren
+-- personas") -- lista de personas (siempre de RECIBO_HONORARIOS, no
+-- aplica a Planilla) que se ofrecen por defecto cada mes al generar el
+-- lote de honorarios, cada una con su monto por defecto (editable ese mes
+-- sin afectar el default guardado acá) -- ver
+-- honorarios_plantilla()/honorarios_generar() en
+-- app/routes/pagos_personal.py. "active" permite sacar a alguien de la
+-- oferta mensual sin perder su monto guardado, por si vuelve más
+-- adelante.
+CREATE TABLE IF NOT EXISTS honorarios_template_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id INTEGER NOT NULL UNIQUE REFERENCES staff(id),
+    default_amount REAL NOT NULL DEFAULT 0,
+    default_concept TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- 18 sep (pedido de Braulio: "el usuario Gustavo Lopez puede entrar a
 -- neumatico pero no puede agregar llantas al inventario, a pesar de tener
 -- permiso... podemos ser mas especificos a la hora de dar accesos a los

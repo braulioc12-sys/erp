@@ -6,6 +6,7 @@
   <div class="page-actions">
     {% if can(current_user.roles, 'pagos_personal', 'edit') %}
     <a href="{{ url_for('pagos_personal.staff_new') }}" class="btn btn-primary">+ Agregar persona</a>
+    <a href="{{ url_for('pagos_personal.staff_import_txt') }}" class="btn btn-secondary">⬆ Importar desde .txt de Telecrédito</a>
     {% endif %}
     <a href="{{ url_for('pagos_personal.list_view') }}" class="btn btn-secondary">← Volver a Pagos personal</a>
   </div>

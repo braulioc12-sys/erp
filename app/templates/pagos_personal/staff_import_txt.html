@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+{% block title %}Importar personal desde .txt{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Importar Catálogo de Personal desde .txt de Telecrédito</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('pagos_personal.staff_list') }}" class="btn btn-secondary">← Volver</a>
+  </div>
+</div>
+<p class="muted mt-0">
+  Sube uno o más archivos .txt de Telecrédito ya generados (de Planilla o de Recibo por honorarios, da igual — es el mismo formato), o un .zip con muchos .txt adentro (en cualquier carpeta — se extraen todos, y si vienen PDFs o Excel mezclados se ignoran). Por cada persona que aparezca en una fila de pago, se busca si ya está en el Catálogo de Personal (primero por N° de documento, si no por nombre exacto): si ya existe se actualizan sus datos bancarios, si no existe se crea.
+</p>
+<p class="muted">No se toca ningún monto ni la "Empresa" de cada persona — eso se revisa a mano si hace falta.</p>
+
+<form class="form panel" method="post" enctype="multipart/form-data" style="max-width:560px;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label>Archivo(s) .txt o .zip *
+    <input type="file" name="archivos" accept=".txt,.zip" multiple required>
+  </label>
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Importar</button>
+  </div>
+</form>
+{% endblock %}

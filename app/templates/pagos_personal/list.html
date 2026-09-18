@@ -9,6 +9,9 @@
     {% endif %}
     <a href="{{ url_for('pagos_personal.constancias_years') }}" class="btn btn-secondary">📁 Constancias</a>
     <a href="{{ url_for('pagos_personal.staff_list') }}" class="btn btn-secondary">Catálogo de Personal</a>
+    {% if can(current_user.roles, 'pagos_personal', 'edit') %}
+    <a href="{{ url_for('pagos_personal.honorarios_plantilla') }}" class="btn btn-secondary">🧾 Plantilla honorarios</a>
+    {% endif %}
   </div>
 </div>
 <p class="muted mt-0">Comprobantes de pago del personal — planilla o recibo por honorarios — por persona y periodo.</p>

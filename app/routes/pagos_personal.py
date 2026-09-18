@@ -46,7 +46,35 @@ bueno (ver la nota grande al inicio de ese módulo).
    usando Braulio para guardar esto a mano, y clasifica cada archivo por
    año/mes con app/payment_vouchers_import.py (ver ese módulo para el
    detalle de las reglas y su verificación contra un zip real de 314
-   archivos)."""
+   archivos).
+
+4. Plantilla de honorarios (tabla `honorarios_template_items`, 18 sep,
+   6ta ronda — "tengo un excel con nombres y numeros de cuenta que quiero
+   que sea la plantilla default con montos que se paga cada mes de
+   recibos por honorario, quiero que cada mes se use esta por default y
+   se editen los montos, agreguen o borren personas. Luego seleccione de
+   esta plantilla a quienes les voy a pagar y se cree el archivo masivo
+   de telecredito, los que ya se crearon que se marquen como pagados."):
+   lista reusable de personas de RECIBO_HONORARIOS con su monto por
+   defecto — `honorarios_plantilla()` la administra (agregar/editar
+   monto/activar-desactivar/quitar), `honorarios_plantilla_import()` la
+   carga en bloque desde un Excel (motor genérico de app/bulk_import.py,
+   HONORARIOS_TEMPLATE_COLUMNS) creando o actualizando personas en el
+   Catálogo de Personal según haga falta, y `honorarios_generar()` es la
+   pantalla mensual: ofrece la plantilla activa con casillas + montos
+   editables para ESE mes (sin tocar el default guardado), y al confirmar
+   sincroniza `staff_payments` (crea/actualiza/quita según lo marcado) —
+   de ahí en más se usa el flujo de Telecrédito normal para generar el
+   archivo. Ese mismo pedido también hizo que `telecredito_generate()`
+   ahora marque como PAGADO los pagos que incluye en el archivo, en vez
+   de dejarlos pendientes.
+
+   Además, `staff_import_txt()` (sección "Catálogo de Personal" más abajo)
+   lee uno o más .txt de Telecrédito YA GENERADOS (de este sistema o del
+   propio banco) y completa el Catálogo de Personal con los datos
+   bancarios de cada persona que encuentra — ver app/telecredito_txt_import.py
+   (lee exactamente las mismas posiciones que escribe app/telecredito.py,
+   verificado contra un archivo real)."""
 import io
 import os
 import uuid
@@ -57,9 +85,17 @@ from flask import Blueprint, Response, abort, current_app, flash, g, redirect, r
 
 from app import storage
 from app.auth import permission_required, validate_csrf
+from app.bulk_import import (
+    HONORARIOS_TEMPLATE_COLUMNS,
+    HONORARIOS_TEMPLATE_EXAMPLE,
+    XLSX_MIME,
+    build_import_template,
+    read_import_rows,
+)
 from app.db import execute, query_all, query_one
 from app.helpers import now_str, parse_date, parse_float, today_str
 from app.payment_vouchers_import import MONTH_LABELS, classify_zip_entry
+from app.telecredito_txt_import import parse_txt_file
 
 bp = Blueprint("pagos_personal", __name__, url_prefix="/pagos-personal")
 
@@ -385,7 +421,16 @@ def telecredito_generate():
     cualquier pago cuya persona no tenga cuenta/CCI, cuya moneda no
     coincida con la cuenta de cargo elegida (el banco exige que todo el
     archivo sea de una sola moneda), o cuyo tipo de documento no sea válido
-    para este servicio (Planilla no admite RUC)."""
+    para este servicio (Planilla no admite RUC).
+
+    18 sep, 6ta ronda (pedido de Braulio, sobre el flujo de honorarios por
+    plantilla: "se cree el archivo masivo de telecredito, los que ya se
+    crearon que se marquen como pagados"): generar el archivo ahora marca
+    de una vez los pagos incluidos como PAGADO (con fecha = fecha de
+    proceso elegida), en vez de dejarlos PENDIENTE a la espera de que se
+    marquen a mano uno por uno con el botón de la lista — aplica igual
+    para Planilla y Honorarios, ya que generar el archivo ES la orden de
+    pago al banco en los dos casos."""
     from app.telecredito import (
         DEFAULT_SUBTIPO_HONORARIOS,
         DEFAULT_SUBTIPO_PLANILLA,
@@ -481,8 +526,9 @@ def telecredito_generate():
 
     now = datetime.now().strftime("%Y%m%d%H%M")
     execute(
-        f"UPDATE staff_payments SET exported_at = ? WHERE id IN ({','.join('?' * len(prepared))})",
-        [today_str()] + [p["id"] for p in prepared],
+        f"""UPDATE staff_payments SET exported_at = ?, status = 'PAGADO', payment_date = ?
+            WHERE id IN ({','.join('?' * len(prepared))})""",
+        [today_str(), fecha_proceso] + [p["id"] for p in prepared],
     )
 
     filename = f"telecredito_{tipo_slug}_{period}_{now}.txt"
@@ -494,6 +540,50 @@ def telecredito_generate():
 
 
 # --- Catálogo de Personal ---
+
+_STAFF_BANK_FIELDS = ("document_type", "document_number", "bank_name", "account_number", "account_type", "cci", "currency")
+
+
+def _match_staff(name, document_number=None):
+    """Empareja con una persona ya existente en el Catálogo de Personal —
+    por documento si se dio uno (más confiable), si no por nombre exacto
+    sin distinguir mayúsculas. Usado por los 2 importadores masivos
+    (Excel de la plantilla de honorarios y .txt de Telecrédito) para no
+    duplicar a alguien que ya está cargado."""
+    doc = (document_number or "").strip()
+    if doc:
+        row = query_one("SELECT * FROM staff WHERE document_number = ?", (doc,))
+        if row:
+            return row
+    return query_one("SELECT * FROM staff WHERE LOWER(name) = LOWER(?)", (name.strip(),))
+
+
+def _upsert_staff_bank_data(name, **fields):
+    """Crea a la persona en Personal si no existe (emparejando por
+    document_number o nombre — ver _match_staff), o actualiza sus datos
+    bancarios si ya existe. Solo pisa un campo si `fields` trae un valor
+    no vacío para él — así una fila incompleta del Excel/.txt nunca borra
+    un dato bueno que la persona ya tenía cargado. `fields` acepta
+    cualquiera de _STAFF_BANK_FIELDS. Devuelve (staff_id, created: bool)."""
+    clean = {k: (v.strip() if isinstance(v, str) else v) for k, v in fields.items() if k in _STAFF_BANK_FIELDS}
+    clean = {k: v for k, v in clean.items() if v}
+    existing = _match_staff(name, clean.get("document_number"))
+    if existing:
+        if clean:
+            sets = ", ".join(f"{k} = ?" for k in clean)
+            execute(f"UPDATE staff SET {sets} WHERE id = ?", list(clean.values()) + [existing["id"]])
+        return existing["id"], False
+    new_id = execute(
+        """INSERT INTO staff (name, document_type, document_number, bank_name, account_number,
+           account_type, cci, currency) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            name.strip(), clean.get("document_type") or "DNI", clean.get("document_number"),
+            clean.get("bank_name"), clean.get("account_number"), clean.get("account_type") or "AHORROS",
+            clean.get("cci"), clean.get("currency") or "S",
+        ),
+    )
+    return new_id, True
+
 
 @bp.route("/personal")
 @permission_required("pagos_personal", "view")
@@ -597,6 +687,99 @@ def staff_toggle(staff_id):
     execute("UPDATE staff SET status = ? WHERE id = ?", (new_status, staff_id))
     flash("Actualizado." if new_status == "INACTIVO" else "Reactivado.", "success")
     return redirect(url_for("pagos_personal.staff_list"))
+
+
+@bp.route("/personal/importar-txt", methods=["GET", "POST"])
+@permission_required("pagos_personal", "edit")
+def staff_import_txt():
+    """18 sep, 6ta ronda (pedido de Braulio: "Si te adjunto varios .txt
+    que usa telecredito y ya sabes como usa su estructura, puedes agregar
+    los datos del personal?"): lee uno o más .txt de Telecrédito YA
+    GENERADOS (de este sistema o del propio banco, de Planilla u
+    Honorarios — el formato es el mismo desde el patch 0054) y completa el
+    Catálogo de Personal con los datos bancarios de cada fila de pago que
+    encuentra — ver app/telecredito_txt_import.py para el detalle exacto
+    de qué posiciones lee (mismas que escribe app/telecredito.py,
+    verificado contra un archivo real). A propósito NO toca "empresa" de
+    cada persona ni ningún monto — ver el docstring de ese módulo para el
+    motivo.
+
+    También acepta un .zip con muchos .txt adentro (Braulio adjuntó un
+    archivador histórico de varios años con esta misma estructura de
+    carpetas por año/mes que ya usaba a mano) — se extraen y procesan
+    todos los .txt que haya dentro, en cualquier subcarpeta, y se ignora
+    en silencio cualquier otro tipo de archivo que venga mezclado (PDFs,
+    Excel, etc. — es común que compartan la misma carpeta)."""
+    if request.method == "POST":
+        if not validate_csrf():
+            abort(400)
+        uploaded = [f for f in request.files.getlist("archivos") if f and f.filename]
+        if not uploaded:
+            flash("Elige al menos un archivo .txt (o un .zip con varios adentro).", "error")
+            return redirect(url_for("pagos_personal.staff_import_txt"))
+
+        # (label, raw_bytes) por cada .txt a procesar — expandiendo cualquier .zip.
+        txt_entries = []
+        errors = []
+        for file_storage in uploaded:
+            fname = file_storage.filename
+            lower = fname.lower()
+            if lower.endswith(".txt"):
+                txt_entries.append((fname, file_storage.read()))
+            elif lower.endswith(".zip"):
+                raw_zip = file_storage.read()
+                try:
+                    zf = zipfile.ZipFile(io.BytesIO(raw_zip))
+                except zipfile.BadZipFile:
+                    errors.append({"row": fname, "message": "No se pudo leer el .zip — revisa que el archivo no esté dañado."})
+                    continue
+                for name in zf.namelist():
+                    if name.endswith("/") or "/__MACOSX/" in name or name.startswith("__MACOSX/"):
+                        continue
+                    base = name.rsplit("/", 1)[-1]
+                    if base.startswith(".") or not base.lower().endswith(".txt"):
+                        continue  # .DS_Store y otros archivos que no son .txt se ignoran sin avisar
+                    raw_bytes = zf.read(name)
+                    if raw_bytes:
+                        txt_entries.append((name, raw_bytes))
+            else:
+                errors.append({"row": fname, "message": "No es un archivo .txt ni .zip, se ignoró."})
+
+        created, updated, skipped = 0, 0, []
+        for label, raw in txt_entries:
+            header_info, rows, warnings = parse_txt_file(raw)
+            for w in warnings:
+                errors.append({"row": label, "message": w})
+            seen_in_file = set()
+            for row in rows:
+                key = row.get("document_number") or row["name"].strip().lower()
+                if key in seen_in_file:
+                    skipped.append({"row": f"{label}:{row['line']}", "message": f"{row['name']} repetido dentro del mismo archivo; ya se había procesado antes."})
+                    continue
+                seen_in_file.add(key)
+                bank_fields = {
+                    "document_type": row["document_type"],
+                    "document_number": row["document_number"],
+                    "account_type": row["account_type"],
+                    "currency": row["currency"],
+                }
+                if row["is_cci"]:
+                    bank_fields["cci"] = row["bank_value"]
+                else:
+                    bank_fields["account_number"] = row["bank_value"]
+                staff_id, was_created = _upsert_staff_bank_data(row["name"], **bank_fields)
+                if was_created:
+                    created += 1
+                else:
+                    updated += 1
+
+        result = {"created": created, "updated": updated, "skipped": skipped, "errors": errors}
+        return render_template(
+            "import_result.html", result=result,
+            back_url=url_for("pagos_personal.staff_list"), retry_url=url_for("pagos_personal.staff_import_txt"),
+        )
+
+    return render_template("pagos_personal/staff_import_txt.html")
 
 
 # --- Constancias de pago (archivador por año -> mes) ---
@@ -858,3 +1041,246 @@ def constancias_restore(voucher_id):
     execute("UPDATE payment_vouchers SET deleted_at = NULL, deleted_by = NULL WHERE id = ?", (voucher_id,))
     flash("Constancia restaurada.", "success")
     return redirect(url_for("pagos_personal.constancias_papelera"))
+
+
+# --- Plantilla de honorarios (lista reusable mes a mes) ---
+
+def _honorarios_template_items():
+    return query_all(
+        """SELECT t.*, s.name AS staff_name, s.document_type, s.document_number,
+                  s.bank_name, s.account_number, s.cci, s.currency, s.status AS staff_status
+           FROM honorarios_template_items t JOIN staff s ON s.id = t.staff_id
+           ORDER BY t.sort_order, s.name"""
+    )
+
+
+@bp.route("/honorarios/plantilla")
+@permission_required("pagos_personal", "edit")
+def honorarios_plantilla():
+    items = _honorarios_template_items()
+    template_staff_ids = {i["staff_id"] for i in items}
+    available_staff = [s for s in get_active_staff() if s["id"] not in template_staff_ids]
+    return render_template(
+        "pagos_personal/honorarios_plantilla.html",
+        items=items, available_staff=available_staff, currency_labels=CURRENCY_LABELS,
+    )
+
+
+@bp.route("/honorarios/plantilla/agregar", methods=["POST"])
+@permission_required("pagos_personal", "edit")
+def honorarios_plantilla_add():
+    if not validate_csrf():
+        abort(400)
+    staff_id = request.form.get("staff_id", type=int)
+    staff = query_one("SELECT id FROM staff WHERE id = ?", (staff_id,))
+    if not staff:
+        flash("Elige una persona válida del catálogo de Personal.", "error")
+        return redirect(url_for("pagos_personal.honorarios_plantilla"))
+    if query_one("SELECT id FROM honorarios_template_items WHERE staff_id = ?", (staff_id,)):
+        flash("Esa persona ya está en la plantilla.", "error")
+        return redirect(url_for("pagos_personal.honorarios_plantilla"))
+    amount = parse_float(request.form.get("default_amount"), 0)
+    concept = request.form.get("default_concept", "").strip() or None
+    max_order = query_one("SELECT COALESCE(MAX(sort_order), 0) AS m FROM honorarios_template_items")["m"]
+    execute(
+        "INSERT INTO honorarios_template_items (staff_id, default_amount, default_concept, sort_order) VALUES (?, ?, ?, ?)",
+        (staff_id, amount, concept, max_order + 1),
+    )
+    flash("Persona agregada a la plantilla.", "success")
+    return redirect(url_for("pagos_personal.honorarios_plantilla"))
+
+
+@bp.route("/honorarios/plantilla/<int:item_id>/editar", methods=["POST"])
+@permission_required("pagos_personal", "edit")
+def honorarios_plantilla_edit(item_id):
+    if not validate_csrf():
+        abort(400)
+    item = query_one("SELECT id FROM honorarios_template_items WHERE id = ?", (item_id,))
+    if item is None:
+        abort(404)
+    amount = parse_float(request.form.get("default_amount"), 0)
+    concept = request.form.get("default_concept", "").strip() or None
+    execute(
+        "UPDATE honorarios_template_items SET default_amount = ?, default_concept = ? WHERE id = ?",
+        (amount, concept, item_id),
+    )
+    flash("Plantilla actualizada.", "success")
+    return redirect(url_for("pagos_personal.honorarios_plantilla"))
+
+
+@bp.route("/honorarios/plantilla/<int:item_id>/alternar", methods=["POST"])
+@permission_required("pagos_personal", "edit")
+def honorarios_plantilla_toggle(item_id):
+    if not validate_csrf():
+        abort(400)
+    item = query_one("SELECT active FROM honorarios_template_items WHERE id = ?", (item_id,))
+    if item is None:
+        abort(404)
+    execute("UPDATE honorarios_template_items SET active = ? WHERE id = ?", (0 if item["active"] else 1, item_id))
+    flash("Actualizado.", "success")
+    return redirect(url_for("pagos_personal.honorarios_plantilla"))
+
+
+@bp.route("/honorarios/plantilla/<int:item_id>/quitar", methods=["POST"])
+@permission_required("pagos_personal", "edit")
+def honorarios_plantilla_remove(item_id):
+    """Quita a la persona de la plantilla (no la elimina del Catálogo de
+    Personal, ni toca ningún pago ya registrado — solo deja de ofrecerse
+    por defecto cada mes)."""
+    if not validate_csrf():
+        abort(400)
+    execute("DELETE FROM honorarios_template_items WHERE id = ?", (item_id,))
+    flash("Quitada de la plantilla.", "success")
+    return redirect(url_for("pagos_personal.honorarios_plantilla"))
+
+
+@bp.route("/honorarios/plantilla/importar/plantilla")
+@permission_required("pagos_personal", "edit")
+def honorarios_plantilla_template():
+    buffer = build_import_template("Plantilla de honorarios", HONORARIOS_TEMPLATE_COLUMNS, HONORARIOS_TEMPLATE_EXAMPLE)
+    return Response(
+        buffer.getvalue(), mimetype=XLSX_MIME,
+        headers={"Content-Disposition": 'attachment; filename="plantilla_honorarios.xlsx"'},
+    )
+
+
+def _apply_honorarios_template_import(rows, example_skips):
+    created, updated, errors = 0, 0, []
+    skipped = [
+        {"row": r, "message": "Fila de ejemplo de la plantilla; se omitió automáticamente."}
+        for r in example_skips
+    ]
+    max_order = query_one("SELECT COALESCE(MAX(sort_order), 0) AS m FROM honorarios_template_items")["m"]
+    for row in rows:
+        n = row["_row_number"]
+        for warn in row["_warnings"]:
+            errors.append({"row": n, "message": warn})
+        name = (row.get("name") or "").strip()
+        if not name:
+            errors.append({"row": n, "message": "Falta el nombre; la fila no se importó."})
+            continue
+        staff_id, staff_created = _upsert_staff_bank_data(
+            name,
+            document_type=row.get("document_type"), document_number=row.get("document_number"),
+            bank_name=row.get("bank_name"), account_number=row.get("account_number"),
+            cci=row.get("cci"), account_type=row.get("account_type"), currency=row.get("currency"),
+        )
+        existing_item = query_one("SELECT id FROM honorarios_template_items WHERE staff_id = ?", (staff_id,))
+        amount = row.get("default_amount") or 0
+        concept = row.get("default_concept") or None
+        if existing_item:
+            execute(
+                "UPDATE honorarios_template_items SET default_amount = ?, default_concept = ?, active = 1 WHERE id = ?",
+                (amount, concept, existing_item["id"]),
+            )
+        else:
+            max_order += 1
+            execute(
+                "INSERT INTO honorarios_template_items (staff_id, default_amount, default_concept, sort_order) VALUES (?, ?, ?, ?)",
+                (staff_id, amount, concept, max_order),
+            )
+        if staff_created:
+            created += 1
+        else:
+            updated += 1
+    return {"created": created, "updated": updated, "skipped": skipped, "errors": errors}
+
+
+@bp.route("/honorarios/plantilla/importar", methods=["GET", "POST"])
+@permission_required("pagos_personal", "edit")
+def honorarios_plantilla_import():
+    if request.method == "POST":
+        if not validate_csrf():
+            abort(400)
+        rows, file_error, example_skips = read_import_rows(request.files.get("file"), HONORARIOS_TEMPLATE_COLUMNS, HONORARIOS_TEMPLATE_EXAMPLE)
+        if file_error:
+            flash(file_error, "error")
+            return redirect(url_for("pagos_personal.honorarios_plantilla_import"))
+        result = _apply_honorarios_template_import(rows, example_skips)
+        return render_template(
+            "import_result.html", result=result,
+            back_url=url_for("pagos_personal.honorarios_plantilla"), retry_url=url_for("pagos_personal.honorarios_plantilla_import"),
+        )
+    return render_template(
+        "import_form.html", title="Importar plantilla de honorarios", module_label="la plantilla de honorarios",
+        template_url=url_for("pagos_personal.honorarios_plantilla_template"), upload_url=url_for("pagos_personal.honorarios_plantilla_import"),
+        back_url=url_for("pagos_personal.honorarios_plantilla"), columns=HONORARIOS_TEMPLATE_COLUMNS,
+    )
+
+
+@bp.route("/honorarios/generar", methods=["GET", "POST"])
+@permission_required("pagos_personal", "edit")
+def honorarios_generar():
+    """Pantalla mensual (pedido de Braulio: "cada mes se use esta [la
+    plantilla] por default y se editen los montos, agreguen o borren
+    personas. Luego seleccione de esta plantilla a quienes les voy a
+    pagar"): ofrece la plantilla activa con casilla + monto (precargado
+    con el default, editable solo para este mes) y al confirmar
+    sincroniza staff_payments de ese periodo con lo marcado — crea un
+    pago PENDIENTE nuevo por cada casilla marcada que todavía no lo
+    tenía, actualiza el monto del que ya existía y sigue PENDIENTE, deja
+    intacto el que ya está PAGADO, y elimina el PENDIENTE de quien se
+    desmarcó. De ahí en más se sigue el flujo normal de Telecrédito
+    (botón "Generar archivo Telecrédito — Honorarios" en la lista) para
+    armar el archivo — que ahora además marca como pagado lo que
+    incluya (ver telecredito_generate())."""
+    period = request.args.get("period") or today_str()[:7]
+
+    if request.method == "POST":
+        if not validate_csrf():
+            abort(400)
+        period = request.form.get("period") or period
+        items = _honorarios_template_items()
+        checked_ids = {int(v) for v in request.form.getlist("incluir")}
+        created, updated, removed = 0, 0, 0
+        for item in items:
+            existing = query_one(
+                "SELECT * FROM staff_payments WHERE staff_id = ? AND period = ? AND payment_type = 'RECIBO_HONORARIOS'",
+                (item["staff_id"], period),
+            )
+            if item["id"] not in checked_ids:
+                if existing and existing["status"] == "PENDIENTE":
+                    execute("DELETE FROM staff_payments WHERE id = ?", (existing["id"],))
+                    removed += 1
+                continue
+            amount = parse_float(request.form.get(f"amount_{item['id']}"), item["default_amount"])
+            concept = (request.form.get(f"concept_{item['id']}", "") or "").strip() or item["default_concept"]
+            if existing:
+                if existing["status"] == "PENDIENTE":
+                    execute(
+                        "UPDATE staff_payments SET amount = ?, concept = ? WHERE id = ?",
+                        (amount, concept, existing["id"]),
+                    )
+                    updated += 1
+                # si ya está PAGADO se deja intacto — no se vuelve a tocar solo por re-generar la pantalla.
+                continue
+            execute(
+                """INSERT INTO staff_payments (staff_id, payment_type, period, amount, concept, status)
+                   VALUES (?, 'RECIBO_HONORARIOS', ?, ?, ?, 'PENDIENTE')""",
+                (item["staff_id"], period, amount, concept),
+            )
+            created += 1
+
+        flash(f"Listo: {created} pago(s) nuevo(s), {updated} actualizado(s), {removed} quitado(s).", "success")
+        return redirect(url_for("pagos_personal.list_view", period=period, payment_type="RECIBO_HONORARIOS"))
+
+    items = _honorarios_template_items()
+    existing_payments = {
+        p["staff_id"]: p for p in query_all(
+            "SELECT * FROM staff_payments WHERE period = ? AND payment_type = 'RECIBO_HONORARIOS'", (period,)
+        )
+    }
+    rows = []
+    for item in items:
+        if not item["active"]:
+            continue
+        payment = existing_payments.get(item["staff_id"])
+        rows.append({
+            "item": item,
+            "payment": payment,
+            "checked": payment is not None or item["active"],
+            "amount": payment["amount"] if payment else item["default_amount"],
+            "concept": payment["concept"] if payment else (item["default_concept"] or ""),
+            "locked": payment is not None and payment["status"] == "PAGADO",
+        })
+    return render_template("pagos_personal/honorarios_generar.html", period=period, rows=rows)

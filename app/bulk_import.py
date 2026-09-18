@@ -487,3 +487,57 @@ OIL_CHANGE_EXAMPLE = {
     "workshop": "Taller de ejemplo",
     "oil_type": "15W40",
 }
+
+# 18 sep, 6ta ronda, pedido de Braulio: convertir su Excel de honorarios
+# (nombres + cuentas + montos que paga cada mes) en la plantilla por
+# defecto de Recibo por honorarios (ver honorarios_template_items en
+# schema.sql y honorarios_plantilla_import() en
+# app/routes/pagos_personal.py). Al importar: si "N° de documento" trae
+# algo, esa fila se empareja con una persona ya existente en el Catálogo
+# de Personal por su documento; si no, se empareja por nombre exacto (sin
+# distinguir mayúsculas). Si no hay ninguna coincidencia, se crea la
+# persona nueva en Personal. En cualquiera de los dos casos, los datos
+# bancarios de la fila (los que vengan llenos) actualizan a la persona, y
+# "Monto por defecto"/"Concepto por defecto" quedan guardados en su fila
+# de la plantilla de honorarios.
+HONORARIOS_TEMPLATE_COLUMNS = [
+    ImportColumn("name", "Nombre", kind="text", required=True, width=28,
+                 note="Se usa para emparejar con el Catálogo de Personal cuando no se da N° de documento."),
+    ImportColumn(
+        "document_type", "Tipo de documento", kind="choice", width=16,
+        choices=[("DNI", ["DNI"]), ("CE", ["CE", "CARNET DE EXTRANJERIA", "CARNÉ DE EXTRANJERÍA"])],
+        note="Si se deja vacío, se usa DNI. Recuerda que Telecrédito solo admite DNI o CE para el pago de honorarios (no RUC).",
+    ),
+    ImportColumn("document_number", "N° de documento", kind="text", width=16,
+                 note="Si se llena, se usa para emparejar con una persona ya existente en Personal (en vez del nombre)."),
+    ImportColumn("bank_name", "Banco", kind="text", width=16),
+    ImportColumn("account_number", "N° de cuenta", kind="text", width=22),
+    ImportColumn("cci", "CCI (cuenta interbancaria)", kind="text", width=24,
+                 note="Si se llena, el pago sale por CCI (cualquier banco) en vez de la cuenta propia."),
+    ImportColumn(
+        "account_type", "Tipo de cuenta", kind="choice", width=16,
+        choices=[("AHORROS", ["AHORROS"]), ("CORRIENTE", ["CORRIENTE"]), ("MAESTRA", ["MAESTRA"])],
+        note="Si se deja vacío, se usa Ahorros.",
+    ),
+    ImportColumn(
+        "currency", "Moneda", kind="choice", width=14,
+        choices=[("S", ["S", "SOLES", "S/"]), ("D", ["D", "DOLARES", "DÓLARES", "US$"])],
+        note="Si se deja vacío, se usa Soles.",
+    ),
+    ImportColumn("default_amount", "Monto por defecto", kind="float", required=True, width=18,
+                 note="El monto que se ofrece cada mes al generar el lote de honorarios — se puede editar ese mes sin cambiar este default."),
+    ImportColumn("default_concept", "Concepto por defecto", kind="text", width=26),
+]
+
+HONORARIOS_TEMPLATE_EXAMPLE = {
+    "name": "Nombre de Ejemplo",
+    "document_type": "DNI",
+    "document_number": "00000000",
+    "bank_name": "BCP",
+    "account_number": "1931234567890",
+    "cci": "",
+    "account_type": "AHORROS",
+    "currency": "S",
+    "default_amount": 1500,
+    "default_concept": "Honorarios profesionales",
+}

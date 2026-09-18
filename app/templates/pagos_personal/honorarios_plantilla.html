@@ -1,0 +1,100 @@
+{% extends 'base.html' %}
+{% block title %}Plantilla de honorarios{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Plantilla de honorarios</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('pagos_personal.honorarios_generar') }}" class="btn btn-primary">▶ Generar el mes</a>
+    <a href="{{ url_for('pagos_personal.list_view') }}" class="btn btn-secondary">← Volver a Pagos personal</a>
+  </div>
+</div>
+<p class="muted mt-0">
+  Lista fija de personas a las que normalmente se les paga recibo por honorarios, con el monto y concepto que se usan por defecto cada mes. Desde acá se agregan, editan o quitan personas de la plantilla; cada mes, en "Generar el mes", se elige a quiénes se les paga y se pueden ajustar los montos solo para ese mes sin tocar el default.
+</p>
+
+<div class="btn-group" style="margin-bottom:16px;">
+  <a href="{{ url_for('pagos_personal.honorarios_plantilla_template') }}" class="btn btn-secondary">⬇ Descargar plantilla Excel</a>
+  <a href="{{ url_for('pagos_personal.honorarios_plantilla_import') }}" class="btn btn-secondary">⬆ Importar desde Excel</a>
+</div>
+
+<div class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Persona</th><th>Documento</th><th>Banco</th><th>Cuenta / CCI</th>
+          <th class="text-right">Monto por defecto</th><th>Concepto por defecto</th><th>Estado</th><th></th><th></th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        <tr>
+          <td>
+            {{ item.staff_name }}
+            {% if item.staff_status == 'INACTIVO' %}<span class="badge badge-pendiente">Persona inactiva</span>{% endif %}
+          </td>
+          <td>{{ item.document_type }} {{ item.document_number or '—' }}</td>
+          <td>{{ item.bank_name or '—' }}</td>
+          <td>{{ item.account_number or item.cci or '—' }}</td>
+          <td class="text-right">
+            <form method="post" action="{{ url_for('pagos_personal.honorarios_plantilla_edit', item_id=item.id) }}" style="display:flex; gap:6px; align-items:center; justify-content:flex-end;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="number" step="0.01" min="0" name="default_amount" value="{{ item.default_amount }}" style="width:110px;">
+              <input type="text" name="default_concept" value="{{ item.default_concept or '' }}" placeholder="Concepto" style="width:150px;">
+              <button class="btn btn-secondary btn-sm" type="submit">Guardar</button>
+            </form>
+          </td>
+          <td>{{ item.default_concept or '—' }}</td>
+          <td>
+            <span class="badge {{ 'badge-activo' if item.active else 'badge-pendiente' }}">{{ 'Activa' if item.active else 'Inactiva' }}</span>
+          </td>
+          <td>
+            <form method="post" action="{{ url_for('pagos_personal.honorarios_plantilla_toggle', item_id=item.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-secondary btn-sm" type="submit">{{ 'Desactivar' if item.active else 'Reactivar' }}</button>
+            </form>
+          </td>
+          <td>
+            <form method="post" action="{{ url_for('pagos_personal.honorarios_plantilla_remove', item_id=item.id) }}" onsubmit="return confirm('¿Quitar a {{ item.staff_name }} de la plantilla? No se borra del Catálogo de Personal ni se toca ningún pago ya registrado.');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-secondary btn-sm" type="submit">Quitar</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="table-empty">La plantilla está vacía todavía.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted" style="margin-top:12px; margin-bottom:0;">
+    "Desactivar" saca a la persona de "Generar el mes" sin borrarla de la plantilla (por si vuelve más adelante). Una persona inactiva en el Catálogo de Personal no se puede pagar aunque siga en la plantilla — reactívala primero en Catálogo de Personal.
+  </p>
+</div>
+
+<div class="panel" style="margin-top:16px;">
+  <h2 style="margin-top:0;">Agregar a la plantilla</h2>
+  {% if available_staff %}
+  <form class="form" method="post" action="{{ url_for('pagos_personal.honorarios_plantilla_add') }}" style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Persona
+      <select name="staff_id" required>
+        <option value="">Elige...</option>
+        {% for s in available_staff %}
+        <option value="{{ s.id }}">{{ s.name }}{% if s.document_number %} — {{ s.document_number }}{% endif %}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Monto por defecto
+      <input type="number" step="0.01" min="0" name="default_amount" value="0" style="width:120px;">
+    </label>
+    <label>Concepto por defecto
+      <input type="text" name="default_concept" placeholder="Ej: Honorarios profesionales" style="width:220px;">
+    </label>
+    <button class="btn btn-primary" type="submit">+ Agregar</button>
+  </form>
+  {% else %}
+  <p class="muted">Todas las personas activas del Catálogo de Personal ya están en la plantilla. Para agregar a alguien nuevo, primero créalo en <a href="{{ url_for('pagos_personal.staff_new') }}">Catálogo de Personal</a> (o impórtalo desde un .txt de Telecrédito).</p>
+  {% endif %}
+</div>
+{% endblock %}
