@@ -1241,8 +1241,6 @@ def honorarios_plantilla():
     status_filter = request.args.get("status", "").strip()
 
     items = _honorarios_template_items()
-    template_staff_ids = {i["staff_id"] for i in items}
-    available_staff = [s for s in get_active_staff() if s["id"] not in template_staff_ids]
     all_concepts = sorted({
         (i["default_concept"] or "").strip() for i in items if (i["default_concept"] or "").strip()
     })
@@ -1253,9 +1251,32 @@ def honorarios_plantilla():
 
     return render_template(
         "pagos_personal/honorarios_plantilla.html",
-        items=items, available_staff=available_staff, currency_labels=CURRENCY_LABELS,
         period=period, q=q, concept_filter=concept_filter, status_filter=status_filter, all_concepts=all_concepts,
         month_rows=month_rows, period_vouchers=period_vouchers, today=today_str(),
+    )
+
+
+@bp.route("/honorarios/plantilla/administrar")
+@permission_required("pagos_personal", "edit")
+def honorarios_plantilla_admin():
+    """"Administrar plantilla" en su propia pantalla, separada de "Pagos
+    del mes" (patch 0065 -- pedido de Braulio: la pantalla combinada se
+    hacía muy larga porque abajo siempre mostraba a TODA la plantilla, sin
+    importar el filtro de arriba. Se separó en una pantalla aparte, con su
+    propio buscador por nombre -- sin distinguir mayúsculas de minúsculas,
+    ej. "torres" encuentra a "TORRES QUISPE, Ana")."""
+    q = request.args.get("q", "").strip()
+    all_items = _honorarios_template_items()
+    template_staff_ids = {i["staff_id"] for i in all_items}
+    available_staff = [s for s in get_active_staff() if s["id"] not in template_staff_ids]
+    items = all_items
+    if q:
+        q_lower = q.lower()
+        items = [i for i in items if q_lower in i["staff_name"].lower()]
+
+    return render_template(
+        "pagos_personal/honorarios_plantilla_admin.html",
+        items=items, available_staff=available_staff, currency_labels=CURRENCY_LABELS, q=q,
     )
 
 
@@ -1448,14 +1469,15 @@ def honorarios_plantilla_desenlazar_constancia(payment_id):
 def honorarios_plantilla_add():
     if not validate_csrf():
         abort(400)
+    q = request.form.get("q", "")
     staff_id = request.form.get("staff_id", type=int)
     staff = query_one("SELECT id FROM staff WHERE id = ?", (staff_id,))
     if not staff:
         flash("Elige una persona válida del catálogo de Personal.", "error")
-        return redirect(url_for("pagos_personal.honorarios_plantilla"))
+        return redirect(url_for("pagos_personal.honorarios_plantilla_admin", q=q))
     if query_one("SELECT id FROM honorarios_template_items WHERE staff_id = ?", (staff_id,)):
         flash("Esa persona ya está en la plantilla.", "error")
-        return redirect(url_for("pagos_personal.honorarios_plantilla"))
+        return redirect(url_for("pagos_personal.honorarios_plantilla_admin", q=q))
     amount = parse_float(request.form.get("default_amount"), 0)
     concept = request.form.get("default_concept", "").strip() or None
     max_order = query_one("SELECT COALESCE(MAX(sort_order), 0) AS m FROM honorarios_template_items")["m"]
@@ -1464,7 +1486,7 @@ def honorarios_plantilla_add():
         (staff_id, amount, concept, max_order + 1),
     )
     flash("Persona agregada a la plantilla.", "success")
-    return redirect(url_for("pagos_personal.honorarios_plantilla"))
+    return redirect(url_for("pagos_personal.honorarios_plantilla_admin", q=q))
 
 
 @bp.route("/honorarios/plantilla/<int:item_id>/editar", methods=["POST"])
@@ -1472,6 +1494,7 @@ def honorarios_plantilla_add():
 def honorarios_plantilla_edit(item_id):
     if not validate_csrf():
         abort(400)
+    q = request.form.get("q", "")
     item = query_one("SELECT id FROM honorarios_template_items WHERE id = ?", (item_id,))
     if item is None:
         abort(404)
@@ -1482,7 +1505,7 @@ def honorarios_plantilla_edit(item_id):
         (amount, concept, item_id),
     )
     flash("Plantilla actualizada.", "success")
-    return redirect(url_for("pagos_personal.honorarios_plantilla"))
+    return redirect(url_for("pagos_personal.honorarios_plantilla_admin", q=q))
 
 
 @bp.route("/honorarios/plantilla/<int:item_id>/alternar", methods=["POST"])
@@ -1490,12 +1513,13 @@ def honorarios_plantilla_edit(item_id):
 def honorarios_plantilla_toggle(item_id):
     if not validate_csrf():
         abort(400)
+    q = request.form.get("q", "")
     item = query_one("SELECT active FROM honorarios_template_items WHERE id = ?", (item_id,))
     if item is None:
         abort(404)
     execute("UPDATE honorarios_template_items SET active = ? WHERE id = ?", (0 if item["active"] else 1, item_id))
     flash("Actualizado.", "success")
-    return redirect(url_for("pagos_personal.honorarios_plantilla"))
+    return redirect(url_for("pagos_personal.honorarios_plantilla_admin", q=q))
 
 
 @bp.route("/honorarios/plantilla/<int:item_id>/quitar", methods=["POST"])
@@ -1506,9 +1530,10 @@ def honorarios_plantilla_remove(item_id):
     por defecto cada mes)."""
     if not validate_csrf():
         abort(400)
+    q = request.form.get("q", "")
     execute("DELETE FROM honorarios_template_items WHERE id = ?", (item_id,))
     flash("Quitada de la plantilla.", "success")
-    return redirect(url_for("pagos_personal.honorarios_plantilla"))
+    return redirect(url_for("pagos_personal.honorarios_plantilla_admin", q=q))
 
 
 @bp.route("/honorarios/plantilla/importar/plantilla")
@@ -1576,12 +1601,12 @@ def honorarios_plantilla_import():
         result = _apply_honorarios_template_import(rows, example_skips)
         return render_template(
             "import_result.html", result=result,
-            back_url=url_for("pagos_personal.honorarios_plantilla"), retry_url=url_for("pagos_personal.honorarios_plantilla_import"),
+            back_url=url_for("pagos_personal.honorarios_plantilla_admin"), retry_url=url_for("pagos_personal.honorarios_plantilla_import"),
         )
     return render_template(
         "import_form.html", title="Importar plantilla de honorarios", module_label="la plantilla de honorarios",
         template_url=url_for("pagos_personal.honorarios_plantilla_template"), upload_url=url_for("pagos_personal.honorarios_plantilla_import"),
-        back_url=url_for("pagos_personal.honorarios_plantilla"), columns=HONORARIOS_TEMPLATE_COLUMNS,
+        back_url=url_for("pagos_personal.honorarios_plantilla_admin"), columns=HONORARIOS_TEMPLATE_COLUMNS,
     )
 
 
