@@ -127,11 +127,13 @@
       </table>
     </div>
     <p class="muted" style="margin-top:12px; margin-bottom:0;">
-      Tilda a quiénes se les paga este mes y ajusta su monto/concepto/N° de comprobante si hace falta. Ya no hace falta destildar a nadie para "limpiar" la lista — dejar a alguien sin marcar simplemente no lo toca (no crea ni borra nada); para sacar del todo a alguien de este mes usa el botón "Quitar" de su fila. Lo que ya está pagado no se puede editar ni quitar desde acá — usa "Desenlazar" si se enlazó por error. "Generar archivo Telecrédito" guarda lo marcado/editado y pasa a elegir la cuenta de cargo y descargar el archivo — eso solo genera el .txt, todavía no marca nada como pagado.
+      Tilda a quiénes se les paga este mes y ajusta su monto/concepto/N° de comprobante si hace falta. Ya no hace falta destildar a nadie para "limpiar" la lista — dejar a alguien sin marcar simplemente no lo toca (no crea ni borra nada); para sacar del todo a alguien de este mes usa el botón "Quitar" de su fila, o marca a varios (por ejemplo filtrando por Estado=Pendiente + "Seleccionar todos") y usa "🗑 Quitar seleccionados" para sacarlos de golpe. Lo que ya está pagado no se puede editar ni quitar desde acá (ni de a uno ni en bloque) — usa "Desenlazar" si se enlazó por error. "Generar archivo Telecrédito" guarda lo marcado/editado y pasa a elegir la cuenta de cargo y descargar el archivo — eso solo genera el .txt, todavía no marca nada como pagado.
     </p>
     <div class="btn-group" style="margin-top:16px;">
       <button class="btn btn-secondary" type="submit" name="action" value="guardar">Guardar</button>
       <button class="btn btn-primary" type="submit" name="action" value="generar">▶ Generar archivo Telecrédito</button>
+      <button class="btn btn-danger" type="submit" name="action" value="quitar_masivo"
+              onclick="return confirm('¿Quitar de {{ period }} a todas las personas marcadas? Se borra su pago pendiente de este mes (no se toca la plantilla). Lo que ya está pagado no se toca.');">🗑 Quitar seleccionados</button>
     </div>
 
     <div class="panel" style="margin-top:16px; margin-bottom:0;">

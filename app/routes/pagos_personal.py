@@ -1271,9 +1271,12 @@ def honorarios_plantilla_guardar_mes():
     una constancia ya subida a los pagos seleccionados y recién ahí los
     marca PAGADO ("enlazar" — pedido de Braulio, 19 sep: "una vez que se
     paguen enlazar la constancia de pago de manera manual para que
-    figuren como pagados"). Solo toca las filas que estaban dentro del
-    filtro (q/concept/status) que tenía puesto la pantalla — ver
-    _honorarios_month_rows().
+    figuren como pagados"), o borra en bloque el pago pendiente de este
+    mes de todos los marcados ("quitar_masivo" — pedido de Braulio, 26
+    sep: poder quitar de a varios a la vez filtrando por Estado=Pendiente
+    + "Seleccionar todos", en vez de una fila a la vez). Solo toca las
+    filas que estaban dentro del filtro (q/concept/status) que tenía
+    puesto la pantalla — ver _honorarios_month_rows().
 
     26 sep (pedido de Braulio: "por default no debe seleccionar ninguno,
     pero arriba debe haber la opcion seleccionar todos o quitar
@@ -1297,6 +1300,44 @@ def honorarios_plantilla_guardar_mes():
 
     rows = _honorarios_month_rows(period, q, concept_filter, status_filter)
     checked_ids = {int(v) for v in request.form.getlist("incluir")}
+
+    if action == "quitar_masivo":
+        # Pedido de Braulio (26 sep): el botón "Quitar" de honorarios_plantilla_quitar_mes()
+        # es de a uno -- con un filtro (p.ej. Estado=Pendiente) + "Seleccionar todos" pidió
+        # poder quitar del mes a todos los marcados de una sola vez. Mismo criterio que el
+        # de a uno: borra el pago PENDIENTE de este periodo puntual (no la plantilla), y
+        # nunca toca uno ya PAGADO -- eso primero necesita "Desenlazar". A propósito NO pasa
+        # por el bloque de guardar/crear de abajo: si alguien marcado todavía no tenía pago
+        # este mes (SIN_REGISTRAR), no hay nada que crear ni que quitar, se ignora.
+        to_delete = []
+        locked_skipped = 0
+        for row in rows:
+            item = row["item"]
+            if item["id"] not in checked_ids:
+                continue
+            payment = row["payment"]
+            if payment is None:
+                continue  # sin registrar todavía este mes -- nada que quitar
+            if payment["status"] == "PAGADO":
+                locked_skipped += 1
+                continue
+            to_delete.append(payment["id"])
+        if not to_delete:
+            if locked_skipped:
+                flash(
+                    f"No se quitó nada -- {locked_skipped} de los marcados ya están pagados "
+                    "(desenlaza la constancia primero si quieres quitarlos).", "error",
+                )
+            else:
+                flash("Marca al menos a una persona con un pago pendiente para quitar.", "error")
+            return _back()
+        execute(f"DELETE FROM staff_payments WHERE id IN ({','.join('?' * len(to_delete))})", to_delete)
+        msg = f"Listo, se quitaron {len(to_delete)} pago(s) pendiente(s) de {period}."
+        if locked_skipped:
+            msg += f" {locked_skipped} no se tocaron porque ya estaban pagados."
+        flash(msg, "success")
+        return _back()
+
     created, updated = 0, 0
     synced_payment_ids = []
 
