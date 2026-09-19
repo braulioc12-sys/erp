@@ -180,7 +180,9 @@ def list_view():
         sql += " AND t.status = ?"
         params.append(status)
     if q:
-        sql += " AND (t.code LIKE ? OR c.name LIKE ? OR t.origin LIKE ? OR t.destination LIKE ?)"
+        # LOWER() en ambos lados (patch 0066) -- ver el comentario completo en
+        # clientes.list_view().
+        sql += " AND (LOWER(t.code) LIKE LOWER(?) OR LOWER(c.name) LIKE LOWER(?) OR LOWER(t.origin) LIKE LOWER(?) OR LOWER(t.destination) LIKE LOWER(?))"
         params += [f"%{q}%"] * 4
     sql += " ORDER BY t.scheduled_date DESC, t.id DESC"
 
@@ -222,8 +224,10 @@ def list_terceros():
         sql += " AND t.status = ?"
         params.append(status)
     if q:
-        sql += """ AND (t.code LIKE ? OR c.name LIKE ? OR t.third_party_name LIKE ?
-                         OR t.origin LIKE ? OR t.destination LIKE ?)"""
+        # LOWER() en ambos lados (patch 0066) -- ver el comentario completo en
+        # clientes.list_view().
+        sql += """ AND (LOWER(t.code) LIKE LOWER(?) OR LOWER(c.name) LIKE LOWER(?) OR LOWER(t.third_party_name) LIKE LOWER(?)
+                         OR LOWER(t.origin) LIKE LOWER(?) OR LOWER(t.destination) LIKE LOWER(?))"""
         params += [f"%{q}%"] * 5
     sql += " ORDER BY t.scheduled_date DESC, t.id DESC"
 

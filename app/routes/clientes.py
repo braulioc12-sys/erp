@@ -11,8 +11,17 @@ bp = Blueprint("clientes", __name__, url_prefix="/clientes")
 def list_view():
     q = request.args.get("q", "").strip()
     if q:
+        # LOWER() en ambos lados (patch 0066): "LIKE" a secas es case-INsensitive en
+        # SQLite (donde se prueba en local) pero case-SENSITIVE en Postgres (donde
+        # corre producción, ver claude/migracion-aws-rds-s3-patch-0043-notas.md) --
+        # con solo "LIKE ?" el buscador funcionaba en pruebas locales pero fallaba en
+        # producción para cualquier búsqueda que no calzara la mayúscula/minúscula
+        # exacta guardada. Braulio lo reportó con capturas (Catálogo de Personal:
+        # "BRAULIO" encontraba, "braulio" no) -- se revisó todo el codebase y el mismo
+        # patrón sin LOWER() aparecía en varios buscadores más, corregidos junto con
+        # este.
         clients = query_all(
-            "SELECT * FROM clients WHERE active = 1 AND (name LIKE ? OR ruc LIKE ?) ORDER BY name",
+            "SELECT * FROM clients WHERE active = 1 AND (LOWER(name) LIKE LOWER(?) OR LOWER(ruc) LIKE LOWER(?)) ORDER BY name",
             (f"%{q}%", f"%{q}%"),
         )
     else:

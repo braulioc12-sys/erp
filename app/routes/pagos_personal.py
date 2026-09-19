@@ -202,7 +202,9 @@ def _filtered_payments(period, staff_id, payment_type, status, q, payment_ids=No
         sql += " AND p.status = ?"
         params.append(status)
     if q:
-        sql += " AND s.name LIKE ?"
+        # LOWER() en ambos lados (patch 0066) -- ver el comentario completo en
+        # clientes.list_view().
+        sql += " AND LOWER(s.name) LIKE LOWER(?)"
         params.append(f"%{q}%")
     if payment_ids:
         sql += f" AND p.id IN ({','.join('?' * len(payment_ids))})"
@@ -701,7 +703,17 @@ def staff_list():
     params = []
     sql += " AND s.status = 'INACTIVO'" if show_inactive else " AND s.status = 'ACTIVO'"
     if q:
-        sql += " AND (s.name LIKE ? OR s.document_number LIKE ?)"
+        # LOWER() en ambos lados (patch 0066) -- pedido de Braulio: reportó con
+        # capturas que buscar "BRAULIO" (mayúsculas) sí encontraba a la persona pero
+        # "braulio" (minúsculas) no. Causa real: "LIKE" a secas es case-insensitive en
+        # SQLite (donde se prueba en local) pero case-SENSITIVE en Postgres (donde
+        # corre producción desde el 31 ago -- ver
+        # claude/migracion-aws-rds-s3-patch-0043-notas.md) -- por eso nunca se notó en
+        # las pruebas de esta sesión. Se revisó todo el codebase: el mismo patrón sin
+        # LOWER() aparecía en Clientes, Flota, Inventarios, RRHH, Rutas, Tarifario y
+        # Viajes -- todos corregidos junto con este (ver
+        # clientes.list_view() para el comentario completo).
+        sql += " AND (LOWER(s.name) LIKE LOWER(?) OR LOWER(s.document_number) LIKE LOWER(?))"
         params.extend([f"%{q}%", f"%{q}%"])
     sql += " ORDER BY s.name"
     staff = query_all(sql, params)

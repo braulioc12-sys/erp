@@ -25,8 +25,10 @@ def list_view():
     # ("+ Agregar nueva ruta", ver new()) y esta pantalla solo filtra/busca.
     q = request.args.get("q", "").strip()
     if q:
+        # LOWER() en ambos lados (patch 0066) -- ver el comentario completo en
+        # clientes.list_view().
         routes = query_all(
-            "SELECT * FROM routes WHERE origin LIKE ? OR destination LIKE ? ORDER BY origin, destination",
+            "SELECT * FROM routes WHERE LOWER(origin) LIKE LOWER(?) OR LOWER(destination) LIKE LOWER(?) ORDER BY origin, destination",
             (f"%{q}%", f"%{q}%"),
         )
     else:

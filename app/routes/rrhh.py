@@ -63,7 +63,9 @@ def _ready_advances(month, driver_id, office, issuer, q):
         sql += " AND t.issuer = ?"
         params.append(issuer)
     if q:
-        sql += " AND (a.code LIKE ? OR t.code LIKE ?)"
+        # LOWER() en ambos lados (patch 0066) -- ver el comentario completo en
+        # clientes.list_view().
+        sql += " AND (LOWER(a.code) LIKE LOWER(?) OR LOWER(t.code) LIKE LOWER(?))"
         like = f"%{q}%"
         params.extend([like, like])
     sql += " ORDER BY d.name IS NULL, d.name, a.liquidated_at, a.id"

@@ -38,7 +38,9 @@ def list_view():
     sql = "SELECT * FROM inventory_items WHERE 1=1"
     params = []
     if q:
-        sql += " AND name LIKE ?"
+        # LOWER() en ambos lados (patch 0066) -- ver el comentario completo en
+        # clientes.list_view().
+        sql += " AND LOWER(name) LIKE LOWER(?)"
         params.append(f"%{q}%")
     sql += " ORDER BY sort_order, name"
     items = query_all(sql, params)

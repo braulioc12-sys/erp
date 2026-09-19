@@ -159,7 +159,10 @@ def list_view():
         conditions.append("vehicle_type = ?")
         params.append(vehicle_type)
     if model:
-        conditions.append("model LIKE ?")
+        # LOWER() en ambos lados (patch 0066) -- "LIKE" a secas es case-sensitive en
+        # Postgres (producción) aunque no en SQLite (local) -- ver el comentario
+        # completo en clientes.list_view().
+        conditions.append("LOWER(model) LIKE LOWER(?)")
         params.append(f"%{model}%")
     vehicles = query_all(
         f"SELECT * FROM vehicles WHERE {' AND '.join(conditions)} ORDER BY plate", tuple(params)

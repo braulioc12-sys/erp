@@ -60,7 +60,9 @@ def list_view():
               WHERE r.active = 1"""
     params = []
     if q:
-        sql += " AND (c.name LIKE ? OR r.origin LIKE ? OR r.destination LIKE ?)"
+        # LOWER() en ambos lados (patch 0066) -- ver el comentario completo en
+        # clientes.list_view().
+        sql += " AND (LOWER(c.name) LIKE LOWER(?) OR LOWER(r.origin) LIKE LOWER(?) OR LOWER(r.destination) LIKE LOWER(?))"
         params.extend([f"%{q}%", f"%{q}%", f"%{q}%"])
     sql += " ORDER BY c.name, r.origin, r.destination"
     routes = query_all(sql, params)
