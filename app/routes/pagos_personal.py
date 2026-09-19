@@ -1210,17 +1210,28 @@ def honorarios_plantilla():
 @bp.route("/honorarios/plantilla/mes", methods=["POST"])
 @permission_required("pagos_personal", "edit")
 def honorarios_plantilla_guardar_mes():
-    """Guarda los pagos de RECIBO_HONORARIOS del periodo elegido según lo
-    marcado/editado en la pantalla (crea/actualiza/quita), y según el
-    botón que se usó se queda en la Plantilla ("guardar"), redirige a
-    telecredito_configure() con la selección exacta de pagos para armar y
-    descargar el archivo ("generar" — ver el docstring grande al inicio
-    del módulo, sección 4), o enlaza una constancia ya subida a los pagos
-    seleccionados y recién ahí los marca PAGADO ("enlazar" — pedido de
-    Braulio, 19 sep: "una vez que se paguen enlazar la constancia de pago
-    de manera manual para que figuren como pagados"). Solo toca las filas
-    que estaban dentro del filtro (q/concept/status) que tenía puesto la
-    pantalla — ver _honorarios_month_rows()."""
+    """Guarda/crea los pagos de RECIBO_HONORARIOS que el usuario marcó con
+    el checkbox (crea si no existía, actualiza monto/concepto/N° de
+    comprobante si ya existía), y según el botón que se usó se queda en la
+    Plantilla ("guardar"), redirige a telecredito_configure() con la
+    selección exacta de pagos para armar y descargar el archivo ("generar"
+    — ver el docstring grande al inicio del módulo, sección 4), o enlaza
+    una constancia ya subida a los pagos seleccionados y recién ahí los
+    marca PAGADO ("enlazar" — pedido de Braulio, 19 sep: "una vez que se
+    paguen enlazar la constancia de pago de manera manual para que
+    figuren como pagados"). Solo toca las filas que estaban dentro del
+    filtro (q/concept/status) que tenía puesto la pantalla — ver
+    _honorarios_month_rows().
+
+    26 sep (pedido de Braulio: "por default no debe seleccionar ninguno,
+    pero arriba debe haber la opcion seleccionar todos o quitar
+    seleccion") -- los checkboxes ahora arrancan TODOS destildados, así
+    que dejar a alguien sin marcar y guardar YA NO borra su pago pendiente
+    (antes sí lo hacía -- con los checkboxes por defecto destildados eso
+    hubiera borrado sin querer a todo el mundo apenas se tildaran unos
+    pocos para una acción puntual). Para sacar a alguien del mes hay que
+    usar el botón "Quitar" de su fila -- ver
+    honorarios_plantilla_quitar_mes()."""
     if not validate_csrf():
         abort(400)
     period = request.form.get("period") or today_str()[:7]
@@ -1234,17 +1245,14 @@ def honorarios_plantilla_guardar_mes():
 
     rows = _honorarios_month_rows(period, q, concept_filter, status_filter)
     checked_ids = {int(v) for v in request.form.getlist("incluir")}
-    created, updated, removed = 0, 0, 0
+    created, updated = 0, 0
     synced_payment_ids = []
 
     for row in rows:
         item = row["item"]
         existing = row["payment"]
         if item["id"] not in checked_ids:
-            if existing and existing["status"] == "PENDIENTE":
-                execute("DELETE FROM staff_payments WHERE id = ?", (existing["id"],))
-                removed += 1
-            continue
+            continue  # no marcado -- no se toca (ni se crea ni se borra)
         if existing and existing["status"] == "PAGADO":
             continue  # ya pagado, no se vuelve a tocar ni a incluir en un nuevo archivo/enlace
         amount = parse_float(request.form.get(f"amount_{item['id']}"), item["default_amount"])
@@ -1294,8 +1302,33 @@ def honorarios_plantilla_guardar_mes():
         flash(f"Constancia enlazada a {len(synced_payment_ids)} pago(s) — quedaron marcados como pagados.", "success")
         return _back()
 
-    flash(f"Listo: {created} pago(s) nuevo(s), {updated} actualizado(s), {removed} quitado(s).", "success")
+    if not synced_payment_ids:
+        flash("No marcaste a nadie -- nada que guardar. Tilda a quienes quieras incluir este mes.", "error")
+        return _back()
+    flash(f"Listo: {created} pago(s) nuevo(s), {updated} actualizado(s).", "success")
     return _back()
+
+
+@bp.route("/honorarios/plantilla/<int:payment_id>/quitar-mes", methods=["POST"])
+@permission_required("pagos_personal", "edit")
+def honorarios_plantilla_quitar_mes(payment_id):
+    """Saca a una persona del mes -- borra su pago PENDIENTE de este
+    periodo puntual (no la plantilla en sí, ni ningún otro mes). No se
+    puede quitar un pago ya PAGADO desde acá -- primero hay que
+    "Desenlazar" la constancia."""
+    if not validate_csrf():
+        abort(400)
+    payment = query_one(
+        "SELECT * FROM staff_payments WHERE id = ? AND payment_type = 'RECIBO_HONORARIOS'", (payment_id,)
+    )
+    if payment is None:
+        abort(404)
+    if payment["status"] == "PAGADO":
+        flash("Ese pago ya está pagado -- primero desenlaza la constancia si quieres quitarlo.", "error")
+        return redirect(url_for("pagos_personal.honorarios_plantilla", period=payment["period"]))
+    execute("DELETE FROM staff_payments WHERE id = ?", (payment_id,))
+    flash("Listo, se quitó a esa persona de este mes.", "success")
+    return redirect(url_for("pagos_personal.honorarios_plantilla", period=payment["period"]))
 
 
 @bp.route("/honorarios/plantilla/<int:payment_id>/desenlazar-constancia", methods=["POST"])

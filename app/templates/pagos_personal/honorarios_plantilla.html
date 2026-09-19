@@ -52,26 +52,31 @@
     {% endif %}
   </p>
   {% else %}
-  <form method="post" action="{{ url_for('pagos_personal.honorarios_plantilla_guardar_mes') }}" style="margin-top:16px;">
+  <form method="post" action="{{ url_for('pagos_personal.honorarios_plantilla_guardar_mes') }}" style="margin-top:16px;" id="pagos-mes-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="period" value="{{ period }}">
     <input type="hidden" name="q" value="{{ q }}">
     <input type="hidden" name="concept" value="{{ concept_filter }}">
     <input type="hidden" name="status" value="{{ status_filter }}">
 
+    <div class="btn-group" style="margin-bottom:10px;">
+      <button type="button" class="btn btn-secondary btn-sm" onclick="document.querySelectorAll('#pagos-mes-form input[name=incluir]:not(:disabled)').forEach(function(cb){cb.checked=true;})">Seleccionar todos</button>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="document.querySelectorAll('#pagos-mes-form input[name=incluir]:not(:disabled)').forEach(function(cb){cb.checked=false;})">Quitar selección</button>
+    </div>
+
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
             <th></th><th>Persona</th><th>Documento</th>
-            <th class="text-right">Monto</th><th>Concepto</th><th>N° de comprobante</th><th>Estado</th><th>Constancia</th>
+            <th class="text-right">Monto</th><th>Concepto</th><th>N° de comprobante</th><th>Estado</th><th>Constancia</th><th></th>
           </tr>
         </thead>
         <tbody>
           {% for row in month_rows %}
           <tr>
             <td>
-              <input type="checkbox" name="incluir" value="{{ row.item.id }}" checked {{ 'disabled' if row.locked }}>
+              <input type="checkbox" name="incluir" value="{{ row.item.id }}" {{ 'disabled' if row.locked }}>
             </td>
             <td>{{ row.item.staff_name }}</td>
             <td>{{ row.item.document_type }} {{ row.item.document_number or '—' }}</td>
@@ -106,13 +111,22 @@
               <span class="muted">—</span>
               {% endif %}
             </td>
+            <td style="white-space:nowrap;">
+              {% if row.payment and not row.locked %}
+              <button type="submit" formaction="{{ url_for('pagos_personal.honorarios_plantilla_quitar_mes', payment_id=row.payment.id) }}"
+                      formmethod="post" formnovalidate class="btn btn-secondary btn-sm"
+                      onclick="return confirm('¿Quitar a {{ row.item.staff_name }} de {{ period }}? Se borra su pago pendiente de este mes (no se toca la plantilla).');">Quitar</button>
+              {% else %}
+              <span class="muted">—</span>
+              {% endif %}
+            </td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
     <p class="muted" style="margin-top:12px; margin-bottom:0;">
-      Si desmarcas a alguien que todavía está pendiente, se elimina su pago pendiente de este periodo. Lo que ya está pagado no se puede editar ni desmarcar desde acá — usa "Desenlazar" si se enlazó por error. "Generar archivo Telecrédito" guarda lo marcado/editado y pasa a elegir la cuenta de cargo y descargar el archivo — eso solo genera el .txt, todavía no marca nada como pagado.
+      Tilda a quiénes se les paga este mes y ajusta su monto/concepto/N° de comprobante si hace falta. Ya no hace falta destildar a nadie para "limpiar" la lista — dejar a alguien sin marcar simplemente no lo toca (no crea ni borra nada); para sacar del todo a alguien de este mes usa el botón "Quitar" de su fila. Lo que ya está pagado no se puede editar ni quitar desde acá — usa "Desenlazar" si se enlazó por error. "Generar archivo Telecrédito" guarda lo marcado/editado y pasa a elegir la cuenta de cargo y descargar el archivo — eso solo genera el .txt, todavía no marca nada como pagado.
     </p>
     <div class="btn-group" style="margin-top:16px;">
       <button class="btn btn-secondary" type="submit" name="action" value="guardar">Guardar</button>
@@ -153,7 +167,7 @@
 <div class="page-header" style="margin-bottom:8px;">
   <h2 style="margin:0;">Administrar plantilla</h2>
 </div>
-<p class="muted mt-0">Lista fija de personas y su monto/concepto por defecto — agregar, editar el default, activar/desactivar o quitar de acá no afecta ningún pago ya generado.</p>
+<p class="muted mt-0">Lista fija de personas y su monto/concepto por defecto — agregar, editar el default, activar/desactivar o quitar de acá no afecta ningún pago ya generado. <strong>Esta lista de abajo siempre muestra a todos</strong> — los filtros de Buscar/Concepto/Estado de arriba solo aplican a la tabla "Pagos de {{ period }}".</p>
 
 <div class="btn-group" style="margin-bottom:16px;">
   <a href="{{ url_for('pagos_personal.honorarios_plantilla_template') }}" class="btn btn-secondary">⬇ Descargar plantilla Excel</a>
