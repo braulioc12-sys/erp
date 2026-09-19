@@ -36,6 +36,7 @@
     <label>Estado
       <select name="status">
         <option value="">Todos</option>
+        <option value="SIN_REGISTRAR" {{ 'selected' if status_filter == 'SIN_REGISTRAR' }}>Sin registrar</option>
         <option value="PENDIENTE" {{ 'selected' if status_filter == 'PENDIENTE' }}>Pendiente</option>
         <option value="PAGADO" {{ 'selected' if status_filter == 'PAGADO' }}>Pagado</option>
       </select>
@@ -99,7 +100,7 @@
               <span class="badge badge-pendiente">Pendiente</span>
               {% if row.exported %}<br><span class="muted" style="font-size:0.85em;">Ya generado</span>{% endif %}
               {% else %}
-              <span class="muted">—</span>
+              <span class="badge badge-borrador">Sin registrar</span>
               {% endif %}
             </td>
             <td style="white-space:nowrap;">

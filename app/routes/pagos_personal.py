@@ -91,6 +91,7 @@ bueno (ver la nota grande al inicio de ese módulo).
    verificado contra un archivo real)."""
 import io
 import os
+import re
 import uuid
 import zipfile
 from datetime import datetime
@@ -473,6 +474,21 @@ def telecredito_configure():
     )
 
 
+def _has_valid_document_number(document_type, document_number):
+    """26 sep (reporte de Braulio, ver la nota grande en
+    telecredito_generate()): un DNI vacío o que no tenga exactamente 8
+    dígitos hace que el banco rechace TODO el lote de Telecrédito, no solo
+    esa fila -- se usa acá y en telecredito_generate() para no dejar
+    pasar a alguien así (y para poder avisar en el Catálogo de Personal
+    antes de llegar a generar el archivo)."""
+    clean = re.sub(r"[^A-Za-z0-9]", "", document_number or "")
+    if not clean:
+        return False
+    if document_type == "DNI" and len(clean) != 8:
+        return False
+    return True
+
+
 @bp.route("/exportar/telecredito/generar", methods=["POST"])
 @permission_required("pagos_personal", "edit")
 def telecredito_generate():
@@ -544,7 +560,22 @@ def telecredito_generate():
     # siempre queda limitado a DNI/CE, sin RUC, en ambos casos.
     valid_doc_codes = DOCUMENT_TYPE_CODES_HABERES
 
-    excluded_bank, excluded_currency, excluded_doc = [], [], []
+    # 26 sep (reporte de Braulio: "esta saliendo error en la plataforma de
+    # telecredito a la hora de subir los archivos ... de los recibos por
+    # honorario") -- el banco rechazó TODO el lote con "el número de
+    # documento de identidad del beneficiario es incorrecto" en cada fila.
+    # La causa: el sistema nunca chequeaba que document_number viniera
+    # lleno (solo chequeaba que document_type fuera DNI/CE) -- alguien
+    # agregado al Catálogo de Personal sin poner su DNI (p.ej. importado
+    # desde un Excel que solo traía nombre+cuenta, o creado a mano sin
+    # llenar ese campo) quedaba con document_type='DNI' por defecto pero
+    # document_number vacío, y ese campo salía en blanco en el archivo --
+    # el banco lo rechaza para TODAS las filas del lote, no solo esa
+    # persona. Ahora se excluye (con aviso, como ya se hacía para cuenta
+    # bancaria/moneda/tipo de documento) a cualquiera sin un DNI de
+    # exactamente 8 dígitos o un CE sin ningún caracter válido, en vez de
+    # dejar pasar un archivo que el banco va a rechazar entero.
+    excluded_bank, excluded_currency, excluded_doc, excluded_docnum = [], [], [], []
     prepared = []
     for row in payments:
         p = dict(row)
@@ -553,6 +584,9 @@ def telecredito_generate():
             continue
         if p["document_type"] not in valid_doc_codes:
             excluded_doc.append(p["staff_name"])
+            continue
+        if not _has_valid_document_number(p["document_type"], p["document_number"]):
+            excluded_docnum.append(p["staff_name"])
             continue
         bank_type, bank_value, is_interbank = abono_bank_fields(p["cci"], p["account_number"], p["account_type"])
         if not bank_value:
@@ -568,6 +602,12 @@ def telecredito_generate():
         flash(f"Su moneda no coincide con la cuenta de cargo elegida ({moneda}), no se pudieron incluir: {', '.join(excluded_currency)}.", "error")
     if excluded_doc:
         flash(f"Su tipo de documento no es válido para este servicio de Telecrédito, no se pudieron incluir: {', '.join(excluded_doc)}.", "error")
+    if excluded_docnum:
+        flash(
+            f"Sin un N° de documento válido en el catálogo de Personal (falta, o el DNI no tiene 8 dígitos), "
+            f"no se pudieron incluir: {', '.join(excluded_docnum)}. Complétalo en Catálogo de Personal y vuelve a generar el archivo.",
+            "error",
+        )
 
     if not prepared:
         flash("No quedó ningún pago para incluir en el archivo — revisa los avisos de arriba.", "error")
@@ -665,7 +705,12 @@ def staff_list():
         params.extend([f"%{q}%", f"%{q}%"])
     sql += " ORDER BY s.name"
     staff = query_all(sql, params)
-    return render_template("pagos_personal/staff_list.html", staff=staff, show_inactive=show_inactive, q=q)
+    invalid_doc_ids = {
+        s["id"] for s in staff if not _has_valid_document_number(s["document_type"], s["document_number"])
+    }
+    return render_template(
+        "pagos_personal/staff_list.html", staff=staff, show_inactive=show_inactive, q=q, invalid_doc_ids=invalid_doc_ids
+    )
 
 
 def _staff_form_context(staff=None):
@@ -1133,9 +1178,14 @@ def _honorarios_month_rows(period, q="", concept_filter="", status_filter=""):
     pago de alguien que quedó fuera de la vista por el filtro, solo de
     quien sí se ve y se desmarca a propósito.
 
-    status_filter "PENDIENTE" incluye tanto lo que ya tiene un pago
-    PENDIENTE como lo que todavía no tiene ningún pago generado ese mes
-    (en los dos casos, "pendiente" en el sentido de "todavía no pagado")."""
+    26 sep, 2da corrección (pedido de Braulio: en un periodo nuevo, con
+    nadie tocado todavía, filtrar por "Pendiente" seguía mostrando a
+    todo el mundo -- porque antes "Pendiente" incluía a propósito tanto
+    lo que ya tenía un pago PENDIENTE como lo que todavía no tenía ningún
+    pago generado ese mes. Braulio pidió separarlo: ahora "Pendiente"
+    son SOLO los que YA tienen un pago con estado PENDIENTE creado; los
+    que todavía no tienen ningún pago este mes caen en el estado nuevo
+    "SIN_REGISTRAR"."""
     items = _honorarios_template_items()
     existing_payments = {
         p["staff_id"]: p for p in query_all(
@@ -1163,9 +1213,11 @@ def _honorarios_month_rows(period, q="", concept_filter="", status_filter=""):
         if concept_lower and concept_lower not in effective_concept.lower():
             continue
         row_status = payment["status"] if payment else None
-        if status_filter == "PENDIENTE" and row_status == "PAGADO":
+        if status_filter == "PENDIENTE" and row_status != "PENDIENTE":
             continue
         if status_filter == "PAGADO" and row_status != "PAGADO":
+            continue
+        if status_filter == "SIN_REGISTRAR" and row_status is not None:
             continue
         rows.append({
             "item": item,
