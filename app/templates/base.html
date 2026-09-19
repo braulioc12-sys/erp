@@ -40,11 +40,21 @@
       <a href="{{ url_for('flota.list_view') }}" class="{{ 'active' if request.blueprint == 'flota' }}">Flota</a>
       <a href="{{ url_for('conductores.list_view') }}" class="{{ 'active' if request.blueprint == 'conductores' }}">Conductores</a>
       <a href="{{ url_for('liquidaciones.list_view') }}" class="{{ 'active' if request.blueprint == 'liquidaciones' }}">Liquidaciones</a>
-      {% if can(current_user.roles, 'rrhh', 'view') %}
-      <a href="{{ url_for('rrhh.list_view') }}" class="{{ 'active' if request.blueprint == 'rrhh' }}">RRHH</a>
-      {% endif %}
-      {% if can(current_user.roles, 'pagos_personal', 'view') %}
-      <a href="{{ url_for('pagos_personal.hub') }}" class="{{ 'active' if request.blueprint == 'pagos_personal' }}">Pagos personal</a>
+      {# 19 sep, pedido de Braulio ("hay que fusionar el modulo de RRHH y
+         Pagos personal. Ambos deben estar dentro del modulo de RRHH"):
+         un solo link "RRHH" en vez de dos separados -- entra al hub que
+         antes era "Pagos personal" (pagos_personal.hub), que ahora trae
+         un 4to card "Viajes de conductor" hacia lo que antes era el menú
+         RRHH aparte (rrhh.list_view). Los permisos de "rrhh" y
+         "pagos_personal" siguen siendo dos módulos separados en Usuarios
+         (no se tocó auth.py/permissions_catalog.py) -- esto es solo un
+         cambio de navegación. El link se muestra si el usuario tiene
+         "ver" en CUALQUIERA de los dos (normalmente van juntos en los
+         roles por defecto, ver auth.py) para no perder el punto de
+         entrada en el caso raro de una excepción puntual por usuario que
+         los separe. #}
+      {% if can(current_user.roles, 'pagos_personal', 'view') or can(current_user.roles, 'rrhh', 'view') %}
+      <a href="{{ url_for('pagos_personal.hub') }}" class="{{ 'active' if request.blueprint in ('pagos_personal', 'rrhh') }}">RRHH</a>
       {% endif %}
       <a href="{{ url_for('mantenimiento.list_view') }}" class="{{ 'active' if request.blueprint == 'mantenimiento' }}">Mantenimiento</a>
       {% if can(current_user.roles, 'inventarios', 'view') %}

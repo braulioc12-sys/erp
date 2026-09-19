@@ -225,14 +225,38 @@ def perform_frotcom_sync(client=None):
 @bp.route("")
 @permission_required("integraciones", "view")
 def index():
+    """19 sep, pedido de Braulio ("en el menu de ubicacion GPS, hay que
+    poner menu de busqueda de placa" + mapa en vivo de toda la flota):
+
+    - `q` filtra la TABLA por placa (case-insensitive en ambos motores de
+      BD -- LOWER() en los dos lados, ver patch 0066) — pero el MAPA
+      siempre muestra a toda la flota con posición conocida, sin importar
+      el filtro de la tabla, porque Braulio pidió ver "la ubicación de
+      todas las unidades en el momento", no solo la que se buscó.
+    - `map_vehicles` es la lista (ya como dicts simples, no sqlite3.Row)
+      que la plantilla vuelca a JSON para Leaflet -- sqlite3.Row no es
+      serializable por `tojson` directo."""
     client = build_client_from_config(current_app.config)
-    vehicles = query_all(
+    q = request.args.get("q", "").strip()
+    all_vehicles = query_all(
         """SELECT v.id, v.plate, v.gps_external_id, v.current_km, v.current_km_updated_at,
                   l.latitude, l.longitude, l.speed_kmh, l.recorded_at, l.updated_at as location_updated_at
            FROM vehicles v
            LEFT JOIN vehicle_locations l ON l.vehicle_id = v.id
            ORDER BY v.plate"""
     )
+    if q:
+        q_lower = q.lower()
+        vehicles = [v for v in all_vehicles if q_lower in (v["plate"] or "").lower()]
+    else:
+        vehicles = all_vehicles
+    map_vehicles = [
+        {
+            "plate": v["plate"], "lat": v["latitude"], "lng": v["longitude"],
+            "speed": v["speed_kmh"], "updated_at": v["location_updated_at"],
+        }
+        for v in all_vehicles if v["latitude"] is not None and v["longitude"] is not None
+    ]
     # Horas manejadas y km avanzados HOY por unidad (31 ago, pedido de
     # Braulio). Preferimos los viajes ya calculados por Frotcom
     # (vehicle_trips, si ya se importaron con "Traer historial") y solo
@@ -240,8 +264,9 @@ def index():
     # importados ese día todavía — ver app/gps_stats.py.
     stats_by_vehicle = combined_daily_stats(today_str())
     return render_template(
-        "integraciones/index.html", vehicles=vehicles, configured=client.is_configured(),
-        stats_by_vehicle=stats_by_vehicle, auto_sync_enabled=current_app.config.get("FROTCOM_AUTO_SYNC_SECONDS", 0) > 0,
+        "integraciones/index.html", vehicles=vehicles, q=q, configured=client.is_configured(),
+        stats_by_vehicle=stats_by_vehicle, map_vehicles=map_vehicles,
+        auto_sync_enabled=current_app.config.get("FROTCOM_AUTO_SYNC_SECONDS", 0) > 0,
     )
 
 

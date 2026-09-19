@@ -2,13 +2,13 @@
 {% block title %}Personal{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>Pagos personal — Catálogo de Personal</h1>
+  <h1>RRHH — Catálogo de Personal</h1>
   <div class="page-actions">
     {% if can(current_user.roles, 'pagos_personal', 'edit') %}
     <a href="{{ url_for('pagos_personal.staff_new') }}" class="btn btn-primary">+ Agregar persona</a>
     <a href="{{ url_for('pagos_personal.staff_import_txt') }}" class="btn btn-secondary">⬆ Importar desde .txt de Telecrédito</a>
     {% endif %}
-    <a href="{{ url_for('pagos_personal.hub') }}" class="btn btn-secondary">← Volver a Pagos personal</a>
+    <a href="{{ url_for('pagos_personal.hub') }}" class="btn btn-secondary">← Volver a RRHH</a>
   </div>
 </div>
 <p class="muted mt-0">Nombre, documento, cargo y datos bancarios de cada persona a la que se le registran pagos (planilla o recibo por honorarios). Si la persona también es conductor, se puede enlazar con su registro en Conductores para no duplicar sus datos.</p>
@@ -38,7 +38,12 @@
         {% for s in staff %}
         <tr>
           <td>{{ s.name }}</td>
-          <td>{{ s.document_type }} {{ s.document_number or '—' }}</td>
+          <td>
+            {{ s.document_type }} {{ s.document_number or '—' }}
+            {% if s.id in invalid_doc_ids %}
+            <br><span class="badge badge-pendiente" style="font-size:0.75em;" title="El banco rechaza todo el archivo de Telecrédito si esta persona queda incluida así.">⚠ {{ 'Falta el DNI/documento' if not s.document_number else 'DNI debe tener 8 dígitos' }}</span>
+            {% endif %}
+          </td>
           <td>{{ s.position or '—' }}</td>
           <td>{{ s.company or '—' }}</td>
           <td>{{ s.driver_name or '—' }}</td>

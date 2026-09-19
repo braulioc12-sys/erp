@@ -1,8 +1,18 @@
 {% extends 'base.html' %}
-{% block title %}Pagos personal{% endblock %}
+{% block title %}RRHH{% endblock %}
 {% block content %}
+<!-- 19 sep, pedido de Braulio ("hay que fusionar el modulo de RRHH y Pagos
+     personal... y luego cuando se entre, sea como ahora que hay los 3
+     menus... y agregar otro que sea 'viajes de conductor'"): esta pantalla
+     era el hub de "Pagos personal" (3 cards); ahora es el hub de "RRHH"
+     con un 4to card hacia lo que antes era el menú RRHH aparte (mismo
+     contenido de siempre -- viajes con liquidación cerrada, listos para
+     RRHH -- ver rrhh/list.html). La ruta en sí sigue siendo
+     pagos_personal.hub() (no se movieron URLs para no romper nada que ya
+     esté enlazado/guardado) -- ver el comentario en base.html sobre el
+     link único del sidebar. -->
 <div class="page-header">
-  <h1>Pagos personal</h1>
+  <h1>RRHH</h1>
   <div class="page-actions">
     <a href="{{ url_for('pagos_personal.staff_list') }}" class="btn btn-secondary">Catálogo de Personal</a>
   </div>
@@ -22,5 +32,11 @@
     <h2 style="margin-top:0;">📁 Constancias</h2>
     <p class="muted" style="margin-bottom:0;">Archivador de constancias de pago que da cada banco, por año y mes.</p>
   </a>
+  {% if can(current_user.roles, 'rrhh', 'view') %}
+  <a href="{{ url_for('rrhh.list_view') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
+    <h2 style="margin-top:0;">🚚 Viajes de conductor</h2>
+    <p class="muted" style="margin-bottom:0;">Viajes con liquidación cerrada, listos para enviarse a RRHH.</p>
+  </a>
+  {% endif %}
 </div>
 {% endblock %}

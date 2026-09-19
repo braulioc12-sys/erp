@@ -1,11 +1,17 @@
 {% extends 'base.html' %}
-{% block title %}RRHH{% endblock %}
+{% block title %}Viajes de conductor — RRHH{% endblock %}
 {% block content %}
+<!-- 19 sep: esta pantalla ahora se llega desde el hub de RRHH (card
+     "🚚 Viajes de conductor", ver pagos_personal/hub.html), tras fusionar
+     el menú separado de RRHH con el de Pagos personal -- mismo contenido y
+     misma ruta de siempre (rrhh.list_view), solo cambia el título/botón de
+     vuelta. -->
 <div class="page-header">
-  <h1>RRHH — Liquidaciones listas para enviar</h1>
+  <h1>Viajes de conductor</h1>
   <div class="page-actions">
     <a href="{{ url_for('rrhh.export_excel', month=month, driver_id=driver_id, office=office, issuer=issuer, q=q) }}" class="btn btn-secondary">⬇ Exportar a Excel</a>
-    <a href="{{ url_for('liquidaciones.list_view') }}" class="btn btn-secondary">← Volver a Liquidaciones</a>
+    <a href="{{ url_for('liquidaciones.list_view') }}" class="btn btn-secondary">Ver en Liquidaciones</a>
+    <a href="{{ url_for('pagos_personal.hub') }}" class="btn btn-secondary">← Volver a RRHH</a>
   </div>
 </div>
 <p class="muted mt-0">

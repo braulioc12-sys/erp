@@ -1,5 +1,26 @@
 {% extends 'base.html' %}
 {% block title %}Integración con Frotcom{% endblock %}
+{% block extra_head %}
+<!-- 19 sep, pedido de Braulio ("a la derecha de la lista salga un mapa...
+     que muestre la ubicacion de todas las unidades en el momento"): Leaflet
+     + tiles de OpenStreetMap para el mapa en vivo de la flota -- no hace
+     falta API key ni facturación (a diferencia de Google Maps), y ya
+     tenemos las coordenadas reales guardadas en vehicle_locations (se
+     sincronizan solas cada 2 min, ver perform_frotcom_sync en
+     integraciones.py) así que el mapa siempre muestra la última posición
+     conocida de cada unidad. -->
+<!-- Sin atributo integrity/SRI a propósito: este sandbox de desarrollo
+     tiene bloqueada la salida a unpkg.com, así que no se pudo calcular el
+     hash real del archivo servido ahora mismo -- un hash SRI equivocado
+     rompe la carga en silencio (el navegador la bloquea) en vez de ser una
+     mejora de seguridad, así que se prefirió dejarlo sin pin en vez de
+     arriesgar eso. Si más adelante se quiere agregar integrity, hay que
+     calcularlo con el archivo real (ej. `curl ... | openssl dgst -sha256
+     -binary | openssl base64 -A`) contra la versión exacta que se use. -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>.content { max-width: 1700px; }</style>
+{% endblock %}
 {% block content %}
 <div class="page-header">
   <h1>Ubicación de la flota (Frotcom)</h1>
@@ -34,44 +55,180 @@
 </div>
 {% endif %}
 
-<div class="panel">
-  <h2>Mapeo unidad ↔ Frotcom</h2>
-  <p class="muted mt-0">Cada unidad necesita su "ID en el proveedor de GPS" (tal como aparece en Frotcom) para poder cruzar los datos. Se edita desde Flota → editar unidad.</p>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Unidad</th><th>ID en Frotcom</th><th>Ubicación real</th><th>Velocidad</th><th>Última actualización</th><th>Km total</th><th>Horas manejadas hoy</th><th>Km avanzados hoy</th></tr></thead>
-      <tbody>
-        {% for v in vehicles %}
-        <tr>
-          <td>{{ v.plate }}</td>
-          <td>{{ v.gps_external_id or '— (falta configurar)' }}</td>
-          <td>
-            {% if v.latitude and v.longitude %}
-            <a href="https://www.google.com/maps?q={{ v.latitude }},{{ v.longitude }}" target="_blank" rel="noopener">{{ '%.5f'|format(v.latitude) }}, {{ '%.5f'|format(v.longitude) }} 🗺️</a>
-            {% else %}—{% endif %}
-          </td>
-          <td>{{ (v.speed_kmh ~ ' km/h') if v.speed_kmh is not none else '—' }}</td>
-          <td>{{ v.location_updated_at or '—' }}</td>
-          <td>{{ '{:,.0f} km'.format(v.current_km) if v.current_km is not none else '—' }}</td>
-          {% set stats = stats_by_vehicle.get(v.id) %}
-          {% set puntos_ok = stats and (stats.source == 'frotcom' or stats.get('points', 0) >= 2) %}
-          <td>
-            {% if puntos_ok %}{{ '%.1f h'|format(stats.hours) }}
-            {% elif stats %}0.0 h <span class="muted">(sin datos suficientes)</span>
-            {% else %}—{% endif %}
-          </td>
-          <td>
-            {% if puntos_ok %}{{ '%.1f km'|format(stats.km) }}
-            {% elif stats %}0.0 km <span class="muted">(sin datos suficientes)</span>
-            {% else %}—{% endif %}
-          </td>
-        </tr>
-        {% else %}
-        <tr><td colspan="8" class="table-empty">No hay unidades registradas.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
+<form class="filters" method="get" style="margin-bottom:16px;">
+  <label>Buscar placa
+    <input type="text" name="q" value="{{ q }}" placeholder="Ej: A0L978">
+  </label>
+  <button class="btn btn-secondary" type="submit">Filtrar</button>
+  {% if q %}
+  <a href="{{ url_for('integraciones.index') }}" class="btn btn-secondary">Quitar filtro</a>
+  {% endif %}
+</form>
+
+<div class="gps-layout">
+  <div class="panel" style="margin-bottom:0;">
+    <h2>Mapeo unidad ↔ Frotcom</h2>
+    <p class="muted mt-0">Cada unidad necesita su "ID en el proveedor de GPS" (tal como aparece en Frotcom) para poder cruzar los datos. Se edita desde Flota → editar unidad.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Unidad</th><th>ID en Frotcom</th><th>Ubicación real</th><th>Velocidad</th><th>Última actualización</th><th>Km total</th><th>Horas manejadas hoy</th><th>Km avanzados hoy</th></tr></thead>
+        <tbody>
+          {% for v in vehicles %}
+          <tr>
+            <td>{{ v.plate }}</td>
+            <td>{{ v.gps_external_id or '— (falta configurar)' }}</td>
+            <td>
+              {% if v.latitude and v.longitude %}
+              <a href="https://www.google.com/maps?q={{ v.latitude }},{{ v.longitude }}" target="_blank" rel="noopener">{{ '%.5f'|format(v.latitude) }}, {{ '%.5f'|format(v.longitude) }} 🗺️</a>
+              {% else %}—{% endif %}
+            </td>
+            <td>{{ (v.speed_kmh ~ ' km/h') if v.speed_kmh is not none else '—' }}</td>
+            <td>{{ v.location_updated_at or '—' }}</td>
+            <td>{{ '{:,.0f} km'.format(v.current_km) if v.current_km is not none else '—' }}</td>
+            {% set stats = stats_by_vehicle.get(v.id) %}
+            {% set puntos_ok = stats and (stats.source == 'frotcom' or stats.get('points', 0) >= 2) %}
+            <td>
+              {% if puntos_ok %}{{ '%.1f h'|format(stats.hours) }}
+              {% elif stats %}0.0 h <span class="muted">(sin datos suficientes)</span>
+              {% else %}—{% endif %}
+            </td>
+            <td>
+              {% if puntos_ok %}{{ '%.1f km'|format(stats.km) }}
+              {% elif stats %}0.0 km <span class="muted">(sin datos suficientes)</span>
+              {% else %}—{% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8" class="table-empty">{{ 'Ninguna placa calza con ese filtro.' if q else 'No hay unidades registradas.' }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="muted" style="margin-top:10px;">"Horas manejadas hoy" y "Km avanzados hoy" usan los viajes exactos de Frotcom si ya se importaron (ver <a href="{{ url_for('integraciones.trips_history') }}">Historial de viajes</a>), y si no, un estimado del historial de posiciones — para ver otros días, usa <a href="{{ url_for('integraciones.daily_report') }}">Reportes diarios</a>.</p>
   </div>
-  <p class="muted" style="margin-top:10px;">"Horas manejadas hoy" y "Km avanzados hoy" usan los viajes exactos de Frotcom si ya se importaron (ver <a href="{{ url_for('integraciones.trips_history') }}">Historial de viajes</a>), y si no, un estimado del historial de posiciones — para ver otros días, usa <a href="{{ url_for('integraciones.daily_report') }}">Reportes diarios</a>.</p>
+
+  <div class="gps-map-panel">
+    <div class="panel" style="margin-bottom:0;">
+      <h2 style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+        Mapa en vivo
+        {% if map_vehicles %}
+        <button type="button" class="btn btn-secondary btn-sm" id="gpsMapExpandBtn">⛶ Ampliar</button>
+        {% endif %}
+      </h2>
+      {% if map_vehicles %}
+      <p class="muted mt-0" style="margin-bottom:10px;">{{ map_vehicles|length }} unidad(es) con posición conocida. Haz clic en el mapa para ampliarlo.</p>
+      <div id="gpsMapSmall" class="gps-map-small" role="button" tabindex="0" aria-label="Ampliar mapa"></div>
+      {% else %}
+      <div class="gps-map-empty">Todavía no hay ninguna unidad con posición conocida — sincroniza con Frotcom para traer las ubicaciones.</div>
+      {% endif %}
+    </div>
+  </div>
 </div>
+
+{% if map_vehicles %}
+<div class="gps-map-overlay" id="gpsMapOverlay" aria-hidden="true">
+  <div class="gps-map-overlay-box">
+    <div class="gps-map-overlay-header">
+      <h2 style="margin:0;">Mapa en vivo — toda la flota</h2>
+      <button type="button" class="btn btn-secondary btn-sm" id="gpsMapCloseBtn">✕ Cerrar</button>
+    </div>
+    <div id="gpsMapLarge" class="gps-map-large"></div>
+  </div>
+</div>
+
+<script>
+  // 19 sep, pedido de Braulio: mapa chico al lado de la tabla que se puede
+  // ampliar a un overlay grande con un clic. Se arman DOS mapas Leaflet
+  // distintos (no uno reciclado) porque Leaflet no soporta bien mover el
+  // mismo mapa entre dos contenedores de tamaño diferente sin artefactos de
+  // renderizado -- el grande recién se inicializa la primera vez que se abre
+  // el overlay (invalidateSize() de por sí no alcanza si el contenedor
+  // arrancó en display:none, Leaflet necesita medir un contenedor visible).
+  (function () {
+    var MAP_VEHICLES = {{ map_vehicles|tojson }};
+
+    function buildMarkers(map) {
+      var bounds = [];
+      MAP_VEHICLES.forEach(function (v) {
+        var marker = L.marker([v.lat, v.lng]).addTo(map);
+        var updated = v.updated_at || 'sin dato';
+        var speed = (v.speed !== null && v.speed !== undefined) ? (v.speed + ' km/h') : 'sin dato';
+        marker.bindPopup(
+          '<strong>' + v.plate + '</strong><br>Velocidad: ' + speed + '<br>Actualizado: ' + updated
+        );
+        bounds.push([v.lat, v.lng]);
+      });
+      return bounds;
+    }
+
+    function initMap(containerId) {
+      var map = L.map(containerId, { scrollWheelZoom: false });
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        maxZoom: 19,
+      }).addTo(map);
+      var bounds = buildMarkers(map);
+      if (bounds.length === 1) {
+        map.setView(bounds[0], 13);
+      } else if (bounds.length > 1) {
+        map.fitBounds(bounds, { padding: [30, 30] });
+      } else {
+        map.setView([-6.5, -76.4], 6); // fallback: centro aprox. San Martín, Perú
+      }
+      return map;
+    }
+
+    var smallMap = null;
+    var largeMap = null;
+    var smallEl = document.getElementById('gpsMapSmall');
+    if (smallEl) {
+      smallMap = initMap('gpsMapSmall');
+    }
+
+    var overlay = document.getElementById('gpsMapOverlay');
+    var expandBtn = document.getElementById('gpsMapExpandBtn');
+    var closeBtn = document.getElementById('gpsMapCloseBtn');
+
+    function openOverlay() {
+      overlay.classList.add('open');
+      overlay.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('gps-map-lock');
+      if (!largeMap) {
+        // Recién se puede inicializar ahora que el contenedor es visible
+        // (ver comentario de arriba) -- un pequeño delay deja que el
+        // navegador termine de aplicar display:flex antes de que Leaflet
+        // mida el contenedor.
+        setTimeout(function () {
+          largeMap = initMap('gpsMapLarge');
+        }, 50);
+      } else {
+        setTimeout(function () { largeMap.invalidateSize(); }, 50);
+      }
+    }
+
+    function closeOverlay() {
+      overlay.classList.remove('open');
+      overlay.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('gps-map-lock');
+    }
+
+    if (smallEl) {
+      smallEl.addEventListener('click', openOverlay);
+      smallEl.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openOverlay(); }
+      });
+    }
+    if (expandBtn) expandBtn.addEventListener('click', openOverlay);
+    if (closeBtn) closeBtn.addEventListener('click', closeOverlay);
+    if (overlay) {
+      overlay.addEventListener('click', function (e) {
+        if (e.target === overlay) closeOverlay();
+      });
+    }
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && overlay && overlay.classList.contains('open')) closeOverlay();
+    });
+  })();
+</script>
+{% endif %}
 {% endblock %}
