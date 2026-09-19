@@ -235,7 +235,18 @@ def index():
       todas las unidades en el momento", no solo la que se buscó.
     - `map_vehicles` es la lista (ya como dicts simples, no sqlite3.Row)
       que la plantilla vuelca a JSON para Leaflet -- sqlite3.Row no es
-      serializable por `tojson` directo."""
+      serializable por `tojson` directo.
+
+    19 sep (patch 0068), pedido de Braulio ("que solo aparezcan los que
+    estan registrados como tracos o camion, todo lo que son carretas no
+    tienen dispositivo gps"): se excluyen las CARRETA -- una carreta es un
+    semirremolque sin motor, nunca lleva GPS propio (viaja enganchada a un
+    tracto que sí lo tiene), así que listarla acá solo sería ruido.
+    `vehicle_type` es un valor fijo (CAMION/TRACTO/CARRETA, viene de un
+    <select>, no de texto libre), así que un IN exacto alcanza -- no hace
+    falta LOWER() como en los buscadores de texto (ver patch 0066).
+    `ORDER BY v.plate` ya deja la lista en orden alfabético de placa, tanto
+    para la tabla como para los marcadores del mapa."""
     client = build_client_from_config(current_app.config)
     q = request.args.get("q", "").strip()
     all_vehicles = query_all(
@@ -243,6 +254,7 @@ def index():
                   l.latitude, l.longitude, l.speed_kmh, l.recorded_at, l.updated_at as location_updated_at
            FROM vehicles v
            LEFT JOIN vehicle_locations l ON l.vehicle_id = v.id
+           WHERE v.vehicle_type IN ('TRACTO', 'CAMION')
            ORDER BY v.plate"""
     )
     if q:
