@@ -7,7 +7,15 @@
 // versión fuerza que activate() borre el caché viejo con los íconos
 // anteriores en vez de servirlos indefinidamente a quien ya tenía la PWA
 // instalada.
-const CACHE_NAME = "erp-transporte-static-v2";
+// v3 (16 sep, mismo día): se reemplazó el mark/lockup de Harris (letra "H")
+// por la foto del cachorro rottweiler que pidió Braulio -- mismo motivo que
+// v2, forzar que se borre el ícono anterior cacheado.
+// v4 (19 sep): Braulio mandó el logo final ya diseñado ("HARRIS ERP", el
+// mismo cachorro rottweiler recortado a un mark cuadrado + wordmark, con
+// fondo transparente en vez del negro sólido del envío anterior) -- se
+// reemplazaron lockup/mark/favicon/íconos otra vez, mismo motivo que
+// v2/v3.
+const CACHE_NAME = "erp-transporte-static-v4";
 const STATIC_ASSETS = [
   "/static/css/style.css",
   "/static/icons/icon-192.png",

@@ -2,22 +2,17 @@
 {% block content_guest %}
 <!-- 16 sep: splash de carga con la marca de Harris al entrar al login,
      pedido de Braulio ("podemos hacerle un logo y una animación cuando
-     esté cargando?"). Puramente cosmético (SVG inline + CSS, sin
-     dependencias) -- se puede saltar con un clic, y no bloquea el
-     formulario de abajo (ya está renderizado, solo tapado un instante). -->
+     esté cargando?"). Puramente cosmético (CSS, sin dependencias) -- se
+     puede saltar con un clic, y no bloquea el formulario de abajo (ya
+     está renderizado, solo tapado un instante).
+
+     19 sep: se reemplazó el mark placeholder (un rectángulo con una "H"
+     dibujado en SVG, diseñado por la sesión) por el logo real que mandó
+     Braulio (harris-logo-mark.png) -- se sacó el trazo punteado/punto
+     ("ruta") que acompañaba a la "H" porque era un detalle pensado para
+     ese placeholder, no para este logo. -->
 <div class="splash-screen" id="harrisSplash" aria-hidden="true">
-  <svg class="splash-mark" viewBox="0 0 200 200" width="120" height="120">
-    <defs>
-      <linearGradient id="splashGrad" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stop-color="#1d4ed8"/>
-        <stop offset="1" stop-color="#1737a6"/>
-      </linearGradient>
-    </defs>
-    <rect x="4" y="4" width="192" height="192" rx="42" fill="url(#splashGrad)"/>
-    <text x="100" y="122" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="92" fill="#fff" text-anchor="middle" class="splash-h">H</text>
-    <path class="splash-route" d="M56 150 L142 150" stroke="#fff" stroke-width="6" fill="none" stroke-linecap="round" stroke-dasharray="4 9"/>
-    <circle class="splash-dot" cx="148" cy="150" r="7" fill="#fff"/>
-  </svg>
+  <img class="splash-mark" src="{{ url_for('static', filename='img/harris-logo-mark.png') }}" width="120" height="120" alt="">
   <div class="splash-word">{{ system_name }}</div>
 </div>
 <div class="login-screen">

@@ -40,7 +40,14 @@ p { margin: 0 0 1em 0; }
   display: flex; flex-direction: column; padding: 20px 0;
 }
 .sidebar-brand { padding: 0 20px 20px 20px; border-bottom: 1px solid rgba(255,255,255,0.08); }
-.sidebar-brand-logo { display: block; max-width: 100%; height: auto; background: #fff; border-radius: 8px; padding: 8px 10px; min-width: 0; flex-shrink: 1; }
+/* 19 sep: logo real de Harris que mandó Braulio (antes era un placeholder
+   generado por la sesión con fondo blanco forzado acá porque no calzaba
+   con el sidebar oscuro). El archivo nuevo (harris-logo-lockup.png) ya
+   viene con fondo transparente pensado para verse directo sobre el
+   sidebar oscuro, así que se sacó el "background: #fff" -- si en algún
+   momento se usa un logo con fondo claro de nuevo, hay que devolver ese
+   fondo blanco acá. */
+.sidebar-brand-logo { display: block; max-width: 100%; height: auto; min-width: 0; flex-shrink: 1; }
 /* Fila de logos (1 sep, ajustada 1 sep): Harraso Transport siempre a la
    izquierda y BRMS siempre a la derecha, uno al lado del otro. El de BRMS
    es un lockup vertical (marca + palabra apilada), por eso se limita por
@@ -67,11 +74,16 @@ p { margin: 0 0 1em 0; }
 /* Splash de carga con la marca de Harris (16 sep) — se muestra un instante
    sobre la pantalla de login (ver auth/login.html), luego se desvanece
    solo (o al hacer clic). Timeline: la marca aparece con un pequeño
-   "rebote" (splashPop), la línea punteada de ruta se dibuja de izquierda a
-   derecha (stroke-dashoffset), y el conjunto se desvanece al final. Todo
-   con animation-fill-mode: forwards, sin JS necesario para la animación en
-   sí — el JS del login solo se encarga de ocultar el elemento del flujo
-   (hidden) una vez terminado, para que no quede interceptando clics. */
+   "rebote" (splashPop), luego el nombre "Harris" se desvanece hacia
+   adentro, y el conjunto se desvanece al final. Todo con
+   animation-fill-mode: forwards, sin JS necesario para la animación en sí
+   — el JS del login solo se encarga de ocultar el elemento del flujo
+   (hidden) una vez terminado, para que no quede interceptando clics.
+
+   19 sep: con el logo real que mandó Braulio (un mark cuadrado, sin la
+   línea punteada de "ruta" que tenía el placeholder anterior) se sacaron
+   .splash-route/.splash-dot y sus @keyframes -- ya no hay nada que las
+   use (ver auth/login.html). */
 .splash-screen {
   position: fixed; inset: 0; z-index: 50;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
@@ -79,19 +91,18 @@ p { margin: 0 0 1em 0; }
   animation: splashFadeOut 0.4s ease 1.15s forwards;
 }
 .splash-screen.splash-hide { animation: splashFadeOut 0.3s ease forwards; }
-.splash-mark { opacity: 0; transform: scale(0.7); animation: splashPop 0.5s cubic-bezier(.34,1.56,.64,1) 0.1s forwards; }
-.splash-route { stroke-dasharray: 4 9; stroke-dashoffset: 90; animation: splashDraw 0.6s ease 0.5s forwards; }
-.splash-dot { opacity: 0; animation: splashDot 0.25s ease 1s forwards; }
+.splash-mark {
+  width: 120px; height: 120px; border-radius: 26px;
+  opacity: 0; transform: scale(0.7); animation: splashPop 0.5s cubic-bezier(.34,1.56,.64,1) 0.1s forwards;
+}
 .splash-word {
   color: #fff; font-weight: 700; font-size: 1.3rem; letter-spacing: 0.02em;
   opacity: 0; animation: splashPop 0.5s cubic-bezier(.34,1.56,.64,1) 0.25s forwards;
 }
 @keyframes splashPop { from { opacity: 0; transform: scale(0.7); } to { opacity: 1; transform: scale(1); } }
-@keyframes splashDraw { to { stroke-dashoffset: 0; } }
-@keyframes splashDot { to { opacity: 1; } }
 @keyframes splashFadeOut { to { opacity: 0; visibility: hidden; pointer-events: none; } }
 @media (prefers-reduced-motion: reduce) {
-  .splash-screen, .splash-mark, .splash-route, .splash-dot, .splash-word { animation: none !important; opacity: 1; transform: none; stroke-dashoffset: 0; }
+  .splash-screen, .splash-mark, .splash-word { animation: none !important; opacity: 1; transform: none; }
   .splash-screen { animation: splashFadeOut 0.4s ease 0.6s forwards !important; }
 }
 
