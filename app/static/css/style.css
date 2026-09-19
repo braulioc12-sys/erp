@@ -49,7 +49,19 @@ p { margin: 0 0 1em 0; }
    igual. position: fixed para que no se mueva con el scroll de la página.
    El media query solo lo muestra si la ventana es lo bastante ancha como
    para que esa franja realmente exista y el logo no se monte encima del
-   contenido -- en laptops o pantallas angostas simplemente no aparece. */
+   contenido -- en laptops o pantallas angostas simplemente no aparece.
+
+   19 sep (patch 0070): algunas pantallas angostan menos el contenido (ej.
+   Ubicación GPS con .content max-width:1700 en vez de los 1200 de
+   siempre), así que a ese ancho el logo caía justo donde ya hay un panel.
+   El logo tiene que quedar SIEMPRE detrás del contenido real (paneles,
+   tablas, mapa) pero SIEMPRE delante del fondo vacío de la página -- un
+   z-index negativo aislado no alcanza, porque cae detrás del fondo de
+   <body> (que cubre toda la pantalla) y el logo desaparece del todo. La
+   solución real está en `.content` (ver más abajo): se le da su propio
+   contexto de apilamiento con z-index más alto que el del logo, así
+   CUALQUIER contenido de CUALQUIER pantalla (no solo GPS) siempre pinta
+   por encima del logo, sin tener que calcular a mano dónde cae cada uno. */
 .brand-watermark {
   display: none;
   position: fixed;
@@ -95,7 +107,10 @@ p { margin: 0 0 1em 0; }
 .sidebar-user-name { color: #fff; font-weight: 600; }
 .sidebar-user-role { color: var(--sidebar-text); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
 .logout-link { color: #fca5a5; font-size: 0.8rem; }
-.content { flex: 1; padding: 28px 36px; max-width: 1200px; }
+/* position/z-index acá (no en .brand-watermark) para que el contenido de
+   CUALQUIER pantalla siempre pinte por encima del logo de fondo -- ver el
+   comentario de .brand-watermark, arriba. */
+.content { flex: 1; padding: 28px 36px; max-width: 1200px; position: relative; z-index: 1; }
 
 /* Splash de carga con la marca de Harris (16 sep) — se muestra un instante
    sobre la pantalla de login (ver auth/login.html), luego se desvanece
@@ -344,8 +359,20 @@ body.doc-scanner-lock { overflow: hidden; }
 /* 19 sep, pedido de Braulio ("a la derecha de la lista salga un mapa...
    que haciendo click se pueda ampliar"): tabla + mapa chico lado a lado en
    Ubicación GPS, con un mapa grande en un overlay a pantalla completa al
-   hacer clic (mismo patrón visual que .doc-scanner-overlay de arriba). */
-.gps-layout { display: grid; grid-template-columns: 1fr 380px; gap: 20px; align-items: start; }
+   hacer clic (mismo patrón visual que .doc-scanner-overlay de arriba).
+
+   19 sep (patch 0070) -- bug real en celular: por default, un elemento
+   dentro de un grid tiene min-width:auto, así que la tabla ancha (8
+   columnas) de adentro forzaba a esta columna "1fr" -- y con ella, TODA la
+   página -- a crecer más allá del ancho del celular, aunque .table-wrap ya
+   tenía overflow-x:auto. El navegador del celular, al ver que la página no
+   entra en su ancho real, ignora el viewport (width=device-width) y hace
+   zoom out para que todo entre -- por eso se veía todo diminuto. min-width:
+   0 en la columna dejar que se achique de verdad, así el que scrollea de
+   lado es solo el .table-wrap de adentro (como en cualquier otra pantalla
+   con tablas anchas), no la página entera. */
+.gps-layout { display: grid; grid-template-columns: 1fr 380px; gap: 20px; align-items: start; min-width: 0; }
+.gps-layout > * { min-width: 0; }
 .gps-map-panel { position: sticky; top: 20px; }
 .gps-map-small {
   width: 100%; height: 420px; border-radius: var(--radius); overflow: hidden;
