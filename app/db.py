@@ -521,6 +521,18 @@ COLUMN_MIGRATIONS = [
     # (staff_payments), no en la plantilla (honorarios_template_items),
     # que solo guarda los valores por defecto reusables mes a mes.
     ("staff_payments", "receipt_number", "TEXT"),
+    # 19 sep (pedido de Braulio, reorganización del menú de Pagos
+    # personal: "una vez que se paguen enlazar la constancia de pago de
+    # manera manual para que figuren como pagados. Una constancia puede
+    # contener varios pagos.") -- de ahí en más un pago solo pasa a
+    # PAGADO cuando se enlaza a mano una constancia ya subida en el
+    # archivador (ver payment_vouchers, patch 0055/0056); generar el
+    # archivo de Telecrédito dejó de marcar como pagado por sí solo (ver
+    # telecredito_generate() en app/routes/pagos_personal.py). Una misma
+    # constancia puede quedar enlazada a muchos pagos (uno a muchos desde
+    # acá), así que no hace falta una tabla intermedia. Sin "REFERENCES"
+    # acá a propósito -- mismo motivo que el resto de esta lista.
+    ("staff_payments", "payment_voucher_id", "INTEGER"),
 ]
 
 

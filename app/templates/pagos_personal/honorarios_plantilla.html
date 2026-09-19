@@ -1,14 +1,17 @@
 {% extends 'base.html' %}
-{% block title %}Plantilla de honorarios{% endblock %}
+{% block title %}Recibos por honorarios{% endblock %}
+{% block extra_head %}
+<style>.content { max-width: 1600px; }</style>
+{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>Plantilla de honorarios</h1>
+  <h1>Recibos por honorarios</h1>
   <div class="page-actions">
-    <a href="{{ url_for('pagos_personal.list_view') }}" class="btn btn-secondary">← Volver a Pagos personal</a>
+    <a href="{{ url_for('pagos_personal.hub') }}" class="btn btn-secondary">← Volver a Pagos personal</a>
   </div>
 </div>
 <p class="muted mt-0">
-  Arriba, los pagos de recibo por honorarios del mes elegido: filtra, marca a quiénes se les paga, ajusta el monto o el N° de comprobante solo para este mes, y genera el archivo de Telecrédito sin salir de acá. Abajo, la plantilla en sí — la lista fija de personas con su monto y concepto por defecto (se administra por separado, no cambia según el mes).
+  Arriba, los pagos de recibo por honorarios del mes elegido: filtra, marca a quiénes se les paga, ajusta el monto o el N° de comprobante solo para este mes, genera el archivo de Telecrédito y enlaza la constancia de pago que suba el banco — recién ahí queda marcado como pagado. Abajo, la plantilla en sí — la lista fija de personas con su monto y concepto por defecto (se administra por separado, no cambia según el mes).
 </p>
 
 <!-- ============ Pagos del mes ============ -->
@@ -30,12 +33,19 @@
         {% endfor %}
       </select>
     </label>
+    <label>Estado
+      <select name="status">
+        <option value="">Todos</option>
+        <option value="PENDIENTE" {{ 'selected' if status_filter == 'PENDIENTE' }}>Pendiente</option>
+        <option value="PAGADO" {{ 'selected' if status_filter == 'PAGADO' }}>Pagado</option>
+      </select>
+    </label>
     <button class="btn btn-secondary" type="submit">Filtrar</button>
   </form>
 
   {% if not month_rows %}
   <p class="muted" style="margin-top:16px; margin-bottom:0;">
-    {% if q or concept_filter %}
+    {% if q or concept_filter or status_filter %}
     Ningún pago de la plantilla calza con ese filtro.
     {% else %}
     No hay personas activas en la plantilla todavía — agrégalas más abajo.
@@ -47,13 +57,14 @@
     <input type="hidden" name="period" value="{{ period }}">
     <input type="hidden" name="q" value="{{ q }}">
     <input type="hidden" name="concept" value="{{ concept_filter }}">
+    <input type="hidden" name="status" value="{{ status_filter }}">
 
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
             <th></th><th>Persona</th><th>Documento</th>
-            <th class="text-right">Monto</th><th>Concepto</th><th>N° de comprobante</th><th>Estado</th>
+            <th class="text-right">Monto</th><th>Concepto</th><th>N° de comprobante</th><th>Estado</th><th>Constancia</th>
           </tr>
         </thead>
         <tbody>
@@ -81,6 +92,16 @@
               <span class="badge badge-activo">Pagado</span>
               {% elif row.payment %}
               <span class="badge badge-pendiente">Pendiente</span>
+              {% if row.exported %}<br><span class="muted" style="font-size:0.85em;">Ya generado</span>{% endif %}
+              {% else %}
+              <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td style="white-space:nowrap;">
+              {% if row.locked and row.voucher %}
+              <a href="{{ url_for('pagos_personal.constancias_file', voucher_id=row.voucher.id) }}" target="_blank">{{ row.voucher.original_filename }}</a>
+              <button type="submit" formaction="{{ url_for('pagos_personal.honorarios_plantilla_desenlazar_constancia', payment_id=row.payment.id) }}"
+                      formmethod="post" formnovalidate class="btn btn-secondary btn-sm" style="margin-left:6px;">Desenlazar</button>
               {% else %}
               <span class="muted">—</span>
               {% endif %}
@@ -91,11 +112,38 @@
       </table>
     </div>
     <p class="muted" style="margin-top:12px; margin-bottom:0;">
-      Si desmarcas a alguien que todavía está pendiente, se elimina su pago pendiente de este periodo. Lo que ya está pagado no se puede editar ni desmarcar desde acá. El botón "Generar archivo Telecrédito" primero guarda lo marcado/editado y de ahí pasa directo a elegir la cuenta de cargo y descargar el archivo — al volver acá, lo que se acaba de generar va a aparecer como "Pagado".
+      Si desmarcas a alguien que todavía está pendiente, se elimina su pago pendiente de este periodo. Lo que ya está pagado no se puede editar ni desmarcar desde acá — usa "Desenlazar" si se enlazó por error. "Generar archivo Telecrédito" guarda lo marcado/editado y pasa a elegir la cuenta de cargo y descargar el archivo — eso solo genera el .txt, todavía no marca nada como pagado.
     </p>
     <div class="btn-group" style="margin-top:16px;">
       <button class="btn btn-secondary" type="submit" name="action" value="guardar">Guardar</button>
       <button class="btn btn-primary" type="submit" name="action" value="generar">▶ Generar archivo Telecrédito</button>
+    </div>
+
+    <div class="panel" style="margin-top:16px; margin-bottom:0;">
+      <h3 style="margin-top:0;">🔗 Enlazar constancia a los seleccionados</h3>
+      {% if period_vouchers %}
+      <p class="muted" style="margin-top:0;">Se enlaza a todas las personas marcadas arriba que todavía estén pendientes — una constancia puede cubrir varios pagos a la vez. Las que ya están pagadas no se tocan.</p>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+        <label>Constancia
+          <select name="voucher_id">
+            <option value="">Elige...</option>
+            {% for v in period_vouchers %}
+            <option value="{{ v.id }}">{{ v.original_filename }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Fecha de pago
+          <input type="date" name="payment_date" value="{{ today }}">
+        </label>
+        <button class="btn btn-primary" type="submit" name="action" value="enlazar">🔗 Enlazar constancia</button>
+      </div>
+      {% else %}
+      <p class="muted" style="margin:0;">
+        Todavía no hay ninguna constancia subida para {{ period }} —
+        <a href="{{ url_for('pagos_personal.constancias_month_detail', year=period[:4]|int, month=period[5:7]|int) }}" target="_blank">súbela primero desde Constancias</a>
+        y después vuelve acá para enlazarla.
+      </p>
+      {% endif %}
     </div>
   </form>
   {% endif %}

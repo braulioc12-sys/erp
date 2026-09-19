@@ -18,6 +18,7 @@
   </script>
   <!-- 10 sep: recorte "tipo escáner" al subir fotos de documentos (ver app/static/js/doc-scanner.js) -->
   <script src="{{ url_for('static', filename='js/doc-scanner.js') }}" defer></script>
+  {% block extra_head %}{% endblock %}
 </head>
 <body>
 {% if current_user %}
@@ -43,7 +44,7 @@
       <a href="{{ url_for('rrhh.list_view') }}" class="{{ 'active' if request.blueprint == 'rrhh' }}">RRHH</a>
       {% endif %}
       {% if can(current_user.roles, 'pagos_personal', 'view') %}
-      <a href="{{ url_for('pagos_personal.list_view') }}" class="{{ 'active' if request.blueprint == 'pagos_personal' }}">Pagos personal</a>
+      <a href="{{ url_for('pagos_personal.hub') }}" class="{{ 'active' if request.blueprint == 'pagos_personal' }}">Pagos personal</a>
       {% endif %}
       <a href="{{ url_for('mantenimiento.list_view') }}" class="{{ 'active' if request.blueprint == 'mantenimiento' }}">Mantenimiento</a>
       {% if can(current_user.roles, 'inventarios', 'view') %}

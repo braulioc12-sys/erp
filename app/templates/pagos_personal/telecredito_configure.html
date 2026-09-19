@@ -15,6 +15,7 @@
   El archivo sale siempre de un solo tipo (planilla u honorarios nunca van mezclados) y solo de los pagos que calcen con los filtros que tenías puestos.
   {% endif %}
 </p>
+<p class="muted" style="margin-top:-8px;">Generar el archivo NO marca los pagos como pagados por sí solo — eso queda pendiente hasta que enlaces a mano la constancia real que te dé el banco.</p>
 
 <form class="form panel" method="post" action="{{ url_for('pagos_personal.telecredito_generate') }}" style="max-width:560px;">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -29,6 +30,7 @@
   <input type="hidden" name="origin" value="{{ origin }}">
   <input type="hidden" name="plantilla_q" value="{{ plantilla_q }}">
   <input type="hidden" name="plantilla_concept" value="{{ plantilla_concept }}">
+  <input type="hidden" name="plantilla_status" value="{{ plantilla_status }}">
 
   <label>Cuenta de cargo (desde la que se paga) *
     <select name="cuenta_cargo_id" required>

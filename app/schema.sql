@@ -1458,6 +1458,10 @@ CREATE TABLE IF NOT EXISTS staff_payments (
     -- libre, no un archivo) -- distinto cada mes, así que va por pago y no
     -- en la plantilla reusable (ver COLUMN_MIGRATIONS en app/db.py).
     receipt_number TEXT,
+    -- Constancia del banco enlazada a mano (19 sep) -- ver la nota grande
+    -- junto a esta misma columna en COLUMN_MIGRATIONS (app/db.py). Un
+    -- pago pasa a PAGADO recién cuando se le enlaza una constancia.
+    payment_voucher_id INTEGER REFERENCES payment_vouchers(id),
     exported_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

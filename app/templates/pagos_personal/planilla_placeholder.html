@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+{% block title %}Planilla{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Planilla</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('pagos_personal.hub') }}" class="btn btn-secondary">← Volver a Pagos personal</a>
+  </div>
+</div>
+<div class="panel">
+  <p class="muted" style="margin:0;">🚧 En construcción — todavía no está lista esta pantalla. Los pagos de planilla que ya estaban registrados no se perdieron, solo no hay una pantalla nueva para administrarlos por ahora.</p>
+</div>
+{% endblock %}

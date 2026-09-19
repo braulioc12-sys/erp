@@ -212,18 +212,28 @@ def _filtered_payments(period, staff_id, payment_type, status, q, payment_ids=No
 
 @bp.route("")
 @permission_required("pagos_personal", "view")
-def list_view():
-    period, staff_id, payment_type, status, q = _filters_from_args(request.args)
-    payments = _filtered_payments(period, staff_id, payment_type, status, q)
-    total_amount = sum(p["amount"] or 0 for p in payments)
-    pending_amount = sum(p["amount"] or 0 for p in payments if p["status"] == "PENDIENTE")
-    return render_template(
-        "pagos_personal/list.html",
-        payments=payments, period=period, staff_id=staff_id, payment_type=payment_type,
-        status=status, q=q, total_amount=total_amount, pending_amount=pending_amount,
-        all_staff=get_active_staff(only_active=False),
-        payment_type_labels=PAYMENT_TYPE_LABELS,
-    )
+def hub():
+    """19 sep (reorganización del menú de Pagos personal, pedido de
+    Braulio: "Primero debe ser una pantalla para seleccionar si se quiere
+    hacer pago de planilla, recibos por honorarios o consultar
+    constancias"): pantalla de entrada con las 3 opciones — Planilla
+    (`planilla_placeholder()`, todavía "en construcción"), Recibos por
+    honorarios (`honorarios_plantilla()`, ver su docstring) y Constancias
+    (`constancias_years()`). Reemplaza a la antigua lista general
+    (mezclaba Planilla y Honorarios en una sola tabla, con filtros de
+    tipo/estado/periodo) que vivía en esta misma URL."""
+    return render_template("pagos_personal/hub.html")
+
+
+@bp.route("/planilla")
+@permission_required("pagos_personal", "view")
+def planilla_placeholder():
+    """"Cuando se ingrese a planilla por mientras dejarlo que diga en
+    construccion, luego haremos este modulo" (pedido de Braulio, 19 sep).
+    Los datos y las rutas de Planilla (new_payment/edit_payment/etc, más
+    abajo) siguen intactos para cuando se retome este módulo — nomás no
+    hay ningún link hacia ellas desde acá todavía."""
+    return render_template("pagos_personal/planilla_placeholder.html")
 
 
 def _payment_form_context(payment=None):
@@ -273,7 +283,7 @@ def new_payment():
             ),
         )
         flash("Pago registrado.", "success")
-        return redirect(url_for("pagos_personal.list_view", period=period))
+        return redirect(url_for("pagos_personal.planilla_placeholder"))
 
     return render_template("pagos_personal/form.html", **_payment_form_context())
 
@@ -320,7 +330,7 @@ def edit_payment(payment_id):
             ),
         )
         flash("Pago actualizado.", "success")
-        return redirect(url_for("pagos_personal.list_view", period=period))
+        return redirect(url_for("pagos_personal.planilla_placeholder"))
 
     return render_template("pagos_personal/form.html", **_payment_form_context(payment))
 
@@ -335,7 +345,7 @@ def delete_payment(payment_id):
         abort(404)
     execute("DELETE FROM staff_payments WHERE id = ?", (payment_id,))
     flash("Pago eliminado.", "success")
-    return redirect(url_for("pagos_personal.list_view", period=payment["period"]))
+    return redirect(url_for("pagos_personal.planilla_placeholder"))
 
 
 @bp.route("/<int:payment_id>/marcar-pagado", methods=["POST"])
@@ -358,7 +368,7 @@ def mark_paid(payment_id):
             (today_str(), payment_id),
         )
         flash("Pago marcado como pagado.", "success")
-    return redirect(url_for("pagos_personal.list_view", period=payment["period"]))
+    return redirect(url_for("pagos_personal.planilla_placeholder"))
 
 
 @bp.route("/<int:payment_id>/comprobante")
@@ -413,11 +423,15 @@ def telecredito_configure():
     origin = request.args.get("origin", "")
     plantilla_q = request.args.get("plantilla_q", "")
     plantilla_concept = request.args.get("plantilla_concept", "")
+    plantilla_status = request.args.get("plantilla_status", "")
 
     def _back_to_origin():
         if origin == "honorarios_plantilla":
-            return redirect(url_for("pagos_personal.honorarios_plantilla", period=period, q=plantilla_q, concept=plantilla_concept))
-        return redirect(url_for("pagos_personal.list_view", period=period, staff_id=staff_id, status=status, q=q))
+            return redirect(url_for(
+                "pagos_personal.honorarios_plantilla", period=period, q=plantilla_q,
+                concept=plantilla_concept, status=plantilla_status,
+            ))
+        return redirect(url_for("pagos_personal.hub"))
 
     if payment_type not in PAYMENT_TYPE_LABELS:
         flash("Para generar el archivo de Telecrédito, primero filtra por un solo tipo: Planilla o Recibo por honorarios.", "error")
@@ -438,9 +452,12 @@ def telecredito_configure():
         return redirect(url_for("catalogos.bancos_list"))
 
     back_url = (
-        url_for("pagos_personal.honorarios_plantilla", period=period, q=plantilla_q, concept=plantilla_concept)
+        url_for(
+            "pagos_personal.honorarios_plantilla", period=period, q=plantilla_q,
+            concept=plantilla_concept, status=plantilla_status,
+        )
         if origin == "honorarios_plantilla"
-        else url_for("pagos_personal.list_view", period=period, staff_id=staff_id, payment_type=payment_type, status=status, q=q)
+        else url_for("pagos_personal.hub")
     )
 
     return render_template(
@@ -452,7 +469,7 @@ def telecredito_configure():
         subtipo_honorarios=DEFAULT_SUBTIPO_HONORARIOS,
         default_reference=f"{PAYMENT_TYPE_LABELS[payment_type].upper()} {period}", today=today_str(),
         payment_ids=payment_ids, origin=origin, plantilla_q=plantilla_q, plantilla_concept=plantilla_concept,
-        back_url=back_url,
+        plantilla_status=plantilla_status, back_url=back_url,
     )
 
 
@@ -466,14 +483,15 @@ def telecredito_generate():
     archivo sea de una sola moneda), o cuyo tipo de documento no sea válido
     para este servicio (Planilla no admite RUC).
 
-    18 sep, 6ta ronda (pedido de Braulio, sobre el flujo de honorarios por
-    plantilla: "se cree el archivo masivo de telecredito, los que ya se
-    crearon que se marquen como pagados"): generar el archivo ahora marca
-    de una vez los pagos incluidos como PAGADO (con fecha = fecha de
-    proceso elegida), en vez de dejarlos PENDIENTE a la espera de que se
-    marquen a mano uno por uno con el botón de la lista — aplica igual
-    para Planilla y Honorarios, ya que generar el archivo ES la orden de
-    pago al banco en los dos casos."""
+    18 sep, 6ta ronda: por un tiempo esto marcaba de una vez como PAGADO
+    los pagos incluidos al generar el archivo. 19 sep (reorganización del
+    menú, pedido de Braulio: "una vez que se paguen enlazar la constancia
+    de pago de manera manual para que figuren como pagados") — se
+    revirtió: generar el archivo ya NO marca como pagado por sí solo,
+    solo dejar constancia (con `exported_at`) de que se generó. El pago
+    recién pasa a PAGADO cuando se enlaza a mano la constancia real que
+    emite el banco — ver honorarios_plantilla_guardar_mes() (action
+    "enlazar") y honorarios_plantilla_desenlazar_constancia()."""
     from app.telecredito import (
         DEFAULT_SUBTIPO_HONORARIOS,
         DEFAULT_SUBTIPO_PLANILLA,
@@ -490,12 +508,14 @@ def telecredito_generate():
     origin = request.form.get("origin", "")
     plantilla_q = request.form.get("plantilla_q", "")
     plantilla_concept = request.form.get("plantilla_concept", "")
+    plantilla_status = request.form.get("plantilla_status", "")
     if payment_type not in PAYMENT_TYPE_LABELS:
         abort(400)
     redirect_to_configure = lambda: redirect(url_for(
         "pagos_personal.telecredito_configure", period=period, staff_id=staff_id,
         payment_type=payment_type, status=status, q=q,
         payment_ids=payment_ids, origin=origin, plantilla_q=plantilla_q, plantilla_concept=plantilla_concept,
+        plantilla_status=plantilla_status,
     ))
 
     effective_status = status or "PENDIENTE"
@@ -574,9 +594,8 @@ def telecredito_generate():
 
     now = datetime.now().strftime("%Y%m%d%H%M")
     execute(
-        f"""UPDATE staff_payments SET exported_at = ?, status = 'PAGADO', payment_date = ?
-            WHERE id IN ({','.join('?' * len(prepared))})""",
-        [today_str(), fecha_proceso] + [p["id"] for p in prepared],
+        f"""UPDATE staff_payments SET exported_at = ? WHERE id IN ({','.join('?' * len(prepared))})""",
+        [today_str()] + [p["id"] for p in prepared],
     )
 
     filename = f"telecredito_{tipo_slug}_{period}_{now}.txt"
@@ -1102,22 +1121,35 @@ def _honorarios_template_items():
     )
 
 
-def _honorarios_month_rows(period, q="", concept_filter=""):
+def _honorarios_month_rows(period, q="", concept_filter="", status_filter=""):
     """Arma las filas de la plantilla activa para UN periodo puntual —
     monto/concepto/N° de comprobante de ESE mes (si ya hay un
     staff_payments para esa persona+periodo) o el default de la plantilla
-    si todavía no se generó nada. Se usa tanto para mostrar la pantalla
-    (GET honorarios_plantilla) como, con los MISMOS q/concept_filter, para
-    saber en el POST (honorarios_plantilla_guardar_mes) exactamente qué
-    filas estaban a la vista — así un filtro puesto nunca crea, actualiza
-    ni borra el pago de alguien que quedó fuera de la vista por el filtro,
-    solo de quien sí se ve y se desmarca a propósito."""
+    si todavía no se generó nada, más la constancia enlazada si ya la
+    tiene. Se usa tanto para mostrar la pantalla (GET honorarios_plantilla)
+    como, con los MISMOS q/concept_filter/status_filter, para saber en el
+    POST (honorarios_plantilla_guardar_mes) exactamente qué filas estaban
+    a la vista — así un filtro puesto nunca crea, actualiza ni borra el
+    pago de alguien que quedó fuera de la vista por el filtro, solo de
+    quien sí se ve y se desmarca a propósito.
+
+    status_filter "PENDIENTE" incluye tanto lo que ya tiene un pago
+    PENDIENTE como lo que todavía no tiene ningún pago generado ese mes
+    (en los dos casos, "pendiente" en el sentido de "todavía no pagado")."""
     items = _honorarios_template_items()
     existing_payments = {
         p["staff_id"]: p for p in query_all(
             "SELECT * FROM staff_payments WHERE period = ? AND payment_type = 'RECIBO_HONORARIOS'", (period,)
         )
     }
+    voucher_ids = {p["payment_voucher_id"] for p in existing_payments.values() if p["payment_voucher_id"]}
+    vouchers = {}
+    if voucher_ids:
+        vouchers = {
+            v["id"]: v for v in query_all(
+                f"SELECT * FROM payment_vouchers WHERE id IN ({','.join('?' * len(voucher_ids))})", list(voucher_ids)
+            )
+        }
     q_lower = q.strip().lower()
     concept_lower = concept_filter.strip().lower()
     rows = []
@@ -1130,6 +1162,11 @@ def _honorarios_month_rows(period, q="", concept_filter=""):
             continue
         if concept_lower and concept_lower not in effective_concept.lower():
             continue
+        row_status = payment["status"] if payment else None
+        if status_filter == "PENDIENTE" and row_status == "PAGADO":
+            continue
+        if status_filter == "PAGADO" and row_status != "PAGADO":
+            continue
         rows.append({
             "item": item,
             "payment": payment,
@@ -1137,6 +1174,8 @@ def _honorarios_month_rows(period, q="", concept_filter=""):
             "concept": effective_concept,
             "receipt_number": (payment["receipt_number"] if payment else "") or "",
             "locked": payment is not None and payment["status"] == "PAGADO",
+            "voucher": vouchers.get(payment["payment_voucher_id"]) if payment and payment["payment_voucher_id"] else None,
+            "exported": bool(payment and payment["exported_at"] and payment["status"] == "PENDIENTE"),
         })
     return rows
 
@@ -1147,6 +1186,7 @@ def honorarios_plantilla():
     period = request.args.get("period") or today_str()[:7]
     q = request.args.get("q", "").strip()
     concept_filter = request.args.get("concept", "").strip()
+    status_filter = request.args.get("status", "").strip()
 
     items = _honorarios_template_items()
     template_staff_ids = {i["staff_id"] for i in items}
@@ -1154,13 +1194,16 @@ def honorarios_plantilla():
     all_concepts = sorted({
         (i["default_concept"] or "").strip() for i in items if (i["default_concept"] or "").strip()
     })
-    month_rows = _honorarios_month_rows(period, q, concept_filter)
+    month_rows = _honorarios_month_rows(period, q, concept_filter, status_filter)
+    period_vouchers = query_all(
+        "SELECT * FROM payment_vouchers WHERE period = ? AND deleted_at IS NULL ORDER BY created_at DESC", (period,)
+    )
 
     return render_template(
         "pagos_personal/honorarios_plantilla.html",
         items=items, available_staff=available_staff, currency_labels=CURRENCY_LABELS,
-        period=period, q=q, concept_filter=concept_filter, all_concepts=all_concepts,
-        month_rows=month_rows,
+        period=period, q=q, concept_filter=concept_filter, status_filter=status_filter, all_concepts=all_concepts,
+        month_rows=month_rows, period_vouchers=period_vouchers, today=today_str(),
     )
 
 
@@ -1169,20 +1212,27 @@ def honorarios_plantilla():
 def honorarios_plantilla_guardar_mes():
     """Guarda los pagos de RECIBO_HONORARIOS del periodo elegido según lo
     marcado/editado en la pantalla (crea/actualiza/quita), y según el
-    botón que se usó ("guardar" o "generar") se queda en la Plantilla o
-    redirige de una vez a telecredito_configure() con la selección exacta
-    de pagos para armar y descargar el archivo (ver el docstring grande
-    al inicio del módulo, sección 4). Solo toca las filas que estaban
-    dentro del filtro (q/concept) que tenía puesto la pantalla — ver
-    _honorarios_month_rows()."""
+    botón que se usó se queda en la Plantilla ("guardar"), redirige a
+    telecredito_configure() con la selección exacta de pagos para armar y
+    descargar el archivo ("generar" — ver el docstring grande al inicio
+    del módulo, sección 4), o enlaza una constancia ya subida a los pagos
+    seleccionados y recién ahí los marca PAGADO ("enlazar" — pedido de
+    Braulio, 19 sep: "una vez que se paguen enlazar la constancia de pago
+    de manera manual para que figuren como pagados"). Solo toca las filas
+    que estaban dentro del filtro (q/concept/status) que tenía puesto la
+    pantalla — ver _honorarios_month_rows()."""
     if not validate_csrf():
         abort(400)
     period = request.form.get("period") or today_str()[:7]
     q = request.form.get("q", "")
     concept_filter = request.form.get("concept", "")
+    status_filter = request.form.get("status", "")
     action = request.form.get("action") or "guardar"
 
-    rows = _honorarios_month_rows(period, q, concept_filter)
+    def _back():
+        return redirect(url_for("pagos_personal.honorarios_plantilla", period=period, q=q, concept=concept_filter, status=status_filter))
+
+    rows = _honorarios_month_rows(period, q, concept_filter, status_filter)
     checked_ids = {int(v) for v in request.form.getlist("incluir")}
     created, updated, removed = 0, 0, 0
     synced_payment_ids = []
@@ -1196,7 +1246,7 @@ def honorarios_plantilla_guardar_mes():
                 removed += 1
             continue
         if existing and existing["status"] == "PAGADO":
-            continue  # ya pagado, no se vuelve a tocar ni a incluir en un nuevo archivo
+            continue  # ya pagado, no se vuelve a tocar ni a incluir en un nuevo archivo/enlace
         amount = parse_float(request.form.get(f"amount_{item['id']}"), item["default_amount"])
         concept = (request.form.get(f"concept_{item['id']}", "") or "").strip() or item["default_concept"]
         receipt_number = (request.form.get(f"receipt_{item['id']}", "") or "").strip() or None
@@ -1219,15 +1269,52 @@ def honorarios_plantilla_guardar_mes():
     if action == "generar":
         if not synced_payment_ids:
             flash("Elige al menos una persona (todavía sin pagar) para generar el archivo de Telecrédito.", "error")
-            return redirect(url_for("pagos_personal.honorarios_plantilla", period=period, q=q, concept=concept_filter))
+            return _back()
         return redirect(url_for(
             "pagos_personal.telecredito_configure", period=period, payment_type="RECIBO_HONORARIOS",
             payment_ids=synced_payment_ids, origin="honorarios_plantilla",
-            plantilla_q=q, plantilla_concept=concept_filter,
+            plantilla_q=q, plantilla_concept=concept_filter, plantilla_status=status_filter,
         ))
 
+    if action == "enlazar":
+        if not synced_payment_ids:
+            flash("Elige al menos una persona (todavía sin pagar) para enlazar la constancia.", "error")
+            return _back()
+        voucher_id = request.form.get("voucher_id", type=int)
+        voucher = query_one("SELECT id FROM payment_vouchers WHERE id = ? AND deleted_at IS NULL", (voucher_id,)) if voucher_id else None
+        if not voucher:
+            flash("Elige una constancia válida para enlazar — si todavía no la subiste, hazlo primero desde Constancias.", "error")
+            return _back()
+        payment_date = request.form.get("payment_date") or today_str()
+        execute(
+            f"""UPDATE staff_payments SET status = 'PAGADO', payment_voucher_id = ?, payment_date = ?
+                WHERE id IN ({','.join('?' * len(synced_payment_ids))})""",
+            [voucher_id, payment_date] + synced_payment_ids,
+        )
+        flash(f"Constancia enlazada a {len(synced_payment_ids)} pago(s) — quedaron marcados como pagados.", "success")
+        return _back()
+
     flash(f"Listo: {created} pago(s) nuevo(s), {updated} actualizado(s), {removed} quitado(s).", "success")
-    return redirect(url_for("pagos_personal.honorarios_plantilla", period=period, q=q, concept=concept_filter))
+    return _back()
+
+
+@bp.route("/honorarios/plantilla/<int:payment_id>/desenlazar-constancia", methods=["POST"])
+@permission_required("pagos_personal", "edit")
+def honorarios_plantilla_desenlazar_constancia(payment_id):
+    """Revierte un enlace hecho por error: vuelve el pago a PENDIENTE y le
+    quita la constancia y la fecha de pago — no borra la constancia en sí,
+    solo la desenlaza de este pago puntual."""
+    if not validate_csrf():
+        abort(400)
+    payment = query_one("SELECT * FROM staff_payments WHERE id = ? AND payment_type = 'RECIBO_HONORARIOS'", (payment_id,))
+    if payment is None:
+        abort(404)
+    execute(
+        "UPDATE staff_payments SET status = 'PENDIENTE', payment_voucher_id = NULL, payment_date = NULL WHERE id = ?",
+        (payment_id,),
+    )
+    flash("Constancia desenlazada — el pago volvió a quedar pendiente.", "success")
+    return redirect(url_for("pagos_personal.honorarios_plantilla", period=payment["period"]))
 
 
 @bp.route("/honorarios/plantilla/agregar", methods=["POST"])

@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+{% block title %}Pagos personal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Pagos personal</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('pagos_personal.staff_list') }}" class="btn btn-secondary">Catálogo de Personal</a>
+  </div>
+</div>
+<p class="muted mt-0">Elige qué quieres hacer.</p>
+
+<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:16px; margin-top:16px;">
+  <a href="{{ url_for('pagos_personal.planilla_placeholder') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
+    <h2 style="margin-top:0;">📋 Planilla</h2>
+    <p class="muted" style="margin-bottom:0;">Pagos de planilla del personal.</p>
+  </a>
+  <a href="{{ url_for('pagos_personal.honorarios_plantilla') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
+    <h2 style="margin-top:0;">🧾 Recibos por honorarios</h2>
+    <p class="muted" style="margin-bottom:0;">Genera el archivo de Telecrédito y enlaza la constancia de pago de cada recibo.</p>
+  </a>
+  <a href="{{ url_for('pagos_personal.constancias_years') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
+    <h2 style="margin-top:0;">📁 Constancias</h2>
+    <p class="muted" style="margin-bottom:0;">Archivador de constancias de pago que da cada banco, por año y mes.</p>
+  </a>
+</div>
+{% endblock %}
