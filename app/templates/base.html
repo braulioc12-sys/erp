@@ -99,6 +99,11 @@
     {% include 'partials/flashes.html' %}
     {% block content %}{% endblock %}
   </main>
+  <!-- 19 sep, pedido de Braulio ("en todos los menus que quede espacio a
+       la derecha, hay que poner grande el logo de harris"): un solo lugar
+       en el layout base, así sale igual en cualquier pantalla del sistema
+       -- ver el comentario de .brand-watermark en style.css. -->
+  <img src="{{ url_for('static', filename='img/harris-logo-mark.png') }}" alt="" class="brand-watermark">
 </div>
 {% else %}
   {% include 'partials/flashes.html' %}

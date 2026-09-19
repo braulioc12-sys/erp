@@ -39,6 +39,32 @@ p { margin: 0 0 1em 0; }
   width: 240px; flex-shrink: 0; background: var(--sidebar-bg); color: var(--sidebar-text);
   display: flex; flex-direction: column; padding: 20px 0;
 }
+
+/* 19 sep, pedido de Braulio ("en todos los menus que quede espacio a la
+   derecha, hay que poner grande el logo de harris"): el contenido no crece
+   más allá de --content-max-width, así que en monitores anchos sobra una
+   franja vacía a la derecha de todo, en cualquier pantalla del sistema.
+   Se pone el isotipo de Harris ahí, grande, una sola vez acá en el layout
+   base (no en cada plantilla) para que salga en TODAS las pantallas por
+   igual. position: fixed para que no se mueva con el scroll de la página.
+   El media query solo lo muestra si la ventana es lo bastante ancha como
+   para que esa franja realmente exista y el logo no se monte encima del
+   contenido -- en laptops o pantallas angostas simplemente no aparece. */
+.brand-watermark {
+  display: none;
+  position: fixed;
+  top: 50%;
+  right: 48px;
+  transform: translateY(-50%);
+  width: 280px;
+  height: 280px;
+  opacity: 0.4;
+  pointer-events: none;
+  z-index: 0;
+}
+@media (min-width: 1680px) {
+  .brand-watermark { display: block; }
+}
 .sidebar-brand { padding: 0 20px 20px 20px; border-bottom: 1px solid rgba(255,255,255,0.08); }
 /* 19 sep: logo real de Harris que mandó Braulio (antes era un placeholder
    generado por la sesión con fondo blanco forzado acá porque no calzaba
