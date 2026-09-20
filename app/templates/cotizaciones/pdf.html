@@ -84,8 +84,13 @@
          página al imprimir/exportar depende de la config regional del
          navegador o de la impresora (en varios países cae en "Carta"/
          Letter en vez de A4) -- se fija A4 acá para que salga igual sin
-         importar esa configuración. */
-      @page { size: A4; margin: 12mm 10mm; }
+         importar esa configuración.
+
+         20 sep: márgenes a pedido de Braulio -- 2cm a los costados (antes
+         10mm = 1cm) y 2cm arriba también (antes 12mm); el de abajo se deja
+         como estaba (12mm), que no se pidió cambiar. Orden del shorthand:
+         arriba | derecha | abajo | izquierda. */
+      @page { size: A4; margin: 20mm 20mm 12mm 20mm; }
     }
   </style>
 </head>
