@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+{% block title %}Resultado del enlace de pedidos{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Resultado del enlace de pedidos</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('guias.link_orders') }}" class="btn btn-secondary">← Volver</a>
+  </div>
+</div>
+
+<div class="panel" style="max-width:860px;">
+  <div class="tag-list" style="margin-bottom: 14px;">
+    <span class="badge badge-activo">{{ result.linked }} guía(s) enlazada(s)</span>
+    {% if result.not_found %}<span class="badge badge-mantenimiento">{{ result.not_found|length }} sin encontrar</span>{% endif %}
+  </div>
+
+  {% if result.not_found %}
+  <h2>Filas sin encontrar</h2>
+  <p class="muted" style="margin-top:-8px;">No se encontró, entre los viajes de BRMS, ninguna guía que coincida exactamente con estos valores de la columna "Guía Transp." — revisa que el número esté bien escrito, o que esa guía todavía no esté registrada en el sistema (guía electrónica, guía de transportista o guía del remitente).</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Fila del Excel</th><th>Detalle</th></tr></thead>
+      <tbody>
+        {% for e in result.not_found %}
+        <tr><td>{{ e.row }}</td><td class="wrap">{{ e.message }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if not result.not_found %}
+  <p class="muted">Todas las filas del archivo se pudieron enlazar.</p>
+  {% endif %}
+
+  <div class="btn-group" style="margin-top:16px;">
+    <a href="{{ url_for('guias.link_orders') }}" class="btn btn-primary">Ir al listado</a>
+  </div>
+</div>
+{% endblock %}

@@ -283,6 +283,17 @@ CREATE TABLE IF NOT EXISTS trips (
     -- save_delivery_proof() en app/routes/viajes.py) — no hay forma de
     -- llegar a ENTREGADO sin este archivo.
     delivery_proof_filename TEXT,
+    -- 20 sep, pedido de Braulio: "número de pedido" que Backus o Naviera
+    -- Oriente (clientes de BRMS) mandan DESPUÉS de la guía -- necesario
+    -- para poder facturarles. Se guarda por viaje (no por guía electrónica
+    -- en `waybills`) porque un viaje puede tener guía electrónica, guía de
+    -- transportista (carrier_waybill_number) o guía del remitente
+    -- (shipper_waybill_number) indistintamente, y el pedido aplica igual
+    -- en cualquiera de los tres casos -- ver app/routes/guias.py
+    -- (ORDER_NUMBER_CLIENTS, link_orders()/link_orders_upload(), que
+    -- también enlaza en bloque desde el Excel semanal que manda Naviera
+    -- Oriente). Texto libre y opcional.
+    client_order_number TEXT,
     -- Pagado: si el cliente ya pagó este viaje. Independiente de "invoiced"
     -- (si ya se facturó) — ambos se pueden marcar/desmarcar a mano desde el
     -- detalle del viaje, además de que "invoiced" se sigue marcando solo al
@@ -1251,14 +1262,6 @@ CREATE TABLE IF NOT EXISTS waybills (
     -- agregarlo al envío real.
     related_document_type TEXT,
     related_document_number TEXT,
-    -- 20 sep, pedido de Braulio: guías de BRMS a Backus o Naviera Oriente
-    -- van enlazadas a un "número de pedido" que esos clientes mandan
-    -- DESPUÉS de que ya se generó/entregó la guía, para poder facturarles
-    -- (ver app/routes/guias.py, ORDER_NUMBER_CLIENTS/save_order_number()).
-    -- Texto libre y opcional -- no depende de un catálogo propio, y queda
-    -- disponible para cualquier cliente/empresa por si hiciera falta más
-    -- adelante, no solo esos dos.
-    client_order_number TEXT,
     notes TEXT,
     sunat_status TEXT NOT NULL DEFAULT 'NO_ENVIADA' CHECK (sunat_status IN ('NO_ENVIADA', 'ACEPTADO', 'RECHAZADO', 'ERROR')),
     sunat_message TEXT,

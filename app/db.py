@@ -533,11 +533,11 @@ COLUMN_MIGRATIONS = [
     # acá), así que no hace falta una tabla intermedia. Sin "REFERENCES"
     # acá a propósito -- mismo motivo que el resto de esta lista.
     ("staff_payments", "payment_voucher_id", "INTEGER"),
-    # 20 sep, pedido de Braulio: "número de pedido" de guías de BRMS a
-    # Backus o Naviera Oriente, que esos clientes mandan después para poder
+    # 20 sep, pedido de Braulio: "número de pedido" que Backus/Naviera
+    # Oriente mandan después de la guía de un viaje de BRMS, para poder
     # facturarles -- ver el comentario largo junto a esta columna en
-    # schema.sql (CREATE TABLE waybills) y app/routes/guias.py.
-    ("waybills", "client_order_number", "TEXT"),
+    # schema.sql (CREATE TABLE trips) y app/routes/guias.py.
+    ("trips", "client_order_number", "TEXT"),
 ]
 
 

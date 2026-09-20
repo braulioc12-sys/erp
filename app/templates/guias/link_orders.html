@@ -1,0 +1,74 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Enlazar facturas y guías{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Enlazar facturas y guías — BRMS</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('guias.list_view', issuer='BRMS') }}" class="btn btn-secondary">← Volver a Guías</a>
+  </div>
+</div>
+<p class="muted mt-0">Todas las guías con las que salió un viaje de BRMS — la guía de remisión electrónica, la guía de transportista, o la guía del remitente cuando ya trae nuestros datos y no hizo falta emitir una nueva. Backus y Naviera Oriente mandan un número de pedido después de la guía, necesario para poder facturarles: enlázalo a mano abajo, o carga el Excel que Naviera Oriente manda semanalmente para enlazar varios de una vez.</p>
+
+<div class="panel">
+  <h2 class="mt-0">Cargar Excel de pedidos (Naviera Oriente)</h2>
+  <p class="muted mt-0">Sube el archivo semanal tal como lo manda Naviera Oriente ("Doc. de compras" = número de pedido, "Guía Transp." = número de guía) — el sistema busca cada guía entre los viajes de BRMS y enlaza el pedido correspondiente. Las filas "FALSO FLETE" o sin guía se ignoran solas.</p>
+  <form method="post" action="{{ url_for('guias.link_orders_upload') }}" enctype="multipart/form-data" class="form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <label>Archivo Excel (.xlsx)
+        <input type="file" name="file" accept=".xlsx" required>
+      </label>
+    </div>
+    <div class="btn-group">
+      <button type="submit" class="btn btn-primary">Cargar y enlazar</button>
+    </div>
+  </form>
+</div>
+
+<form class="filters" method="get">
+  <label>Buscar
+    <input type="text" name="q" value="{{ q }}" placeholder="Cliente, número de guía o de pedido">
+  </label>
+  <button class="btn btn-secondary" type="submit">Filtrar</button>
+</form>
+
+<div class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Viaje</th><th>Cliente</th><th>Ruta</th><th>Guía</th><th>N.° de pedido</th><th></th></tr></thead>
+      <tbody>
+        {% for t in trips %}
+        <tr>
+          <td><a href="{{ url_for('viajes.detail', trip_id=t.trip_id) }}">{{ t.trip_code }}</a></td>
+          <td>{{ t.client_name }}</td>
+          <td>{{ t.origin }} → {{ t.destination }}</td>
+          <td>
+            {% if t.waybill_id %}<div>Electrónica: <a href="{{ url_for('guias.detail', waybill_id=t.waybill_id) }}">{{ t.series }}-{{ '%06d'|format(t.series_number) }}</a> {{ m.badge(t.sunat_status) }}</div>{% endif %}
+            {% if t.carrier_waybill_number %}<div class="muted">Transportista: {{ t.carrier_waybill_number }}</div>{% endif %}
+            {% if t.shipper_waybill_shows_carrier == 'SI' %}<div class="muted">Del remitente{% if t.shipper_waybill_number %}: {{ t.shipper_waybill_number }}{% endif %}</div>{% endif %}
+          </td>
+          <td>
+            {% if t.client_order_number %}{{ t.client_order_number }}
+            {% elif needs_order_number('BRMS', t.client_name) %}<span class="badge badge-pendiente">Falta pedido</span>
+            {% else %}—{% endif %}
+          </td>
+          <td>
+            {% if can(current_user.roles, 'guias', 'edit') %}
+            <form method="post" action="{{ url_for('guias.save_trip_order_number', trip_id=t.trip_id) }}" style="display:flex; gap:6px;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="q" value="{{ q }}">
+              <input type="text" name="client_order_number" value="{{ t.client_order_number or '' }}" style="width:140px;" placeholder="N.° de pedido">
+              <button type="submit" class="btn btn-secondary btn-sm">Guardar</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="table-empty">No se encontraron guías{{ ' para esta búsqueda' if q else ' de BRMS todavía' }}.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

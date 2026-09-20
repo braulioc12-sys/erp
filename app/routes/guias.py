@@ -11,6 +11,7 @@ from flask import (
     send_from_directory,
     url_for,
 )
+from openpyxl import load_workbook
 
 from app.auth import permission_required, validate_csrf
 from app.db import execute, query_all, query_one
@@ -53,6 +54,14 @@ def _client_needs_order_number(issuer, client_name):
         return False
     name = client_name.strip().lower()
     return any(keyword in name for keyword in ORDER_NUMBER_CLIENTS)
+
+
+def _set_trip_order_number(trip_id, raw_value):
+    execute(
+        "UPDATE trips SET client_order_number = ? WHERE id = ?",
+        ((raw_value or "").strip() or None, trip_id),
+    )
+
 
 # 10 sep, patch 0028: catálogo de ubigeos (departamento/provincia/distrito)
 # para los desplegables en cascada del formulario — se arma una sola vez acá
@@ -99,7 +108,8 @@ def list_view():
         return render_template("guias/list.html", waybills=None, issuer=None)
 
     q = request.args.get("q", "").strip()
-    sql = """SELECT w.*, t.code as trip_code, t.origin, t.destination, c.name as client_name
+    sql = """SELECT w.*, t.code as trip_code, t.origin, t.destination, c.name as client_name,
+                    t.client_order_number as client_order_number
              FROM waybills w
              JOIN trips t ON t.id = w.trip_id
              JOIN clients c ON c.id = t.client_id
@@ -112,7 +122,7 @@ def list_view():
         # (V001-6 en vez de V001-000006), pero alcanza para encontrar una
         # guía por su número tal como aparece en el PDF o en la búsqueda.
         sql += """ AND (LOWER(c.name) LIKE LOWER(?) OR LOWER(w.series || '-' || w.series_number) LIKE LOWER(?)
-                    OR LOWER(COALESCE(w.client_order_number, '')) LIKE LOWER(?))"""
+                    OR LOWER(COALESCE(t.client_order_number, '')) LIKE LOWER(?))"""
         params += [f"%{q}%"] * 3
     sql += " ORDER BY w.issue_date DESC, w.id DESC"
 
@@ -260,6 +270,7 @@ def new(trip_id):
 def detail(waybill_id):
     waybill = query_one(
         """SELECT w.*, t.code as trip_code, t.origin, t.destination, t.cargo_description,
+                  t.client_order_number as client_order_number,
                   c.name as client_name
            FROM waybills w
            JOIN trips t ON t.id = w.trip_id
@@ -282,19 +293,214 @@ def save_order_number(waybill_id):
     """20 sep, pedido de Braulio: número de pedido que Backus/Naviera
     Oriente mandan después de la guía (BRMS) para poder facturarles -- se
     guarda/edita acá, aparte del formulario de creación, porque llega
-    después (ver el comentario largo en schema.sql, CREATE TABLE
-    waybills)."""
+    después. Se guarda en trips.client_order_number (no en waybills, ver el
+    comentario largo en schema.sql junto a esa columna), así que primero
+    hay que resolver el trip_id de esta guía."""
     if not validate_csrf():
         abort(400)
-    waybill = query_one("SELECT id FROM waybills WHERE id = ?", (waybill_id,))
+    waybill = query_one("SELECT trip_id FROM waybills WHERE id = ?", (waybill_id,))
     if waybill is None:
         abort(404)
-    execute(
-        "UPDATE waybills SET client_order_number = ? WHERE id = ?",
-        (request.form.get("client_order_number", "").strip() or None, waybill_id),
-    )
+    _set_trip_order_number(waybill["trip_id"], request.form.get("client_order_number"))
     flash("Número de pedido guardado.", "success")
     return redirect(url_for("guias.detail", waybill_id=waybill_id))
+
+
+# --- Enlazar facturas y guías (20 sep, pedido de Braulio): pantalla propia
+# de BRMS que reúne TODAS las guías con las que un viaje puede haber salido
+# -- la guía electrónica propia (waybills), la guía de transportista
+# (trips.carrier_waybill_number, documento propio pero de texto libre) y la
+# guía del remitente cuando ya trae nuestros datos y no hace falta emitir
+# una nueva (trips.shipper_waybill_number, caso "remisión") -- y permite
+# enlazar el número de pedido de cada una a mano o en bloque, subiendo el
+# Excel semanal que manda Naviera Oriente ("DETALLE DE VIAJE BRMS.xlsx":
+# columna D "Doc. de compras" = pedido, columna G "Guía Transp." = guía,
+# confirmado con Braulio).
+
+# Valores de la columna "Guía Transp." que no son una guía real y se
+# ignoran solos al importar (un viaje "sin flete real" en el sistema de
+# Naviera Oriente, visto en el archivo real que compartió Braulio).
+IGNORED_GUIA_VALUES = {"", "FALSO FLETE", "N/A", "-"}
+
+
+def _cell_text(value):
+    """openpyxl a veces trae un número como float (5900090082.0) en vez de
+    int -- lo pasamos a texto sin ese ".0" para que calce con lo que
+    escribiría una persona a mano."""
+    if value is None:
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
+
+
+def _parse_naviera_orders_excel(file_storage):
+    """Lee el Excel semanal de Naviera Oriente y devuelve una lista de
+    (fila del Excel, pedido, guía), o (None, mensaje de error).
+
+    OJO: este archivo NO es una plantilla nuestra (a diferencia de
+    app/bulk_import.py, que sí genera y espera su propio formato con
+    encabezado en una fila fija) -- es un reporte de su propio sistema, con
+    el bloque de encabezado ("PROVEEDOR"...) repetido cada tanto y una fila
+    "Total general" al cerrar cada bloque, en vez de una sola tabla
+    continua. Por eso se recorren TODAS las filas de TODAS las hojas,
+    descartando encabezados/totales/filas sin guía o sin pedido, en vez de
+    asumir una posición fija."""
+    try:
+        wb = load_workbook(file_storage, data_only=True, read_only=True)
+    except Exception:
+        return None, (
+            "No se pudo leer el archivo. Confirma que sea el Excel (.xlsx) tal como lo manda Naviera Oriente."
+        )
+
+    rows_out = []
+    for ws in wb.worksheets:
+        for excel_row_num, row in enumerate(ws.iter_rows(values_only=True), start=1):
+            if not row or len(row) < 7:
+                continue
+            col_a = _cell_text(row[0]).upper()
+            if col_a in ("PROVEEDOR", "TOTAL GENERAL"):
+                continue
+            pedido = _cell_text(row[3])
+            guia = _cell_text(row[6])
+            if not pedido or not guia or guia.upper() in IGNORED_GUIA_VALUES:
+                continue
+            rows_out.append((excel_row_num, pedido, guia))
+
+    if not rows_out:
+        return None, 'No se encontraron filas con "Doc. de compras" y "Guía Transp." en el archivo.'
+    return rows_out, None
+
+
+def _index_guia_values(pairs):
+    """Arma {valor de guía en minúscula: trip_id} a partir de (valor, trip_id)
+    -- si un mismo valor aparece en más de un viaje se descarta de este
+    índice (ambiguo) en vez de quedarse con cualquiera de los dos al azar,
+    para no enlazar un pedido al viaje equivocado."""
+    index = {}
+    ambiguous = set()
+    for value, trip_id in pairs:
+        key = (value or "").strip().lower()
+        if not key:
+            continue
+        if key in index and index[key] != trip_id:
+            ambiguous.add(key)
+        else:
+            index[key] = trip_id
+    for key in ambiguous:
+        index.pop(key, None)
+    return index
+
+
+def _brms_trip_guide_index():
+    """Tres índices {guía en minúscula: trip_id} para los viajes de BRMS:
+    por guía de transportista (texto libre), por guía electrónica propia
+    (serie-número, con el mismo cero-relleno que se muestra en pantalla) y
+    por guía del remitente (caso remisión). Se buscan en ese orden porque
+    "Guía Transp." de Naviera Oriente suele calzar con la guía de
+    transportista de texto libre, no con la electrónica."""
+    trips = query_all(
+        "SELECT id, carrier_waybill_number, shipper_waybill_number FROM trips WHERE issuer = 'BRMS'"
+    )
+    carrier_index = _index_guia_values((t["carrier_waybill_number"], t["id"]) for t in trips)
+    shipper_index = _index_guia_values((t["shipper_waybill_number"], t["id"]) for t in trips)
+
+    waybills = query_all(
+        """SELECT w.trip_id, w.series, w.series_number FROM waybills w
+           JOIN trips t ON t.id = w.trip_id WHERE t.issuer = 'BRMS'"""
+    )
+    electronic_index = _index_guia_values(
+        (f"{w['series']}-{w['series_number']:06d}", w["trip_id"]) for w in waybills
+    )
+    return carrier_index, electronic_index, shipper_index
+
+
+@bp.route("/enlazar-pedidos")
+@permission_required("guias", "view")
+def link_orders():
+    q = request.args.get("q", "").strip()
+    sql = """SELECT t.id as trip_id, t.code as trip_code, t.origin, t.destination,
+                    t.client_order_number, t.carrier_waybill_number,
+                    t.shipper_waybill_shows_carrier, t.shipper_waybill_number,
+                    c.name as client_name,
+                    w.id as waybill_id, w.series, w.series_number, w.sunat_status
+             FROM trips t
+             JOIN clients c ON c.id = t.client_id
+             LEFT JOIN waybills w ON w.trip_id = t.id
+             WHERE t.issuer = 'BRMS'
+               AND (
+                     w.id IS NOT NULL
+                     OR t.shipper_waybill_shows_carrier = 'SI'
+                     OR (t.carrier_waybill_number IS NOT NULL AND t.carrier_waybill_number != '')
+                   )"""
+    params = []
+    if q:
+        sql += """ AND (
+                     LOWER(c.name) LIKE LOWER(?)
+                     OR LOWER(COALESCE(t.carrier_waybill_number, '')) LIKE LOWER(?)
+                     OR LOWER(COALESCE(t.shipper_waybill_number, '')) LIKE LOWER(?)
+                     OR LOWER(COALESCE(t.client_order_number, '')) LIKE LOWER(?)
+                     OR LOWER(COALESCE(w.series || '-' || w.series_number, '')) LIKE LOWER(?)
+                   )"""
+        params += [f"%{q}%"] * 5
+    sql += " ORDER BY t.scheduled_date DESC, t.id DESC"
+
+    trips = query_all(sql, params)
+    return render_template(
+        "guias/link_orders.html", trips=trips, q=q, needs_order_number=_client_needs_order_number
+    )
+
+
+@bp.route("/enlazar-pedidos/viajes/<int:trip_id>", methods=["POST"])
+@permission_required("guias", "edit")
+def save_trip_order_number(trip_id):
+    if not validate_csrf():
+        abort(400)
+    trip = query_one("SELECT id FROM trips WHERE id = ?", (trip_id,))
+    if trip is None:
+        abort(404)
+    _set_trip_order_number(trip_id, request.form.get("client_order_number"))
+    flash("Número de pedido guardado.", "success")
+    q = request.form.get("q", "").strip()
+    return redirect(url_for("guias.link_orders", q=q) if q else url_for("guias.link_orders"))
+
+
+@bp.route("/enlazar-pedidos/cargar", methods=["POST"])
+@permission_required("guias", "edit")
+def link_orders_upload():
+    if not validate_csrf():
+        abort(400)
+    file_storage = request.files.get("file")
+    if not file_storage or not file_storage.filename:
+        flash("Selecciona el archivo Excel de Naviera Oriente para cargar.", "error")
+        return redirect(url_for("guias.link_orders"))
+
+    rows, file_error = _parse_naviera_orders_excel(file_storage)
+    if file_error:
+        flash(file_error, "error")
+        return redirect(url_for("guias.link_orders"))
+
+    carrier_index, electronic_index, shipper_index = _brms_trip_guide_index()
+    not_found = []
+    updates = {}
+    for excel_row, pedido, guia in rows:
+        key = guia.strip().lower()
+        trip_id = carrier_index.get(key) or electronic_index.get(key) or shipper_index.get(key)
+        if trip_id is None:
+            not_found.append(
+                {
+                    "row": excel_row,
+                    "message": f'Guía "{guia}" (pedido {pedido}) no se encontró entre los viajes de BRMS.',
+                }
+            )
+            continue
+        updates[trip_id] = pedido
+
+    for trip_id, pedido in updates.items():
+        execute("UPDATE trips SET client_order_number = ? WHERE id = ?", (pedido, trip_id))
+
+    result = {"linked": len(updates), "not_found": not_found}
+    return render_template("guias/link_orders_result.html", result=result)
 
 
 @bp.route("/<int:waybill_id>/enviar-sunat", methods=["POST"])

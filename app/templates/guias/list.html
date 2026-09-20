@@ -5,6 +5,11 @@
 {% block content %}
 <div class="page-header">
   <h1>Guías de Remisión Electrónica{% if issuer %} — {{ 'BRMS' if issuer == 'BRMS' else 'Harraso Transport' }}{% endif %}</h1>
+  {% if issuer == 'BRMS' %}
+  <div class="page-actions">
+    <a href="{{ url_for('guias.link_orders') }}" class="btn btn-secondary">🔗 Enlazar facturas y guías</a>
+  </div>
+  {% endif %}
 </div>
 <p class="muted mt-0">Se generan desde el detalle de un viaje (Viajes → viaje en curso o entregado → "Generar guía de remisión"). Sirven para sustentar ante SUNAT el traslado de carga de tus clientes con tus propias unidades ("Guía de Remisión Transportista").</p>
 
