@@ -10,8 +10,16 @@ Decisión de alcance (AskUserQuestion, 1 sep, antes de construir):
 independiente de Viajes/Facturación por ahora (no se "convierte" en nada,
 solo genera el PDF); el "Código" de cada línea es texto libre (no un
 catálogo de servicios); la numeración sigue la real de Harraso, arranca en
-QUOTATION_START_NUMBER (112, la de referencia era la N° 111); el PDF lleva
-el logo de Harraso + BRMS, igual que el resto de documentos del sistema.
+QUOTATION_START_NUMBER (112, la de referencia era la N° 111).
+
+20 sep (patch 0071), pedido de Braulio ("si el que cotiza es Harraso debe
+salir solo el logo de Harraso y si es BRMS solo el logo de brms"): el PDF
+antes llevaba el logo de Harraso + BRMS siempre juntos (decisión original
+del 1 sep, ya no vigente) -- ahora muestra solo el logo de la empresa que
+emite esa cotización en particular (`quotation.issuer`, ver
+app/templates/cotizaciones/pdf.html). También se fijó el tamaño de página
+a A4 explícitamente al imprimir/exportar (antes dependía de la
+configuración regional del navegador/impresora de quien lo use).
 """
 from flask import Blueprint, abort, current_app, flash, g, jsonify, redirect, render_template, request, url_for
 
