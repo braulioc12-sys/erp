@@ -1,3 +1,4 @@
+import json
 import uuid
 
 from flask import (
@@ -14,7 +15,7 @@ from flask import (
 from openpyxl import load_workbook
 
 from app.auth import permission_required, validate_csrf
-from app.db import execute, query_all, query_one
+from app.db import execute, get_db, query_all, query_one
 from app.helpers import company_info_for_issuer, parse_date, parse_float, today_str
 from app.integrations.sunat_ose import (
     SunatOseError,
@@ -539,6 +540,310 @@ def link_orders_upload():
 
     result = {"linked": len(updates), "not_found": not_found}
     return render_template("guias/link_orders_result.html", result=result)
+
+
+# 20 sep, pedido de Braulio ("y si las guías fueron emitidas por
+# tefacturo.pe, pero antes de que se cree harris?"): pantalla de solo
+# consulta para las guías reales que Harris nunca generó porque el sistema
+# no existía todavía. Se cargan desde el Excel "Lista de Guías
+# Transportistas" que exporta el propio panel de tefacturo.pe (uno por
+# RUC/empresa) -- ver el comentario largo en schema.sql, tabla
+# sunat_waybills_history, sobre por qué esto NO crea un `trip`.
+
+# Columnas del export de tefacturo.pe que de verdad se usan (confirmado
+# contra el archivo real de Harraso, 20 sep -- el resto de columnas del
+# archivo, ~63 en total, no hace falta leerlas). "NÚMERO DOCUMENTO
+# RELACIONADO" también aparece en una fila de continuación (ver abajo), por
+# eso se busca en ambas.
+_HISTORY_REQUIRED_HEADERS = ("TIPO", "SERIE", "NUMERO", "FECHA EMISION", "RUC TRANSPORTISTA")
+
+
+def _history_header_map(ws):
+    """Primera fila del Excel -> {NOMBRE EN MAYÚSCULA: índice 0-based}. El
+    export de tefacturo.pe repite un par de nombres de columna (p.ej.
+    "NÚMERO AUTORIZACIÓN" sale dos veces) -- no importa porque esas no se
+    usan acá; para las que sí interesan, el nombre es único."""
+    header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+    if not header_row:
+        return None, "El archivo está vacío."
+    header = {}
+    for idx, value in enumerate(header_row):
+        name = _cell_text(value).upper()
+        if name:
+            header[name] = idx
+    missing = [h for h in _HISTORY_REQUIRED_HEADERS if h not in header]
+    if missing:
+        return None, (
+            "No se reconoce el formato del archivo -- faltan columnas: "
+            + ", ".join(missing)
+            + '. Debe ser el Excel "Lista de Guías Transportistas" tal como lo exporta tefacturo.pe.'
+        )
+    return header, None
+
+
+# ESTADO de tefacturo.pe (columna numérica): 1 = aceptado por SUNAT, 3 =
+# rechazado (en el archivo real de Harraso, casi siempre porque la
+# GRE-Remitente ya traía nuestros datos y no hacía falta la de
+# transportista) -- cualquier otro valor (o ninguno) se guarda como OTRO;
+# "RESPUESTA DECLARACION" trae el detalle en texto para ese caso.
+_HISTORY_ESTADO_MAP = {"1": "ACEPTADO", "3": "RECHAZADO"}
+
+
+def _parse_tefacturo_history_excel(file_storage):
+    """Lee el Excel "Lista de Guías Transportistas" de tefacturo.pe y
+    devuelve (lista de dicts, None) o (None, mensaje de error).
+
+    Cada guía ocupa su fila principal (columna TIPO llena) y, a veces, una o
+    más filas de continuación inmediatamente debajo (TIPO vacío) con datos
+    que no entran en una sola fila -- vistas en el archivo real: un segundo
+    vehículo/tarjeta de circulación (placa de la carreta) y, más raro, un
+    segundo documento relacionado. Se toma el primer vehículo de
+    continuación como `trailer_plate` (mismo campo que ya usa Harris) y el
+    resto de filas de continuación se guarda tal cual en `raw_extra_json`,
+    por si hace falta consultarlo después."""
+    try:
+        wb = load_workbook(file_storage, data_only=True, read_only=True)
+    except Exception:
+        return None, (
+            'No se pudo leer el archivo. Confirma que sea el Excel "Lista de Guías '
+            "Transportistas\" tal como lo exporta tefacturo.pe."
+        )
+    ws = wb.worksheets[0]
+    header, error = _history_header_map(ws)
+    if error:
+        return None, error
+
+    def cell(row, name):
+        idx = header.get(name)
+        return row[idx] if idx is not None and idx < len(row) else None
+
+    docs = []
+    current = None
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row:
+            continue
+        tipo = _cell_text(cell(row, "TIPO"))
+        if tipo:
+            series = _cell_text(cell(row, "SERIE"))
+            numero_raw = _cell_text(cell(row, "NUMERO"))
+            fecha_raw = _cell_text(cell(row, "FECHA EMISION"))
+            ruc = _cell_text(cell(row, "RUC TRANSPORTISTA"))
+            if not (series and numero_raw and fecha_raw and ruc):
+                current = None
+                continue
+            try:
+                numero = int(float(numero_raw))
+            except ValueError:
+                current = None
+                continue
+            packages_raw = cell(row, "NUMERO PAQUETES TRASLADO")
+            packages = None
+            if packages_raw not in (None, ""):
+                try:
+                    packages = int(float(packages_raw))
+                except (TypeError, ValueError):
+                    packages = None
+            current = {
+                "series": series,
+                "series_number": numero,
+                "issue_date": fecha_raw[:10],
+                "ruc_transportista": ruc,
+                "sunat_status": _HISTORY_ESTADO_MAP.get(_cell_text(cell(row, "ESTADO")), "OTRO"),
+                "sunat_status_detail": _cell_text(cell(row, "RESPUESTA DECLARACION")) or None,
+                "client_document": _cell_text(cell(row, "NUMERO DOCUMENTO REMITENTE")) or None,
+                "client_name": _cell_text(cell(row, "RAZON SOCIAL REMITENTE")) or None,
+                "recipient_document": _cell_text(cell(row, "NUMERO DOCUMENTO DESTINATARIO")) or None,
+                "recipient_name": _cell_text(cell(row, "RAZON SOCIAL DESTINATARIO")) or None,
+                "origin_address": _cell_text(cell(row, "DIRECCION PUNTO PARTIDA")) or None,
+                "origin_ubigeo": _cell_text(cell(row, "UBIGEO PUNTO PARTIDA")) or None,
+                "destination_address": _cell_text(cell(row, "DIRECCION PUNTO LLEGADA")) or None,
+                "destination_ubigeo": _cell_text(cell(row, "UBIGEO PUNTO LLEGADA")) or None,
+                "weight_kg": parse_float(cell(row, "PESO BRUTO TOTAL TRASLADO"), None),
+                "packages": packages,
+                "cargo_description": _cell_text(cell(row, "DESCRIPCION TRASLADO")) or None,
+                "driver_document": _cell_text(cell(row, "NÚMERO DOCUMENTO CONDUCTOR")) or None,
+                "driver_name": _cell_text(cell(row, "NOMBRE COMPLETO CONDUCTOR")) or None,
+                "driver_license": _cell_text(cell(row, "LICENCIA DE CONDUCIR")) or None,
+                "vehicle_plate": _cell_text(cell(row, "PLACA VEHÍCULO")) or None,
+                "trailer_plate": None,
+                "related_document_type": _cell_text(cell(row, "TIPO DOCUMENTO RELACIONADO")) or None,
+                "related_document_number": _cell_text(cell(row, "NÚMERO DOCUMENTO RELACIONADO")) or None,
+                "related_document_series": _cell_text(cell(row, "SERIE DOCUMENTO RELACIONADO")) or None,
+                "_extra": [],
+            }
+            docs.append(current)
+            continue
+
+        if current is None:
+            continue
+        plate = _cell_text(cell(row, "PLACA VEHÍCULO")) or None
+        tarjeta = _cell_text(cell(row, "TARJETA CIRCULACIÓN")) or None
+        rel_num = _cell_text(cell(row, "NÚMERO DOCUMENTO RELACIONADO")) or None
+        if not (plate or tarjeta or rel_num):
+            continue
+        if plate and not current["trailer_plate"]:
+            current["trailer_plate"] = plate
+        else:
+            current["_extra"].append(
+                {
+                    "vehicle_plate": plate,
+                    "tarjeta_circulacion": tarjeta,
+                    "related_document_type": _cell_text(cell(row, "TIPO DOCUMENTO RELACIONADO")) or None,
+                    "related_document_number": rel_num,
+                    "related_document_series": _cell_text(cell(row, "SERIE DOCUMENTO RELACIONADO")) or None,
+                }
+            )
+
+    if not docs:
+        return None, "No se encontró ninguna guía reconocible en el archivo."
+    return docs, None
+
+
+def _issuer_for_ruc(ruc):
+    """HARRASO o BRMS según con qué RUC configurado (COMPANY_RUC/BRMS_RUC)
+    coincida la fila del Excel -- default HARRASO si no calza con ninguno
+    (mismo criterio que company_info_for_issuer en app/helpers.py)."""
+    cfg = current_app.config
+    if ruc and cfg.get("BRMS_RUC") and ruc == cfg.get("BRMS_RUC"):
+        return "BRMS"
+    return "HARRASO"
+
+
+@bp.route("/historico-sunat")
+@permission_required("guias", "view")
+def sunat_history_list():
+    issuer = request.args.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        return render_template("guias/sunat_history.html", rows=None, issuer=None)
+
+    q = request.args.get("q", "").strip()
+    anio = request.args.get("anio", "").strip()
+    estado = request.args.get("estado", "").strip().upper()
+
+    year_rows = query_all(
+        """SELECT DISTINCT substr(issue_date, 1, 4) as anio FROM sunat_waybills_history
+           WHERE issuer = ? ORDER BY anio DESC""",
+        (issuer,),
+    )
+    available_years = [r["anio"] for r in year_rows if r["anio"]]
+
+    sql = "SELECT * FROM sunat_waybills_history WHERE issuer = ?"
+    params = [issuer]
+    if q:
+        sql += """ AND (LOWER(COALESCE(client_name, '')) LIKE LOWER(?)
+                    OR LOWER(series || '-' || series_number) LIKE LOWER(?))"""
+        params += [f"%{q}%"] * 2
+    if anio:
+        sql += " AND substr(issue_date, 1, 4) = ?"
+        params.append(anio)
+    if estado in ("ACEPTADO", "RECHAZADO", "OTRO"):
+        sql += " AND sunat_status = ?"
+        params.append(estado)
+    sql += " ORDER BY issue_date DESC, series_number DESC"
+
+    rows = query_all(sql, params)
+    return render_template(
+        "guias/sunat_history.html",
+        rows=rows,
+        issuer=issuer,
+        q=q,
+        anio=anio,
+        estado=estado,
+        available_years=available_years,
+    )
+
+
+@bp.route("/historico-sunat/cargar", methods=["POST"])
+@permission_required("guias", "edit")
+def sunat_history_upload():
+    if not validate_csrf():
+        abort(400)
+    issuer = request.form.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        issuer = "HARRASO"
+    file_storage = request.files.get("file")
+    if not file_storage or not file_storage.filename:
+        flash('Selecciona el Excel "Lista de Guías Transportistas" de tefacturo.pe.', "error")
+        return redirect(url_for("guias.sunat_history_list", issuer=issuer))
+
+    docs, file_error = _parse_tefacturo_history_excel(file_storage)
+    if file_error:
+        flash(file_error, "error")
+        return redirect(url_for("guias.sunat_history_list", issuer=issuer))
+
+    existing = query_all("SELECT ruc_transportista, series, series_number FROM sunat_waybills_history")
+    existing_keys = {(r["ruc_transportista"], r["series"], r["series_number"]) for r in existing}
+
+    # El archivo real de tefacturo.pe es por RUC (una sola empresa a la
+    # vez), pero por si acaso se calcula la empresa fila por fila en vez de
+    # asumirla una sola vez -- `detected_issuer` (para saber a dónde
+    # redirigir) queda con la del primer documento del archivo.
+    detected_issuer = _issuer_for_ruc(docs[0]["ruc_transportista"])
+    db = get_db()
+    inserted = 0
+    skipped = 0
+    for doc in docs:
+        key = (doc["ruc_transportista"], doc["series"], doc["series_number"])
+        if key in existing_keys:
+            skipped += 1
+            continue
+        existing_keys.add(key)
+        row_issuer = _issuer_for_ruc(doc["ruc_transportista"])
+        db.execute(
+            """INSERT OR IGNORE INTO sunat_waybills_history (
+                   issuer, ruc_transportista, series, series_number, issue_date,
+                   sunat_status, sunat_status_detail, client_document, client_name,
+                   recipient_document, recipient_name, origin_address, origin_ubigeo,
+                   destination_address, destination_ubigeo, weight_kg, packages,
+                   cargo_description, driver_document, driver_name, driver_license,
+                   vehicle_plate, trailer_plate, related_document_type,
+                   related_document_number, related_document_series, raw_extra_json
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                row_issuer,
+                doc["ruc_transportista"],
+                doc["series"],
+                doc["series_number"],
+                doc["issue_date"],
+                doc["sunat_status"],
+                doc["sunat_status_detail"],
+                doc["client_document"],
+                doc["client_name"],
+                doc["recipient_document"],
+                doc["recipient_name"],
+                doc["origin_address"],
+                doc["origin_ubigeo"],
+                doc["destination_address"],
+                doc["destination_ubigeo"],
+                doc["weight_kg"],
+                doc["packages"],
+                doc["cargo_description"],
+                doc["driver_document"],
+                doc["driver_name"],
+                doc["driver_license"],
+                doc["vehicle_plate"],
+                doc["trailer_plate"],
+                doc["related_document_type"],
+                doc["related_document_number"],
+                doc["related_document_series"],
+                json.dumps(doc["_extra"], ensure_ascii=False) if doc["_extra"] else None,
+            ),
+        )
+        inserted += 1
+    db.commit()
+
+    if inserted:
+        flash(
+            f"Se cargaron {inserted} guía(s) nueva(s) al histórico SUNAT."
+            + (f" {skipped} ya estaban cargadas (se omitieron)." if skipped else ""),
+            "success",
+        )
+    else:
+        flash(
+            f"No se cargó ninguna guía nueva -- las {skipped} del archivo ya estaban en el histórico.",
+            "info",
+        )
+    return redirect(url_for("guias.sunat_history_list", issuer=detected_issuer))
 
 
 @bp.route("/<int:waybill_id>/enviar-sunat", methods=["POST"])

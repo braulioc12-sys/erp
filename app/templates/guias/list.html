@@ -5,9 +5,12 @@
 {% block content %}
 <div class="page-header">
   <h1>Guías de Remisión Electrónica{% if issuer %} — {{ 'BRMS' if issuer == 'BRMS' else 'Harraso Transport' }}{% endif %}</h1>
-  {% if issuer == 'BRMS' %}
+  {% if issuer %}
   <div class="page-actions">
+    {% if issuer == 'BRMS' %}
     <a href="{{ url_for('guias.link_orders') }}" class="btn btn-secondary">🔗 Enlazar facturas y guías</a>
+    {% endif %}
+    <a href="{{ url_for('guias.sunat_history_list', issuer=issuer) }}" class="btn btn-secondary">📄 Histórico SUNAT</a>
   </div>
   {% endif %}
 </div>

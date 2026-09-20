@@ -1277,6 +1277,68 @@ CREATE TABLE IF NOT EXISTS waybills (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- 20 sep, pedido de Braulio ("y si las guías fueron emitidas por
+-- tefacturo.pe, pero antes de que se cree harris?"): guías transportista
+-- reales, ya aceptadas (o no) por SUNAT vía tefacturo.pe, que Harris nunca
+-- generó porque el sistema todavía no existía. Se cargan desde el Excel
+-- "Lista de Guías Transportistas" que exporta el propio panel de
+-- tefacturo.pe (por RUC) -- NO desde la integración en vivo de
+-- app/integrations/sunat_ose.py, que solo sabe consultar (PDF/XML/CDR) un
+-- comprobante puntual que Harris ya generó, nunca listar todo lo emitido.
+-- A propósito esta tabla NO crea un `trip`/viaje ni toca `waybills`: son
+-- solo un histórico de consulta y búsqueda (pantalla aparte, ver
+-- guias.sunat_history_list()/sunat_history_upload() en
+-- app/routes/guias.py) -- ligarlas a Viajes/Liquidaciones/Facturación las
+-- haría contar como viajes reales para comisión de conductor y reportes
+-- contables, que no es lo que son. El mismo archivo se puede volver a
+-- cargar sin duplicar (UNIQUE ruc_transportista+series+series_number,
+-- INSERT OR IGNORE/ON CONFLICT DO NOTHING en el import).
+CREATE TABLE IF NOT EXISTS sunat_waybills_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- Empresa emisora, deducida del RUC transportista de la fila contra
+    -- COMPANY_RUC/BRMS_RUC (config) al importar -- ver _issuer_for_ruc() en
+    -- app/routes/guias.py. Default HARRASO porque el primer archivo real
+    -- (20 sep) es solo de Harraso.
+    issuer TEXT NOT NULL DEFAULT 'HARRASO' CHECK (issuer IN ('HARRASO', 'BRMS')),
+    ruc_transportista TEXT NOT NULL,
+    series TEXT NOT NULL,
+    series_number INTEGER NOT NULL,
+    issue_date TEXT NOT NULL,
+    -- ESTADO de tefacturo.pe (columna numérica del export): 1 -> ACEPTADO,
+    -- 3 -> RECHAZADO (visto en el archivo real: casi siempre porque la
+    -- GRE-Remitente ya traía nuestros datos y no hacía falta emitir la de
+    -- transportista), cualquier otro valor -> OTRO. sunat_status_detail
+    -- guarda el texto real de "RESPUESTA DECLARACION" cuando lo trae.
+    sunat_status TEXT NOT NULL DEFAULT 'ACEPTADO' CHECK (sunat_status IN ('ACEPTADO', 'RECHAZADO', 'OTRO')),
+    sunat_status_detail TEXT,
+    client_document TEXT,
+    client_name TEXT,
+    recipient_document TEXT,
+    recipient_name TEXT,
+    origin_address TEXT,
+    origin_ubigeo TEXT,
+    destination_address TEXT,
+    destination_ubigeo TEXT,
+    weight_kg REAL,
+    packages INTEGER,
+    cargo_description TEXT,
+    driver_document TEXT,
+    driver_name TEXT,
+    driver_license TEXT,
+    vehicle_plate TEXT,
+    trailer_plate TEXT,
+    related_document_type TEXT,
+    related_document_number TEXT,
+    related_document_series TEXT,
+    -- Fila(s) del Excel más allá de la principal (vehículo/conductor
+    -- secundario, más de un documento relacionado) que no entran en las
+    -- columnas de arriba -- se guardan tal cual como JSON, solo por si hace
+    -- falta consultarlas después (no se muestran en pantalla por ahora).
+    raw_extra_json TEXT,
+    imported_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (ruc_transportista, series, series_number)
+);
+
 -- Cotizaciones (1 sep) — documento comercial que se le envía a un cliente
 -- antes de un viaje/servicio, con el mismo formato de columnas/totales que
 -- ya usa Harraso en sus cotizaciones reales (Gravado/Exonerado/Inafecto/
@@ -1601,6 +1663,7 @@ CREATE INDEX IF NOT EXISTS idx_expenses_vehicle ON expenses(vehicle_id);
 CREATE INDEX IF NOT EXISTS idx_maintenance_vehicle ON maintenance_records(vehicle_id);
 CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_waybills_trip ON waybills(trip_id);
+CREATE INDEX IF NOT EXISTS idx_sunat_history_issuer_date ON sunat_waybills_history(issuer, issue_date);
 CREATE INDEX IF NOT EXISTS idx_inspections_vehicle ON inspections(vehicle_id);
 CREATE INDEX IF NOT EXISTS idx_inspection_items_inspection ON inspection_items(inspection_id);
 CREATE INDEX IF NOT EXISTS idx_expense_advances_trip ON expense_advances(trip_id);
