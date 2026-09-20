@@ -130,15 +130,21 @@ class Config:
 
     # BRMS como segunda empresa que puede emitir una Cotización (1 sep,
     # pedido de Braulio: "la cotizacion debes poder elegir entre Harraso o
-    # BRMS ... ya que son las 2"). El correo/teléfono de contacto se
-    # comparten con Harraso (COMPANY_EMAIL/COMPANY_PHONE) — Braulio
-    # confirmó que son los mismos. El RUC y la dirección de BRMS SÍ son
+    # BRMS ... ya que son las 2"). El RUC y la dirección de BRMS son
     # propios y todavía no se confirmaron — quedan vacíos a propósito
     # (AJUSTAR: complétalos aquí o por variable de entorno antes de emitir
     # una cotización real a nombre de BRMS, si no el PDF va a salir con esos
     # campos en blanco).
     BRMS_RUC = os.environ.get("BRMS_RUC", "")
     BRMS_ADDRESS = os.environ.get("BRMS_ADDRESS", "")
+    # 20 sep, pedido de Braulio ("tengo su propio correo y telefono"): antes
+    # BRMS compartía COMPANY_EMAIL/COMPANY_PHONE con Harraso (confirmado el
+    # 1 sep) — ahora tiene los suyos propios. Vacíos por defecto, igual que
+    # BRMS_RUC/BRMS_ADDRESS — AJUSTAR aquí o por variable de entorno antes
+    # de emitir una cotización real a nombre de BRMS, si no el PDF va a
+    # salir con estos campos en blanco.
+    BRMS_EMAIL = os.environ.get("BRMS_EMAIL", "")
+    BRMS_PHONE = os.environ.get("BRMS_PHONE", "")
     # Única cuenta bancaria que se muestra cuando la cotización es de BRMS
     # (Braulio confirmó que, a diferencia de Harraso, BRMS no muestra
     # Banco de la Nación ni cuenta de ahorro — solo esta). El formato del

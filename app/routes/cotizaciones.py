@@ -400,12 +400,13 @@ def pdf(quotation_id):
 
     # Datos de la empresa emisora — Harraso o BRMS (1 sep, pedido de
     # Braulio: "la cotizacion debes poder elegir entre Harraso o BRMS ...
-    # ya que son las 2"). El correo/teléfono se comparten entre ambas
-    # (confirmado por Braulio); el RUC y la dirección de BRMS son propios
+    # ya que son las 2"). El RUC y la dirección de BRMS son propios
     # (BRMS_RUC/BRMS_ADDRESS, ver config.py — AJUSTAR si quedaron vacíos).
     # BRMS solo muestra una cuenta bancaria (BRMS_BANK_ACCOUNT), sin Banco
     # de la Nación ni cuenta de ahorro — a diferencia de Harraso, que
-    # muestra las 3.
+    # muestra las 3. El correo/teléfono de BRMS también son propios desde
+    # el 20 sep (BRMS_EMAIL/BRMS_PHONE, pedido de Braulio: "tengo su propio
+    # correo y telefono" — antes se compartían con Harraso).
     if quotation["issuer"] == "BRMS":
         # Sin "S.A.C." fijo a propósito (a diferencia de Harraso, donde sí
         # se confirmó) — la razón social legal completa de BRMS no se
@@ -415,6 +416,8 @@ def pdf(quotation_id):
         company_legal_suffix = ""
         company_ruc = cfg["BRMS_RUC"]
         company_address = cfg["BRMS_ADDRESS"]
+        company_email = cfg["BRMS_EMAIL"]
+        company_phone = cfg["BRMS_PHONE"]
         bank_accounts = [
             {"bank": "Banco de Crédito del Perú (BCP)", "label": "Cuenta en Soles", "account": cfg["BRMS_BANK_ACCOUNT"]},
         ]
@@ -423,6 +426,8 @@ def pdf(quotation_id):
         company_legal_suffix = "S.A.C."
         company_ruc = cfg["COMPANY_RUC"]
         company_address = cfg["COMPANY_ADDRESS"]
+        company_email = cfg["COMPANY_EMAIL"]
+        company_phone = cfg["COMPANY_PHONE"]
         bank_accounts = [
             {"bank": "Banco de la Nación", "label": "Cuenta Detracción en Soles", "account": cfg["COMPANY_BANK_NACION_ACCOUNT"], "cci": cfg["COMPANY_BANK_NACION_CCI"]},
             {"bank": "Banco de Crédito del Perú", "label": "Cta Ahorro en Soles", "account": cfg["COMPANY_BANK_BCP_SAVINGS_ACCOUNT"], "cci": cfg["COMPANY_BANK_BCP_SAVINGS_CCI"]},
@@ -450,8 +455,8 @@ def pdf(quotation_id):
         company_legal_suffix=company_legal_suffix,
         company_ruc=company_ruc,
         company_address=company_address,
-        company_email=cfg["COMPANY_EMAIL"],
-        company_phone=cfg["COMPANY_PHONE"],
+        company_email=company_email,
+        company_phone=company_phone,
         bank_groups=bank_groups,
         generated_at=today_str(),
     )

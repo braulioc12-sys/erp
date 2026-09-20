@@ -166,7 +166,7 @@ def company_info_for_issuer(issuer, cfg):
             "ruc": cfg.get("BRMS_RUC", ""),
             "name": "BRMS",
             "address": cfg.get("BRMS_ADDRESS", ""),
-            "email": cfg.get("COMPANY_EMAIL", ""),  # BRMS comparte correo con Harraso (confirmado en Cotizaciones)
+            "email": cfg.get("BRMS_EMAIL", ""),  # 20 sep: BRMS tiene su propio correo (antes compartía el de Harraso)
             "commercial_name": "BRMS",
             "legal_name": f"BRMS {legal_suffix}".strip(),
             "mtc_registration": cfg.get("BRMS_MTC_REGISTRATION", ""),

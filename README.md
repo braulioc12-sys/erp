@@ -264,8 +264,8 @@ El sistema factura y emite guías a nombre de **dos empresas distintas, cada una
    - `HARRASO_TEFACTURO_EMAIL` / `HARRASO_TEFACTURO_PASSWORD`: usuario y clave de la cuenta de Harraso en tefacturo.pe.
    - `BRMS_TEFACTURO_EMAIL` / `BRMS_TEFACTURO_PASSWORD`: lo mismo para la cuenta de BRMS (déjalas vacías si BRMS todavía no emite comprobantes electrónicos propios).
    - `HARRASO_MTC_REGISTRATION` / `BRMS_MTC_REGISTRATION`: el número de registro de cada empresa ante el MTC (Ministerio de Transportes y Comunicaciones) — SUNAT lo exige para la guía de remisión electrónica.
-   - `COMPANY_RUC` y `COMPANY_ADDRESS`: el RUC y la dirección fiscal de Harraso (el emisor de sus comprobantes).
-   - `BRMS_RUC` y `BRMS_ADDRESS`: lo mismo para BRMS (hoy vacíos — ver sección de Cotizaciones más arriba).
+   - `COMPANY_RUC`, `COMPANY_ADDRESS`, `COMPANY_EMAIL` y `COMPANY_PHONE`: el RUC, dirección fiscal, correo y teléfono de Harraso (el emisor de sus comprobantes).
+   - `BRMS_RUC`, `BRMS_ADDRESS`, `BRMS_EMAIL` y `BRMS_PHONE`: lo mismo para BRMS (hoy vacíos — ver sección de Cotizaciones más arriba).
    - `INVOICE_SERIES` y `WAYBILL_SERIES`: las series que hayas dado de alta para facturas y guías (por defecto `F001` y `V001` — tefacturo.pe exige que la serie de guía transportista empiece con "V"). Si BRMS emite con series propias, hoy el sistema usa las mismas para ambas empresas; avisar si hace falta separarlas.
 3. Registra el RUC de cada cliente (Clientes → editar) — es obligatorio para emitir una factura o guía electrónica (el cliente hace de "receptor"/"remitente"/"destinatario" del comprobante).
 4. Para conductores, registra también su **DNI** (Conductores → editar) — se necesita para las guías de remisión.
@@ -294,7 +294,7 @@ Módulo para armar el documento comercial que se le envía a un cliente **antes*
 
 - **Numeración:** continúa la numeración que ya venía usando Harraso — la primera cotización emitida por el sistema es la **N° 112** (configurable con `QUOTATION_START_NUMBER` en `.env` si hace falta ajustarla), y cada cotización nueva toma el siguiente número correlativo.
 - **Cliente:** se puede elegir de la lista de Clientes (autocompleta razón social, RUC y dirección) o escribirlos a mano para un cliente nuevo que aún no está en el catálogo — en ambos casos los datos quedan guardados con la cotización y se pueden editar sin afectar el catálogo de Clientes. Al escribir un RUC de 11 dígitos a mano, el sistema también consulta SUNAT automáticamente (vía decolecta.com, mismo servicio y caché que ya usa Liquidaciones para el RUC del proveedor) y completa solo la razón social y la dirección — si el RUC no existe o el servicio falla, simplemente no se autocompleta y se escribe a mano, nunca bloquea el registro.
-- **Empresa que cotiza (1 sep):** cada cotización elige si la emite **Harraso Transport** o **BRMS** — son dos empresas distintas, cada una con su propio RUC, dirección y cuenta bancaria en el PDF (el correo y el teléfono de contacto sí son los mismos para ambas). La elección queda guardada con la cotización, así que un documento ya emitido no cambia si más adelante se ajusta la configuración. **AJUSTAR:** el RUC y la dirección de BRMS (`BRMS_RUC`/`BRMS_ADDRESS` en `.env`) están vacíos hasta que los confirmes — complétalos antes de emitir una cotización real a nombre de BRMS, o el PDF va a salir con esos campos en blanco. La cuenta bancaria de BRMS (`BRMS_BANK_ACCOUNT`, por defecto `480-4768721-0-81`) ya viene cargada — a diferencia de Harraso (que muestra 3 cuentas: Banco de la Nación, BCP ahorro y BCP corriente), BRMS solo muestra esa única cuenta. El PDF la etiqueta como "Banco de Crédito del Perú (BCP)" por el formato del número de cuenta — confírmalo o ajústalo en `app/templates/cotizaciones/pdf.html` si en realidad es de otro banco.
+- **Empresa que cotiza (1 sep):** cada cotización elige si la emite **Harraso Transport** o **BRMS** — son dos empresas distintas, cada una con su propio RUC, dirección, correo, teléfono y cuenta bancaria en el PDF (hasta el 20 sep el correo y el teléfono se compartían entre ambas; ahora BRMS tiene los suyos propios). La elección queda guardada con la cotización, así que un documento ya emitido no cambia si más adelante se ajusta la configuración. **AJUSTAR:** el RUC, la dirección, el correo y el teléfono de BRMS (`BRMS_RUC`/`BRMS_ADDRESS`/`BRMS_EMAIL`/`BRMS_PHONE` en `.env`) están vacíos hasta que los confirmes — complétalos antes de emitir una cotización real a nombre de BRMS, o el PDF va a salir con esos campos en blanco. La cuenta bancaria de BRMS (`BRMS_BANK_ACCOUNT`, por defecto `480-4768721-0-81`) ya viene cargada — a diferencia de Harraso (que muestra 3 cuentas: Banco de la Nación, BCP ahorro y BCP corriente), BRMS solo muestra esa única cuenta. El PDF la etiqueta como "Banco de Crédito del Perú (BCP)" por el formato del número de cuenta — confírmalo o ajústalo en `app/templates/cotizaciones/pdf.html` si en realidad es de otro banco.
 - **Ítems:** el "Código" de cada línea es **texto libre** (no depende de un catálogo de servicios) — se escribe lo que corresponda para esa cotización, igual que en el documento de referencia. Cada línea tiene su propio tratamiento tributario (Gravado/Exonerado/Inafecto), aunque en la práctica casi todas las líneas de Harraso son Gravado.
 - **Totales:** el sistema calcula automáticamente Total Gravado, Exonerado, Inafecto, IGV (18% solo sobre lo Gravado — tasa vigente, fija en `IGV_RATE` en `app/routes/cotizaciones.py`), Descuentos, Otros Cargos e Importe Total, además del monto en letras ("SON: ... Y XX/100 SOLES"). El formulario muestra una vista previa en vivo mientras escribes, pero el total que queda guardado siempre lo recalcula el servidor a partir de los valores enviados.
 - **Estados:** Borrador → Enviada → Aceptada / Rechazada. Solo se puede editar o eliminar una cotización mientras está en Borrador.
@@ -423,7 +423,9 @@ Si el negocio ya no puede depender de que la base de datos y los comprobantes de
 - La **base de datos** pasa de SQLite a **Amazon RDS para PostgreSQL** (gestionada por AWS: backups automáticos, no se pierde nunca).
 - Los **comprobantes de gastos** (Liquidaciones) pasan de guardarse en el disco de Render a un **bucket privado de Amazon S3**.
 
-Si no defines estas variables, la app sigue funcionando exactamente igual que ahora (SQLite + disco local) — es un cambio de todo o nada por variable, no un punto sin retorno. Como hoy el disco de Render es efímero, no hay datos reales que "migrar": es un cambio en limpio, no una migración con riesgo de pérdida de información.
+Si no defines estas variables, la app sigue funcionando exactamente igual que ahora (SQLite + disco local) — es un cambio de todo o nada por variable, no un punto sin retorno.
+
+**Actualización (16 sep):** cuando se escribió esta sección por primera vez, el disco de Render todavía era efímero y no había datos reales que migrar — era un cambio en limpio. Eso dejó de ser cierto: el proyecto ya está en producción real, con un disco persistente de pago y datos de verdad (viajes, clientes, comprobantes, etc.). Por eso el paso 5 de abajo ("Migra los datos y archivos que ya existen") es ahora **obligatorio, no opcional** — saltarlo y poner directamente `DATABASE_URL`/`AWS_S3_BUCKET` en Render haría que la app arranque con una base Postgres vacía y sin poder ver ningún comprobante ya subido (los enlaces existentes darían 404), como si el negocio empezara de cero.
 
 ### Antes de empezar: por qué un usuario IAM y no la cuenta root
 
@@ -454,7 +456,7 @@ Los términos exactos de la capa gratuita (horas incluidas de RDS, créditos de 
      ]
    }
    ```
-3. Termina de crear el usuario, ábrelo, pestaña **Security credentials** → **Create access key** → elige "Application running outside AWS" → copia el **Access key ID** y el **Secret access key** (el secreto solo se muestra una vez — guárdalo ahora, lo vas a necesitar en el paso 5).
+3. Termina de crear el usuario, ábrelo, pestaña **Security credentials** → **Create access key** → elige "Application running outside AWS" → copia el **Access key ID** y el **Secret access key** (el secreto solo se muestra una vez — guárdalo ahora, lo vas a necesitar en los pasos 5 y 6).
 
 ### 3. Crea el bucket de S3 (comprobantes de gastos)
 
@@ -481,7 +483,33 @@ Los términos exactos de la capa gratuita (horas incluidas de RDS, créditos de 
 10. Una vez creada, ábrela y en la pestaña **Connectivity & security** anota el **Endpoint** (algo como `harraso-erp-db.xxxxxxxxxx.us-east-1.rds.amazonaws.com`).
 11. Abre el security group `harraso-erp-db-sg` (**EC2** → **Security Groups**) → **Inbound rules** → **Edit** → agrega una regla: **Type** PostgreSQL, **Port** 5432, **Source**: `0.0.0.0/0` (cualquier IP — Render no publica un rango fijo de IPs salientes en el plan gratuito). Esto es seguro porque el acceso real sigue exigiendo la contraseña de la base; si más adelante usas un plan de Render con IP saliente fija, puedes restringir el Source a esa IP para una capa extra de seguridad.
 
-### 5. Configura las variables de entorno en Render
+### 5. Migra los datos y archivos que ya existen
+
+**No pongas todavía `DATABASE_URL` ni `AWS_S3_BUCKET` en Render** — hazlo recién después de que los dos scripts de este paso terminen bien. El proyecto trae dos scripts (`scripts/migrate_files_to_s3.py` y `scripts/migrate_sqlite_to_rds.py`) que copian, respectivamente, los comprobantes/guías/fotos ya subidos y las filas de la base SQLite actual hacia el bucket de S3 y la base de RDS que acabas de crear — sin tocar ni borrar nada del lado de origen. Ambos ya usan las mismas variables de entorno y la misma lógica de guardado que la app (no duplican nada a mano), y se pueden correr más de una vez sin riesgo si algo falla a mitad de camino.
+
+Corre ambos **desde la Shell de tu Web Service en Render** (pestaña **Shell** del servicio, no tu máquina — así se usa el mismo disco donde están hoy los comprobantes reales):
+
+1. Copia los archivos a S3:
+   ```bash
+   AWS_S3_BUCKET=harraso-erp-comprobantes \
+   AWS_ACCESS_KEY_ID=... \
+   AWS_SECRET_ACCESS_KEY=... \
+   AWS_DEFAULT_REGION=us-east-1 \
+   python scripts/migrate_files_to_s3.py
+   ```
+   Al final imprime, por cada tipo de archivo (comprobantes, fotos de conductor, guías, etc.), cuántos había en disco y cuántos quedaron confirmados en S3. Si dice "FALTAN ARCHIVOS" en alguna, no sigas — vuelve a correrlo (es seguro repetirlo: los que ya están en S3 se saltan) antes de pasar al siguiente paso. Puedes agregar `--dry-run` primero si quieres ver qué haría sin subir nada todavía.
+
+2. Copia la base de datos a RDS:
+   ```bash
+   python scripts/migrate_sqlite_to_rds.py --database-url "postgresql://erp_admin:TU_PASSWORD@TU_ENDPOINT:5432/postgres"
+   ```
+   Este script crea el esquema completo en la base de RDS (las mismas tablas que usa la app), copia todas las filas de la base SQLite actual, y al final compara cantidad de filas origen vs. destino tabla por tabla — si todas calzan, confirma (`COMMIT`); si alguna no calza, deshace todo (`ROLLBACK`) y no queda nada a medio migrar. Por seguridad, si la base de RDS ya tiene datos de negocio (por ejemplo porque ya corriste esto antes), se detiene y pide `--force` en vez de sobrescribir por accidente.
+
+3. Antes de seguir, confirma a ojo que ambos terminaron con su mensaje de éxito (no solo que no tiraron error) — el script de S3 dice "Todo copiado y verificado" y el de RDS dice "Migración completa y verificada".
+
+Recién cuando los dos scripts terminaron bien, sigue con el paso 6 para que Render empiece a usarlos.
+
+### 6. Configura las variables de entorno en Render
 
 En tu Web Service de Render → **Environment**, agrega:
 
@@ -494,22 +522,27 @@ En tu Web Service de Render → **Environment**, agrega:
 | `AWS_DEFAULT_REGION` | la región que elegiste (ej. `us-east-1`) |
 | `AUTO_SEED_DEMO` | `0` — **importante**: ya con una base persistente de verdad, no quieres que la app recree los usuarios de ejemplo encima de tus datos reales |
 
-Guarda los cambios — Render vuelve a desplegar automáticamente. Al arrancar, la app crea sola todas las tablas en tu base de Postgres (igual que hoy hace con SQLite) — no hace falta correr ningún script aparte.
+Guarda los cambios — Render vuelve a desplegar automáticamente. Al arrancar, la app se conecta directo a la base de Postgres y al bucket de S3 que ya dejaste listos en el paso 5 (con tus datos y archivos ya migrados) — no hace falta correr ningún script en este paso, esos ya se corrieron antes.
 
 **Nota sobre la versión de Python (agosto 2026)**: si al desplegar ves en los logs de Render un error como `ImportError: ... undefined symbol: _PyInterpreterState_Get` al importar `psycopg2`, es porque Render está usando una versión de Python demasiado nueva (ej. 3.14) para la que el paquete `psycopg2-binary` todavía no tiene una versión compatible — no tiene que ver con tus credenciales de AWS. El proyecto ya trae un archivo `.python-version` (fijado en `3.12.8`) para que Render use esa versión automáticamente; si tu servicio ya estaba creado antes de que existiera ese archivo, agrega además la variable `PYTHON_VERSION` = `3.12.8` en Render → Environment para forzarlo de inmediato.
 
 ### Verificación después de desplegar
 
-1. Entra a la URL de tu app y confirma que el login funciona (si `AUTO_SEED_DEMO=0` y la base es nueva, no habrá usuarios todavía — pon `AUTO_SEED_DEMO=1` en el primer despliegue para que se cree el usuario Administrador, entra, cambia la contraseña, y luego vuelve a poner `AUTO_SEED_DEMO=0`).
-2. En **Liquidaciones**, registra un gasto con un comprobante adjunto y confirma que puedes volver a verlo — eso confirma que S3 está funcionando.
-3. Reinicia manualmente el servicio en Render (**Manual Deploy** → **Deploy latest commit**, o simplemente espera a que se duerma y despierte) y confirma que los datos siguen ahí — eso confirma que RDS está funcionando (ya no depende del disco efímero).
+Si ya migraste datos reales (paso 5), lo que hay que confirmar es que la app ve exactamente lo mismo que veía antes de cambiar de motor, no que arranca "de cero":
+
+1. Entra a la URL de tu app y confirma que el login funciona con tu usuario real de siempre (no debería pedir crear ninguno nuevo — los usuarios ya viajaron con la migración de datos).
+2. Abre un viaje o cliente que ya existía antes del cambio y confirma que sigue ahí con la misma información.
+3. En **Liquidaciones**, abre un gasto con comprobante que ya existía antes del cambio y confirma que el comprobante todavía se puede ver (esto confirma que S3 tiene los archivos migrados, no solo los nuevos). Después, registra un gasto nuevo con un comprobante nuevo y confirma que también se puede ver — esto confirma que las subidas nuevas también van a S3 correctamente.
+4. Reinicia manualmente el servicio en Render (**Manual Deploy** → **Deploy latest commit**, o simplemente espera a que se duerma y despierte) y confirma que todo sigue ahí — eso confirma que RDS está funcionando (ya no depende del disco efímero).
+
+Si vas a probar esto primero en limpio (sin datos reales, por ejemplo en un servicio de prueba aparte) y quieres que se cree un usuario Administrador de ejemplo, pon `AUTO_SEED_DEMO=1` en el primer despliegue, entra, cambia la contraseña, y luego vuelve a poner `AUTO_SEED_DEMO=0`.
 
 ### Notas de seguridad y costos
 
 - Nunca compartas el `AWS_SECRET_ACCESS_KEY` ni la contraseña de la base — viven solo como variables de entorno en Render, igual que las demás credenciales del proyecto (Frotcom, SUNAT, decolecta.com).
 - El bucket de S3 es privado: nadie puede leer un comprobante sin pasar antes por el login y los permisos de la propia aplicación.
 - Revisa el **Billing Dashboard** de AWS cada tanto los primeros meses para confirmar que el gasto es el esperado, sobre todo si dejaste pasar el periodo de capa gratuita.
-- Si por lo que sea quieres volver atrás, basta con borrar (o vaciar) `DATABASE_URL` y `AWS_S3_BUCKET` en Render — la app vuelve a SQLite + disco local sin ningún otro cambio.
+- Si por lo que sea quieres volver atrás, basta con borrar (o vaciar) `DATABASE_URL` y `AWS_S3_BUCKET` en Render — la app vuelve a SQLite + disco local sin ningún otro cambio. Justamente por eso los scripts del paso 5 nunca borran nada del lado de origen (ni la base SQLite vieja ni los archivos en el disco de Render): déjalos ahí un tiempo como respaldo antes de borrarlos a mano, una vez que confirmes que todo funciona bien en AWS.
 
 ## Estructura del proyecto
 
