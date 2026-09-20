@@ -1251,6 +1251,14 @@ CREATE TABLE IF NOT EXISTS waybills (
     -- agregarlo al envío real.
     related_document_type TEXT,
     related_document_number TEXT,
+    -- 20 sep, pedido de Braulio: guías de BRMS a Backus o Naviera Oriente
+    -- van enlazadas a un "número de pedido" que esos clientes mandan
+    -- DESPUÉS de que ya se generó/entregó la guía, para poder facturarles
+    -- (ver app/routes/guias.py, ORDER_NUMBER_CLIENTS/save_order_number()).
+    -- Texto libre y opcional -- no depende de un catálogo propio, y queda
+    -- disponible para cualquier cliente/empresa por si hiciera falta más
+    -- adelante, no solo esos dos.
+    client_order_number TEXT,
     notes TEXT,
     sunat_status TEXT NOT NULL DEFAULT 'NO_ENVIADA' CHECK (sunat_status IN ('NO_ENVIADA', 'ACEPTADO', 'RECHAZADO', 'ERROR')),
     sunat_message TEXT,

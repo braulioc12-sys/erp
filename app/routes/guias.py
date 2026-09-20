@@ -22,6 +22,7 @@ from app.integrations.sunat_ose import (
     is_duplicate_comprobante_error,
     parse_ose_response,
 )
+from app.routes.viajes import ISSUER_CHOICES
 from app.storage import (
     local_sunat_documents_dir,
     save_sunat_document,
@@ -37,6 +38,21 @@ from app.ubigeo import (
 )
 
 bp = Blueprint("guias", __name__, url_prefix="/guias")
+
+# 20 sep, pedido de Braulio: guías de BRMS a Backus o Naviera Oriente van
+# enlazadas a un "número de pedido" que esos clientes mandan después de
+# recibir la guía, para poder facturarles -- se identifica por nombre
+# porque no hay un campo/booleano propio en Clientes para marcarlo; si el
+# nombre de alguno de estos dos cambia en el catálogo, o se suma un tercer
+# cliente con el mismo requisito, ajustar esta lista.
+ORDER_NUMBER_CLIENTS = ("backus", "naviera oriente")
+
+
+def _client_needs_order_number(issuer, client_name):
+    if issuer != "BRMS" or not client_name:
+        return False
+    name = client_name.strip().lower()
+    return any(keyword in name for keyword in ORDER_NUMBER_CLIENTS)
 
 # 10 sep, patch 0028: catálogo de ubigeos (departamento/provincia/distrito)
 # para los desplegables en cascada del formulario — se arma una sola vez acá
@@ -72,14 +88,42 @@ def _next_series_number(series):
 @bp.route("")
 @permission_required("guias", "view")
 def list_view():
-    waybills = query_all(
-        """SELECT w.*, t.code as trip_code, t.origin, t.destination, c.name as client_name
-           FROM waybills w
-           JOIN trips t ON t.id = w.trip_id
-           JOIN clients c ON c.id = t.client_id
-           ORDER BY w.issue_date DESC, w.id DESC"""
+    """20 sep, pedido de Braulio: mismo selector obligatorio de empresa que
+    ya usan Viajes y Liquidaciones (ver el comentario largo en
+    viajes.list_view) -- sin ?issuer=HARRASO|BRMS en la URL no se consulta
+    ni se muestra ninguna guía, solo el selector (ver guias/list.html).
+    También agrega un buscador por cliente o número de guía (y, para BRMS,
+    también por número de pedido)."""
+    issuer = request.args.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        return render_template("guias/list.html", waybills=None, issuer=None)
+
+    q = request.args.get("q", "").strip()
+    sql = """SELECT w.*, t.code as trip_code, t.origin, t.destination, c.name as client_name
+             FROM waybills w
+             JOIN trips t ON t.id = w.trip_id
+             JOIN clients c ON c.id = t.client_id
+             WHERE w.issuer = ?"""
+    params = [issuer]
+    if q:
+        # LOWER() en ambos lados (patch 0066) -- ver el comentario completo
+        # en clientes.list_view(). "w.series || '-' || w.series_number" no
+        # queda con el mismo cero-relleno que se muestra en pantalla
+        # (V001-6 en vez de V001-000006), pero alcanza para encontrar una
+        # guía por su número tal como aparece en el PDF o en la búsqueda.
+        sql += """ AND (LOWER(c.name) LIKE LOWER(?) OR LOWER(w.series || '-' || w.series_number) LIKE LOWER(?)
+                    OR LOWER(COALESCE(w.client_order_number, '')) LIKE LOWER(?))"""
+        params += [f"%{q}%"] * 3
+    sql += " ORDER BY w.issue_date DESC, w.id DESC"
+
+    waybills = query_all(sql, params)
+    return render_template(
+        "guias/list.html",
+        waybills=waybills,
+        issuer=issuer,
+        q=q,
+        needs_order_number=_client_needs_order_number,
     )
-    return render_template("guias/list.html", waybills=waybills)
 
 
 @bp.route("/nueva/<int:trip_id>", methods=["GET", "POST"])
@@ -225,7 +269,32 @@ def detail(waybill_id):
     )
     if waybill is None:
         abort(404)
-    return render_template("guias/detail.html", waybill=waybill)
+    return render_template(
+        "guias/detail.html",
+        waybill=waybill,
+        needs_order_number=_client_needs_order_number(waybill["issuer"], waybill["client_name"]),
+    )
+
+
+@bp.route("/<int:waybill_id>/pedido", methods=["POST"])
+@permission_required("guias", "edit")
+def save_order_number(waybill_id):
+    """20 sep, pedido de Braulio: número de pedido que Backus/Naviera
+    Oriente mandan después de la guía (BRMS) para poder facturarles -- se
+    guarda/edita acá, aparte del formulario de creación, porque llega
+    después (ver el comentario largo en schema.sql, CREATE TABLE
+    waybills)."""
+    if not validate_csrf():
+        abort(400)
+    waybill = query_one("SELECT id FROM waybills WHERE id = ?", (waybill_id,))
+    if waybill is None:
+        abort(404)
+    execute(
+        "UPDATE waybills SET client_order_number = ? WHERE id = ?",
+        (request.form.get("client_order_number", "").strip() or None, waybill_id),
+    )
+    flash("Número de pedido guardado.", "success")
+    return redirect(url_for("guias.detail", waybill_id=waybill_id))
 
 
 @bp.route("/<int:waybill_id>/enviar-sunat", methods=["POST"])

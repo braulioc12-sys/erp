@@ -1,32 +1,59 @@
 {% extends 'base.html' %}
 {% import 'partials/macros.html' as m %}
+{% import 'partials/company_gate.html' as cg %}
 {% block title %}Guías de Remisión{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>Guías de Remisión Electrónica</h1>
+  <h1>Guías de Remisión Electrónica{% if issuer %} — {{ 'BRMS' if issuer == 'BRMS' else 'Harraso Transport' }}{% endif %}</h1>
 </div>
 <p class="muted mt-0">Se generan desde el detalle de un viaje (Viajes → viaje en curso o entregado → "Generar guía de remisión"). Sirven para sustentar ante SUNAT el traslado de carga de tus clientes con tus propias unidades ("Guía de Remisión Transportista").</p>
+
+{% if not issuer %}
+{{ cg.company_gate('guias.list_view', 'para ver sus guías de remisión') }}
+{% else %}
+<p class="company-switch"><a href="{{ url_for('guias.list_view') }}">↺ Cambiar de empresa</a></p>
+
+<form class="filters" method="get">
+  <input type="hidden" name="issuer" value="{{ issuer }}">
+  <label>Buscar
+    <input type="text" name="q" value="{{ q }}" placeholder="Cliente, número de guía{{ ' o de pedido' if issuer == 'BRMS' else '' }}">
+  </label>
+  <button class="btn btn-secondary" type="submit">Filtrar</button>
+</form>
 
 <div class="panel">
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Serie-número</th><th>Viaje</th><th>Cliente</th><th>Empresa</th><th>Ruta</th><th>Emisión</th><th>Estado SUNAT</th></tr></thead>
+      <thead>
+        <tr>
+          <th>Serie-número</th><th>Viaje</th><th>Cliente</th><th>Ruta</th><th>Emisión</th>
+          {% if issuer == 'BRMS' %}<th>N.° de pedido</th>{% endif %}
+          <th>Estado SUNAT</th>
+        </tr>
+      </thead>
       <tbody>
         {% for w in waybills %}
         <tr>
           <td><a href="{{ url_for('guias.detail', waybill_id=w.id) }}">{{ w.series }}-{{ '%06d'|format(w.series_number) }}</a></td>
           <td><a href="{{ url_for('viajes.detail', trip_id=w.trip_id) }}">{{ w.trip_code }}</a></td>
           <td>{{ w.client_name }}</td>
-          <td>{{ 'BRMS' if w.issuer == 'BRMS' else 'Harraso' }}</td>
           <td>{{ w.origin }} → {{ w.destination }}</td>
           <td>{{ w.issue_date }}</td>
+          {% if issuer == 'BRMS' %}
+          <td>
+            {% if w.client_order_number %}{{ w.client_order_number }}
+            {% elif needs_order_number(w.issuer, w.client_name) %}<span class="badge badge-pendiente">Falta pedido</span>
+            {% else %}—{% endif %}
+          </td>
+          {% endif %}
           <td>{{ m.badge(w.sunat_status) }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="7" class="table-empty">Todavía no se han generado guías de remisión.</td></tr>
+        <tr><td colspan="{{ 7 if issuer == 'BRMS' else 6 }}" class="table-empty">No se encontraron guías de remisión{{ ' para esta búsqueda' if q else '' }}.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
+{% endif %}
 {% endblock %}

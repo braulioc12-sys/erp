@@ -51,6 +51,33 @@
   {% endif %}
 </div>
 
+{% if waybill.issuer == 'BRMS' %}
+<div class="panel">
+  <h2 class="mt-0">Número de pedido del cliente</h2>
+  {% if needs_order_number %}
+  <p class="muted mt-0">{{ waybill.client_name }} manda este número después de recibir la guía, y hace falta para poder facturarle — complétalo apenas te lo envíen.</p>
+  {% else %}
+  <p class="muted mt-0">Referencia opcional del pedido del cliente, si corresponde.</p>
+  {% endif %}
+  <div class="detail-grid" style="margin-bottom:12px;">
+    <div class="detail-item"><div class="label">N.° de pedido</div><div class="value">{{ waybill.client_order_number or '—' }}{% if needs_order_number and not waybill.client_order_number %} <span class="badge badge-pendiente">Falta pedido</span>{% endif %}</div></div>
+  </div>
+  {% if can(current_user.roles, 'guias', 'edit') %}
+  <form method="post" action="{{ url_for('guias.save_order_number', waybill_id=waybill.id) }}" class="form" style="max-width:320px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <label>N.° de pedido
+        <input type="text" name="client_order_number" value="{{ waybill.client_order_number or '' }}">
+      </label>
+    </div>
+    <div class="btn-group">
+      <button type="submit" class="btn btn-secondary btn-sm">Guardar número de pedido</button>
+    </div>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if waybill.notes %}
 <div class="panel"><h2>Observaciones</h2><p class="mt-0">{{ waybill.notes }}</p></div>
 {% endif %}
