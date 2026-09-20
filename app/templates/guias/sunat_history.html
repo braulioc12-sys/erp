@@ -46,6 +46,14 @@
       {% endfor %}
     </select>
   </label>
+  <label>Mes
+    <select name="mes">
+      <option value="">Todos</option>
+      {% for num, nombre in [('01','Enero'),('02','Febrero'),('03','Marzo'),('04','Abril'),('05','Mayo'),('06','Junio'),('07','Julio'),('08','Agosto'),('09','Setiembre'),('10','Octubre'),('11','Noviembre'),('12','Diciembre')] %}
+      <option value="{{ num }}" {% if mes == num %}selected{% endif %}>{{ nombre }}</option>
+      {% endfor %}
+    </select>
+  </label>
   <label>Estado SUNAT
     <select name="estado">
       <option value="">Todos</option>
@@ -71,13 +79,17 @@
         <tr>
           <td>{{ r.series }}-{{ '%06d'|format(r.series_number) }}</td>
           <td>{{ r.issue_date }}</td>
-          <td>{{ r.client_name or '—' }}</td>
-          <td>{{ r.recipient_name or '—' }}</td>
-          <td>{{ r.driver_name or '—' }}</td>
+          <td class="truncate" title="{{ r.client_name or '' }}">{{ r.client_name or '—' }}</td>
+          {% if r.recipient_name and r.recipient_name != r.client_name %}
+          <td class="truncate" title="{{ r.recipient_name }}">{{ r.recipient_name }}</td>
+          {% else %}
+          <td class="muted">ídem</td>
+          {% endif %}
+          <td class="truncate" title="{{ r.driver_name or '' }}">{{ r.driver_name or '—' }}</td>
           <td>{{ r.vehicle_plate or '—' }}{% if r.trailer_plate %} / {{ r.trailer_plate }}{% endif %}</td>
           <td>
             {{ m.badge(r.sunat_status) }}
-            {% if r.sunat_status_detail %}<div class="muted" style="font-size:12px;">{{ r.sunat_status_detail }}</div>{% endif %}
+            {% if r.sunat_status_detail %}<div class="muted truncate" style="font-size:12px;" title="{{ r.sunat_status_detail }}">{{ r.sunat_status_detail }}</div>{% endif %}
           </td>
         </tr>
         {% else %}

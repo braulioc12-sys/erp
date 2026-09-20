@@ -718,6 +718,7 @@ def sunat_history_list():
 
     q = request.args.get("q", "").strip()
     anio = request.args.get("anio", "").strip()
+    mes = request.args.get("mes", "").strip()
     estado = request.args.get("estado", "").strip().upper()
 
     year_rows = query_all(
@@ -736,6 +737,13 @@ def sunat_history_list():
     if anio:
         sql += " AND substr(issue_date, 1, 4) = ?"
         params.append(anio)
+    # 20 sep, pedido de Braulio ("aparte de año también pueda haber mes"):
+    # igual que el filtro de año, comparando texto (substr) en vez de
+    # strftime -- funciona igual en SQLite y Postgres sin tocar `_translate`
+    # en db.py. mes viene como '01'..'12' desde el <select> del template.
+    if mes in (f"{n:02d}" for n in range(1, 13)):
+        sql += " AND substr(issue_date, 6, 2) = ?"
+        params.append(mes)
     if estado in ("ACEPTADO", "RECHAZADO", "OTRO"):
         sql += " AND sunat_status = ?"
         params.append(estado)
@@ -748,6 +756,7 @@ def sunat_history_list():
         issuer=issuer,
         q=q,
         anio=anio,
+        mes=mes,
         estado=estado,
         available_years=available_years,
     )

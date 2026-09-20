@@ -196,6 +196,14 @@ th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--bo
 th { background: #fafbfc; color: var(--text-muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; }
 tbody tr:hover { background: #fafbfc; }
 td.wrap, th.wrap { white-space: normal; }
+/* 20 sep, pedido de Braulio (tabla de Histórico SUNAT: "que muestre más
+   información hasta estado" -- con nombres de cliente largos, la fila se
+   volvía más ancha que la pantalla y las últimas columnas quedaban fuera
+   de vista sin hacer scroll horizontal): recorta el texto con "..." en vez
+   de dejarlo empujar la columna -- el valor completo queda disponible al
+   pasar el mouse (atributo title en el <td>). */
+.truncate { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+td.truncate { display: table-cell; }
 .table-empty { padding: 30px; text-align: center; color: var(--text-muted); }
 
 /* Badges */
