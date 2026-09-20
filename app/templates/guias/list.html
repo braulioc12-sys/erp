@@ -23,6 +23,22 @@
   <label>Buscar
     <input type="text" name="q" value="{{ q }}" placeholder="Cliente, número de guía{{ ' o de pedido' if issuer == 'BRMS' else '' }}">
   </label>
+  <label>Año
+    <select name="anio">
+      <option value="">Todos</option>
+      {% for y in available_years %}
+      <option value="{{ y }}" {% if anio == y %}selected{% endif %}>{{ y }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Estado SUNAT
+    <select name="estado">
+      <option value="">Todos</option>
+      {% for s in sunat_status_choices %}
+      <option value="{{ s }}" {% if estado == s %}selected{% endif %}>{{ s|replace('_', ' ')|capitalize }}</option>
+      {% endfor %}
+    </select>
+  </label>
   <button class="btn btn-secondary" type="submit">Filtrar</button>
 </form>
 

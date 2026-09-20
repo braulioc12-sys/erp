@@ -94,6 +94,9 @@ def _next_series_number(series):
     return (row["n"] if row else 0) + 1
 
 
+SUNAT_STATUS_CHOICES = ("NO_ENVIADA", "ACEPTADO", "RECHAZADO", "ERROR")
+
+
 @bp.route("")
 @permission_required("guias", "view")
 def list_view():
@@ -102,12 +105,37 @@ def list_view():
     viajes.list_view) -- sin ?issuer=HARRASO|BRMS en la URL no se consulta
     ni se muestra ninguna guía, solo el selector (ver guias/list.html).
     También agrega un buscador por cliente o número de guía (y, para BRMS,
-    también por número de pedido)."""
+    también por número de pedido).
+
+    20 sep, pedido de Braulio ("ver todas las guías emitidas desde el
+    portal SUNAT en lo que va del año"): se suman dos filtros opcionales,
+    Año (sobre issue_date, comparando solo los primeros 4 caracteres --
+    funciona igual en SQLite y Postgres sin tocar `_translate` en db.py,
+    a diferencia de strftime) y Estado SUNAT. "Emitida desde el portal
+    SUNAT" = sunat_status = 'ACEPTADO' (aceptada por SUNAT); NO_ENVIADA
+    todavía es un borrador que no se mandó. Ninguno de los dos viene
+    marcado por default -- así no cambia lo que ya se veía antes (todas
+    las guías de la empresa, sin filtrar) para quien solo busca una guía
+    puntual."""
     issuer = request.args.get("issuer", "").strip().upper()
     if issuer not in ISSUER_CHOICES:
         return render_template("guias/list.html", waybills=None, issuer=None)
 
     q = request.args.get("q", "").strip()
+    anio = request.args.get("anio", "").strip()
+    estado = request.args.get("estado", "").strip().upper()
+
+    year_rows = query_all(
+        """SELECT DISTINCT substr(issue_date, 1, 4) as anio FROM waybills
+           WHERE issuer = ? AND issue_date IS NOT NULL AND issue_date != ''
+           ORDER BY anio DESC""",
+        (issuer,),
+    )
+    available_years = [r["anio"] for r in year_rows if r["anio"]]
+    current_year = today_str()[:4]
+    if current_year not in available_years:
+        available_years.insert(0, current_year)
+
     sql = """SELECT w.*, t.code as trip_code, t.origin, t.destination, c.name as client_name,
                     t.client_order_number as client_order_number
              FROM waybills w
@@ -124,6 +152,12 @@ def list_view():
         sql += """ AND (LOWER(c.name) LIKE LOWER(?) OR LOWER(w.series || '-' || w.series_number) LIKE LOWER(?)
                     OR LOWER(COALESCE(t.client_order_number, '')) LIKE LOWER(?))"""
         params += [f"%{q}%"] * 3
+    if anio:
+        sql += " AND substr(w.issue_date, 1, 4) = ?"
+        params.append(anio)
+    if estado in SUNAT_STATUS_CHOICES:
+        sql += " AND w.sunat_status = ?"
+        params.append(estado)
     sql += " ORDER BY w.issue_date DESC, w.id DESC"
 
     waybills = query_all(sql, params)
@@ -132,6 +166,10 @@ def list_view():
         waybills=waybills,
         issuer=issuer,
         q=q,
+        anio=anio,
+        estado=estado,
+        available_years=available_years,
+        sunat_status_choices=SUNAT_STATUS_CHOICES,
         needs_order_number=_client_needs_order_number,
     )
 
