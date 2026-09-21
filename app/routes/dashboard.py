@@ -6,7 +6,7 @@ from app.helpers import today_str
 from app.routes.conductores import document_alerts as driver_document_alerts
 from app.routes.flota import vehicle_document_alerts
 from app.routes.liquidaciones import budget_alerts
-from app.routes.mantenimiento import km_alerts
+from app.routes.mantenimiento import km_alerts, maintenance_date_alerts
 from app.routes.neumaticos import tire_alerts
 
 bp = Blueprint("dashboard", __name__, url_prefix="/")
@@ -44,14 +44,11 @@ def index():
     )
 
     # Alertas: mantenimientos próximos (documentos de conductores y
-    # unidades se resuelven en sus propios módulos, ver imports arriba)
-    maintenance_alerts = query_all(
-        """SELECT v.plate, m.next_due_date FROM maintenance_records m
-           JOIN vehicles v ON v.id = m.vehicle_id
-           WHERE m.next_due_date IS NOT NULL AND m.next_due_date != ''
-           AND date(m.next_due_date) <= date('now', '+30 days')
-           ORDER BY m.next_due_date ASC"""
-    )
+    # unidades se resuelven en sus propios módulos, ver imports arriba).
+    # 20 sep: la consulta se movió a maintenance_date_alerts() en
+    # mantenimiento.py, para reusarla también en las alertas por correo
+    # (ver app/alerts.py) sin repetirla acá.
+    maintenance_alerts = maintenance_date_alerts()
 
     return render_template(
         "dashboard/index.html",

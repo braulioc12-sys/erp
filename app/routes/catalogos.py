@@ -1,11 +1,13 @@
 """Catálogos editables por el administrador: conceptos de mantenimiento,
 tipos de gasto, etc. — para no tener que tocar código cada vez que se
 necesita agregar una opción nueva a un desplegable."""
-from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
 
+from app.alerts import alert_recipient_emails, build_alert_sections, total_alert_count
 from app.auth import permission_required, validate_csrf
 from app.db import execute, get_setting, query_all, query_one, set_setting
-from app.helpers import parse_float
+from app.email_sender import send_email
+from app.helpers import parse_float, today_str
 from app.seed_data import MECHANIC_TYPES, labor_cost_setting_key
 
 bp = Blueprint("catalogos", __name__, url_prefix="/configuracion/catalogos")
@@ -231,3 +233,62 @@ def bancos_toggle(account_id):
     execute("UPDATE company_bank_accounts SET active = ? WHERE id = ?", (0 if account["active"] else 1, account_id))
     flash("Actualizado." if account["active"] else "Reactivado.", "success")
     return redirect(url_for("catalogos.bancos_list"))
+
+
+# 20 sep, pedido de Braulio ("como podemos hacer para que se envien
+# alertas automaticas a los correos?"): esta pantalla es solo para ver si
+# AWS SES está configurado y probar el envío a mano -- el envío
+# automático de verdad corre aparte, por fuera de un request HTTP normal,
+# desde un Cron Job de Render que ejecuta send_alerts.py (ver el
+# comentario largo en ese archivo y en app/email_sender.py/config.py).
+
+
+@bp.route("/alertas-correo")
+@permission_required("catalogos", "view")
+def alertas_correo():
+    sections = build_alert_sections()
+    return render_template(
+        "catalogos/alertas_correo.html",
+        sections=sections,
+        total=total_alert_count(sections),
+        ses_sender=(current_app.config.get("SES_SENDER_EMAIL") or "").strip(),
+        recipients=alert_recipient_emails(),
+    )
+
+
+@bp.route("/alertas-correo/enviar", methods=["POST"])
+@permission_required("catalogos", "edit")
+def alertas_correo_enviar():
+    if not validate_csrf():
+        abort(400)
+    # 21 sep, pedido de Braulio: el destinatario ya no es un correo fijo --
+    # es el correo de login de cada usuario activo (ver
+    # alert_recipient_emails() en app/alerts.py).
+    to = alert_recipient_emails()
+    if not to:
+        flash(
+            "No hay ningún destinatario -- no hay usuarios activos con correo, ni ALERT_EMAIL_TO configurado.",
+            "error",
+        )
+        return redirect(url_for("catalogos.alertas_correo"))
+
+    periodo = request.form.get("periodo", "diario")
+    if periodo not in ("diario", "semanal"):
+        periodo = "diario"
+    sections = build_alert_sections()
+    total = total_alert_count(sections)
+    etiqueta = "Resumen diario" if periodo == "diario" else "Resumen semanal"
+    subject = (
+        f"Harris — {etiqueta} de alertas ({total}) [PRUEBA]"
+        if total
+        else f"Harris — {etiqueta}: sin alertas pendientes [PRUEBA]"
+    )
+    html = render_template(
+        "email/alertas.html", sections=sections, total=total, periodo=periodo, today=today_str()
+    )
+    ok, error = send_email(to, subject, html)
+    if ok:
+        flash(f"Correo de prueba enviado a {', '.join(to)} ({total} alerta(s)).", "success")
+    else:
+        flash(f"No se pudo enviar el correo: {error}", "error")
+    return redirect(url_for("catalogos.alertas_correo"))

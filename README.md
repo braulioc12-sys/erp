@@ -544,6 +544,120 @@ Si vas a probar esto primero en limpio (sin datos reales, por ejemplo en un serv
 - Revisa el **Billing Dashboard** de AWS cada tanto los primeros meses para confirmar que el gasto es el esperado, sobre todo si dejaste pasar el periodo de capa gratuita.
 - Si por lo que sea quieres volver atrás, basta con borrar (o vaciar) `DATABASE_URL` y `AWS_S3_BUCKET` en Render — la app vuelve a SQLite + disco local sin ningún otro cambio. Justamente por eso los scripts del paso 5 nunca borran nada del lado de origen (ni la base SQLite vieja ni los archivos en el disco de Render): déjalos ahí un tiempo como respaldo antes de borrarlos a mano, una vez que confirmes que todo funciona bien en AWS.
 
+## Alertas por correo (AWS SES)
+
+20 sep, pedido de Braulio ("como podemos hacer para que se envien alertas
+automaticas a los correos?"). Las mismas alertas que ya se ven en el Panel
+(**Alertas del panel**, más arriba: documentos de conductores/unidades por
+vencer, mantenimientos próximos por fecha y por kilometraje, presupuestos
+al límite, neumáticos) se pueden mandar por correo automáticamente — un
+resumen diario y otro semanal — usando **AWS SES** (Simple Email Service),
+reusando la misma cuenta de AWS que ya usas para RDS/S3.
+
+Esto corre **fuera** de la app web, como un script aparte
+(`send_alerts.py`) que se dispara con un **Cron Job de Render** (un
+servicio separado del Web Service normal), no con un proceso que quede
+corriendo en segundo plano dentro del propio servidor web — así no depende
+de que el Web Service se mantenga despierto ni se duplica el envío si
+alguna vez corre con más de una instancia.
+
+### 1. Verifica el remitente en AWS SES
+
+21 sep, pedido de Braulio: las alertas salen desde **`contacto@harraso.com`**
+(ya es el default de `SES_SENDER_EMAIL`, no hace falta configurar nada si
+usas ese correo). En la consola de AWS, busca **SES** (Simple Email
+Service) → **Verified identities** → **Create identity** → verifica ese
+correo (o, mejor, el dominio `harraso.com` completo: sirve para cualquier
+correo `@harraso.com` sin verificar uno por uno, incluido este). Sigue las
+instrucciones (llega un correo de confirmación, o hay que agregar unos
+registros DNS si es el dominio).
+
+**Cuenta nueva de AWS SES = modo "sandbox"**: por default, una cuenta de
+SES recién creada solo puede mandar correo a direcciones que *también*
+estén verificadas (no solo el remitente) — pensado para probar antes de
+que AWS confirme que no vas a mandar spam. El destinatario de las alertas
+ya no es un solo correo fijo (ver el paso 3): es el correo de login de
+**cada usuario activo** del sistema, así que mientras estés en sandbox
+hay que verificar el correo de cada uno de esos usuarios también, uno por
+uno. Si son pocos usuarios puede alcanzar para probar, pero para que
+llegue de verdad a todos sin tener que verificarlos a mano, pide
+"producción" desde **SES → Account dashboard → Request production
+access** (un formulario corto; AWS lo aprueba en minutos u horas, no es
+instantáneo) — con la cuenta ya en producción, SES manda a cualquier
+destinatario sin necesidad de verificarlo antes.
+
+### 2. Agrega el permiso de SES al usuario IAM
+
+El mismo usuario IAM que ya creaste para S3 (ver más arriba, "Crea el
+usuario IAM para el bucket de S3") necesita además permiso para mandar
+correo. En IAM → Users → tu usuario → **Add permissions**, agrega la
+política administrada `AmazonSESFullAccess` (o, más ajustado, una política
+propia que solo permita `ses:SendEmail` y `ses:SendRawEmail`).
+
+### 3. Variables de entorno (y quién recibe las alertas)
+
+`SES_SENDER_EMAIL` ya tiene como default `contacto@harraso.com` — si ese
+es el correo que verificaste en el paso 1, no hace falta configurar nada.
+Solo agrega la variable si quieres usar un remitente distinto.
+
+**El destinatario ya no se configura a mano**: le llega a cada usuario
+ACTIVO del sistema, en el mismo correo que usa para entrar a Harris
+(`users.email`) — un usuario desactivado no recibe nada, tiene sentido
+porque tampoco puede ya entrar al sistema. Si en algún momento quieres
+sumar un correo que no es de ningún usuario del sistema (ej. un contador
+externo), existe la variable opcional `ALERT_EMAIL_TO` (uno o varios
+correos separados por coma) que se agrega a la lista de siempre, sin
+reemplazarla.
+
+| Variable | Valor | Obligatoria |
+|---|---|---|
+| `SES_SENDER_EMAIL` | remitente verificado en SES — default `contacto@harraso.com` | Solo si usas otro remitente |
+| `ALERT_EMAIL_TO` | correo(s) extra que no son de ningún usuario del sistema, separados por coma | No |
+
+Las credenciales de AWS (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/
+`AWS_DEFAULT_REGION`) son las mismas que ya usas para S3 — no hace falta
+crear nada nuevo ahí. Estas sí hay que copiarlas al Cron Job del paso
+siguiente (el Cron Job es un servicio aparte del Web Service, con sus
+propias variables de entorno) — junto con `DATABASE_URL`, porque
+`send_alerts.py` necesita leer la lista de usuarios de la misma base de
+datos real.
+
+### 4. Crea el Cron Job en Render
+
+En el dashboard de Render → **New** → **Cron Job** (es un tipo de servicio
+distinto al Web Service, corre el comando, termina, y se apaga hasta la
+próxima vez):
+
+- **Repositorio**: el mismo repo de GitHub/Bitbucket que ya usa el Web
+  Service.
+- **Build Command**: `pip install -r requirements.txt` (igual que el Web
+  Service).
+- **Command**: `python send_alerts.py` para el resumen diario.
+- **Schedule**: una expresión cron, ej. `0 8 * * *` (todos los días 8:00
+  AM UTC — ajusta la hora a tu zona horaria real, Perú es UTC-5, así que
+  8:00 AM Perú es `0 13 * * *` en UTC).
+- **Variables de entorno**: las mismas `DATABASE_URL`/`AWS_*` (y
+  `SES_SENDER_EMAIL`/`ALERT_EMAIL_TO` si las configuraste) que el Web
+  Service (Render te deja copiarlas de un "Environment Group" compartido,
+  para no repetirlas a mano en cada servicio).
+
+Repite el mismo proceso para el resumen **semanal**: otro Cron Job, mismo
+repo y mismas variables, pero con **Command**: `python send_alerts.py
+--periodo semanal` y un **Schedule** semanal, ej. `0 13 * * 1` (todos los
+lunes, 8:00 AM Perú). El contenido del correo es el mismo resumen en
+ambos casos — lo único que cambia es el asunto y la frecuencia.
+
+### 5. Probarlo sin esperar al cron
+
+Con **Configuración → Catálogos → 📧 Alertas por correo** (usuario
+Administrador) puedes ver el remitente configurado, la lista real de
+destinatarios (el correo de cada usuario activo), cuántas alertas hay
+pendientes ahora mismo, y mandar un correo de prueba con un clic — sin
+tener que esperar a que dispare el
+Cron Job. Si el envío falla, el mensaje de error que muestra Harris es el
+mismo que devuelve AWS (ej. "Email address is not verified" si el
+remitente o el destinatario todavía no están verificados en SES).
+
 ## Estructura del proyecto
 
 ```

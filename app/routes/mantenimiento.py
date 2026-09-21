@@ -927,3 +927,22 @@ def km_alerts():
                 }
             )
     return alerts
+
+
+def maintenance_date_alerts():
+    """Mantenimientos cuya próxima fecha (next_due_date) está a 30 días o
+    menos, o ya vencida -- la usan el Panel y las alertas por correo (ver
+    app/alerts.py). Estaba escrita directo en dashboard.index(); se separó
+    acá (20 sep) para no repetir la misma consulta en los dos lugares."""
+    rows = query_all(
+        """SELECT v.plate, m.next_due_date FROM maintenance_records m
+           JOIN vehicles v ON v.id = m.vehicle_id
+           WHERE m.next_due_date IS NOT NULL AND m.next_due_date != ''
+           AND date(m.next_due_date) <= date('now', '+30 days')
+           ORDER BY m.next_due_date ASC"""
+    )
+    today = today_str()
+    return [
+        {"plate": r["plate"], "next_due_date": r["next_due_date"], "overdue": r["next_due_date"] < today}
+        for r in rows
+    ]

@@ -23,6 +23,40 @@ class Config:
     AWS_S3_BUCKET = os.environ.get("AWS_S3_BUCKET", "")
     AWS_S3_PREFIX = os.environ.get("AWS_S3_PREFIX", "comprobantes")
 
+    # 20 sep, pedido de Braulio ("como podemos hacer para que se envien
+    # alertas automaticas a los correos?"): alertas por correo (documentos
+    # de conductores/unidades por vencer, mantenimientos próximos,
+    # presupuestos, neumáticos -- las mismas que ya se ven en el Dashboard)
+    # vía AWS SES, reusando la misma cuenta de AWS que ya usan RDS/S3 (las
+    # credenciales AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_DEFAULT_REGION
+    # de siempre, boto3 las toma directo del entorno -- ver
+    # app/email_sender.py). No se manda nada si SES_SENDER_EMAIL queda
+    # vacío o no hay ningún destinatario. Ver README, sección "Alertas por
+    # correo (AWS SES)", para cómo verificar el remitente en la consola de
+    # SES y cómo armar el Cron Job en Render que corre send_alerts.py.
+    #
+    # SES_SENDER_EMAIL: el correo remitente, que debe estar VERIFICADO en la
+    # consola de AWS SES (Verified identities) antes de poder mandar nada.
+    # 21 sep, pedido de Braulio ("las alertas tienen que salir desde
+    # contacto@harraso.com"): mismo correo que ya es el default de
+    # COMPANY_EMAIL más abajo -- se repite acá (en vez de leer
+    # COMPANY_EMAIL directo) para poder usar un remitente de alertas
+    # distinto el día que haga falta, sin tocar los datos de la empresa
+    # que salen en documentos comerciales.
+    SES_SENDER_EMAIL = os.environ.get("SES_SENDER_EMAIL", "contacto@harraso.com")
+    # 21 sep, pedido de Braulio ("...y llegar a los correos de los usuarios
+    # que usan para entrar al sistema"): el destinatario YA NO es un correo
+    # fijo -- app/alerts.py arma la lista sola, con el correo de login
+    # (users.email) de cada usuario ACTIVO del sistema (ver
+    # alert_recipient_emails()). ALERT_EMAIL_TO se deja como agregado
+    # OPCIONAL, para sumar correos que no son de ningún usuario del sistema
+    # (ej. un contador externo) -- uno solo, o varios separados por coma.
+    # Mientras la cuenta de SES esté en modo "sandbox" (toda cuenta nueva
+    # empieza así), CADA destinatario (cada usuario activo, más los de
+    # ALERT_EMAIL_TO si los hay) también debe estar verificado en SES, no
+    # solo el remitente.
+    ALERT_EMAIL_TO = os.environ.get("ALERT_EMAIL_TO", "")
+
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     # En producción detrás de HTTPS, activa esto en tu entorno:

@@ -1,0 +1,55 @@
+{% extends 'base.html' %}
+{% block title %}Alertas por correo{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Alertas por correo</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('catalogos.list_view') }}" class="btn btn-secondary">← Volver a Catálogos</a>
+  </div>
+</div>
+<p class="muted mt-0">El mismo resumen de alertas que ya se ve en el Panel (documentos de conductores/unidades por vencer, mantenimientos próximos, presupuestos al límite, neumáticos) se puede mandar por correo automáticamente vía AWS SES -- un resumen diario y otro semanal, desde un Cron Job configurado en Render. El destinatario es el correo de login de cada usuario activo del sistema (no hay que configurarlo a mano). Esta pantalla es solo para revisar la configuración y mandar un correo de prueba; el envío automático de verdad no pasa por acá.</p>
+
+<div class="panel" style="max-width:640px;">
+  <h2 class="mt-0">Configuración</h2>
+  {% if ses_sender and recipients %}
+  <p class="mt-0"><span class="badge badge-activo">Configurado</span></p>
+  <ul style="margin:0;">
+    <li>Remitente (SES_SENDER_EMAIL): <strong>{{ ses_sender }}</strong></li>
+    <li>Destinatarios ({{ recipients|length }}, correo de cada usuario activo del sistema): <strong>{{ recipients|join(', ') }}</strong></li>
+  </ul>
+  {% else %}
+  <p class="mt-0"><span class="badge badge-pendiente">Falta configurar</span></p>
+  <p class="muted" style="margin-bottom:0;">
+    {% if not ses_sender %}Falta configurar la variable de entorno <code>SES_SENDER_EMAIL</code> en el servidor.{% endif %}
+    {% if not recipients %}No hay ningún destinatario -- no hay usuarios activos con correo cargado, ni <code>ALERT_EMAIL_TO</code> configurado.{% endif %}
+    El remitente debe estar verificado en la consola de AWS SES (Verified identities) antes de poder mandar nada --
+    y mientras la cuenta de SES esté en modo "sandbox", CADA destinatario (cada usuario activo) también debe estar verificado ahí.
+  </p>
+  {% endif %}
+</div>
+
+<div class="panel" style="max-width:640px;">
+  <h2 class="mt-0">Vista previa ({{ total }} alerta{{ '' if total == 1 else 's' }})</h2>
+  {% if not sections %}
+  <p class="muted mt-0" style="margin-bottom:0;">No hay ninguna alerta pendiente ahora mismo.</p>
+  {% else %}
+  {% for s in sections %}
+  {# s['items'] entre corchetes, no s.items -- ver el comentario en app/templates/email/alertas.html #}
+  <p style="margin:0 0 4px;"><strong>{{ s.title }}</strong>: {{ s['items']|length }}</p>
+  {% endfor %}
+  {% endif %}
+
+  {% if can(current_user.roles, 'catalogos', 'edit') %}
+  <form method="post" action="{{ url_for('catalogos.alertas_correo_enviar') }}" class="filters" style="margin-top:16px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Enviar como
+      <select name="periodo">
+        <option value="diario">Resumen diario</option>
+        <option value="semanal">Resumen semanal</option>
+      </select>
+    </label>
+    <button type="submit" class="btn btn-primary" {% if not ses_sender or not recipients %}disabled{% endif %}>Enviar correo de prueba ahora</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}
