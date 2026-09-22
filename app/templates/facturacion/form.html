@@ -14,7 +14,103 @@
       </select>
     </label>
   </form>
+  <p class="mt-0" style="margin-bottom:0;">
+    <button type="button" class="btn btn-secondary" id="btn-toggle-new-client" style="font-size:0.9em;">+ Registrar cliente nuevo</button>
+  </p>
+
+  <!-- 22 sep, pedido de Braulio ("debe haber la opcion de generar cliente
+       nuevo y se pueda emitir una factura de cliente que no este
+       registrado"): registra el cliente sin salir de esta pantalla —
+       redirige de vuelta ya con ese cliente elegido (ver
+       quick_new_client() en app/routes/facturacion.py). -->
+  <form method="post" action="{{ url_for('facturacion.quick_new_client') }}" id="new-client-form" style="display:none; margin-top:12px; padding-top:12px; border-top:1px solid var(--border, #e2e5eb);">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <label>Nombre / Razón social *
+        <input type="text" name="name" id="new_client_name" required>
+      </label>
+      <label>RUC
+        <input type="text" name="ruc" id="new_client_ruc">
+      </label>
+    </div>
+    <p class="muted" id="new_client_ruc_status" style="margin-top:-8px;"></p>
+    <div class="form-row">
+      <label>Dirección
+        <input type="text" name="address" id="new_client_address">
+      </label>
+      <label>Teléfono
+        <input type="text" name="phone">
+      </label>
+      <label>Correo
+        <input type="email" name="email">
+      </label>
+    </div>
+    <p class="muted mt-0">El RUC es obligatorio para poder enviarle una factura electrónica a SUNAT más adelante — puedes crearlo sin RUC ahora y completarlo después desde Clientes.</p>
+    <div class="btn-group">
+      <button type="submit" class="btn btn-primary">Crear cliente y continuar</button>
+      <button type="button" class="btn btn-secondary" id="btn-cancel-new-client">Cancelar</button>
+    </div>
+  </form>
 </div>
+
+<script>
+(function () {
+  var toggleBtn = document.getElementById('btn-toggle-new-client');
+  var newClientForm = document.getElementById('new-client-form');
+  var cancelBtn = document.getElementById('btn-cancel-new-client');
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', function () {
+      newClientForm.style.display = newClientForm.style.display === 'none' ? 'block' : 'none';
+    });
+  }
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', function () {
+      newClientForm.style.display = 'none';
+      newClientForm.reset();
+      document.getElementById('new_client_ruc_status').textContent = '';
+    });
+  }
+
+  // Autocompleta razón social y dirección al escribir un RUC de 11 dígitos
+  // -- mismo servicio y patrón que ya usa Cotizaciones (ver
+  // consultar_ruc() en app/routes/facturacion.py). Nunca bloquea crear el
+  // cliente: si falla o el RUC no existe, se completa a mano.
+  var rucInput = document.getElementById('new_client_ruc');
+  var rucStatus = document.getElementById('new_client_ruc_status');
+  var rucLookupTimer = null;
+  var lastRucLookedUp = '';
+  if (rucInput) {
+    rucInput.addEventListener('input', function () {
+      var digits = (rucInput.value || '').replace(/\D/g, '');
+      if (rucLookupTimer) { clearTimeout(rucLookupTimer); }
+      if (digits.length !== 11) { rucStatus.textContent = ''; return; }
+      rucLookupTimer = setTimeout(function () { lookupRuc(digits); }, 500);
+    });
+  }
+  function lookupRuc(ruc) {
+    if (ruc === lastRucLookedUp) { return; }
+    lastRucLookedUp = ruc;
+    rucStatus.textContent = 'Buscando en SUNAT…';
+    fetch('{{ url_for("facturacion.consultar_ruc") }}?ruc=' + ruc)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (ruc !== lastRucLookedUp) { return; }
+        if (!data.found) {
+          rucStatus.textContent = 'No se encontró ese RUC — completa los datos a mano.';
+          return;
+        }
+        var nameInput = document.getElementById('new_client_name');
+        if (!nameInput.value.trim()) { nameInput.value = data.razon_social; }
+        if (data.direccion) {
+          var addrInput = document.getElementById('new_client_address');
+          if (!addrInput.value.trim()) { addrInput.value = data.direccion; }
+        }
+        rucStatus.textContent = data.estado && data.estado !== 'ACTIVO' ? 'Estado SUNAT: ' + data.estado : '';
+      })
+      .catch(function () { rucStatus.textContent = ''; });
+  }
+})();
+</script>
 
 {% if selected_client %}
 <form class="panel" method="post" id="invoice-form">

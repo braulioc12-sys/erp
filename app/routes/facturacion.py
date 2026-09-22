@@ -5,6 +5,7 @@ from flask import (
     abort,
     current_app,
     flash,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -22,6 +23,7 @@ from app.integrations.sunat_ose import (
     is_duplicate_comprobante_error,
     parse_ose_response,
 )
+from app.integrations.sunat_ruc import get_company_for_ruc
 from app.storage import (
     local_sunat_documents_dir,
     save_sunat_document,
@@ -80,6 +82,78 @@ def _collect_manual_items():
             continue
         items.append((desc, amt))
     return items, incomplete
+
+
+@bp.route("/clientes/consultar-ruc")
+@permission_required("facturacion", "edit")
+def consultar_ruc():
+    """22 sep, pedido de Braulio ("debe haber la opcion de generar cliente
+    nuevo y se pueda emitir una factura de cliente que no este
+    registrado"): autocompleta razón social/dirección al escribir un RUC de
+    11 dígitos en el formulario de "cliente nuevo" de Facturación (ver
+    facturacion/form.html) -- mismo servicio y caché que ya usa Cotizaciones
+    (consultar_ruc() en app/routes/cotizaciones.py) y Liquidaciones. No se
+    reusa directamente el endpoint de Cotizaciones a propósito: queda con
+    permission_required("cotizaciones", "edit"), y Contabilidad (el único
+    rol, junto con Admin, que tiene "facturacion" edit) no siempre tiene por
+    qué tener también "cotizaciones" -- hoy la tiene, pero depender de eso
+    sería un acoplamiento frágil entre dos módulos que no tienen por qué
+    variar juntos. Nunca devuelve error 500: si el servicio externo falla o
+    el RUC no existe, responde found=false y el cliente se completa a mano."""
+    ruc = request.args.get("ruc", "")
+    try:
+        company = get_company_for_ruc(
+            ruc,
+            base_url=current_app.config.get("DECOLECTA_RUC_BASE_URL") or None,
+            token=current_app.config.get("DECOLECTA_TOKEN") or None,
+        )
+    except Exception:
+        company = None
+    if not company:
+        return jsonify({"found": False})
+    return jsonify({
+        "found": True,
+        "razon_social": company["razon_social"],
+        "estado": company["estado"],
+        "direccion": company.get("direccion") or "",
+    })
+
+
+@bp.route("/clientes/nuevo", methods=["POST"])
+@permission_required("facturacion", "edit")
+def quick_new_client():
+    """22 sep, pedido de Braulio ("en este menu, debe haber la opcion de
+    generar cliente nuevo y se peuda emitir una factura de cliente que no
+    este registrado"): crea un cliente sin salir de "Generar factura" (ver
+    el formulario colapsable "+ Registrar cliente nuevo" en
+    facturacion/form.html) y redirige de vuelta ya con ese cliente
+    seleccionado -- como un cliente recién creado nunca tiene viajes
+    pendientes, la pantalla le mostrará directo la sección de "Ítems
+    adicionales" (ver new() más abajo) para facturarlo igual.
+
+    Gateado por el permiso de Facturación (no el de Clientes) a propósito:
+    Contabilidad -- el único rol, junto con Admin, con "facturacion" edit --
+    solo tiene "clientes" en modo "view" (ver PERMISSIONS en app/auth.py), y
+    es justo quien necesita esto para poder facturar a un cliente nuevo sin
+    depender de que alguien más lo dé de alta primero en Clientes."""
+    if not validate_csrf():
+        abort(400)
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("El nombre del cliente nuevo es obligatorio.", "error")
+        return redirect(url_for("facturacion.new"))
+    client_id = execute(
+        "INSERT INTO clients (name, ruc, phone, email, address) VALUES (?, ?, ?, ?, ?)",
+        (
+            name,
+            request.form.get("ruc", "").strip(),
+            request.form.get("phone", "").strip(),
+            request.form.get("email", "").strip(),
+            request.form.get("address", "").strip(),
+        ),
+    )
+    flash(f"Cliente '{name}' creado — ya puedes facturarle.", "success")
+    return redirect(url_for("facturacion.new", client_id=client_id))
 
 
 @bp.route("/nuevo", methods=["GET", "POST"])
