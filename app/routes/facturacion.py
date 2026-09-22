@@ -15,7 +15,7 @@ from flask import (
 
 from app.auth import permission_required, validate_csrf
 from app.db import execute, get_db, query_all, query_one
-from app.helpers import company_info_for_issuer, compute_detraction, next_code, parse_date, today_str
+from app.helpers import company_info_for_issuer, compute_detraction, next_code, parse_date, parse_float, today_str
 from app.integrations.sunat_ose import (
     SunatOseError,
     build_client_from_config,
@@ -318,7 +318,69 @@ def detail(invoice_id):
            LEFT JOIN trips t ON t.id = ii.trip_id WHERE ii.invoice_id = ?""",
         (invoice_id,),
     )
-    return render_template("facturacion/detail.html", invoice=invoice, items=items)
+    # 22 sep, pedido de Braulio ("como confirmo la detraccion?"): cuando la
+    # factura tiene ítems manuales (ver new() más arriba), el sistema NO
+    # aplica detracción automática -- se necesita un campo para
+    # confirmarla/editarla a mano (ver update_detraction() abajo). Se
+    # sugiere la cuenta del Banco de la Nación de la empresa emisora como
+    # punto de partida, editable por si esta factura puntual usa otra.
+    company = company_info_for_issuer(invoice["issuer"], current_app.config)
+    return render_template(
+        "facturacion/detail.html", invoice=invoice, items=items,
+        default_detraction_account=company.get("bank_nacion_detraction_account", ""),
+    )
+
+
+@bp.route("/<int:invoice_id>/detraccion", methods=["POST"])
+@permission_required("facturacion", "edit")
+def update_detraction(invoice_id):
+    """22 sep, pedido de Braulio ("como confirmo la detraccion?"): edición
+    manual de la detracción de UNA factura -- necesaria porque el cálculo
+    automático (compute_detraction() en app/helpers.py) solo aplica al
+    código "027" (transporte de carga) y se desactiva por completo apenas
+    la factura tiene algún ítem manual (alquileres, gestión, etc. -- ver
+    new()), ya que esos servicios pueden estar sujetos a un código y
+    porcentaje de detracción TOTALMENTE DISTINTO (o no estarlo en
+    absoluto) según el Anexo de SUNAT, y este sistema no tiene forma de
+    determinarlo solo. Braulio (o su contador) confirma acá el código y
+    porcentaje correctos; el monto se puede dejar en blanco para que se
+    calcule solo a partir del porcentaje, o ingresarlo a mano si difiere.
+
+    Desmarcar "aplica" limpia los 4 campos de detracción de la factura
+    (vuelve a quedar como si nunca se le hubiera aplicado)."""
+    if not validate_csrf():
+        abort(400)
+    invoice = query_one("SELECT * FROM invoices WHERE id = ?", (invoice_id,))
+    if invoice is None:
+        abort(404)
+
+    if request.form.get("applies") != "on":
+        execute(
+            """UPDATE invoices SET detraction_applies=0, detraction_code=NULL,
+               detraction_percentage=NULL, detraction_amount=NULL, detraction_bank_account=NULL
+               WHERE id=?""",
+            (invoice_id,),
+        )
+        flash("Se quitó la detracción de esta factura.", "success")
+        return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
+
+    code = request.form.get("code", "").strip()
+    percentage = parse_float(request.form.get("percentage"), default=0.0)
+    bank_account = request.form.get("bank_account", "").strip()
+    if not code or percentage <= 0:
+        flash("Ingresa el código de detracción y un porcentaje mayor a 0.", "error")
+        return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
+
+    amount_raw = request.form.get("amount", "").strip()
+    amount = parse_float(amount_raw) if amount_raw else round(invoice["amount"] * percentage / 100, 2)
+
+    execute(
+        """UPDATE invoices SET detraction_applies=1, detraction_code=?, detraction_percentage=?,
+           detraction_amount=?, detraction_bank_account=? WHERE id=?""",
+        (code, percentage, amount, bank_account, invoice_id),
+    )
+    flash("Detracción actualizada.", "success")
+    return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
 
 
 @bp.route("/<int:invoice_id>/estado", methods=["POST"])

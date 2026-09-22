@@ -39,9 +39,9 @@
   <div class="detail-item"><div class="label">Total</div><div class="value">{{ invoice.amount|money }}</div></div>
 </div>
 
-{% if invoice.detraction_applies %}
 <div class="panel">
-  <h2>Concepto de Detracción</h2>
+  <h2 class="mt-0">Concepto de Detracción</h2>
+  {% if invoice.detraction_applies %}
   <div class="detail-grid">
     <div class="detail-item"><div class="label">Código del bien/servicio</div><div class="value">{{ invoice.detraction_code }}</div></div>
     <div class="detail-item"><div class="label">Porcentaje</div><div class="value">{{ '%.2f'|format(invoice.detraction_percentage) }}%</div></div>
@@ -49,10 +49,50 @@
     <div class="detail-item"><div class="label">Neto a cobrar del cliente</div><div class="value">{{ (invoice.amount - invoice.detraction_amount)|money }}</div></div>
     <div class="detail-item"><div class="label">Cuenta Bco. de la Nación</div><div class="value">{{ invoice.detraction_bank_account or '⚠ falta configurar' }}</div></div>
   </div>
-  <p class="mt-0 muted">Esta factura supera S/ 400 por un servicio de transporte de carga (código 027) — está sujeta a detracción del 4%. El cliente debe depositar {{ invoice.detraction_amount|money }} en la cuenta del Banco de la Nación de arriba y transferir el resto ({{ (invoice.amount - invoice.detraction_amount)|money }}) directamente.</p>
-  <p class="mt-0"><strong>⚠ Pendiente:</strong> por ahora "Enviar a SUNAT" NO incluye este dato en el comprobante electrónico — la documentación pública de tefacturo.pe no especifica cómo mandarlo. Hasta confirmarlo con su soporte, registra la detracción también desde el portal de tefacturo.pe para esta factura (tienen una opción "Activar detracción" al emitir).</p>
+  <p class="mt-0 muted">El cliente debe depositar {{ invoice.detraction_amount|money }} en la cuenta del Banco de la Nación de arriba y transferir el resto ({{ (invoice.amount - invoice.detraction_amount)|money }}) directamente.</p>
+  {% else %}
+  <p class="mt-0 muted">Esta factura no tiene detracción aplicada.</p>
+  {% endif %}
+  <p class="mt-0"><strong>⚠ Pendiente:</strong> por ahora "Enviar a SUNAT" NO incluye este dato en el comprobante electrónico — la documentación pública de tefacturo.pe no especifica cómo mandarlo. Hasta confirmarlo con su soporte, si de verdad corresponde detracción regístrala también desde el portal de tefacturo.pe para esta factura (tienen una opción "Activar detracción" al emitir).</p>
+
+  {% if can(current_user.roles, 'facturacion', 'edit') %}
+  <details {{ 'open' if not invoice.detraction_applies and invoice.amount > 700 else '' }} style="margin-top:12px;">
+    <summary style="cursor:pointer; font-weight:600;">{{ 'Editar / quitar detracción' if invoice.detraction_applies else '+ Aplicar detracción manualmente' }}</summary>
+    <form method="post" action="{{ url_for('facturacion.update_detraction', invoice_id=invoice.id) }}" style="margin-top:12px;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label style="display:flex; align-items:center; gap:8px; font-weight:normal;">
+        <input type="checkbox" name="applies" style="width:auto;" {{ 'checked' if invoice.detraction_applies }}>
+        Esta factura está sujeta a detracción
+      </label>
+      <div class="form-row">
+        <label>Código del bien/servicio
+          <input type="text" name="code" value="{{ invoice.detraction_code or '' }}" placeholder="Ej. 037">
+        </label>
+        <label>Porcentaje (%)
+          <input type="number" name="percentage" step="0.01" min="0" value="{{ invoice.detraction_percentage or '' }}">
+        </label>
+      </div>
+      <div class="form-row">
+        <label>Monto detraído (S/) — déjalo vacío para calcularlo con el % de arriba
+          <input type="number" name="amount" step="0.01" min="0" value="{{ invoice.detraction_amount or '' }}">
+        </label>
+        <label>Cuenta Banco de la Nación
+          <input type="text" name="bank_account" value="{{ invoice.detraction_bank_account or default_detraction_account or '' }}">
+        </label>
+      </div>
+      <p class="muted mt-0">
+        Confirma con tu contador el código y porcentaje correctos según el Anexo de SUNAT antes de guardar —
+        este sistema solo calcula automáticamente el código 027 (transporte de carga); cualquier otro servicio
+        (alquileres, gestión, etc.) puede tener un código, porcentaje o umbral distinto, o no estar sujeto a
+        detracción en absoluto.
+      </p>
+      <div class="btn-group">
+        <button type="submit" class="btn btn-primary">Guardar detracción</button>
+      </div>
+    </form>
+  </details>
+  {% endif %}
 </div>
-{% endif %}
 
 <div class="panel">
   <h2>Estado ante SUNAT {{ m.badge(invoice.sunat_status) }}</h2>
