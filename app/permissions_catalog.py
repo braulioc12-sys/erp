@@ -49,7 +49,14 @@ MODULE_LABELS = {
     "inventarios": "Inventarios",
     "usuarios": "Usuarios",
     "catalogos": "Catálogos",
-    "integraciones": "Integraciones",
+    # 22 sep, pedido de Braulio: quería dar acceso a Ubicación GPS a un
+    # usuario puntual desde Usuarios > editar > "Permisos específicos", pero
+    # no encontraba la opción porque esta fila decía "Integraciones" — un
+    # nombre genérico que no coincide con como se ve el módulo en el menú
+    # ("Ubicación GPS", ver app/templates/base.html). Es el mismo módulo/
+    # blueprint (app/routes/integraciones.py) en ambos lados, solo cambia la
+    # etiqueta acá para que sea reconocible en la lista de permisos.
+    "integraciones": "Ubicación GPS",
     "rrhh": "RRHH",
     "tarifario": "Tarifario",
     "pagos_personal": "Pagos personal",
