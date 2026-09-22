@@ -7,7 +7,19 @@ Braulio compartió https://api.tefacturo.pe/doc/integracion/docs/get-started/,
 que reemplaza al primer intento del mismo día basado en un PDF suelto de
 2019 sin autenticación documentada ni guía de remisión):
 
-- Base URL: https://jarvis.tefacturo.pe (configurable, TEFACTURO_BASE_URL).
+- Base URL: https://tefacturo.pe (configurable, TEFACTURO_BASE_URL). 21 sep,
+  CONFIRMADO por soporte técnico de tefacturo.pe (Juan Reyes, Close2u,
+  correo "CONFIGURACION - 20610357726 - HARRASO TRANSPORT S.A.C. -
+  INTEGRACION APIREST - CPE - GRT", con el RUC real de Harraso en el
+  asunto): antes se usaba "https://jarvis.tefacturo.pe" como default (el
+  entorno de PRUEBAS con el que Braulio ya había probado, según el mismo
+  correo: "Como ya realizó pruebas con nuestro entorno de JARVIS...") — el
+  correo da las URI reales de PRODUCCIÓN, con el dominio raíz
+  "tefacturo.pe" (sin el subdominio "jarvis."), así que ese pasa a ser el
+  default. Sigue siendo configurable vía TEFACTURO_BASE_URL, así que si
+  hiciera falta volver a apuntar a "jarvis.tefacturo.pe" (por ejemplo,
+  para seguir probando antes de emitir comprobantes reales), basta con
+  esa variable de entorno, sin tocar código.
 - Autenticación: POST /tokenapi/secure/v2/login/token con
   {"aplicacion": {"codigo": "1"}, "clave", "mail", "ruc"} (ruc como número).
   Devuelve {"c2uToken": "<JWT>", "fechaExpiracion": "<ISO>", ...} — el JWT
@@ -15,9 +27,22 @@ que reemplaza al primer intento del mismo día basado en un PDF suelto de
   llamada siguiente. Es un login POR RUC (cada empresa — Harraso y BRMS —
   necesita su propia cuenta usuario/clave en tefacturo.pe, no un solo
   usuario para ambas).
-- Emitir factura: PUT /factura-api/invoice2u/integracion/factura/{ruc}.
+- Emitir factura: PUT /factura-api/invoice2u/integracion/factura/{ruc} —
+  URI reconfirmada tal cual por el correo del 21 sep de arriba.
 - Emitir guía de remisión (TRANSPORTISTA): POST
-  /guiatransportista-api/invoice2u/integracion/guia-remision/transportista/{ruc}.
+  /guiatransportista-api/invoice2u/integracion/guiaremision/transportista/{ruc}.
+  21 sep, CORREGIDO contra el mismo correo de soporte: la URI real es
+  ".../guiaremision/transportista/{ruc}" (SIN guión, una sola palabra) —
+  la versión anterior de este archivo (desde el patch 0032, 14 sep) usaba
+  ".../guia-remision/transportista/{ruc}" (CON guión), un nombre que nunca
+  se confirmó contra un 201/200 real de este endpoint específico (el 201
+  Created del patch 0032 fue sobre la ESTRUCTURA del payload, sin que
+  quedara registrado ahí el path exacto de la URL usada). Con el guión de
+  más, cualquier guía transportista real habría estado fallando con 404
+  ("ruta no encontrada") en vez de llegar siquiera a validarse — si
+  Braulio mandó guías transportista reales y quedaron ACEPTADAS antes de
+  este fix, avisar para revisar qué URI se usó de verdad en ese momento
+  (por si el servidor de tefacturo.pe acepta ambas variantes).
   tefacturo.pe también documenta un endpoint de guía REMITENTE
   (guiaremitente-api/.../guia-remision/{ruc}) — no se implementó aquí a
   propósito: la guía remitente la debe emitir el DUEÑO de la carga (el
@@ -195,7 +220,11 @@ class TefacturoClient:
         self.ruc = (ruc or "").strip()
         self.email = (email or "").strip()
         self.password = password or ""
-        self.base_url = (base_url or "https://jarvis.tefacturo.pe").rstrip("/")
+        # 21 sep: default cambiado de "https://jarvis.tefacturo.pe" (entorno
+        # de pruebas) a "https://tefacturo.pe" (producción, confirmado por
+        # soporte técnico de tefacturo.pe) -- ver la nota grande al inicio
+        # del archivo. TEFACTURO_BASE_URL sigue pudiendo pisar esto.
+        self.base_url = (base_url or "https://tefacturo.pe").rstrip("/")
         self.timeout = timeout
 
     def is_configured(self):
@@ -281,9 +310,13 @@ class TefacturoClient:
 
     def emit_guia_transportista(self, payload):
         self._require_configured()
+        # 21 sep: "guiaremision" SIN guión -- corregido contra el correo de
+        # soporte técnico de tefacturo.pe, ver la nota grande al inicio del
+        # archivo. Antes decía "guia-remision" (con guión), nunca confirmado
+        # contra un 201/200 real de este endpoint específico.
         return self._request(
             "POST",
-            f"/guiatransportista-api/invoice2u/integracion/guia-remision/transportista/{self.ruc}",
+            f"/guiatransportista-api/invoice2u/integracion/guiaremision/transportista/{self.ruc}",
             payload,
         )
 
