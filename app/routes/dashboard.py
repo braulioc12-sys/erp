@@ -4,6 +4,7 @@ from app.auth import permission_required
 from app.db import query_all, query_one
 from app.helpers import today_str
 from app.routes.conductores import document_alerts as driver_document_alerts
+from app.routes.descansos import descansos_alerts
 from app.routes.flota import vehicle_document_alerts
 from app.routes.liquidaciones import budget_alerts
 from app.routes.mantenimiento import km_alerts, maintenance_date_alerts
@@ -64,5 +65,8 @@ def index():
         km_alerts=km_alerts(),
         budget_alerts=budget_alerts(),
         tire_alerts=tire_alerts(),
+        # 22 sep: conductores que ya deberían descansar o superaron el tope
+        # de días trabajados seguidos (ver app/routes/descansos.py).
+        descansos_alerts=descansos_alerts(),
         today=today_str(),
     )

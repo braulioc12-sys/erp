@@ -39,6 +39,9 @@
       <a href="{{ url_for('clientes.list_view') }}" class="{{ 'active' if request.blueprint == 'clientes' }}">Clientes</a>
       <a href="{{ url_for('flota.list_view') }}" class="{{ 'active' if request.blueprint == 'flota' }}">Flota</a>
       <a href="{{ url_for('conductores.list_view') }}" class="{{ 'active' if request.blueprint == 'conductores' }}">Conductores</a>
+      {% if can(current_user.roles, 'descansos', 'view') %}
+      <a href="{{ url_for('descansos.list_view') }}" class="{{ 'active' if request.blueprint == 'descansos' }}">Descansos</a>
+      {% endif %}
       <a href="{{ url_for('liquidaciones.list_view') }}" class="{{ 'active' if request.blueprint == 'liquidaciones' }}">Liquidaciones</a>
       {# 19 sep, pedido de Braulio ("hay que fusionar el modulo de RRHH y
          Pagos personal. Ambos deben estar dentro del modulo de RRHH"):

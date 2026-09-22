@@ -1,0 +1,100 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Descansos laborales{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Descansos laborales</h1>
+  <div class="page-actions">
+    {% if can(current_user.roles, 'descansos', 'edit') %}
+    <a href="{{ url_for('descansos.new') }}" class="btn btn-primary">+ Registrar descanso</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="panel">
+  <h2 class="mt-0">Estado de conductores</h2>
+  <p class="muted mt-0">
+    Hasta {{ limits.soon }} días seguidos de trabajo corresponde al menos 1 día de descanso; el tope absoluto son
+    {{ limits.max }} días seguidos, y en ese caso corresponden al menos 2 días de descanso. "Días trabajados
+    seguidos" se cuenta desde el día siguiente al último descanso registrado abajo (o desde su primer viaje / alta
+    en el sistema si todavía no tiene ningún descanso registrado aquí).
+  </p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Conductor</th><th>Último descanso</th><th>Días trabajados seguidos</th><th>Estado</th><th></th></tr></thead>
+      <tbody>
+        {% for r in statuses %}
+        <tr>
+          <td>{{ r.driver.name }}</td>
+          <td>
+            {% if r.status == 'DESCANSANDO' %}
+              Descansando hasta {{ r.resting_until }}
+            {% elif r.last_rest %}
+              {{ r.last_rest.start_date }} → {{ r.last_rest.end_date }}
+              ({{ r.last_rest.days_count }} {{ 'día' if r.last_rest.days_count == 1 else 'días' }})
+            {% else %}
+              — (sin descansos registrados)
+            {% endif %}
+          </td>
+          <td>{{ r.streak_days if r.streak_days is not none else '—' }}</td>
+          <td>{{ m.badge(r.status) }}</td>
+          <td>
+            <div class="btn-group">
+              <a class="btn btn-secondary btn-sm" href="{{ url_for('descansos.list_view', driver_id=r.driver.id) }}">Ver historial</a>
+              {% if can(current_user.roles, 'descansos', 'edit') %}
+              <a class="btn btn-primary btn-sm" href="{{ url_for('descansos.new', driver_id=r.driver.id) }}">Registrar descanso</a>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="table-empty">No hay conductores activos.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="panel">
+  <h2 class="mt-0">Historial de descansos registrados</h2>
+  <form class="filters" method="get">
+    <label>Conductor
+      <select name="driver_id" onchange="this.form.submit()">
+        <option value="">-- Todos --</option>
+        {% for d in drivers %}
+        <option value="{{ d.id }}" {{ 'selected' if selected_driver == d.id }}>{{ d.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </form>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Conductor</th><th>Desde</th><th>Hasta</th><th>Días</th><th>Notas</th><th></th></tr></thead>
+      <tbody>
+        {% for r in rests %}
+        <tr>
+          <td>{{ r.driver_name }}</td>
+          <td>{{ r.start_date }}</td>
+          <td>{{ r.end_date }}</td>
+          <td>{{ r.days_count }}</td>
+          <td class="wrap">{{ r.notes or '—' }}</td>
+          <td>
+            {% if can(current_user.roles, 'descansos', 'edit') %}
+            <div class="btn-group">
+              <a class="btn btn-secondary btn-sm" href="{{ url_for('descansos.edit', rest_id=r.id) }}">Editar</a>
+              <form method="post" action="{{ url_for('descansos.delete', rest_id=r.id) }}" onsubmit="return confirm('¿Eliminar este registro de descanso?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-danger btn-sm" type="submit">Eliminar</button>
+              </form>
+            </div>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="table-empty">No hay descansos registrados todavía.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

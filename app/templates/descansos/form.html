@@ -1,0 +1,54 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Editar descanso' if mode == 'edit' else 'Registrar descanso' }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ 'Editar descanso' if mode == 'edit' else 'Registrar descanso' }}</h1>
+</div>
+<form class="form panel" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  {% if mode == 'edit' %}
+  <p class="muted mt-0">
+    Conductor: <strong>{{ driver.name if driver else '—' }}</strong>
+    (no se puede cambiar aquí — elimina el registro y crea uno nuevo si te equivocaste de conductor).
+  </p>
+  {% else %}
+  <label>Conductor *
+    <select name="driver_id" required onchange="if (this.value) { window.location.href = '{{ url_for('descansos.new') }}?driver_id=' + this.value; }">
+      <option value="">-- Selecciona --</option>
+      {% for d in drivers %}
+      <option value="{{ d.id }}" {{ 'selected' if selected_driver_id == d.id }}>{{ d.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% if driver and hint %}
+  <p class="muted" style="margin-top:-8px;">
+    {% if hint.status == 'DESCANSANDO' %}
+      {{ driver.name }} está descansando actualmente (hasta {{ hint.resting_until }}).
+    {% elif hint.streak_days is not none %}
+      {{ driver.name }} lleva <strong>{{ hint.streak_days }}</strong> día(s) trabajados seguidos desde su último descanso.
+    {% else %}
+      Sin datos suficientes todavía para calcular los días trabajados de {{ driver.name }}.
+    {% endif %}
+  </p>
+  {% endif %}
+  {% endif %}
+
+  <div class="form-row">
+    <label>Fecha de inicio *
+      <input type="date" name="start_date" value="{{ rest.start_date if rest else '' }}" required>
+    </label>
+    <label>Fecha de fin *
+      <input type="date" name="end_date" value="{{ rest.end_date if rest else '' }}" required>
+    </label>
+  </div>
+  <label>Notas
+    <textarea name="notes">{{ rest.notes if rest else '' }}</textarea>
+  </label>
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Guardar</button>
+    <a href="{{ url_for('descansos.list_view') }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+{% endblock %}

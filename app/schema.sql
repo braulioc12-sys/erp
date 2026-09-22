@@ -193,6 +193,24 @@ CREATE TABLE IF NOT EXISTS drivers (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- 22 sep, pedido de Braulio ("modulo de Descansos Laborales... los
+-- conductores pueden trabajar hasta 6 dias seguidos y descansar 1, o
+-- trabajar 12 dias seguidos y descansar 2. Quiero poder registrar los dias
+-- que han descansado"). Cada fila es UN periodo de descanso ya tomado por
+-- un conductor (no un turno futuro planificado) -- ver app/routes/descansos.py
+-- para el cálculo de días trabajados seguidos y las alertas del Panel.
+-- days_count se guarda calculado (en vez de calcularlo siempre al vuelo)
+-- para que el historial no cambie si algún día se ajusta cómo se cuenta.
+CREATE TABLE IF NOT EXISTS driver_rests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    driver_id INTEGER NOT NULL REFERENCES drivers(id),
+    start_date TEXT NOT NULL,
+    end_date TEXT NOT NULL,
+    days_count INTEGER NOT NULL,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS trips (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL UNIQUE,

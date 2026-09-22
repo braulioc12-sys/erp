@@ -22,6 +22,7 @@ El logo de Harraso Transport está en `app/static/img/` (`logo-lockup.png`, el l
 - **Clientes:** datos de contacto y facturación.
 - **Flota:** unidades (placa, capacidad, tipo — camión, tracto o carreta —, estado, **propietario**), con vencimiento de **SOAT** y **Revisión Técnica** (alertas en el Panel).
 - **Conductores:** datos personales, vencimiento de brevete, y control de vencimientos de **examen médico ocupacional** y de los requisitos para operar con **Backus** (examen de manejo, capacitación del plan de tráfico, y escuela de conductores) — todos con alerta en el Panel.
+- **Descansos laborales:** registro de los días de descanso ya tomados por cada conductor, y una vista de "días trabajados seguidos" con alerta (en el módulo y en el Panel) cuando ya le toca descansar o supera el máximo permitido — ver la sección dedicada más abajo.
 - **Liquidaciones:** una liquidación contable por viaje — el anticipo de viáticos entregado al conductor, los gastos reales (combustible, peajes, viáticos, mantenimiento u otros) que se le van asignando manualmente, y el cierre por oficina con numeración de voucher. Incluye **presupuestos mensuales** por unidad o tipo (con alerta en el Panel), un **historial de gastos** filtrable y exportable a Excel, y un **resumen contable exportable** en el formato exacto de la plantilla de liquidación de Harraso — ver la sección dedicada más abajo.
 - **Rutas:** catálogo de rutas frecuentes con un monto de viáticos predeterminado (usado para sugerir el anticipo de gastos de cada viaje) y un monto de **comisión del conductor** predeterminado (usado para sugerir la comisión al registrar un viaje por esa ruta).
 - **Mantenimiento:** historial de mantenimientos por unidad, costo, kilometraje registrado y próxima fecha/kilometraje. Los conceptos (tipos de mantenimiento) se administran desde Catálogos. Si indicas el kilometraje al registrar un mantenimiento, actualiza automáticamente el kilometraje actual de la unidad. Incluye un catálogo de **trabajos con tiempo estimado** (ej. cambio de aceite = 60 min) que se seleccionan al registrar un mantenimiento, y una vista de **historial y costos totales por unidad**. Los repuestos usados en una orden se descuentan del stock de **Inventarios** — ver la sección dedicada más abajo.
@@ -144,6 +145,23 @@ Cada viaje tiene, además de la tarifa, un campo de **comisión del conductor**.
 **Ruta por catálogo, no por texto libre (28 ago):** el origen/destino de un viaje ya no se escribe a mano — se elige de un desplegable con las rutas activas registradas en **Rutas** (para agregar una ruta nueva, primero se registra ahí). Si no hay ninguna ruta en el catálogo, el formulario avisa y enlaza directo a Rutas para agregar una. Al editar un viaje cuya ruta ya no está en el catálogo activo (por ejemplo, se desactivó esa ruta después), el desplegable muestra esa combinación como "Ruta actual (no está en el catálogo)" para no perder el dato — si no la vuelves a elegir explícitamente, se mantiene igual.
 
 **Viajes → Comisiones por mes** muestra, para el mes seleccionado, cuántos viajes hizo cada conductor, a qué ruta, y el total de comisión correspondiente (agrupado por conductor y luego por ruta, con subtotal por conductor y total general). Los viajes cancelados no se cuentan. Se puede exportar el mismo reporte a Excel (`.xlsx`) con el botón "Exportar a Excel".
+
+## Descansos laborales (22 sep)
+
+Módulo para registrar los períodos de descanso ya tomados por cada conductor y llevar el control de cuántos días lleva trabajando seguidos, según la norma que rige a Harraso/BRMS: **hasta 6 días seguidos de trabajo corresponde al menos 1 día de descanso**, y se puede extender hasta un **tope absoluto de 12 días seguidos** si al final se descansan al menos **2 días**. Estas dos reglas se usan en conjunto (no son dos "turnos" distintos asignados por conductor) — a los 6 días ya le toca descansar, pero se tolera seguir hasta 12 si se compensa con 2 días de descanso en vez de 1.
+
+**Cómo se calcula "días trabajados seguidos":** desde el día siguiente al fin de su último descanso registrado en este módulo. Si un conductor todavía no tiene ningún descanso registrado aquí, se cuenta desde el más antiguo entre su primer viaje registrado o su fecha de alta en Conductores (para no generar una alerta descabellada apenas se activa el módulo). **Importante:** es una bitácora de cumplimiento, no un sistema de asistencia — si un conductor descansó un día real sin que nadie lo registre acá, el sistema no tiene forma de saberlo y seguirá contando ese día como trabajado. Por eso conviene registrar los descansos apenas ocurren.
+
+**Estados** (columna "Estado" en la lista, y grupo de alertas propio en el Panel):
+- 🟢 **OK** — menos de 6 días trabajados seguidos.
+- 🟠 **Atención** — entre 6 y 11 días: ya le corresponde descansar.
+- 🔴 **Urgente** — 12 días o más: superó el tope absoluto.
+- 🔵 **Descansando** — está dentro de un período de descanso ya registrado.
+- ⚪ **Sin datos** — no hay suficiente información para calcular (caso raro: conductor sin viajes ni fecha de alta legible).
+
+Al **registrar un descanso** (fecha de inicio, fecha de fin y notas opcionales) el sistema avisa — sin bloquear el registro — si el descanso es más corto que el mínimo que le correspondía según los días que trabajó justo antes (1 día si trabajó 6 o menos, 2 días si trabajó más de 6). El aviso es solo informativo: se guarda igual, para no perder el dato real de lo que pasó; conviene revisarlo si fue un error de fechas.
+
+**Permisos:** RRHH y Administrador pueden ver y registrar/editar descansos; Despachador solo puede verlos (le sirve para no asignar un viaje a un conductor que está por descansar o descansando); el resto de roles no tiene acceso. Se puede ajustar en `PERMISSIONS` (`app/auth.py`).
 
 ## Neumáticos: vida útil y posición por unidad
 

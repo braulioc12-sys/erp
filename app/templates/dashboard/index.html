@@ -30,7 +30,7 @@
   </div>
 </div>
 
-{% if driver_document_alerts or vehicle_document_alerts or maintenance_alerts or km_alerts or budget_alerts or tire_alerts %}
+{% if driver_document_alerts or vehicle_document_alerts or maintenance_alerts or km_alerts or budget_alerts or tire_alerts or descansos_alerts %}
 <div class="panel">
   <h2>Alertas próximas</h2>
   {# 9 sep, pedido de Braulio: "agrupar las alertas por tipo, para que no
@@ -53,6 +53,7 @@
     ('Mantenimiento por kilometraje', km_alerts),
     ('Presupuestos de gastos', budget_alerts),
     ('Neumáticos', tire_alerts),
+    ('Descansos laborales', descansos_alerts),
   ] %}
   <div class="alert-groups">
     {% for group_label, group_alerts in alert_groups %}
@@ -95,6 +96,13 @@
             <div class="alert-item">
               <span>Neumático en <strong>{{ a.position_label }}</strong> de la unidad <strong>{{ a.plate }}</strong> {{ 'ya superó' if a.overdue else 'se acerca a' }} su vida útil</span>
               <span>{{ '{:,.0f}'.format(a.accumulated_km) }} / {{ '{:,.0f}'.format(a.expected_life_km) }} km ({{ a.percent }}%)</span>
+            </div>
+            {% endfor %}
+          {% elif group_label == 'Descansos laborales' %}
+            {% for a in group_alerts %}
+            <div class="alert-item">
+              <span><strong>{{ a.name }}</strong> {{ 'ya superó el máximo de 12 días trabajados seguidos' if a.overdue else 'ya debería descansar' }}</span>
+              <span>{{ a.streak_days }} día(s) trabajados seguidos</span>
             </div>
             {% endfor %}
           {% endif %}

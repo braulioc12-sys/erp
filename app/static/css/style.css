@@ -236,6 +236,12 @@ td.truncate { display: table-cell; }
 /* "Disponible para programar" de una unidad en mantenimiento (15 sep) */
 .badge-disponible { background: var(--success-soft); color: var(--success); }
 .badge-no_disponible { background: var(--danger-soft); color: var(--danger); }
+/* Descansos laborales (22 sep) */
+.badge-ok { background: var(--success-soft); color: var(--success); }
+.badge-atencion { background: var(--warning-soft); color: var(--warning); }
+.badge-urgente { background: var(--danger-soft); color: var(--danger); }
+.badge-descansando { background: var(--primary-soft); color: var(--primary-dark); }
+.badge-sin_datos { background: var(--text-muted-soft, #eee); color: var(--text-muted); }
 
 /* Forms */
 form.form { display: flex; flex-direction: column; gap: 14px; max-width: 640px; }

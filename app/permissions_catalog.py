@@ -53,6 +53,7 @@ MODULE_LABELS = {
     "rrhh": "RRHH",
     "tarifario": "Tarifario",
     "pagos_personal": "Pagos personal",
+    "descansos": "Descansos laborales",
 }
 
 # module -> [(action, etiqueta), ...] en el orden en que se muestran.
@@ -81,4 +82,5 @@ PERMISSION_CATALOG = {
     "rrhh": [("view", "Ver")],
     "tarifario": [("view", "Ver"), ("edit", "Editar")],
     "pagos_personal": [("view", "Ver"), ("edit", "Editar y generar archivos")],
+    "descansos": [("view", "Ver"), ("edit", "Registrar y editar")],
 }
