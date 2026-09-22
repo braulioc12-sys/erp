@@ -65,8 +65,6 @@ El panel avisa (30 días antes de vencer, o si ya venció) sobre: vencimiento de
 
 Esto se puede ajustar fácilmente editando el diccionario `PERMISSIONS` en `app/auth.py`.
 
-Además del rol, cada usuario puede tener excepciones puntuales (**Usuarios → editar usuario → "Permisos específicos"**): por cada módulo/acción se puede forzar "Permitir siempre" o "Bloquear siempre" para esa persona en particular, sin afectar a nadie más que comparta su rol — por ejemplo, dar acceso a **Ubicación GPS** a un Operador puntual sin dárselo a todos los Operadores. 22 sep: esa fila del cuadro decía "Integraciones" (nombre interno del módulo) en vez de "Ubicación GPS" como aparece en el menú, así que era difícil de encontrar — ya quedó renombrada en `app/permissions_catalog.py` para que coincida.
-
 ## Mantenimiento: trabajos con tiempo estimado e historial por unidad
 
 Desde **Mantenimiento → Trabajos y tiempos** se administra un catálogo de trabajos de mantenimiento con su tiempo estimado en minutos (ej. "Cambio de aceite" = 60 min, "Fugas de aire" = 120 min), con un botón para agregar trabajos nuevos que no estén en la lista. Al registrar un mantenimiento, se pueden marcar uno o más trabajos realizados y el sistema suma automáticamente el tiempo estimado total (útil para planificar cuánto tiempo va a estar la unidad en taller).
