@@ -188,21 +188,66 @@ def company_info_for_issuer(issuer, cfg):
 
 # Detracción (SPOT) — 9 sep, Braulio compartió una factura real ya emitida
 # (fuera de este ERP) que incluye el bloque "Concepto de Detracción": el
-# servicio de transporte de bienes por vía terrestre (el único que prestan
-# Harraso/BRMS) está sujeto al 4% de detracción cuando el importe de la
-# operación supera S/ 400 — código de bien "027" del catálogo SUNAT.
-# Confirmado en DOS fuentes independientes: (1) la propia factura real que
-# compartió Braulio (S/708.00 * 4% = S/28.32, coincide exacto con el monto
-# mostrado), y (2) la orientación oficial de SUNAT
+# servicio de transporte de bienes por vía terrestre está sujeto al 4% de
+# detracción cuando el importe de la operación supera S/ 400 — código de
+# bien "027" del catálogo SUNAT. Confirmado en DOS fuentes independientes:
+# (1) la propia factura real que compartió Braulio (S/708.00 * 4% = S/28.32,
+# coincide exacto con el monto mostrado), y (2) la orientación oficial de
+# SUNAT
 # (orientacion.sunat.gob.pe/detracciones-en-el-transporte-de-bienes-por-via-terrestre):
 # "el monto del depósito resulta de aplicar el porcentaje de cuatro por
 # ciento (4%) ... siempre que el importe de la operación ... sea mayor a
-# S/.400.00". Como Harraso/BRMS solo prestan este único servicio, se asume
-# que TODA factura de este sistema es "027" — no hace falta un catálogo de
-# servicios sujetos a detracción.
+# S/.400.00".
+#
+# 22 sep, pedido de Braulio ("recuerda que solo Harraso emite con
+# detraccion, BRMS no"): a diferencia de lo que se asumía antes (que
+# Harraso y BRMS prestaban el mismo servicio y por tanto ambas caían bajo
+# el mismo "027"), BRMS nunca aplica detracción — ni el cálculo automático
+# de acá abajo ni la confirmación manual de facturación.py/detail.html se
+# ofrecen para una factura de BRMS, sin importar el monto. Ver el filtro
+# por `issuer` en app/routes/facturacion.py (new()) y el `{% if
+# invoice.issuer == 'HARRASO' %}` en facturacion/detail.html.
 DETRACTION_CODE = "027"
 DETRACTION_PERCENTAGE = 4.0
 DETRACTION_THRESHOLD = 400.0
+
+# 22 sep, pedido de Braulio: catálogo de bienes/servicios para elegir por
+# NOMBRE al confirmar la detracción de una factura con ítems manuales (no
+# 100% viajes, que sigue calculando "027" solo) — el formulario ya no pide
+# escribir el código a mano, se elige de esta lista y el código/porcentaje
+# se completan solos (ver facturacion/form.html y facturacion/detail.html).
+#
+# Lista tal como la dio Braulio (los primeros códigos "principales" del
+# Anexo de bienes de SUNAT). OJO -- al verificarla contra fuentes públicas
+# actuales (docs.factpro.la/catalogos-sunat, estudiobonilla.pe) aparecieron
+# varias diferencias que NO se corrigieron acá a propósito (se prefirió
+# respetar la lista que dio Braulio antes que asumir cuál fuente tiene
+# razón): "003 Alcohol etílico", "008 Madera", "014 Carnes y despojos
+# comestibles" y "017 Harina/pellets de pescado" aparecen en esas fuentes
+# como 4% (acá quedaron con el % que dio Braulio); "006 Algodón", "013
+# Animales vivos" y "015 Abonos/cueros/pieles" aparecen en al menos una
+# fuente como códigos YA DEROGADOS (sin vigencia desde ~2014). Confirma con
+# tu contador antes de usar cualquiera de estos cuatro códigos o alguno de
+# esos tres en una factura real -- un depósito de detracción con el
+# porcentaje o código equivocado no se puede corregir después con SUNAT.
+DETRACTION_GOODS_CATALOG = [
+    ("001", "Azúcar y melaza de caña", 10.0),
+    ("003", "Alcohol etílico", 10.0),
+    ("004", "Recursos hidrobiológicos", 4.0),
+    ("005", "Maíz amarillo duro", 4.0),
+    ("006", "Algodón", 10.0),
+    ("007", "Caña de azúcar", 10.0),
+    ("008", "Madera", 12.0),
+    ("009", "Arena y piedra", 10.0),
+    ("010", "Residuos, subproductos, desechos, recortes y desperdicios", 15.0),
+    ("013", "Animales vivos", 10.0),
+    ("014", "Carnes y despojos comestibles", 10.0),
+    ("015", "Abonos, cueros y pieles de origen animal", 10.0),
+    ("016", "Aceite de pescado", 10.0),
+    ("017", "Harina, polvo y \"pellets\" de pescado", 10.0),
+    (DETRACTION_CODE, "Transporte y/o traslado de bienes", DETRACTION_PERCENTAGE),
+]
+DETRACTION_GOODS_CODES = {code for code, _label, _pct in DETRACTION_GOODS_CATALOG}
 
 
 def compute_detraction(amount, company):

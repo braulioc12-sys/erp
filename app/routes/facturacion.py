@@ -16,7 +16,16 @@ from flask import (
 
 from app.auth import permission_required, validate_csrf
 from app.db import execute, get_db, query_all, query_one
-from app.helpers import company_info_for_issuer, compute_detraction, next_code, parse_date, parse_float, today_str
+from app.helpers import (
+    DETRACTION_GOODS_CATALOG,
+    DETRACTION_GOODS_CODES,
+    company_info_for_issuer,
+    compute_detraction,
+    next_code,
+    parse_date,
+    parse_float,
+    today_str,
+)
 from app.integrations.sunat_ose import (
     SunatOseError,
     build_client_from_config,
@@ -25,6 +34,7 @@ from app.integrations.sunat_ose import (
     parse_ose_response,
 )
 from app.integrations.sunat_ruc import get_company_for_ruc
+from app.routes.viajes import ISSUER_CHOICES
 from app.storage import (
     local_sunat_documents_dir,
     save_sunat_document,
@@ -43,16 +53,27 @@ def _next_series_number(series):
 @bp.route("")
 @permission_required("facturacion", "view")
 def list_view():
+    """22 sep, pedido de Braulio ("en facturacion la primera pantalla debe
+    ser elegir Harraso o BRMS"): mismo patrón obligatorio (sin una opción
+    "Todas") ya usado en viajes.list_view/liquidaciones.list_view — ver el
+    comentario en viajes.py. Antes esta lista mezclaba facturas de ambas
+    empresas con una columna "Empresa"; ahora, al elegir la empresa acá, esa
+    elección se lleva también a "Generar factura" (ver new() más abajo),
+    donde ya no hace falta volver a preguntarla."""
+    issuer = request.args.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        return render_template("facturacion/list.html", invoices=None, issuer=None, status="")
+
     status = request.args.get("status", "")
     sql = """SELECT i.*, c.name as client_name FROM invoices i
-              JOIN clients c ON c.id = i.client_id WHERE 1=1"""
-    params = []
+              JOIN clients c ON c.id = i.client_id WHERE i.issuer = ?"""
+    params = [issuer]
     if status:
         sql += " AND i.status = ?"
         params.append(status)
     sql += " ORDER BY i.issue_date DESC, i.id DESC"
     invoices = query_all(sql, params)
-    return render_template("facturacion/list.html", invoices=invoices, status=status)
+    return render_template("facturacion/list.html", invoices=invoices, status=status, issuer=issuer)
 
 
 def _collect_manual_items():
@@ -163,10 +184,16 @@ def quick_new_client():
     depender de que alguien más lo dé de alta primero en Clientes."""
     if not validate_csrf():
         abort(400)
+    # 22 sep: la empresa ya se eligió al entrar a "Generar factura" (ver
+    # new() más abajo) -- el formulario de "+ Registrar cliente nuevo"
+    # manda ese mismo issuer en un campo oculto para no perderlo al volver.
+    issuer = request.form.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        issuer = None
     name = request.form.get("name", "").strip()
     if not name:
         flash("El nombre del cliente nuevo es obligatorio.", "error")
-        return redirect(url_for("facturacion.new"))
+        return redirect(url_for("facturacion.new", issuer=issuer) if issuer else url_for("facturacion.list_view"))
     client_id = execute(
         "INSERT INTO clients (name, ruc, phone, email, address) VALUES (?, ?, ?, ?, ?)",
         (
@@ -178,12 +205,32 @@ def quick_new_client():
         ),
     )
     flash(f"Cliente '{name}' creado — ya puedes facturarle.", "success")
-    return redirect(url_for("facturacion.new", client_id=client_id))
+    if not issuer:
+        return redirect(url_for("facturacion.list_view"))
+    return redirect(url_for("facturacion.new", issuer=issuer, client_id=client_id))
 
 
 @bp.route("/nuevo", methods=["GET", "POST"])
 @permission_required("facturacion", "edit")
 def new():
+    """22 sep, pedido de Braulio ("en facturacion la primera pantalla debe
+    ser elegir Harraso o BRMS. Luego cuando se genera factura ya no debe
+    salir ese campo de empresa que emite"): la empresa emisora ya no se
+    elige dentro de este formulario (el <select> "Empresa que emite" se
+    quitó de facturacion/form.html) -- se elige ANTES, en Facturación →
+    lista (ver list_view()), y este endpoint la recibe como ?issuer=... y
+    la mantiene fija en un campo oculto durante todo el formulario. Sin un
+    issuer válido (alguien entra directo a /facturacion/nuevo sin pasar por
+    la lista) se manda de vuelta a elegir empresa, igual que el resto de
+    módulos con este mismo patrón (viajes, liquidaciones)."""
+    if request.method == "POST":
+        issuer = request.form.get("issuer", "").strip().upper()
+    else:
+        issuer = request.args.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        flash("Elige primero la empresa (Harraso o BRMS) para generar la factura.", "error")
+        return redirect(url_for("facturacion.list_view"))
+
     clients = query_all("SELECT * FROM clients WHERE active = 1 ORDER BY name")
 
     if request.method == "POST":
@@ -197,13 +244,13 @@ def new():
 
         if not client_id:
             flash("Selecciona un cliente para facturar.", "error")
-            return redirect(url_for("facturacion.new", client_id=client_id))
+            return redirect(url_for("facturacion.new", issuer=issuer, client_id=client_id))
         if not trip_ids and not manual_items:
             flash(
                 "Marca al menos un viaje o agrega al menos un ítem adicional (descripción y monto) para facturar.",
                 "error",
             )
-            return redirect(url_for("facturacion.new", client_id=client_id))
+            return redirect(url_for("facturacion.new", issuer=issuer, client_id=client_id))
         if manual_items_incomplete:
             flash(
                 "Hay un ítem adicional a medio llenar (le falta la descripción o el monto) — "
@@ -220,32 +267,25 @@ def new():
             )
             if not trips:
                 flash("Los viajes seleccionados ya no están disponibles para facturar.", "error")
-                return redirect(url_for("facturacion.new", client_id=client_id))
+                return redirect(url_for("facturacion.new", issuer=issuer, client_id=client_id))
 
         # 7 sep, integración con tefacturo.pe: un comprobante electrónico se
         # emite a nombre de UN RUC, así que todos los viajes de una misma
         # factura deben ser de la misma empresa (Harraso o BRMS, ver
-        # trips.issuer). Se valida aquí en vez de solo en el checkbox del
-        # formulario, por si llegan viajes de ambas empresas manipulando el
-        # POST a mano.
+        # trips.issuer). 22 sep: ahora la empresa se fija ANTES (arriba, vía
+        # ?issuer=...) y "Viajes entregados pendientes de facturar" ya solo
+        # muestra los de esa empresa (ver el GET más abajo) -- esta
+        # validación queda como red de seguridad por si alguien manipula el
+        # POST a mano con viajes de la empresa equivocada.
         if trips:
             issuers = {t["issuer"] for t in trips}
-            if len(issuers) > 1:
+            if len(issuers) > 1 or issuer not in issuers:
                 flash(
-                    "Los viajes seleccionados son de empresas distintas (Harraso y BRMS); "
+                    "Los viajes seleccionados no son de la empresa elegida (Harraso/BRMS); "
                     "una factura solo puede emitirse a nombre de una. Factúralos por separado.",
                     "error",
                 )
-                return redirect(url_for("facturacion.new", client_id=client_id))
-            # 21 sep: si se marcaron viajes, la empresa emisora se toma de
-            # ellos (igual que siempre) -- el <select> "Empresa que emite"
-            # del formulario solo importa cuando la factura es 100% manual
-            # (sin viajes), ver el else de abajo.
-            issuer = issuers.pop()
-        else:
-            issuer = request.form.get("issuer")
-            if issuer not in ("HARRASO", "BRMS"):
-                issuer = "HARRASO"
+                return redirect(url_for("facturacion.new", issuer=issuer, client_id=client_id))
 
         total = sum(t["rate"] for t in trips) + sum(line_total for _, _, _, line_total in manual_items)
         number = next_code("F", "invoices")
@@ -270,13 +310,22 @@ def new():
         # "Detracción"): con algún ítem manual incluido, ahora se puede
         # confirmar la detracción de una vez en esta misma pantalla (mismos
         # campos y misma validación que update_detraction() en
-        # facturacion/detail.html) -- código, porcentaje, monto (se calcula
-        # solo si se deja en blanco) y cuenta del Banco de la Nación. Si NO
-        # se marca el switch, o falta código/porcentaje, se guarda sin
-        # detracción -- igual que siempre, se puede confirmar después desde
-        # el detalle de la factura.
+        # facturacion/detail.html) -- se elige el bien de una lista (ver
+        # DETRACTION_GOODS_CATALOG en app/helpers.py) que completa sola el
+        # código y el porcentaje; el monto se calcula solo si se deja en
+        # blanco. Si NO se marca el switch, o el bien elegido no trae
+        # código/porcentaje válidos, se guarda sin detracción -- igual que
+        # siempre, se puede confirmar después desde el detalle de la
+        # factura.
+        #
+        # 22 sep, mismo pedido ("recuerda que solo Harraso emite con
+        # detraccion, BRMS no"): para una factura de BRMS no se ofrece nada
+        # de esto -- ni este bloque manual ni el cálculo automático de abajo
+        # -- sin importar el monto ni los ítems que tenga.
         company = company_info_for_issuer(issuer, current_app.config)
-        if manual_items:
+        if issuer != "HARRASO":
+            detraction = {"applies": False, "code": None, "percentage": None, "amount": None, "bank_account": None}
+        elif manual_items:
             if request.form.get("detraction_applies") == "on":
                 det_code = request.form.get("detraction_code", "").strip()
                 det_percentage = parse_float(request.form.get("detraction_percentage"), default=0.0)
@@ -290,8 +339,8 @@ def new():
                     }
                 else:
                     flash(
-                        "Marcaste que esta factura tiene detracción, pero falta el código o el porcentaje "
-                        "— se generó SIN detracción. Confírmala desde el detalle de la factura.",
+                        "Marcaste que esta factura tiene detracción, pero no elegiste un bien válido de la "
+                        "lista — se generó SIN detracción. Confírmala desde el detalle de la factura.",
                         "error",
                     )
                     detraction = {"applies": False, "code": None, "percentage": None, "amount": None, "bank_account": None}
@@ -328,7 +377,7 @@ def new():
             )
         db.commit()
 
-        if manual_items and total > 400 and not detraction["applies"]:
+        if issuer == "HARRASO" and manual_items and total > 400 and not detraction["applies"]:
             flash(
                 "Esta factura supera S/400 e incluye ítems adicionales (no solo viajes) — "
                 "no se le aplicó detracción. Confirma si corresponde detracción (y con qué código) "
@@ -341,24 +390,21 @@ def new():
     selected_client = request.args.get("client_id", type=int)
     pending_trips = []
     if selected_client:
+        # 22 sep: solo viajes de la empresa ya elegida arriba (issuer) --
+        # antes se mostraban los del cliente sin importar la empresa, y el
+        # aviso de "factúralos por separado" cubría el resto; ahora que la
+        # empresa se fija primero, ni siquiera aparecen los de la otra.
         pending_trips = query_all(
-            """SELECT * FROM trips WHERE client_id = ? AND status = 'ENTREGADO' AND invoiced = 0
+            """SELECT * FROM trips WHERE client_id = ? AND issuer = ? AND status = 'ENTREGADO' AND invoiced = 0
                ORDER BY delivered_date""",
-            (selected_client,),
+            (selected_client, issuer),
         )
-    # 22 sep: cuenta del Banco de la Nación sugerida para la detracción,
-    # una por empresa (Harraso/BRMS) -- el JS del formulario cambia la
-    # sugerencia según la empresa elegida en "Empresa que emite" (ver
-    # facturacion/form.html), igual que hace tefacturo.pe con sus propios
-    # campos según la empresa emisora.
-    default_detraction_accounts = {
-        "HARRASO": company_info_for_issuer("HARRASO", current_app.config).get("bank_nacion_detraction_account", ""),
-        "BRMS": company_info_for_issuer("BRMS", current_app.config).get("bank_nacion_detraction_account", ""),
-    }
+    company = company_info_for_issuer(issuer, current_app.config)
     return render_template(
         "facturacion/form.html", clients=clients, selected_client=selected_client,
-        pending_trips=pending_trips, today=today_str(),
-        default_detraction_accounts=default_detraction_accounts,
+        pending_trips=pending_trips, today=today_str(), issuer=issuer,
+        default_detraction_account=company.get("bank_nacion_detraction_account", ""),
+        detraction_goods_catalog=DETRACTION_GOODS_CATALOG,
     )
 
 
@@ -390,6 +436,8 @@ def detail(invoice_id):
     return render_template(
         "facturacion/detail.html", invoice=invoice, items=items,
         default_detraction_account=company.get("bank_nacion_detraction_account", ""),
+        detraction_goods_catalog=DETRACTION_GOODS_CATALOG,
+        detraction_goods_codes=DETRACTION_GOODS_CODES,
     )
 
 
@@ -424,6 +472,18 @@ def update_detraction(invoice_id):
             (invoice_id,),
         )
         flash("Se quitó la detracción de esta factura.", "success")
+        return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
+
+    # 22 sep, pedido de Braulio ("recuerda que solo Harraso emite con
+    # detraccion, BRMS no"): el formulario de facturacion/detail.html ya no
+    # ofrece esta sección para una factura de BRMS (ver el `{% if
+    # invoice.issuer == 'HARRASO' %}` ahí) -- este chequeo es solo la red de
+    # seguridad por si alguien manda el POST a mano igual. Sí se permite
+    # siempre desmarcar "aplica" (el bloque de arriba), por si una factura
+    # de BRMS quedó con detracción de antes de esta regla y hay que
+    # corregirla.
+    if invoice["issuer"] != "HARRASO":
+        flash("BRMS no emite comprobantes con detracción — no se puede aplicar aquí.", "error")
         return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
 
     code = request.form.get("code", "").strip()

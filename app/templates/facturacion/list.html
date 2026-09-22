@@ -1,15 +1,24 @@
 {% extends 'base.html' %}
 {% import 'partials/macros.html' as m %}
+{% import 'partials/company_gate.html' as cg %}
 {% block title %}Facturación{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>Facturación</h1>
+  <h1>Facturación{% if issuer %} — {{ 'BRMS' if issuer == 'BRMS' else 'Harraso Transport' }}{% endif %}</h1>
+  {% if issuer %}
   <div class="page-actions">
-    <a href="{{ url_for('facturacion.new') }}" class="btn btn-primary">+ Generar factura</a>
+    <a href="{{ url_for('facturacion.new', issuer=issuer) }}" class="btn btn-primary">+ Generar factura</a>
   </div>
+  {% endif %}
 </div>
 
+{% if not issuer %}
+{{ cg.company_gate('facturacion.list_view', 'para ver sus facturas') }}
+{% else %}
+<p class="company-switch"><a href="{{ url_for('facturacion.list_view') }}">↺ Cambiar de empresa</a></p>
+
 <form class="filters" method="get">
+  <input type="hidden" name="issuer" value="{{ issuer }}">
   <label>Estado
     <select name="status">
       <option value="">Todos</option>
@@ -23,13 +32,12 @@
 
 <div class="table-wrap">
   <table>
-    <thead><tr><th>N°</th><th>Cliente</th><th>Empresa</th><th>Emisión</th><th>Vencimiento</th><th class="text-right">Monto</th><th>Estado</th><th>SUNAT</th></tr></thead>
+    <thead><tr><th>N°</th><th>Cliente</th><th>Emisión</th><th>Vencimiento</th><th class="text-right">Monto</th><th>Estado</th><th>SUNAT</th></tr></thead>
     <tbody>
       {% for i in invoices %}
       <tr onclick="window.location='{{ url_for('facturacion.detail', invoice_id=i.id) }}'" style="cursor:pointer;">
         <td><a href="{{ url_for('facturacion.detail', invoice_id=i.id) }}">{{ i.number }}</a></td>
         <td>{{ i.client_name }}</td>
-        <td>{{ 'BRMS' if i.issuer == 'BRMS' else 'Harraso' }}</td>
         <td>{{ i.issue_date }}</td>
         <td>{{ i.due_date or '—' }}</td>
         <td class="text-right">{{ i.amount|money }}</td>
@@ -37,9 +45,10 @@
         <td>{{ m.badge(i.sunat_status) }}</td>
       </tr>
       {% else %}
-      <tr><td colspan="8" class="table-empty">No hay facturas generadas.</td></tr>
+      <tr><td colspan="7" class="table-empty">No hay facturas generadas.</td></tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
+{% endif %}
 {% endblock %}

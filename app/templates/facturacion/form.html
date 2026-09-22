@@ -1,10 +1,12 @@
 {% extends 'base.html' %}
 {% block title %}Generar factura{% endblock %}
 {% block content %}
-<div class="page-header"><h1>Generar factura</h1></div>
+<div class="page-header"><h1>Generar factura — {{ 'BRMS' if issuer == 'BRMS' else 'Harraso Transport' }}</h1></div>
+<p class="company-switch"><a href="{{ url_for('facturacion.list_view') }}">↺ Cambiar de empresa</a></p>
 
 <div class="panel">
   <form method="get" class="filters">
+    <input type="hidden" name="issuer" value="{{ issuer }}">
     <label>Cliente
       <select name="client_id" onchange="this.form.submit()">
         <option value="">-- Selecciona un cliente --</option>
@@ -22,9 +24,11 @@
        nuevo y se pueda emitir una factura de cliente que no este
        registrado"): registra el cliente sin salir de esta pantalla —
        redirige de vuelta ya con ese cliente elegido (ver
-       quick_new_client() en app/routes/facturacion.py). -->
+       quick_new_client() en app/routes/facturacion.py). Manda el issuer ya
+       elegido arriba como campo oculto para no perderlo al volver. -->
   <form method="post" action="{{ url_for('facturacion.quick_new_client') }}" id="new-client-form" style="display:none; margin-top:12px; padding-top:12px; border-top:1px solid var(--border, #e2e5eb);">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="issuer" value="{{ issuer }}">
     <div class="form-row">
       <label>Nombre / Razón social *
         <input type="text" name="name" id="new_client_name" required>
@@ -116,19 +120,26 @@
 <form class="panel" method="post" id="invoice-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <input type="hidden" name="client_id" value="{{ selected_client }}">
+  <!-- 22 sep, pedido de Braulio ("la primera pantalla debe ser elegir
+       Harraso o BRMS... ya no debe salir ese campo de empresa que emite"):
+       la empresa se eligió antes de entrar acá (Facturación → lista, ver
+       list_view()) y queda fija durante todo este formulario -- ya no hay
+       un <select> "Empresa que emite" ni depende de si se marcan viajes o
+       no. "Viajes entregados pendientes de facturar" de abajo ya solo trae
+       los de esta empresa (ver el GET de new() en
+       app/routes/facturacion.py). -->
+  <input type="hidden" name="issuer" value="{{ issuer }}">
 
   <h2 class="mt-0">Viajes entregados pendientes de facturar</h2>
   {% if pending_trips %}
-  <p class="muted">Una factura electrónica se emite a nombre de una sola empresa — si hay viajes de Harraso y de BRMS, márcalos por separado (uno u otro grupo a la vez).</p>
   <div class="table-wrap" style="margin-bottom:16px;">
     <table>
-      <thead><tr><th></th><th>Código</th><th>Empresa</th><th>Fecha entrega</th><th>Ruta</th><th class="text-right">Tarifa</th></tr></thead>
+      <thead><tr><th></th><th>Código</th><th>Fecha entrega</th><th>Ruta</th><th class="text-right">Tarifa</th></tr></thead>
       <tbody>
         {% for t in pending_trips %}
         <tr>
           <td><input type="checkbox" name="trip_ids" value="{{ t.id }}" class="trip-checkbox" checked style="width:auto;"></td>
           <td>{{ t.code }}</td>
-          <td>{{ 'BRMS' if t.issuer == 'BRMS' else 'Harraso' }}</td>
           <td>{{ t.delivered_date }}</td>
           <td>{{ t.origin }} → {{ t.destination }}</td>
           <td class="text-right">{{ t.rate|money }}</td>
@@ -138,7 +149,7 @@
     </table>
   </div>
   {% else %}
-  <p class="muted">Este cliente no tiene viajes entregados pendientes de facturar — puedes facturarle igual con los ítems adicionales de abajo (por ejemplo, un alquiler u otro concepto sin viaje).</p>
+  <p class="muted">Este cliente no tiene viajes entregados pendientes de facturar (con esta empresa) — puedes facturarle igual con los ítems adicionales de abajo (por ejemplo, un alquiler u otro concepto sin viaje).</p>
   {% endif %}
 
   <h2>Ítems adicionales (opcional)</h2>
@@ -163,49 +174,53 @@
     <button type="button" class="btn btn-secondary" id="btn-add-row">+ Agregar línea</button>
   </div>
 
-  <div class="form-row" id="issuer-row">
-    <label>Empresa que emite
-      <select name="issuer" id="issuer-select">
-        <option value="HARRASO">Harraso Transport</option>
-        <option value="BRMS">BRMS</option>
-      </select>
-    </label>
-  </div>
-  <p class="muted" id="issuer-hint" style="margin-top:-8px;">Solo se usa si no marcas ningún viaje arriba — si marcas viajes, la empresa se toma de ellos.</p>
-
-  <!-- 22 sep, pedido de Braulio ("como confirmo la detraccion?" + captura
-       del formulario de tefacturo.pe, que tiene un switch de "Detracción"):
-       solo importa cuando la factura tiene ítems adicionales -- si es 100%
-       de viajes, el código "027" se calcula solo (ver new() en
-       app/routes/facturacion.py) y esta sección queda deshabilitada. -->
-  <div id="detraccion-section" style="margin:0 0 16px; padding:16px; border:1px solid var(--border, #e2e5eb); border-radius:8px; background:var(--bg-subtle,#f7f8fa);">
-    <label style="display:flex; align-items:center; gap:8px; font-weight:600;">
+  <!-- 22 sep, pedido de Braulio: "el cuadro de detraccion debe ser chico
+       solo que salga para marcar (Afecta a detraccion)" -- por defecto solo
+       se ve el checkbox; el resto (bien, código, porcentaje, monto, cuenta)
+       aparece recién al marcarlo. "el codigo del bien debe ser para elegir
+       el nombre... y se jale solo el codigo y el %" -- se elige de una
+       lista (DETRACTION_GOODS_CATALOG en app/helpers.py, con los
+       porcentajes que dio Braulio -- ver el comentario ahí sobre algunas
+       diferencias encontradas contra fuentes públicas, confírmalas con tu
+       contador) y el código/porcentaje se completan solos, de solo
+       lectura. "recuerda que solo Harraso emite con detraccion, BRMS no" --
+       esta sección entera no existe para una factura de BRMS. -->
+  {% if issuer == 'HARRASO' %}
+  <div id="detraccion-section" style="margin:0 0 16px; padding:12px 16px; border:1px solid var(--border, #e2e5eb); border-radius:8px; background:var(--bg-subtle,#f7f8fa);">
+    <label style="display:flex; align-items:center; gap:8px; font-weight:600; margin:0;">
       <input type="checkbox" name="detraction_applies" id="detraction-applies" style="width:auto;">
-      Esta factura está sujeta a detracción
+      Afecta a detracción
     </label>
-    <div class="form-row" id="detraccion-fields" style="display:none; margin-top:10px;">
-      <label>Código del bien/servicio
-        <input type="text" name="detraction_code" id="detraction-code" placeholder="Ej. 037">
+    <div id="detraccion-fields" style="display:none; margin-top:12px;">
+      <label>Bien / servicio sujeto a detracción
+        <select id="detraction-good-picker">
+          <option value="">-- Elige de la lista --</option>
+          {% for code, label, pct in detraction_goods_catalog %}
+          <option value="{{ code }}" data-pct="{{ pct }}">{{ code }} — {{ label }} ({{ '%g'|format(pct) }}%)</option>
+          {% endfor %}
+        </select>
       </label>
-      <label>Porcentaje (%)
-        <input type="number" name="detraction_percentage" id="detraction-percentage" step="0.01" min="0">
-      </label>
+      <div class="form-row">
+        <label>Código
+          <input type="text" name="detraction_code" id="detraction-code" readonly style="background:var(--bg-soft,#f3f5f8);">
+        </label>
+        <label>Porcentaje (%)
+          <input type="text" name="detraction_percentage" id="detraction-percentage" readonly style="background:var(--bg-soft,#f3f5f8);">
+        </label>
+      </div>
+      <div class="form-row">
+        <label>Monto detraído (S/) — vacío para calcularlo con el % de arriba
+          <input type="number" name="detraction_amount" step="0.01" min="0">
+        </label>
+        <label>Cuenta Banco de la Nación
+          <input type="text" name="detraction_bank_account" value="{{ default_detraction_account or '' }}">
+        </label>
+      </div>
+      <p class="muted mt-0">Confirma con tu contador el bien y porcentaje correctos antes de guardar.</p>
     </div>
-    <div class="form-row" id="detraccion-fields-2" style="display:none;">
-      <label>Monto detraído (S/) — vacío para calcularlo con el % de arriba
-        <input type="number" name="detraction_amount" step="0.01" min="0">
-      </label>
-      <label>Cuenta Banco de la Nación
-        <input type="text" name="detraction_bank_account" id="detraction-bank-account"
-               value="{{ default_detraction_accounts.HARRASO if default_detraction_accounts else '' }}">
-      </label>
-    </div>
-    <p class="muted mt-0" id="detraccion-hint">
-      Agrega al menos un ítem adicional para poder confirmar la detracción aquí — en una factura 100% de viajes se
-      calcula automáticamente (código 027, transporte de carga). Confirma con tu contador el código y porcentaje
-      correctos antes de guardar.
-    </p>
+    <p class="muted mt-0" id="detraccion-hint">Agrega al menos un ítem adicional para poder marcar detracción aquí — en una factura 100% de viajes se calcula automáticamente (código 027, transporte de carga).</p>
   </div>
+  {% endif %}
 
   <h2>Condición de pago</h2>
   <div class="form-row">
@@ -230,17 +245,13 @@
 
   <div class="btn-group">
     <button type="submit" class="btn btn-primary">Generar factura</button>
-    <a href="{{ url_for('facturacion.list_view') }}" class="btn btn-secondary">Cancelar</a>
+    <a href="{{ url_for('facturacion.list_view', issuer=issuer) }}" class="btn btn-secondary">Cancelar</a>
   </div>
 </form>
 
 <script>
 (function () {
   var tbody = document.getElementById('items-tbody');
-  var defaultDetractionAccounts = {
-    HARRASO: {{ (default_detraction_accounts.HARRASO if default_detraction_accounts else '') | tojson }},
-    BRMS: {{ (default_detraction_accounts.BRMS if default_detraction_accounts else '') | tojson }}
-  };
 
   function updateItemsTotal() {
     var total = 0;
@@ -300,54 +311,45 @@
     updateItemsTotal();
   });
 
-  // La empresa que emite solo importa cuando la factura es 100% manual (sin
-  // viajes marcados) -- ver new() en app/routes/facturacion.py. Se
-  // deshabilita (no se envía) el <select> mientras haya al menos un viaje
-  // marcado, para que quede claro de dónde sale la empresa en ese caso.
-  var issuerSelect = document.getElementById('issuer-select');
-  var issuerRow = document.getElementById('issuer-row');
-  var tripCheckboxes = document.querySelectorAll('.trip-checkbox');
-  function updateIssuerState() {
-    var anyChecked = Array.prototype.some.call(tripCheckboxes, function (cb) { return cb.checked; });
-    issuerSelect.disabled = anyChecked;
-    issuerRow.style.opacity = anyChecked ? '0.5' : '1';
-  }
-  tripCheckboxes.forEach(function (cb) { cb.addEventListener('change', updateIssuerState); });
-  updateIssuerState();
-
-  // Sugiere la cuenta del Banco de la Nación según la empresa elegida --
-  // solo si el campo sigue vacío (no pisa algo que el usuario ya escribió a
-  // mano), mismo criterio "no destructivo" que el autocompletado de RUC.
-  var bankAccountInput = document.getElementById('detraction-bank-account');
-  issuerSelect.addEventListener('change', function () {
-    if (!bankAccountInput.value.trim()) {
-      bankAccountInput.value = defaultDetractionAccounts[issuerSelect.value] || '';
-    }
-  });
-
-  // Detracción (22 sep): la sección solo tiene sentido cuando hay al menos
-  // un ítem adicional -- en una factura 100% de viajes la detracción "027"
-  // se calcula sola (ver new() en facturacion.py) y esta sección no aplica.
+  // Detracción (22 sep): cuadro chico -- por defecto solo el checkbox
+  // "Afecta a detracción"; el resto de campos aparece recién al marcarlo,
+  // y solo tiene sentido cuando hay al menos un ítem adicional (en una
+  // factura 100% de viajes la detracción "027" se calcula sola, ver new()
+  // en facturacion.py). No existe en absoluto para BRMS (ver el condicional
+  // de empresa más arriba en este archivo) -- por eso todo esto se protege
+  // con comprobaciones de null, para no romper la página cuando la sección
+  // ni siquiera está en el HTML.
   var detraccionSection = document.getElementById('detraccion-section');
   var detraccionApplies = document.getElementById('detraction-applies');
   var detraccionFields = document.getElementById('detraccion-fields');
-  var detraccionFields2 = document.getElementById('detraccion-fields-2');
   var detraccionHint = document.getElementById('detraccion-hint');
+  var detraccionGoodPicker = document.getElementById('detraction-good-picker');
+  var detraccionCodeInput = document.getElementById('detraction-code');
+  var detraccionPercentageInput = document.getElementById('detraction-percentage');
+
+  if (detraccionApplies) {
+    detraccionApplies.addEventListener('change', updateDetraccionFieldsVisibility);
+  }
+  if (detraccionGoodPicker) {
+    detraccionGoodPicker.addEventListener('change', function () {
+      var opt = detraccionGoodPicker.options[detraccionGoodPicker.selectedIndex];
+      detraccionCodeInput.value = opt.value || '';
+      detraccionPercentageInput.value = opt.value ? opt.getAttribute('data-pct') : '';
+    });
+  }
 
   function updateDetraccionFieldsVisibility() {
+    if (!detraccionApplies) { return; }
     var show = detraccionApplies.checked && !detraccionApplies.disabled;
-    detraccionFields.style.display = show ? 'flex' : 'none';
-    detraccionFields2.style.display = show ? 'flex' : 'none';
+    detraccionFields.style.display = show ? 'block' : 'none';
   }
-  detraccionApplies.addEventListener('change', updateDetraccionFieldsVisibility);
 
   function updateDetraccionState() {
+    if (!detraccionSection) { return; }
     var hasManualItems = tbody.querySelectorAll('.item-row').length > 0;
     detraccionApplies.disabled = !hasManualItems;
     detraccionSection.style.opacity = hasManualItems ? '1' : '0.5';
-    detraccionHint.textContent = hasManualItems
-      ? 'Confirma con tu contador el código y porcentaje correctos antes de guardar -- este sistema no los determina automáticamente para ítems que no son de transporte de carga.'
-      : 'Agrega al menos un ítem adicional para poder confirmar la detracción aquí -- en una factura 100% de viajes se calcula automáticamente (código 027, transporte de carga).';
+    detraccionHint.style.display = hasManualItems ? 'none' : '';
     if (!hasManualItems) {
       detraccionApplies.checked = false;
       updateDetraccionFieldsVisibility();
