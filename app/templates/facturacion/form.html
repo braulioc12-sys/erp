@@ -17,20 +17,20 @@
 </div>
 
 {% if selected_client %}
-<form class="panel" method="post">
+<form class="panel" method="post" id="invoice-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <input type="hidden" name="client_id" value="{{ selected_client }}">
 
-  <h2>Viajes entregados pendientes de facturar</h2>
+  <h2 class="mt-0">Viajes entregados pendientes de facturar</h2>
   {% if pending_trips %}
-  <p class="muted mt-0">Una factura electrónica se emite a nombre de una sola empresa — si hay viajes de Harraso y de BRMS, márcalos por separado (uno u otro grupo a la vez).</p>
+  <p class="muted">Una factura electrónica se emite a nombre de una sola empresa — si hay viajes de Harraso y de BRMS, márcalos por separado (uno u otro grupo a la vez).</p>
   <div class="table-wrap" style="margin-bottom:16px;">
     <table>
       <thead><tr><th></th><th>Código</th><th>Empresa</th><th>Fecha entrega</th><th>Ruta</th><th class="text-right">Tarifa</th></tr></thead>
       <tbody>
         {% for t in pending_trips %}
         <tr>
-          <td><input type="checkbox" name="trip_ids" value="{{ t.id }}" checked style="width:auto;"></td>
+          <td><input type="checkbox" name="trip_ids" value="{{ t.id }}" class="trip-checkbox" checked style="width:auto;"></td>
           <td>{{ t.code }}</td>
           <td>{{ 'BRMS' if t.issuer == 'BRMS' else 'Harraso' }}</td>
           <td>{{ t.delivered_date }}</td>
@@ -41,6 +41,31 @@
       </tbody>
     </table>
   </div>
+  {% else %}
+  <p class="muted">Este cliente no tiene viajes entregados pendientes de facturar — puedes facturarle igual con los ítems adicionales de abajo (por ejemplo, un alquiler u otro concepto sin viaje).</p>
+  {% endif %}
+
+  <h2>Ítems adicionales (opcional)</h2>
+  <p class="muted mt-0">Para conceptos que no vienen de un viaje — alquileres u otro tipo de servicio. Puedes combinarlos con los viajes marcados arriba, o dejar los viajes sin marcar y facturar solo con estos ítems.</p>
+  <div class="table-wrap" style="margin-bottom:8px;">
+    <table id="items-table">
+      <thead><tr><th>Descripción</th><th style="width:16%;">Monto (S/)</th><th></th></tr></thead>
+      <tbody id="items-tbody"></tbody>
+    </table>
+  </div>
+  <div class="btn-group" style="margin-top:-8px; margin-bottom:16px;">
+    <button type="button" class="btn btn-secondary" id="btn-add-row">+ Agregar línea</button>
+  </div>
+
+  <div class="form-row" id="issuer-row">
+    <label>Empresa que emite
+      <select name="issuer" id="issuer-select">
+        <option value="HARRASO">Harraso Transport</option>
+        <option value="BRMS">BRMS</option>
+      </select>
+    </label>
+  </div>
+  <p class="muted" id="issuer-hint" style="margin-top:-8px;">Solo se usa si no marcas ningún viaje arriba — si marcas viajes, la empresa se toma de ellos.</p>
 
   <div class="form-row">
     <label>Fecha de emisión
@@ -58,9 +83,42 @@
     <button type="submit" class="btn btn-primary">Generar factura</button>
     <a href="{{ url_for('facturacion.list_view') }}" class="btn btn-secondary">Cancelar</a>
   </div>
-  {% else %}
-  <p class="muted">Este cliente no tiene viajes entregados pendientes de facturar.</p>
-  {% endif %}
 </form>
+
+<script>
+(function () {
+  var tbody = document.getElementById('items-tbody');
+
+  function rowTemplate() {
+    var tr = document.createElement('tr');
+    tr.className = 'item-row';
+    tr.innerHTML =
+      '<td><input type="text" name="item_description" placeholder="Ej. Alquiler de cisterna, setiembre 2026" style="min-width:220px;"></td>' +
+      '<td><input type="number" name="item_amount" min="0" step="0.01" placeholder="0.00"></td>' +
+      '<td><button type="button" class="btn btn-secondary btn-remove-row">✕</button></td>';
+    tr.querySelector('.btn-remove-row').addEventListener('click', function () { tr.remove(); });
+    return tr;
+  }
+
+  document.getElementById('btn-add-row').addEventListener('click', function () {
+    tbody.appendChild(rowTemplate());
+  });
+
+  // La empresa que emite solo importa cuando la factura es 100% manual (sin
+  // viajes marcados) -- ver new() en app/routes/facturacion.py. Se
+  // deshabilita (no se envía) el <select> mientras haya al menos un viaje
+  // marcado, para que quede claro de dónde sale la empresa en ese caso.
+  var issuerSelect = document.getElementById('issuer-select');
+  var issuerRow = document.getElementById('issuer-row');
+  var tripCheckboxes = document.querySelectorAll('.trip-checkbox');
+  function updateIssuerState() {
+    var anyChecked = Array.prototype.some.call(tripCheckboxes, function (cb) { return cb.checked; });
+    issuerSelect.disabled = anyChecked;
+    issuerRow.style.opacity = anyChecked ? '0.5' : '1';
+  }
+  tripCheckboxes.forEach(function (cb) { cb.addEventListener('change', updateIssuerState); });
+  updateIssuerState();
+})();
+</script>
 {% endif %}
 {% endblock %}

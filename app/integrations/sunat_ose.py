@@ -434,23 +434,35 @@ def build_invoice_payload(invoice, items, client, company):
     if sin_tarifa:
         # `items` no siempre trae `trip_code` (algunas consultas solo hacen
         # SELECT * FROM invoice_items, sin JOIN con trips) — se usa si está
-        # disponible, y si no, se cae al id del viaje.
-        codigos = ", ".join(
-            (it["trip_code"] if "trip_code" in it.keys() and it["trip_code"] else f"viaje #{it['trip_id']}")
-            for it in sin_tarifa
-        )
+        # disponible, y si no, se cae al id del viaje. 21 sep, pedido de
+        # Braulio (ítems manuales sin viaje, ej. alquileres): un ítem así
+        # tiene trip_id NULL -- se identifica por su descripción (o, si ni
+        # eso se completó, por el id del propio ítem) en vez de mostrar
+        # "viaje #None".
+        def _identificar(it):
+            if "trip_code" in it.keys() and it["trip_code"]:
+                return it["trip_code"]
+            if it["trip_id"]:
+                return f"viaje #{it['trip_id']}"
+            return it["description"] or f"ítem #{it['id']}"
+
+        codigos = ", ".join(_identificar(it) for it in sin_tarifa)
         raise SunatOseError(
-            f"El viaje {codigos} tiene tarifa S/ 0.00 en esta factura — SUNAT no permite "
-            "un ítem de venta con valor cero. Corrige la tarifa de ese viaje (o quítalo de "
-            "esta factura y factúralo aparte, si de verdad no tiene costo) antes de enviar."
+            f"El ítem {codigos} tiene tarifa S/ 0.00 en esta factura — SUNAT no permite "
+            "un ítem de venta con valor cero. Corrige el monto (o quítalo de esta factura "
+            "y factúralo aparte, si de verdad no tiene costo) antes de enviar."
         )
 
     detalle = []
     for it in items:
         gravada, _igv = _split_igv(float(it["amount"]))
+        # 21 sep, pedido de Braulio (ítems manuales sin viaje): sin trip_id,
+        # el código de producto se arma con el id del propio ítem de factura
+        # en vez de "SERV-None".
+        codigo_producto = f"SERV-{it['trip_id']}" if it["trip_id"] else f"ITEM-{it['id']}"
         detalle.append(
             {
-                "codigoProducto": f"SERV-{it['trip_id']}",
+                "codigoProducto": codigo_producto,
                 "descripcion": it["description"] or "Servicio de transporte de carga",
                 "tipoAfectacion": "GRAVADO_OPERACION_ONEROSA",
                 # Confirmado contra la API real (8 sep, primer envío real de

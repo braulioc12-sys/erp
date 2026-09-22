@@ -71,14 +71,16 @@
 </div>
 
 <div class="panel">
-  <h2>Viajes incluidos</h2>
+  <h2>Ítems facturados</h2>
   <div class="table-wrap">
     <table>
       <thead><tr><th>Viaje</th><th>Descripción</th><th class="text-right">Monto</th></tr></thead>
       <tbody>
         {% for it in items %}
         <tr>
-          <td><a href="{{ url_for('viajes.detail', trip_id=it.trip_id) }}">{{ it.trip_code }}</a></td>
+          <!-- 21 sep: un ítem manual (alquiler u otro concepto sin viaje,
+               ver new() en app/routes/facturacion.py) tiene trip_id NULL. -->
+          <td>{% if it.trip_id %}<a href="{{ url_for('viajes.detail', trip_id=it.trip_id) }}">{{ it.trip_code }}</a>{% else %}<span class="muted">— (ítem adicional)</span>{% endif %}</td>
           <td class="wrap">{{ it.description }}</td>
           <td class="text-right">{{ it.amount|money }}</td>
         </tr>

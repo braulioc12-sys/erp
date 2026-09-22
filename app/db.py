@@ -624,6 +624,49 @@ def _apply_role_check_migration_sqlite(conn):
         conn.execute(f"PRAGMA foreign_keys = {'ON' if fk_was_on else 'OFF'}")
 
 
+def _apply_invoice_items_trip_nullable_sqlite(conn):
+    """21 sep, pedido de Braulio ("aparte de facturar los viajes, tambien
+    se puedan emitir facturas no relacionadas a viajes... de todo tipo"):
+    un ítem de factura ya no tiene por qué venir de un viaje (puede ser un
+    alquiler u otro concepto libre, ver app/routes/facturacion.py) -- trip_id
+    pasa a ser OPCIONAL. SQLite no soporta ALTER TABLE para quitar un NOT
+    NULL ya creado, así que hay que recrear la tabla -- mismo mecanismo que
+    _apply_role_check_migration_sqlite (rename -> crear la nueva -> copiar
+    -> drop), pero sin necesidad de tocar PRAGMA foreign_keys/
+    legacy_alter_table: a diferencia de "users", ninguna otra tabla tiene una
+    FOREIGN KEY que apunte a invoice_items, así que no hay ninguna referencia
+    que SQLite pueda reescribir sola al renombrarla."""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='invoice_items'"
+    ).fetchone()
+    if not row or not row[0] or "trip_id INTEGER NOT NULL" not in row[0]:
+        return  # ya migrada, o todavía no existe (schema.sql ya la crea nullable)
+    conn.execute("ALTER TABLE invoice_items RENAME TO invoice_items_trip_nullable_old")
+    conn.execute(
+        """CREATE TABLE invoice_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            invoice_id INTEGER NOT NULL REFERENCES invoices(id),
+            trip_id INTEGER REFERENCES trips(id),
+            description TEXT,
+            amount REAL NOT NULL DEFAULT 0
+        )"""
+    )
+    conn.execute(
+        """INSERT INTO invoice_items (id, invoice_id, trip_id, description, amount)
+           SELECT id, invoice_id, trip_id, description, amount FROM invoice_items_trip_nullable_old"""
+    )
+    conn.execute("DROP TABLE invoice_items_trip_nullable_old")
+
+
+def _apply_invoice_items_trip_nullable_postgres(conn):
+    """Equivalente Postgres de _apply_invoice_items_trip_nullable_sqlite --
+    acá sí se puede quitar el NOT NULL directamente, y es seguro repetirlo
+    en cada arranque: si la columna ya es nullable, DROP NOT NULL es un
+    no-op (a diferencia del CHECK de "role", Postgres no se queja)."""
+    cur = conn.cursor()
+    cur.execute("ALTER TABLE invoice_items ALTER COLUMN trip_id DROP NOT NULL")
+
+
 def _apply_role_check_migration_postgres(conn):
     """Equivalente para Postgres/RDS: Postgres sí soporta ALTER TABLE ...
     DROP/ADD CONSTRAINT directamente, pero hay que encontrar el nombre real
@@ -1117,6 +1160,7 @@ def init_db(app):
             _apply_column_migrations_postgres(conn)
             cur.execute(fk_sql)
             _apply_role_check_migration_postgres(conn)
+            _apply_invoice_items_trip_nullable_postgres(conn)
             _backfill_user_roles_postgres(conn)
             _ensure_combustible_concept_postgres(conn)
             _fix_boleta_account_codes_postgres(conn)
@@ -1132,6 +1176,7 @@ def init_db(app):
         conn.executescript(schema_sql)
         _apply_column_migrations_sqlite(conn)
         _apply_role_check_migration_sqlite(conn)
+        _apply_invoice_items_trip_nullable_sqlite(conn)
         _backfill_user_roles_sqlite(conn)
         _ensure_combustible_concept_sqlite(conn)
         _fix_boleta_account_codes_sqlite(conn)

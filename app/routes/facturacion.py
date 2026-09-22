@@ -52,6 +52,36 @@ def list_view():
     return render_template("facturacion/list.html", invoices=invoices, status=status)
 
 
+def _collect_manual_items():
+    """21 sep, pedido de Braulio ("aparte de facturar los viajes, tambien
+    se puedan emitir facturas no relacionadas a viajes, como alquileres...
+    de todo tipo"): filas libres (descripción + monto) que el propio
+    formulario permite agregar/quitar con JS (ver facturacion/form.html,
+    mismo patrón "+ Agregar línea" que ya usa Cotizaciones). Una fila se
+    ignora en silencio si quedó vacía (usuario que le dio "+ Agregar línea"
+    de más y no la llenó) -- solo se exige description Y amount > 0 cuando
+    al menos uno de los dos campos de esa fila SÍ se completó, para poder
+    avisar de una fila a medio llenar en vez de tragarla sin decir nada."""
+    descriptions = request.form.getlist("item_description")
+    amounts = request.form.getlist("item_amount")
+    items = []
+    incomplete = False
+    for desc, amt_raw in zip(descriptions, amounts):
+        desc = (desc or "").strip()
+        amt_raw = (amt_raw or "").strip()
+        if not desc and not amt_raw:
+            continue
+        try:
+            amt = float(amt_raw)
+        except ValueError:
+            amt = 0
+        if not desc or amt <= 0:
+            incomplete = True
+            continue
+        items.append((desc, amt))
+    return items, incomplete
+
+
 @bp.route("/nuevo", methods=["GET", "POST"])
 @permission_required("facturacion", "edit")
 def new():
@@ -64,19 +94,34 @@ def new():
         trip_ids = request.form.getlist("trip_ids")
         issue_date = parse_date(request.form.get("issue_date")) or today_str()
         due_date = parse_date(request.form.get("due_date"))
+        manual_items, manual_items_incomplete = _collect_manual_items()
 
-        if not client_id or not trip_ids:
-            flash("Selecciona un cliente y al menos un viaje para facturar.", "error")
+        if not client_id:
+            flash("Selecciona un cliente para facturar.", "error")
             return redirect(url_for("facturacion.new", client_id=client_id))
+        if not trip_ids and not manual_items:
+            flash(
+                "Marca al menos un viaje o agrega al menos un ítem adicional (descripción y monto) para facturar.",
+                "error",
+            )
+            return redirect(url_for("facturacion.new", client_id=client_id))
+        if manual_items_incomplete:
+            flash(
+                "Hay un ítem adicional a medio llenar (le falta la descripción o el monto) — "
+                "se ignoró esa línea. Revisa los ítems adicionales antes de guardar si no era esa tu intención.",
+                "error",
+            )
 
-        trips = query_all(
-            f"""SELECT * FROM trips WHERE id IN ({','.join('?' * len(trip_ids))})
-                AND client_id = ? AND status = 'ENTREGADO' AND invoiced = 0""",
-            (*trip_ids, client_id),
-        )
-        if not trips:
-            flash("Los viajes seleccionados ya no están disponibles para facturar.", "error")
-            return redirect(url_for("facturacion.new", client_id=client_id))
+        trips = []
+        if trip_ids:
+            trips = query_all(
+                f"""SELECT * FROM trips WHERE id IN ({','.join('?' * len(trip_ids))})
+                    AND client_id = ? AND status = 'ENTREGADO' AND invoiced = 0""",
+                (*trip_ids, client_id),
+            )
+            if not trips:
+                flash("Los viajes seleccionados ya no están disponibles para facturar.", "error")
+                return redirect(url_for("facturacion.new", client_id=client_id))
 
         # 7 sep, integración con tefacturo.pe: un comprobante electrónico se
         # emite a nombre de UN RUC, así que todos los viajes de una misma
@@ -84,27 +129,50 @@ def new():
         # trips.issuer). Se valida aquí en vez de solo en el checkbox del
         # formulario, por si llegan viajes de ambas empresas manipulando el
         # POST a mano.
-        issuers = {t["issuer"] for t in trips}
-        if len(issuers) > 1:
-            flash(
-                "Los viajes seleccionados son de empresas distintas (Harraso y BRMS); "
-                "una factura solo puede emitirse a nombre de una. Factúralos por separado.",
-                "error",
-            )
-            return redirect(url_for("facturacion.new", client_id=client_id))
-        issuer = issuers.pop()
+        if trips:
+            issuers = {t["issuer"] for t in trips}
+            if len(issuers) > 1:
+                flash(
+                    "Los viajes seleccionados son de empresas distintas (Harraso y BRMS); "
+                    "una factura solo puede emitirse a nombre de una. Factúralos por separado.",
+                    "error",
+                )
+                return redirect(url_for("facturacion.new", client_id=client_id))
+            # 21 sep: si se marcaron viajes, la empresa emisora se toma de
+            # ellos (igual que siempre) -- el <select> "Empresa que emite"
+            # del formulario solo importa cuando la factura es 100% manual
+            # (sin viajes), ver el else de abajo.
+            issuer = issuers.pop()
+        else:
+            issuer = request.form.get("issuer")
+            if issuer not in ("HARRASO", "BRMS"):
+                issuer = "HARRASO"
 
-        total = sum(t["rate"] for t in trips)
+        total = sum(t["rate"] for t in trips) + sum(amt for _, amt in manual_items)
         number = next_code("F", "invoices")
         series = current_app.config["INVOICE_SERIES"]
         series_number = _next_series_number(series)
 
         # Detracción (SPOT) — 9 sep: se calcula al crear la factura, igual
-        # que el "issuer", y no se recalcula después (ver compute_detraction
-        # en app/helpers.py para la regla completa: 4% cuando el total
-        # supera S/400, código de bien "027").
+        # que el "issuer" (4% sobre el total cuando supera S/400, código de
+        # bien "027" -- transporte de carga -- ver compute_detraction en
+        # app/helpers.py). 21 sep, pedido de Braulio (facturas no ligadas a
+        # viajes, ej. alquileres): el código "027" es específico de
+        # transporte de carga y NO corresponde necesariamente a un ítem
+        # manual (un alquiler de equipo, por ejemplo, tendría su propio
+        # código de detracción, distinto y no confirmado). Para no arriesgar
+        # marcar una detracción con el código equivocado en un comprobante
+        # fiscal real, el cálculo automático solo se aplica cuando la
+        # factura es 100% de viajes (sin ningún ítem manual) -- exactamente
+        # el mismo comportamiento que ya existía. Con algún ítem manual
+        # incluido, se guarda sin detracción y se avisa para que Braulio lo
+        # revise a mano (con su contador o desde el propio portal de
+        # tefacturo.pe) antes de enviarla a SUNAT.
         company = company_info_for_issuer(issuer, current_app.config)
-        detraction = compute_detraction(total, company)
+        if manual_items:
+            detraction = {"applies": False, "code": None, "percentage": None, "amount": None, "bank_account": None}
+        else:
+            detraction = compute_detraction(total, company)
 
         db = get_db()
         cur = db.execute(
@@ -127,8 +195,20 @@ def new():
                 (invoice_id, t["id"], f"{t['code']}: {t['origin']} -> {t['destination']}", t["rate"]),
             )
             db.execute("UPDATE trips SET invoiced = 1 WHERE id = ?", (t["id"],))
+        for desc, amt in manual_items:
+            db.execute(
+                "INSERT INTO invoice_items (invoice_id, trip_id, description, amount) VALUES (?, NULL, ?, ?)",
+                (invoice_id, desc, amt),
+            )
         db.commit()
 
+        if manual_items and total > 400:
+            flash(
+                "Esta factura supera S/400 e incluye ítems adicionales (no solo viajes) — "
+                "no se le aplicó detracción automática. Confirma si corresponde detracción "
+                "(y con qué código) antes de enviarla a SUNAT.",
+                "info",
+            )
         flash(f"Factura {number} generada por {total:.2f}.", "success")
         return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
 
@@ -156,9 +236,12 @@ def detail(invoice_id):
     )
     if invoice is None:
         abort(404)
+    # LEFT JOIN (no JOIN): 21 sep, un ítem manual (alquiler u otro concepto
+    # sin viaje, ver new() más arriba) tiene trip_id NULL -- un JOIN normal
+    # lo descartaría en silencio de esta lista.
     items = query_all(
         """SELECT ii.*, t.code as trip_code FROM invoice_items ii
-           JOIN trips t ON t.id = ii.trip_id WHERE ii.invoice_id = ?""",
+           LEFT JOIN trips t ON t.id = ii.trip_id WHERE ii.invoice_id = ?""",
         (invoice_id,),
     )
     return render_template("facturacion/detail.html", invoice=invoice, items=items)

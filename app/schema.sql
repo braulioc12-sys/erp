@@ -1176,7 +1176,15 @@ CREATE TABLE IF NOT EXISTS invoices (
 CREATE TABLE IF NOT EXISTS invoice_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     invoice_id INTEGER NOT NULL REFERENCES invoices(id),
-    trip_id INTEGER NOT NULL REFERENCES trips(id),
+    -- 21 sep, pedido de Braulio ("aparte de facturar los viajes, tambien
+    -- se puedan emitir facturas no relacionadas a viajes, como alquileres
+    -- ... de todo tipo"): trip_id pasa a ser OPCIONAL -- un ítem sin
+    -- trip_id es una línea manual (descripción + monto escritos a mano al
+    -- crear la factura, sin ligar a ningún viaje), ver "Ítems
+    -- adicionales" en app/routes/facturacion.py. Para una base ya
+    -- desplegada (esta columna nacía NOT NULL) ver la migración
+    -- _apply_invoice_items_trip_nullable_* en app/db.py.
+    trip_id INTEGER REFERENCES trips(id),
     description TEXT,
     amount REAL NOT NULL DEFAULT 0
 );
