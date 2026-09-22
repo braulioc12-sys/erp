@@ -1,4 +1,5 @@
 import uuid
+from itertools import zip_longest
 
 from flask import (
     Blueprint,
@@ -57,30 +58,54 @@ def list_view():
 def _collect_manual_items():
     """21 sep, pedido de Braulio ("aparte de facturar los viajes, tambien
     se puedan emitir facturas no relacionadas a viajes, como alquileres...
-    de todo tipo"): filas libres (descripción + monto) que el propio
-    formulario permite agregar/quitar con JS (ver facturacion/form.html,
-    mismo patrón "+ Agregar línea" que ya usa Cotizaciones). Una fila se
-    ignora en silencio si quedó vacía (usuario que le dio "+ Agregar línea"
-    de más y no la llenó) -- solo se exige description Y amount > 0 cuando
-    al menos uno de los dos campos de esa fila SÍ se completó, para poder
-    avisar de una fila a medio llenar en vez de tragarla sin decir nada."""
+    de todo tipo"): filas libres (cantidad + descripción + precio unitario)
+    que el propio formulario permite agregar/quitar con JS (ver
+    facturacion/form.html, mismo patrón "+ Agregar línea" que ya usa
+    Cotizaciones). Una fila se ignora en silencio si quedó vacía (usuario
+    que le dio "+ Agregar línea" de más y no la llenó) -- solo se exige
+    description Y amount > 0 cuando al menos uno de los campos de esa fila
+    SÍ se completó, para poder avisar de una fila a medio llenar en vez de
+    tragarla sin decir nada.
+
+    22 sep, pedido de Braulio ("a la hora de agregar un item debe salir
+    cantidad, descripcion y monto" -- ver la captura que compartió del
+    formulario de tefacturo.pe, que separa Cantidad y Valor Unitario):
+    "amount" pasa a ser el PRECIO UNITARIO que se escribe en el formulario,
+    y el monto de la línea (lo que se guarda en invoice_items.amount y lo
+    que se suma al total de la factura) es cantidad × amount. Con
+    cantidad=1 (el valor por defecto si se deja vacío) el comportamiento es
+    IDÉNTICO al de antes -- una factura ya generada con una sola fila nunca
+    cambia de monto por este cambio.
+
+    Devuelve una lista de (description, quantity, unit_amount, line_total)."""
     descriptions = request.form.getlist("item_description")
+    quantities = request.form.getlist("item_quantity")
     amounts = request.form.getlist("item_amount")
     items = []
     incomplete = False
-    for desc, amt_raw in zip(descriptions, amounts):
+    # zip_longest (no zip): "item_quantity" es un campo nuevo (22 sep) -- si
+    # llegara una fila sin ese campo (formulario viejo en caché, JS que no
+    # cargó), un zip() normal recortaría TODAS las filas a la lista más
+    # corta y se perderían ítems en silencio. Con fillvalue="" simplemente
+    # se asume cantidad 1 para esa fila (ver más abajo), nunca se descarta.
+    for desc, qty_raw, amt_raw in zip_longest(descriptions, quantities, amounts, fillvalue=""):
         desc = (desc or "").strip()
+        qty_raw = (qty_raw or "").strip()
         amt_raw = (amt_raw or "").strip()
-        if not desc and not amt_raw:
+        if not desc and not qty_raw and not amt_raw:
             continue
         try:
             amt = float(amt_raw)
         except ValueError:
             amt = 0
-        if not desc or amt <= 0:
+        try:
+            qty = float(qty_raw) if qty_raw else 1.0
+        except ValueError:
+            qty = 0
+        if not desc or amt <= 0 or qty <= 0:
             incomplete = True
             continue
-        items.append((desc, amt))
+        items.append((desc, qty, amt, round(qty * amt, 2)))
     return items, incomplete
 
 
@@ -222,7 +247,7 @@ def new():
             if issuer not in ("HARRASO", "BRMS"):
                 issuer = "HARRASO"
 
-        total = sum(t["rate"] for t in trips) + sum(amt for _, amt in manual_items)
+        total = sum(t["rate"] for t in trips) + sum(line_total for _, _, _, line_total in manual_items)
         number = next_code("F", "invoices")
         series = current_app.config["INVOICE_SERIES"]
         series_number = _next_series_number(series)
@@ -238,13 +263,40 @@ def new():
         # marcar una detracción con el código equivocado en un comprobante
         # fiscal real, el cálculo automático solo se aplica cuando la
         # factura es 100% de viajes (sin ningún ítem manual) -- exactamente
-        # el mismo comportamiento que ya existía. Con algún ítem manual
-        # incluido, se guarda sin detracción y se avisa para que Braulio lo
-        # revise a mano (con su contador o desde el propio portal de
-        # tefacturo.pe) antes de enviarla a SUNAT.
+        # el mismo comportamiento que ya existía.
+        #
+        # 22 sep, pedido de Braulio ("como confirmo la detraccion?" +
+        # captura del formulario de tefacturo.pe, que sí tiene un switch de
+        # "Detracción"): con algún ítem manual incluido, ahora se puede
+        # confirmar la detracción de una vez en esta misma pantalla (mismos
+        # campos y misma validación que update_detraction() en
+        # facturacion/detail.html) -- código, porcentaje, monto (se calcula
+        # solo si se deja en blanco) y cuenta del Banco de la Nación. Si NO
+        # se marca el switch, o falta código/porcentaje, se guarda sin
+        # detracción -- igual que siempre, se puede confirmar después desde
+        # el detalle de la factura.
         company = company_info_for_issuer(issuer, current_app.config)
         if manual_items:
-            detraction = {"applies": False, "code": None, "percentage": None, "amount": None, "bank_account": None}
+            if request.form.get("detraction_applies") == "on":
+                det_code = request.form.get("detraction_code", "").strip()
+                det_percentage = parse_float(request.form.get("detraction_percentage"), default=0.0)
+                det_bank_account = request.form.get("detraction_bank_account", "").strip()
+                if det_code and det_percentage > 0:
+                    det_amount_raw = request.form.get("detraction_amount", "").strip()
+                    det_amount = parse_float(det_amount_raw) if det_amount_raw else round(total * det_percentage / 100, 2)
+                    detraction = {
+                        "applies": True, "code": det_code, "percentage": det_percentage,
+                        "amount": det_amount, "bank_account": det_bank_account,
+                    }
+                else:
+                    flash(
+                        "Marcaste que esta factura tiene detracción, pero falta el código o el porcentaje "
+                        "— se generó SIN detracción. Confírmala desde el detalle de la factura.",
+                        "error",
+                    )
+                    detraction = {"applies": False, "code": None, "percentage": None, "amount": None, "bank_account": None}
+            else:
+                detraction = {"applies": False, "code": None, "percentage": None, "amount": None, "bank_account": None}
         else:
             detraction = compute_detraction(total, company)
 
@@ -269,18 +321,18 @@ def new():
                 (invoice_id, t["id"], f"{t['code']}: {t['origin']} -> {t['destination']}", t["rate"]),
             )
             db.execute("UPDATE trips SET invoiced = 1 WHERE id = ?", (t["id"],))
-        for desc, amt in manual_items:
+        for desc, qty, _unit_amt, line_total in manual_items:
             db.execute(
-                "INSERT INTO invoice_items (invoice_id, trip_id, description, amount) VALUES (?, NULL, ?, ?)",
-                (invoice_id, desc, amt),
+                "INSERT INTO invoice_items (invoice_id, trip_id, description, amount, quantity) VALUES (?, NULL, ?, ?, ?)",
+                (invoice_id, desc, line_total, qty),
             )
         db.commit()
 
-        if manual_items and total > 400:
+        if manual_items and total > 400 and not detraction["applies"]:
             flash(
                 "Esta factura supera S/400 e incluye ítems adicionales (no solo viajes) — "
-                "no se le aplicó detracción automática. Confirma si corresponde detracción "
-                "(y con qué código) antes de enviarla a SUNAT.",
+                "no se le aplicó detracción. Confirma si corresponde detracción (y con qué código) "
+                "antes de enviarla a SUNAT.",
                 "info",
             )
         flash(f"Factura {number} generada por {total:.2f}.", "success")
@@ -294,9 +346,19 @@ def new():
                ORDER BY delivered_date""",
             (selected_client,),
         )
+    # 22 sep: cuenta del Banco de la Nación sugerida para la detracción,
+    # una por empresa (Harraso/BRMS) -- el JS del formulario cambia la
+    # sugerencia según la empresa elegida en "Empresa que emite" (ver
+    # facturacion/form.html), igual que hace tefacturo.pe con sus propios
+    # campos según la empresa emisora.
+    default_detraction_accounts = {
+        "HARRASO": company_info_for_issuer("HARRASO", current_app.config).get("bank_nacion_detraction_account", ""),
+        "BRMS": company_info_for_issuer("BRMS", current_app.config).get("bank_nacion_detraction_account", ""),
+    }
     return render_template(
         "facturacion/form.html", clients=clients, selected_client=selected_client,
         pending_trips=pending_trips, today=today_str(),
+        default_detraction_accounts=default_detraction_accounts,
     )
 
 

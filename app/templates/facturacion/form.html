@@ -142,14 +142,24 @@
   {% endif %}
 
   <h2>Ítems adicionales (opcional)</h2>
-  <p class="muted mt-0">Para conceptos que no vienen de un viaje — alquileres u otro tipo de servicio. Puedes combinarlos con los viajes marcados arriba, o dejar los viajes sin marcar y facturar solo con estos ítems.</p>
-  <div class="table-wrap" style="margin-bottom:8px;">
+  <p class="muted mt-0">Para conceptos que no vienen de un viaje — alquileres u otro tipo de servicio. Puedes combinarlos con los viajes marcados arriba, o dejar los viajes sin marcar y facturar solo con estos ítems. El monto de la línea es cantidad × precio unitario.</p>
+  <div class="table-wrap" style="margin-bottom:4px;">
     <table id="items-table">
-      <thead><tr><th>Descripción</th><th style="width:16%;">Monto (S/)</th><th></th></tr></thead>
+      <thead>
+        <tr>
+          <th style="width:10%;">Cantidad</th>
+          <th>Descripción</th>
+          <th style="width:15%;">P. unitario (S/)</th>
+          <th style="width:14%;">Subtotal</th>
+          <th></th>
+          <th></th>
+        </tr>
+      </thead>
       <tbody id="items-tbody"></tbody>
     </table>
   </div>
-  <div class="btn-group" style="margin-top:-8px; margin-bottom:16px;">
+  <p class="muted mt-0" style="margin-bottom:8px;">Total ítems adicionales: <strong id="items-total-value">S/ 0.00</strong></p>
+  <div class="btn-group" style="margin-top:0; margin-bottom:16px;">
     <button type="button" class="btn btn-secondary" id="btn-add-row">+ Agregar línea</button>
   </div>
 
@@ -163,12 +173,55 @@
   </div>
   <p class="muted" id="issuer-hint" style="margin-top:-8px;">Solo se usa si no marcas ningún viaje arriba — si marcas viajes, la empresa se toma de ellos.</p>
 
+  <!-- 22 sep, pedido de Braulio ("como confirmo la detraccion?" + captura
+       del formulario de tefacturo.pe, que tiene un switch de "Detracción"):
+       solo importa cuando la factura tiene ítems adicionales -- si es 100%
+       de viajes, el código "027" se calcula solo (ver new() en
+       app/routes/facturacion.py) y esta sección queda deshabilitada. -->
+  <div id="detraccion-section" style="margin:0 0 16px; padding:16px; border:1px solid var(--border, #e2e5eb); border-radius:8px; background:var(--bg-subtle,#f7f8fa);">
+    <label style="display:flex; align-items:center; gap:8px; font-weight:600;">
+      <input type="checkbox" name="detraction_applies" id="detraction-applies" style="width:auto;">
+      Esta factura está sujeta a detracción
+    </label>
+    <div class="form-row" id="detraccion-fields" style="display:none; margin-top:10px;">
+      <label>Código del bien/servicio
+        <input type="text" name="detraction_code" id="detraction-code" placeholder="Ej. 037">
+      </label>
+      <label>Porcentaje (%)
+        <input type="number" name="detraction_percentage" id="detraction-percentage" step="0.01" min="0">
+      </label>
+    </div>
+    <div class="form-row" id="detraccion-fields-2" style="display:none;">
+      <label>Monto detraído (S/) — vacío para calcularlo con el % de arriba
+        <input type="number" name="detraction_amount" step="0.01" min="0">
+      </label>
+      <label>Cuenta Banco de la Nación
+        <input type="text" name="detraction_bank_account" id="detraction-bank-account"
+               value="{{ default_detraction_accounts.HARRASO if default_detraction_accounts else '' }}">
+      </label>
+    </div>
+    <p class="muted mt-0" id="detraccion-hint">
+      Agrega al menos un ítem adicional para poder confirmar la detracción aquí — en una factura 100% de viajes se
+      calcula automáticamente (código 027, transporte de carga). Confirma con tu contador el código y porcentaje
+      correctos antes de guardar.
+    </p>
+  </div>
+
+  <h2>Condición de pago</h2>
   <div class="form-row">
+    <label>Condición
+      <select id="payment-condition-select">
+        <option value="CONTADO">Contado</option>
+        <option value="CREDITO">Crédito</option>
+      </select>
+    </label>
     <label>Fecha de emisión
       <input type="date" name="issue_date" value="{{ today }}">
     </label>
+  </div>
+  <div class="form-row" id="due-date-row" style="display:none;">
     <label>Fecha de vencimiento
-      <input type="date" name="due_date">
+      <input type="date" name="due_date" id="due-date-input">
     </label>
   </div>
   <label>Notas
@@ -184,20 +237,67 @@
 <script>
 (function () {
   var tbody = document.getElementById('items-tbody');
+  var defaultDetractionAccounts = {
+    HARRASO: {{ (default_detraction_accounts.HARRASO if default_detraction_accounts else '') | tojson }},
+    BRMS: {{ (default_detraction_accounts.BRMS if default_detraction_accounts else '') | tojson }}
+  };
+
+  function updateItemsTotal() {
+    var total = 0;
+    tbody.querySelectorAll('.item-row').forEach(function (tr) {
+      var qty = parseFloat(tr.querySelector('[name="item_quantity"]').value) || 0;
+      var amt = parseFloat(tr.querySelector('[name="item_amount"]').value) || 0;
+      total += qty * amt;
+    });
+    document.getElementById('items-total-value').textContent = 'S/ ' + total.toFixed(2);
+    updateDetraccionState();
+  }
 
   function rowTemplate() {
     var tr = document.createElement('tr');
     tr.className = 'item-row';
     tr.innerHTML =
-      '<td><input type="text" name="item_description" placeholder="Ej. Alquiler de cisterna, setiembre 2026" style="min-width:220px;"></td>' +
+      '<td><input type="number" name="item_quantity" value="1" min="0.01" step="0.01" style="width:80px;"></td>' +
+      '<td><input type="text" name="item_description" placeholder="Ej. Alquiler de cisterna, setiembre 2026" style="min-width:200px;"></td>' +
       '<td><input type="number" name="item_amount" min="0" step="0.01" placeholder="0.00"></td>' +
-      '<td><button type="button" class="btn btn-secondary btn-remove-row">✕</button></td>';
-    tr.querySelector('.btn-remove-row').addEventListener('click', function () { tr.remove(); });
+      '<td class="text-right item-subtotal">S/ 0.00</td>' +
+      '<td><button type="button" class="btn btn-secondary btn-sm btn-save-row">Guardar</button></td>' +
+      '<td><button type="button" class="btn btn-secondary btn-sm btn-remove-row">✕</button></td>';
+
+    var qtyInput = tr.querySelector('[name="item_quantity"]');
+    var amtInput = tr.querySelector('[name="item_amount"]');
+    var descInput = tr.querySelector('[name="item_description"]');
+    var subtotalCell = tr.querySelector('.item-subtotal');
+    var saveBtn = tr.querySelector('.btn-save-row');
+
+    function recalcRow() {
+      var qty = parseFloat(qtyInput.value) || 0;
+      var amt = parseFloat(amtInput.value) || 0;
+      subtotalCell.textContent = 'S/ ' + (qty * amt).toFixed(2);
+      updateItemsTotal();
+    }
+    qtyInput.addEventListener('input', recalcRow);
+    amtInput.addEventListener('input', recalcRow);
+
+    // "Guardar" (22 sep, pedido de Braulio): confirmación SOLO visual de la
+    // línea -- no guarda nada en el servidor todavía (eso pasa recién con
+    // "Generar factura" al final, igual que siempre). Usa "readonly" (no
+    // "disabled") a propósito: un campo "disabled" NO se envía con el
+    // formulario y la línea se perdería en silencio al enviar.
+    saveBtn.addEventListener('click', function () {
+      var confirmed = !tr.classList.contains('item-row-confirmed');
+      tr.classList.toggle('item-row-confirmed', confirmed);
+      [qtyInput, amtInput, descInput].forEach(function (inp) { inp.readOnly = confirmed; });
+      saveBtn.textContent = confirmed ? '✓ Guardado' : 'Guardar';
+    });
+
+    tr.querySelector('.btn-remove-row').addEventListener('click', function () { tr.remove(); updateItemsTotal(); });
     return tr;
   }
 
   document.getElementById('btn-add-row').addEventListener('click', function () {
     tbody.appendChild(rowTemplate());
+    updateItemsTotal();
   });
 
   // La empresa que emite solo importa cuando la factura es 100% manual (sin
@@ -214,6 +314,68 @@
   }
   tripCheckboxes.forEach(function (cb) { cb.addEventListener('change', updateIssuerState); });
   updateIssuerState();
+
+  // Sugiere la cuenta del Banco de la Nación según la empresa elegida --
+  // solo si el campo sigue vacío (no pisa algo que el usuario ya escribió a
+  // mano), mismo criterio "no destructivo" que el autocompletado de RUC.
+  var bankAccountInput = document.getElementById('detraction-bank-account');
+  issuerSelect.addEventListener('change', function () {
+    if (!bankAccountInput.value.trim()) {
+      bankAccountInput.value = defaultDetractionAccounts[issuerSelect.value] || '';
+    }
+  });
+
+  // Detracción (22 sep): la sección solo tiene sentido cuando hay al menos
+  // un ítem adicional -- en una factura 100% de viajes la detracción "027"
+  // se calcula sola (ver new() en facturacion.py) y esta sección no aplica.
+  var detraccionSection = document.getElementById('detraccion-section');
+  var detraccionApplies = document.getElementById('detraction-applies');
+  var detraccionFields = document.getElementById('detraccion-fields');
+  var detraccionFields2 = document.getElementById('detraccion-fields-2');
+  var detraccionHint = document.getElementById('detraccion-hint');
+
+  function updateDetraccionFieldsVisibility() {
+    var show = detraccionApplies.checked && !detraccionApplies.disabled;
+    detraccionFields.style.display = show ? 'flex' : 'none';
+    detraccionFields2.style.display = show ? 'flex' : 'none';
+  }
+  detraccionApplies.addEventListener('change', updateDetraccionFieldsVisibility);
+
+  function updateDetraccionState() {
+    var hasManualItems = tbody.querySelectorAll('.item-row').length > 0;
+    detraccionApplies.disabled = !hasManualItems;
+    detraccionSection.style.opacity = hasManualItems ? '1' : '0.5';
+    detraccionHint.textContent = hasManualItems
+      ? 'Confirma con tu contador el código y porcentaje correctos antes de guardar -- este sistema no los determina automáticamente para ítems que no son de transporte de carga.'
+      : 'Agrega al menos un ítem adicional para poder confirmar la detracción aquí -- en una factura 100% de viajes se calcula automáticamente (código 027, transporte de carga).';
+    if (!hasManualItems) {
+      detraccionApplies.checked = false;
+      updateDetraccionFieldsVisibility();
+    }
+  }
+  updateDetraccionState();
+
+  // Condición de pago (22 sep, pedido de Braulio): Contado/Crédito es en
+  // realidad la misma fecha de vencimiento que ya se usa para decidir
+  // "formaPago" en el comprobante real que se manda a SUNAT (ver
+  // build_invoice_payload en app/integrations/sunat_ose.py: CREDITO si
+  // due_date tiene valor, CONTADO si no) -- este <select> es solo una
+  // forma más clara de mostrar/editar esa misma fecha, para que nunca
+  // queden desincronizados el <select> y lo que de verdad se le declara a
+  // SUNAT. Por eso NO se manda como campo aparte: al elegir "Contado" se
+  // vacía due_date, y al elegir "Crédito" se exige una fecha.
+  var paymentConditionSelect = document.getElementById('payment-condition-select');
+  var dueDateRow = document.getElementById('due-date-row');
+  var dueDateInput = document.getElementById('due-date-input');
+  function updatePaymentCondition() {
+    var isCredito = paymentConditionSelect.value === 'CREDITO';
+    dueDateRow.style.display = isCredito ? 'flex' : 'none';
+    dueDateInput.required = isCredito;
+    if (!isCredito) { dueDateInput.value = ''; }
+  }
+  paymentConditionSelect.addEventListener('change', updatePaymentCondition);
+  if (dueDateInput.value) { paymentConditionSelect.value = 'CREDITO'; }
+  updatePaymentCondition();
 })();
 </script>
 {% endif %}

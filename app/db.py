@@ -538,6 +538,10 @@ COLUMN_MIGRATIONS = [
     # facturarles -- ver el comentario largo junto a esta columna en
     # schema.sql (CREATE TABLE trips) y app/routes/guias.py.
     ("trips", "client_order_number", "TEXT"),
+    # 22 sep, pedido de Braulio ("a la hora de agregar un item debe salir
+    # cantidad, descripcion y monto") -- ver el comentario largo junto a
+    # esta columna en schema.sql (CREATE TABLE invoice_items).
+    ("invoice_items", "quantity", "REAL NOT NULL DEFAULT 1"),
 ]
 
 

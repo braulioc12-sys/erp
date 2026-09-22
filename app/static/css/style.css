@@ -236,6 +236,9 @@ td.truncate { display: table-cell; }
 /* "Disponible para programar" de una unidad en mantenimiento (15 sep) */
 .badge-disponible { background: var(--success-soft); color: var(--success); }
 .badge-no_disponible { background: var(--danger-soft); color: var(--danger); }
+/* Confirmación visual de una línea de ítem en Facturación (22 sep) */
+.item-row-confirmed td { background: var(--success-soft); }
+
 /* Descansos laborales (22 sep) */
 .badge-ok { background: var(--success-soft); color: var(--success); }
 .badge-atencion { background: var(--warning-soft); color: var(--warning); }

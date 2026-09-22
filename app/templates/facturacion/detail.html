@@ -35,6 +35,12 @@
   <div class="detail-item"><div class="label">Empresa que factura</div><div class="value">{{ 'BRMS' if invoice.issuer == 'BRMS' else 'Harraso Transport' }}</div></div>
   <div class="detail-item"><div class="label">Serie / número SUNAT</div><div class="value">{{ invoice.series }}-{{ '%06d'|format(invoice.series_number) }}</div></div>
   <div class="detail-item"><div class="label">Fecha de emisión</div><div class="value">{{ invoice.issue_date }}</div></div>
+  <!-- 22 sep: "Contado"/"Crédito" no es una columna aparte -- se deriva de
+       si hay fecha de vencimiento, igual que ya hace build_invoice_payload()
+       en app/integrations/sunat_ose.py para decidir "formaPago" en el
+       comprobante real que se manda a SUNAT (así nunca queda desincronizado
+       lo que se ve acá con lo que de verdad se declaró). -->
+  <div class="detail-item"><div class="label">Condición de pago</div><div class="value">{{ 'Crédito' if invoice.due_date else 'Contado' }}</div></div>
   <div class="detail-item"><div class="label">Vencimiento</div><div class="value">{{ invoice.due_date or '—' }}</div></div>
   <div class="detail-item"><div class="label">Total</div><div class="value">{{ invoice.amount|money }}</div></div>
 </div>
@@ -114,7 +120,7 @@
   <h2>Ítems facturados</h2>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Viaje</th><th>Descripción</th><th class="text-right">Monto</th></tr></thead>
+      <thead><tr><th>Viaje</th><th>Descripción</th><th class="text-right">Cantidad</th><th class="text-right">Monto</th></tr></thead>
       <tbody>
         {% for it in items %}
         <tr>
@@ -122,6 +128,10 @@
                ver new() en app/routes/facturacion.py) tiene trip_id NULL. -->
           <td>{% if it.trip_id %}<a href="{{ url_for('viajes.detail', trip_id=it.trip_id) }}">{{ it.trip_code }}</a>{% else %}<span class="muted">— (ítem adicional)</span>{% endif %}</td>
           <td class="wrap">{{ it.description }}</td>
+          <!-- 22 sep: "quantity" nace en 1 para ítems ya existentes (ver la
+               migración en app/db.py) y para los de viaje (siempre 1) -- solo
+               varía en un ítem manual nuevo (cantidad × precio unitario). -->
+          <td class="text-right">{{ it.quantity|int if it.quantity == it.quantity|int else it.quantity }}</td>
           <td class="text-right">{{ it.amount|money }}</td>
         </tr>
         {% endfor %}

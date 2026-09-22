@@ -1204,7 +1204,19 @@ CREATE TABLE IF NOT EXISTS invoice_items (
     -- _apply_invoice_items_trip_nullable_* en app/db.py.
     trip_id INTEGER REFERENCES trips(id),
     description TEXT,
-    amount REAL NOT NULL DEFAULT 0
+    amount REAL NOT NULL DEFAULT 0,
+    -- 22 sep, pedido de Braulio ("a la hora de agregar un item debe salir
+    -- cantidad, descripcion y monto"): cantidad de un ítem manual (un
+    -- viaje siempre es cantidad 1, ver new() en facturacion.py). "amount"
+    -- SIGUE siendo el monto TOTAL de la línea (cantidad × precio unitario
+    -- que se escribe en el formulario) -- no se toca su significado en
+    -- ningún otro lado del sistema (ni en el total de la factura, ni en el
+    -- payload que se manda a tefacturo.pe, ver el comentario en
+    -- sunat_ose.py) para no arriesgar la integración real ya verificada;
+    -- esta columna es solo para mostrar la cantidad en el detalle de la
+    -- factura. Para una base ya desplegada, ver COLUMN_MIGRATIONS en
+    -- app/db.py.
+    quantity REAL NOT NULL DEFAULT 1
 );
 
 -- Guías de remisión electrónicas — modalidad "Transportista" (la empresa
