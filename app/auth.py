@@ -60,6 +60,13 @@ PERMISSIONS = {
         # 22 sep: Descansos laborales (ver app/routes/descansos.py) — es un
         # tema de RRHH, Operador no lo necesita.
         "descansos": set(),
+        # 22 sep, pedido de Braulio ("yo como administrador, pueda saber
+        # quien ha hecho cada cosa"): el registro de actividad es cosa de
+        # Administrador -- el resto de los roles llega acá solo con "*" (o
+        # con una excepción puntual por usuario, ver Usuarios > Permisos
+        # específicos), igual que cualquier otro módulo nuevo sin entrada
+        # explícita en PERMISSIONS de un rol no-ADMIN.
+        "actividad": set(),
     },
     # Programa unidades/conductores y da seguimiento a los viajes del día a
     # día — sin acceso a montos de Facturación/Liquidaciones/Cotizaciones ni
@@ -90,6 +97,7 @@ PERMISSIONS = {
         # descansando para no asignarle un viaje, pero el registro en sí
         # (RRHH) queda en RRHH/Admin.
         "descansos": {"view"},
+        "actividad": set(),
     },
     # Solo el módulo de Inventarios (repuestos, proveedores, compras) — la
     # AUTORIZACIÓN de una orden de compra sigue siendo exclusiva de
@@ -117,6 +125,7 @@ PERMISSIONS = {
         "tarifario": set(),
         "pagos_personal": set(),
         "descansos": set(),
+        "actividad": set(),
     },
     # Documentos con montos: Liquidaciones, Facturación, Cotizaciones. Ve
     # Viajes/Clientes (para ubicar a qué viaje o cliente corresponde cada
@@ -156,6 +165,7 @@ PERMISSIONS = {
         "pagos_personal": {"view", "edit"},
         # 22 sep: Descansos laborales — no es un tema de Contabilidad.
         "descansos": set(),
+        "actividad": set(),
     },
     # Solo el módulo de Mantenimiento (órdenes, trabajos) y ver Neumáticos.
     "MECANICO": {
@@ -180,6 +190,7 @@ PERMISSIONS = {
         "tarifario": set(),
         "pagos_personal": set(),
         "descansos": set(),
+        "actividad": set(),
     },
     # 18 sep, 5ta ronda (pedido de Braulio: "en el menu de usuarios tambien
     # hay que poner rol RRHH, el cual tenga acceso a RRHH, pagos personal,
@@ -211,6 +222,7 @@ PERMISSIONS = {
         # es el dueño natural de este módulo (junto con Admin) — mismo
         # criterio que conductores/liquidaciones/pagos_personal arriba.
         "descansos": {"view", "edit"},
+        "actividad": set(),
     },
 }
 

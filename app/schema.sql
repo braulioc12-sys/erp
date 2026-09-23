@@ -1734,3 +1734,46 @@ CREATE INDEX IF NOT EXISTS idx_inspections_vehicle ON inspections(vehicle_id);
 CREATE INDEX IF NOT EXISTS idx_inspection_items_inspection ON inspection_items(inspection_id);
 CREATE INDEX IF NOT EXISTS idx_expense_advances_trip ON expense_advances(trip_id);
 CREATE INDEX IF NOT EXISTS idx_fuel_entries_advance ON fuel_entries(advance_id);
+
+-- 22 sep, pedido de Braulio ("Hay manera de que yo como administrador,
+-- pueda saber quien ha hecho cada cosa? Es decir que usuario creo el
+-- viaje, subio algun doc, borro guia o genero guias, etc?"): registro de
+-- actividad para TODO el sistema (confirmó "todo el sistema de una vez"),
+-- mostrado tanto en una pantalla nueva (Actividad, ver
+-- app/routes/actividad.py) como en "creado por" dentro de cada registro
+-- (confirmó "las dos cosas"). Es una tabla de solo-inserción (append-only)
+-- -- nunca se edita ni se borra una fila de acá, ni siquiera si se corrige
+-- el registro original -- así queda un historial confiable. El único punto
+-- de escritura es log_activity() en app/audit.py.
+--
+-- user_id/user_name: se guarda el nombre además del id (denormalizado) para
+-- que el historial siga siendo legible aunque el usuario se desactive más
+-- adelante, sin necesidad de un JOIN para listar. module usa las mismas
+-- claves que PERMISSIONS en app/auth.py (viajes, flota, facturacion, etc.)
+-- -- así la pantalla de Actividad puede reusar MODULE_LABELS de
+-- app/permissions_catalog.py para mostrar el nombre bonito y para el
+-- filtro por módulo. action es texto libre pero sigue un vocabulario común
+-- (CREAR/EDITAR/ELIMINAR/SUBIR/GENERAR/ESTADO/...) -- ver ACTION_LABELS en
+-- app/audit.py. entity_type + entity_id identifican el registro puntual
+-- (ej. "viaje"/123) para poder listar "el historial de ESTE viaje" en su
+-- propia pantalla de detalle; entity_url se guarda ya resuelto (el propio
+-- código que llama a log_activity() ya sabe el url_for exacto) para poder
+-- enlazar "Ver" desde Actividad sin tener que mantener un mapa central de
+-- rutas por tipo de entidad.
+CREATE TABLE IF NOT EXISTS activity_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    user_id INTEGER REFERENCES users(id),
+    user_name TEXT NOT NULL,
+    module TEXT NOT NULL,
+    action TEXT NOT NULL,
+    entity_type TEXT,
+    entity_id INTEGER,
+    label TEXT,
+    entity_url TEXT,
+    details TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_activity_log_module ON activity_log(module);
+CREATE INDEX IF NOT EXISTS idx_activity_log_user ON activity_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_activity_log_entity ON activity_log(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_activity_log_created ON activity_log(created_at);

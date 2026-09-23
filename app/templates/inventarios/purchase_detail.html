@@ -14,6 +14,15 @@
 
 <div class="panel">
   <div class="detail-grid">
+    {# 22 sep, pedido de Braulio ("que usuario... genero guias, etc"):
+       mismo criterio que app/templates/viajes/detail.html -- visible solo
+       para quien tiene acceso al módulo de Actividad. #}
+    {% if can(current_user.roles, 'actividad', 'view') %}
+    <div>
+      <span class="muted">Creado por</span><br>
+      {% if creator %}{{ creator.user_name }} — {{ creator.created_at[:16] }}{% else %}No disponible (registro anterior a este historial){% endif %}
+    </div>
+    {% endif %}
     <div><span class="muted">Proveedor</span><br>{{ purchase.provider_name }}</div>
     <div><span class="muted">Orden de compra</span><br>{{ purchase.purchase_order_number or '—' }}</div>
     <div><span class="muted">Fecha</span><br>{{ purchase.purchase_date }}</div>

@@ -4,6 +4,7 @@ necesita agregar una opción nueva a un desplegable."""
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
 
 from app.alerts import alert_recipient_emails, build_alert_sections, total_alert_count
+from app.audit import log_activity
 from app.auth import permission_required, validate_csrf
 from app.db import execute, get_setting, query_all, query_one, set_setting
 from app.email_sender import send_email
@@ -59,6 +60,15 @@ def update_labor_cost():
         values[t] = value
     for t, value in values.items():
         set_setting(labor_cost_setting_key(t), f"{value:.2f}")
+    # 22 sep, registro de actividad (ver app/audit.py): esto edita settings
+    # (ver get_setting/set_setting en app/db.py), no una fila de catálogo con
+    # id propio -- se registra sin entity_id, solo con el detalle de los
+    # valores nuevos.
+    log_activity(
+        "catalogos", "EDITAR",
+        "Costos de mano de obra: " + ", ".join(f"{t} S/{v:.2f}" for t, v in values.items()),
+        entity_type="costo_mano_obra",
+    )
     flash("Costos de mano de obra actualizados.", "success")
     return redirect(url_for("catalogos.list_view"))
 
@@ -84,14 +94,25 @@ def add_item():
             flash("Ese concepto ya existe.", "error")
         else:
             execute("UPDATE catalog_items SET active = 1 WHERE id = ?", (existing["id"],))
+            # 22 sep, registro de actividad (ver app/audit.py): entity_type
+            # distingue la categoría (varias comparten esta misma vista
+            # genérica, ver CATEGORIES arriba) para poder filtrar en Actividad.
+            log_activity(
+                "catalogos", "REACTIVAR", f"{CATEGORIES[category]}: {name}",
+                entity_type=f"catalogo_{category}", entity_id=existing["id"],
+            )
             flash(f'"{name}" reactivado.', "success")
     else:
         max_order = query_one(
             "SELECT COALESCE(MAX(sort_order), -1) m FROM catalog_items WHERE category = ?", (category,)
         )["m"]
-        execute(
+        item_id = execute(
             "INSERT INTO catalog_items (category, name, sort_order) VALUES (?, ?, ?)",
             (category, name, max_order + 1),
+        )
+        log_activity(
+            "catalogos", "CREAR", f"{CATEGORIES[category]}: {name}",
+            entity_type=f"catalogo_{category}", entity_id=item_id,
         )
         flash(f'"{name}" agregado.', "success")
     return redirect(url_for("catalogos.list_view", categoria=category))
@@ -106,6 +127,12 @@ def toggle_item(item_id):
     if item is None:
         abort(404)
     execute("UPDATE catalog_items SET active = ? WHERE id = ?", (0 if item["active"] else 1, item_id))
+    # 22 sep, registro de actividad (ver app/audit.py).
+    log_activity(
+        "catalogos", "DESACTIVAR" if item["active"] else "REACTIVAR",
+        f"{CATEGORIES.get(item['category'], item['category'])}: {item['name']}",
+        entity_type=f"catalogo_{item['category']}", entity_id=item_id,
+    )
     flash("Actualizado." if item["active"] else "Reactivado.", "success")
     return redirect(url_for("catalogos.list_view", categoria=item["category"]))
 
@@ -139,9 +166,14 @@ def grifos_add():
         return redirect(url_for("catalogos.grifos_list"))
 
     max_order = query_one("SELECT COALESCE(MAX(sort_order), -1) m FROM fuel_stations")["m"]
-    execute(
+    station_id = execute(
         "INSERT INTO fuel_stations (city, business_name, ruc, sort_order) VALUES (?, ?, ?, ?)",
         (city, business_name, ruc, max_order + 1),
+    )
+    # 22 sep, registro de actividad (ver app/audit.py).
+    log_activity(
+        "catalogos", "CREAR", f"Grifo: {business_name} ({city})",
+        entity_type="grifo", entity_id=station_id,
     )
     flash(f'Grifo "{business_name}" ({city}) agregado.', "success")
     return redirect(url_for("catalogos.grifos_list"))
@@ -156,6 +188,12 @@ def grifos_toggle(station_id):
     if station is None:
         abort(404)
     execute("UPDATE fuel_stations SET active = ? WHERE id = ?", (0 if station["active"] else 1, station_id))
+    # 22 sep, registro de actividad (ver app/audit.py).
+    log_activity(
+        "catalogos", "DESACTIVAR" if station["active"] else "REACTIVAR",
+        f"Grifo: {station['business_name']} ({station['city']})",
+        entity_type="grifo", entity_id=station_id,
+    )
     flash("Actualizado." if station["active"] else "Reactivado.", "success")
     return redirect(url_for("catalogos.grifos_list"))
 
@@ -212,11 +250,16 @@ def bancos_add():
         return redirect(url_for("catalogos.bancos_list"))
 
     max_order = query_one("SELECT COALESCE(MAX(sort_order), -1) m FROM company_bank_accounts")["m"]
-    execute(
+    account_id = execute(
         """INSERT INTO company_bank_accounts
            (company_name, bank_name, account_type, currency, account_number, alias, sort_order)
            VALUES (?, ?, ?, ?, ?, ?, ?)""",
         (company_name, bank_name, account_type, currency, account_number, alias, max_order + 1),
+    )
+    # 22 sep, registro de actividad (ver app/audit.py).
+    log_activity(
+        "catalogos", "CREAR", f"Cuenta bancaria de {company_name}: {bank_name} ({account_number})",
+        entity_type="banco", entity_id=account_id,
     )
     flash(f'Cuenta de "{company_name}" agregada.', "success")
     return redirect(url_for("catalogos.bancos_list"))
@@ -231,6 +274,12 @@ def bancos_toggle(account_id):
     if account is None:
         abort(404)
     execute("UPDATE company_bank_accounts SET active = ? WHERE id = ?", (0 if account["active"] else 1, account_id))
+    # 22 sep, registro de actividad (ver app/audit.py).
+    log_activity(
+        "catalogos", "DESACTIVAR" if account["active"] else "REACTIVAR",
+        f"Cuenta bancaria de {account['company_name']}: {account['bank_name']} ({account['account_number']})",
+        entity_type="banco", entity_id=account_id,
+    )
     flash("Actualizado." if account["active"] else "Reactivado.", "success")
     return redirect(url_for("catalogos.bancos_list"))
 
@@ -288,12 +337,21 @@ def detraccion_add():
                 "UPDATE detraction_concepts SET active = 1, name = ?, percentage = ? WHERE id = ?",
                 (name, percentage, existing["id"]),
             )
+            # 22 sep, registro de actividad (ver app/audit.py).
+            log_activity(
+                "catalogos", "REACTIVAR", f"Concepto de detracción: {code} — {name} ({percentage}%)",
+                entity_type="concepto_detraccion", entity_id=existing["id"],
+            )
             flash(f'"{code}" reactivado.', "success")
     else:
         max_order = query_one("SELECT COALESCE(MAX(sort_order), -1) m FROM detraction_concepts")["m"]
-        execute(
+        concept_id = execute(
             "INSERT INTO detraction_concepts (code, name, percentage, sort_order) VALUES (?, ?, ?, ?)",
             (code, name, percentage, max_order + 1),
+        )
+        log_activity(
+            "catalogos", "CREAR", f"Concepto de detracción: {code} — {name} ({percentage}%)",
+            entity_type="concepto_detraccion", entity_id=concept_id,
         )
         flash(f'Concepto de detracción "{code} — {name}" agregado.', "success")
     return redirect(url_for("catalogos.detraccion_list"))
@@ -331,6 +389,11 @@ def detraccion_edit(concept_id):
         "UPDATE detraction_concepts SET code = ?, name = ?, percentage = ? WHERE id = ?",
         (code, name, percentage, concept_id),
     )
+    # 22 sep, registro de actividad (ver app/audit.py).
+    log_activity(
+        "catalogos", "EDITAR", f"Concepto de detracción: {code} — {name} ({percentage}%)",
+        entity_type="concepto_detraccion", entity_id=concept_id,
+    )
     flash(f'Concepto "{code} — {name}" actualizado.', "success")
     return redirect(url_for("catalogos.detraccion_list"))
 
@@ -344,6 +407,12 @@ def detraccion_toggle(concept_id):
     if concept is None:
         abort(404)
     execute("UPDATE detraction_concepts SET active = ? WHERE id = ?", (0 if concept["active"] else 1, concept_id))
+    # 22 sep, registro de actividad (ver app/audit.py).
+    log_activity(
+        "catalogos", "DESACTIVAR" if concept["active"] else "REACTIVAR",
+        f"Concepto de detracción: {concept['code']} — {concept['name']}",
+        entity_type="concepto_detraccion", entity_id=concept_id,
+    )
     flash("Actualizado." if concept["active"] else "Reactivado.", "success")
     return redirect(url_for("catalogos.detraccion_list"))
 
@@ -401,6 +470,13 @@ def alertas_correo_enviar():
     )
     ok, error = send_email(to, subject, html)
     if ok:
+        # 22 sep, registro de actividad (ver app/audit.py): no hay una fila
+        # propia que identifique este envío (es un correo de prueba, no una
+        # entidad guardada) -- se registra sin entity_type/entity_id, solo
+        # para que quede quién lo mandó y a quiénes.
+        log_activity(
+            "catalogos", "ENVIAR", f"Correo de prueba de alertas ({etiqueta.lower()}) a {', '.join(to)}",
+        )
         flash(f"Correo de prueba enviado a {', '.join(to)} ({total} alerta(s)).", "success")
     else:
         flash(f"No se pudo enviar el correo: {error}", "error")

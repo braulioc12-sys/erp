@@ -3,6 +3,7 @@ import secrets
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 from werkzeug.security import generate_password_hash
 
+from app.audit import get_creator_info, log_activity
 from app.auth import ROLE_LABELS, permission_required, validate_csrf
 from app.db import USER_ROLES, execute, get_db, query_all, query_one
 from app.permissions_catalog import MODULE_LABELS, PERMISSION_CATALOG
@@ -150,6 +151,15 @@ def new():
             (name, email, generate_password_hash(password), roles[0]),
         )
         _save_user_roles(user_id, roles)
+        # 22 sep, registro de actividad (ver app/audit.py) -- IMPORTANTE:
+        # nunca se registra la contraseña ni su hash acá, solo nombre/correo
+        # y los roles asignados.
+        log_activity(
+            "usuarios", "CREAR",
+            f"Usuario {name} ({email}) — roles: {', '.join(ROLE_LABELS.get(r, r) for r in roles)}",
+            entity_type="usuario", entity_id=user_id,
+            entity_url=url_for("usuarios.edit", user_id=user_id),
+        )
         flash("Usuario creado.", "success")
         return redirect(url_for("usuarios.list_view"))
 
@@ -166,6 +176,12 @@ def edit(user_id):
     if user is None:
         abort(404)
     current_roles = [r["role"] for r in query_all("SELECT role FROM user_roles WHERE user_id = ? ORDER BY role", (user_id,))]
+    # 22 sep, registro de actividad (ver app/audit.py): estado ANTES de
+    # aplicar los cambios, para poder detectar qué cambió realmente (activo
+    # <-> inactivo, permisos específicos) y registrarlo con la acción
+    # correcta en vez de un EDITAR genérico siempre.
+    creator = get_creator_info("usuario", user_id)
+    existing_overrides = _current_overrides(user_id)
 
     if request.method == "POST":
         if not validate_csrf():
@@ -215,6 +231,33 @@ def edit(user_id):
         _save_user_roles(user_id, roles)
         _save_user_overrides(user_id, request.form)
 
+        # 22 sep, registro de actividad (ver app/audit.py) -- IMPORTANTE:
+        # nunca se registra la contraseña ni su hash acá. Se usa
+        # DESACTIVAR/REACTIVAR en vez de EDITAR cuando lo único relevante que
+        # cambió fue el estado activo/inactivo (pedido explícito de Braulio);
+        # cualquier otro cambio (nombre, roles) queda como EDITAR normal. Los
+        # permisos específicos se registran aparte (ver más abajo) porque son
+        # sensibles y Braulio pidió que se pueda identificar ese cambio en
+        # particular en la pantalla de Actividad.
+        if user["active"] and not active:
+            main_action = "DESACTIVAR"
+        elif not user["active"] and active:
+            main_action = "REACTIVAR"
+        else:
+            main_action = "EDITAR"
+        log_activity(
+            "usuarios", main_action,
+            f"Usuario {name} — roles: {', '.join(ROLE_LABELS.get(r, r) for r in roles)}",
+            entity_type="usuario", entity_id=user_id,
+            entity_url=url_for("usuarios.edit", user_id=user_id),
+        )
+        if current_overrides != existing_overrides:
+            log_activity(
+                "usuarios", "EDITAR", f"Usuario {name}: permisos específicos actualizados",
+                entity_type="usuario", entity_id=user_id,
+                entity_url=url_for("usuarios.edit", user_id=user_id),
+            )
+
         flash("Usuario actualizado.", "success")
         return redirect(url_for("usuarios.list_view"))
 
@@ -222,5 +265,6 @@ def edit(user_id):
         "usuarios/form.html", user=user, mode="edit", user_id=user_id,
         role_choices=ROLE_CHOICES, selected_roles=current_roles,
         permission_catalog=PERMISSION_CATALOG, module_labels=MODULE_LABELS,
-        current_overrides=_current_overrides(user_id), override_field_name=_override_field_name,
+        current_overrides=existing_overrides, override_field_name=_override_field_name,
+        creator=creator,
     )

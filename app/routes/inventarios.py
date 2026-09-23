@@ -14,6 +14,7 @@ from datetime import datetime
 
 from flask import Blueprint, abort, flash, g, redirect, render_template, request, url_for
 
+from app.audit import get_creator_info, log_activity
 from app.auth import permission_required, validate_csrf
 from app.db import execute, get_db, query_all, query_one
 from app.helpers import parse_date, parse_float, today_str
@@ -72,6 +73,9 @@ def item_detail(item_id):
            ORDER BY p.purchase_date DESC, p.id DESC""",
         (item_id,),
     )
+    # 22 sep, registro de actividad (ver app/audit.py): "creado por" en el
+    # detalle del repuesto -- ver items_add() para dónde se registra el CREAR.
+    creator = get_creator_info("item_inventario", item_id)
     # Precio último/promedio a partir de lo REALMENTE recibido por línea
     # (received_quantity), no del estado de la orden completa — desde que
     # existen recepciones parciales (1 sep) una línea puede tener mercadería
@@ -88,6 +92,7 @@ def item_detail(item_id):
         purchase_history=purchase_history,
         last_price=last_price,
         avg_price=avg_price,
+        creator=creator,
     )
 
 
@@ -112,12 +117,26 @@ def items_add():
                 "UPDATE inventory_items SET active = 1, unit_cost = ? WHERE id = ?",
                 (unit_cost, existing["id"]),
             )
+            # 22 sep, registro de actividad (ver app/audit.py): reactivar un
+            # repuesto inactivo desde este mismo formulario.
+            log_activity(
+                "inventarios", "REACTIVAR", f"Repuesto {name}",
+                entity_type="item_inventario", entity_id=existing["id"],
+                entity_url=url_for("inventarios.item_detail", item_id=existing["id"]),
+            )
             flash(f'"{name}" reactivado.', "success")
     else:
         max_order = query_one("SELECT COALESCE(MAX(sort_order), -1) m FROM inventory_items")["m"]
-        execute(
+        item_id = execute(
             "INSERT INTO inventory_items (name, unit_cost, stock_quantity, sort_order) VALUES (?, ?, ?, ?)",
             (name, unit_cost, stock_quantity, max_order + 1),
+        )
+        # 22 sep, registro de actividad (ver app/audit.py): quién dio de alta
+        # este repuesto -- alimenta "Creado por" en item_detail.html.
+        log_activity(
+            "inventarios", "CREAR", f"Repuesto {name} — stock {stock_quantity}",
+            entity_type="item_inventario", entity_id=item_id,
+            entity_url=url_for("inventarios.item_detail", item_id=item_id),
         )
         flash(f'"{name}" agregado.', "success")
     return redirect(url_for("inventarios.list_view"))
@@ -132,6 +151,13 @@ def items_toggle(item_id):
     if item is None:
         abort(404)
     execute("UPDATE inventory_items SET active = ? WHERE id = ?", (0 if item["active"] else 1, item_id))
+    # 22 sep, registro de actividad (ver app/audit.py): distingue activar vs
+    # desactivar según el estado ANTES del toggle.
+    log_activity(
+        "inventarios", "DESACTIVAR" if item["active"] else "REACTIVAR", f'Repuesto {item["name"]}',
+        entity_type="item_inventario", entity_id=item_id,
+        entity_url=url_for("inventarios.item_detail", item_id=item_id),
+    )
     flash("Actualizado." if item["active"] else "Reactivado.", "success")
     return redirect(url_for("inventarios.list_view"))
 
@@ -152,6 +178,13 @@ def items_adjust_stock(item_id):
         flash("Indica una cantidad de stock válida.", "error")
         return redirect(url_for("inventarios.list_view"))
     execute("UPDATE inventory_items SET stock_quantity = ? WHERE id = ?", (new_stock, item_id))
+    # 22 sep, registro de actividad (ver app/audit.py): ajuste manual de
+    # stock -- útil para auditar quién cuadró el conteo físico.
+    log_activity(
+        "inventarios", "EDITAR", f'Repuesto {item["name"]} — stock ajustado a {new_stock}',
+        entity_type="item_inventario", entity_id=item_id,
+        entity_url=url_for("inventarios.item_detail", item_id=item_id),
+    )
     flash(f'Stock de "{item["name"]}" ajustado a {new_stock}.', "success")
     return redirect(url_for("inventarios.list_view"))
 
@@ -194,12 +227,26 @@ def providers_add():
                 "UPDATE inventory_providers SET active = 1, ruc = ?, phone = ? WHERE id = ?",
                 (ruc, phone, existing["id"]),
             )
+            # 22 sep, registro de actividad (ver app/audit.py): reactivar un
+            # proveedor inactivo desde este mismo formulario.
+            log_activity(
+                "inventarios", "REACTIVAR", f"Proveedor {name}",
+                entity_type="proveedor_inventario", entity_id=existing["id"],
+                entity_url=url_for("inventarios.providers_list"),
+            )
             flash(f'"{name}" reactivado.', "success")
     else:
         max_order = query_one("SELECT COALESCE(MAX(sort_order), -1) m FROM inventory_providers")["m"]
-        execute(
+        provider_id = execute(
             "INSERT INTO inventory_providers (name, ruc, phone, sort_order) VALUES (?, ?, ?, ?)",
             (name, ruc, phone, max_order + 1),
+        )
+        # 22 sep, registro de actividad (ver app/audit.py): sin pantalla de
+        # detalle propia para proveedores, el enlace va a la lista.
+        log_activity(
+            "inventarios", "CREAR", f"Proveedor {name}",
+            entity_type="proveedor_inventario", entity_id=provider_id,
+            entity_url=url_for("inventarios.providers_list"),
         )
         flash(f'"{name}" agregado.', "success")
     return redirect(url_for("inventarios.providers_list"))
@@ -215,6 +262,13 @@ def providers_toggle(provider_id):
         abort(404)
     execute(
         "UPDATE inventory_providers SET active = ? WHERE id = ?", (0 if provider["active"] else 1, provider_id)
+    )
+    # 22 sep, registro de actividad (ver app/audit.py): distingue activar vs
+    # desactivar según el estado ANTES del toggle.
+    log_activity(
+        "inventarios", "DESACTIVAR" if provider["active"] else "REACTIVAR", f'Proveedor {provider["name"]}',
+        entity_type="proveedor_inventario", entity_id=provider_id,
+        entity_url=url_for("inventarios.providers_list"),
     )
     flash("Actualizado." if provider["active"] else "Reactivado.", "success")
     return redirect(url_for("inventarios.providers_list"))
@@ -358,6 +412,13 @@ def purchases_new():
                 "inventarios/purchase_form.html", providers=providers, items=items, purchase=request.form,
             )
 
+        # 22 sep, registro de actividad (ver app/audit.py): recién acá, ya
+        # confirmado que la orden quedó con al menos una línea válida.
+        log_activity(
+            "inventarios", "CREAR", f'Orden de compra #{purchase_id} — {provider["name"]}',
+            entity_type="orden_compra", entity_id=purchase_id,
+            entity_url=url_for("inventarios.purchases_detail", purchase_id=purchase_id),
+        )
         flash("Orden de compra registrada como pendiente de autorización.", "success")
         return redirect(url_for("inventarios.purchases_detail", purchase_id=purchase_id))
 
@@ -392,6 +453,9 @@ def purchases_detail(purchase_id):
         )
         for row in rows:
             reception_items.setdefault(row["reception_id"], []).append(row)
+    # 22 sep, registro de actividad (ver app/audit.py): "creado por" en el
+    # detalle de la orden -- ver purchases_new() para dónde se registra el CREAR.
+    creator = get_creator_info("orden_compra", purchase_id)
     return render_template(
         "inventarios/purchase_detail.html",
         purchase=purchase, items=items, total=total,
@@ -399,6 +463,7 @@ def purchases_detail(purchase_id):
         display_status_code=display_status_code, display_status_label=display_status_label,
         receptions=receptions, reception_items=reception_items,
         is_admin=("ADMIN" in g.user["roles"]),
+        creator=creator,
     )
 
 
@@ -429,6 +494,14 @@ def purchases_authorize(purchase_id):
            SET authorized_at = ?, authorized_by_name = ?, authorized_by_user_id = ?
            WHERE id = ?""",
         (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), g.user["name"], g.user["id"], purchase_id),
+    )
+    # 22 sep, registro de actividad (ver app/audit.py) -- además del propio
+    # authorized_by_name/authorized_at de la orden, queda en el historial
+    # general de Actividad junto con el resto de acciones del sistema.
+    log_activity(
+        "inventarios", "APROBAR", f'Orden de compra #{purchase_id} — {purchase["provider_name"]}',
+        entity_type="orden_compra", entity_id=purchase_id,
+        entity_url=url_for("inventarios.purchases_detail", purchase_id=purchase_id),
     )
     flash(f'Orden de compra autorizada por {g.user["name"]}. Ya se puede generar el PDF y recibir los repuestos.', "success")
     return redirect(url_for("inventarios.purchases_detail", purchase_id=purchase_id))
@@ -549,6 +622,15 @@ def purchases_receive(purchase_id):
                 (today_str(), purchase_id),
             )
         db.commit()
+        # 22 sep, registro de actividad (ver app/audit.py) -- "RECIBIR" no
+        # tiene etiqueta especial en ACTION_LABELS, se muestra tal cual
+        # ("Recibir") en app/routes/actividad.py, que ya cubre ese caso.
+        received_label = ", ".join(f"{it['item_name']} x{qty}" for it, qty in to_receive)
+        log_activity(
+            "inventarios", "RECIBIR", f'Orden de compra #{purchase_id} — {received_label}',
+            entity_type="orden_compra", entity_id=purchase_id,
+            entity_url=url_for("inventarios.purchases_detail", purchase_id=purchase_id),
+        )
         flash(
             "Recepción registrada — se sumó al stock de cada repuesto."
             + (" La orden quedó completa y se cerró." if all_received else " Quedan repuestos pendientes de llegar."),
@@ -584,6 +666,14 @@ def purchases_close(purchase_id):
         "UPDATE inventory_purchases SET status = 'RECIBIDO', received_at = ? WHERE id = ?",
         (today_str(), purchase_id),
     )
+    # 22 sep, registro de actividad (ver app/audit.py): cierre manual con
+    # faltantes -- distinto de una recepción normal, por eso ESTADO y no
+    # RECIBIR.
+    log_activity(
+        "inventarios", "ESTADO", f'Orden de compra #{purchase_id} cerrada con faltantes — {purchase["provider_name"]}',
+        entity_type="orden_compra", entity_id=purchase_id,
+        entity_url=url_for("inventarios.purchases_detail", purchase_id=purchase_id),
+    )
     flash("Orden cerrada con lo recibido hasta ahora.", "success")
     return redirect(url_for("inventarios.purchases_detail", purchase_id=purchase_id))
 
@@ -605,5 +695,11 @@ def purchases_delete(purchase_id):
         return redirect(url_for("inventarios.purchases_detail", purchase_id=purchase_id))
     execute("DELETE FROM inventory_purchase_items WHERE purchase_id = ?", (purchase_id,))
     execute("DELETE FROM inventory_purchases WHERE id = ?", (purchase_id,))
+    # 22 sep, registro de actividad (ver app/audit.py) -- sin entity_url:
+    # la orden ya no existe, no hay a dónde enlazar.
+    log_activity(
+        "inventarios", "ELIMINAR", f'Orden de compra #{purchase_id} — {purchase["provider_name"]}',
+        entity_type="orden_compra", entity_id=purchase_id,
+    )
     flash("Orden de compra eliminada.", "success")
     return redirect(url_for("inventarios.purchases_list"))

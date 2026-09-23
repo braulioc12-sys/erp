@@ -10,6 +10,19 @@
 </div>
 
 <div class="detail-grid">
+  {# 22 sep, pedido de Braulio ("que usuario creo el viaje... etc"): visible
+     solo para quien tiene acceso al módulo de Actividad (Administrador por
+     defecto, ver app/routes/actividad.py) -- mismo criterio que
+     viajes/detail.html. Si la liquidación es de antes de que existiera este
+     registro, no hay forma de saberlo retroactivamente. #}
+  {% if can(current_user.roles, 'actividad', 'view') %}
+  <div class="detail-item">
+    <div class="label">Creado por</div>
+    <div class="value">
+      {% if creator %}{{ creator.user_name }} — {{ creator.created_at[:16] }}{% else %}No disponible (registro anterior a este historial){% endif %}
+    </div>
+  </div>
+  {% endif %}
   <div class="detail-item"><div class="label">Ruta</div><div class="value">{{ advance.origin }} → {{ advance.destination }}</div></div>
   <div class="detail-item"><div class="label">Total entregado ({{ payments|length }} anticipo{{ 's' if payments|length != 1 }})</div><div class="value">{{ advance.amount_given|money }}</div></div>
   <div class="detail-item"><div class="label">Gastado hasta ahora (todos los gastos del viaje)</div><div class="value">{{ spent|money }}</div></div>

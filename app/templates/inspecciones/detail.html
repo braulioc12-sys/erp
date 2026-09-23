@@ -9,6 +9,17 @@
 </div>
 
 <div class="detail-grid">
+  {# 22 sep, pedido de Braulio ("que usuario... etc"): visible solo para
+     quien tiene acceso al módulo de Actividad -- mismo criterio en el resto
+     de módulos instrumentados (ver app/routes/viajes.py detail.html). #}
+  {% if can(current_user.roles, 'actividad', 'view') %}
+  <div class="detail-item">
+    <div class="label">Creado por</div>
+    <div class="value">
+      {% if creator %}{{ creator.user_name }} — {{ creator.created_at[:16] }}{% else %}No disponible (registro anterior a este historial){% endif %}
+    </div>
+  </div>
+  {% endif %}
   <div class="detail-item"><div class="label">Momento</div><div class="value">{{ 'Antes de salir' if inspection.type == 'PRE' else 'Al llegar' }}</div></div>
   <div class="detail-item"><div class="label">Fecha</div><div class="value">{{ inspection.inspection_date }}</div></div>
   <div class="detail-item"><div class="label">Viaje</div><div class="value">{% if inspection.trip_code %}<a href="{{ url_for('viajes.detail', trip_id=inspection.trip_id) }}">{{ inspection.trip_code }}</a>{% else %}—{% endif %}</div></div>

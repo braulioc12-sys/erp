@@ -13,6 +13,18 @@
 </div>
 
 <div class="detail-grid">
+  {# 22 sep, pedido de Braulio ("que usuario... genero guias"): visible solo
+     para quien tiene acceso al módulo de Actividad -- mismo criterio en el
+     resto de módulos instrumentados. Si la guía es de antes de que existiera
+     este registro, no hay forma de saberlo retroactivamente. #}
+  {% if can(current_user.roles, 'actividad', 'view') %}
+  <div class="detail-item">
+    <div class="label">Generado por</div>
+    <div class="value">
+      {% if creator %}{{ creator.user_name }} — {{ creator.created_at[:16] }}{% else %}No disponible (registro anterior a este historial){% endif %}
+    </div>
+  </div>
+  {% endif %}
   <div class="detail-item"><div class="label">Viaje</div><div class="value"><a href="{{ url_for('viajes.detail', trip_id=waybill.trip_id) }}">{{ waybill.trip_code }}</a></div></div>
   <div class="detail-item"><div class="label">Cliente / Remitente</div><div class="value">{{ waybill.client_name }}</div></div>
   <div class="detail-item"><div class="label">Destinatario</div><div class="value">{% if waybill.recipient_ruc %}{{ waybill.recipient_name }} ({{ waybill.recipient_ruc }}){% else %}{{ waybill.client_name }} (igual al remitente){% endif %}</div></div>

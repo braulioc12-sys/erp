@@ -14,6 +14,7 @@ from datetime import datetime
 
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 
+from app.audit import get_creator_info, log_activity
 from app.auth import permission_required, validate_csrf
 from app.db import execute, get_db, query_all, query_one
 from app.helpers import parse_date, parse_float, today_str
@@ -442,6 +443,13 @@ def inventory_detail(tire_inventory_id):
 
     current_assignment = _inventory_current_assignment(tire_inventory_id) if tire["status"] == "ASIGNADA" else None
 
+    # 22 sep, pedido de Braulio ("que usuario creo... etc"): quién y cuándo se
+    # agregó esta llanta al inventario, según activity_log (ver app/audit.py).
+    # None para llantas de antes de que existiera este registro (incluye las
+    # sembradas en bloque por _seed_default_tire_codes_sqlite/_postgres en
+    # app/db.py, que no pasan por inventory_new()).
+    creator = get_creator_info("llanta", tire_inventory_id)
+
     return render_template(
         "neumaticos/inventory_detail.html",
         tire=tire,
@@ -456,6 +464,7 @@ def inventory_detail(tire_inventory_id):
         installation_rows=installation_rows,
         inspections=inspections,
         today=today_str(),
+        creator=creator,
     )
 
 
@@ -512,6 +521,19 @@ def inventory_add_inspection(tire_inventory_id):
     db = get_db()
     record_tire_inspection(db, tire_inventory_id, inspection_date, tread_depth_mm, vehicle_plate_at_inspection, notes)
     db.commit()
+    # 22 sep, registro de actividad (ver app/audit.py). Solo se instrumenta acá
+    # (la ruta propia del inventario) y no dentro de record_tire_inspection(),
+    # porque esa función también la llama app/routes/inspecciones.py dentro de
+    # su propia transacción con varios INSERT pendientes -- log_activity()
+    # hace su propio commit, y llamarla ahí adelantaría ese commit en medio de
+    # una operación que no es la de este módulo.
+    log_activity(
+        "neumaticos", "INSPECCIONAR",
+        f'Cocada de llanta "{tire["code"]}": {tread_depth_mm} mm'
+        + (f" ({vehicle_plate_at_inspection})" if vehicle_plate_at_inspection else ""),
+        entity_type="llanta", entity_id=tire_inventory_id,
+        entity_url=url_for("neumaticos.inventory_detail", tire_inventory_id=tire_inventory_id),
+    )
     flash("Medición de cocada registrada.", "success")
     return redirect(url_for("neumaticos.inventory_detail", tire_inventory_id=tire_inventory_id))
 
@@ -541,10 +563,17 @@ def inventory_new():
             if existing:
                 flash(f'Ya existe una llanta registrada con el código "{code}".', "error")
             else:
-                execute(
+                tire_inventory_id = execute(
                     """INSERT INTO tire_inventory (code, brand, model, tire_type, expected_life_km, notes)
                        VALUES (?, ?, ?, ?, ?, ?)""",
                     (code, brand or None, model or None, tire_type, expected_life_km, notes or None),
+                )
+                # 22 sep, registro de actividad (ver app/audit.py): quién agregó esta
+                # llanta al inventario -- alimenta "Creado por" en inventory_detail.html.
+                log_activity(
+                    "neumaticos", "CREAR", f'Llanta "{code}" agregada al inventario',
+                    entity_type="llanta", entity_id=tire_inventory_id,
+                    entity_url=url_for("neumaticos.inventory_detail", tire_inventory_id=tire_inventory_id),
                 )
                 flash(f'Llanta "{code}" registrada en el inventario.', "success")
                 return redirect(next_url or url_for("neumaticos.inventory_list"))
@@ -605,6 +634,12 @@ def inventory_edit(tire_inventory_id):
                     """UPDATE tire_inventory SET code = ?, brand = ?, model = ?, tire_type = ?,
                        expected_life_km = ?, notes = ? WHERE id = ?""",
                     (code, brand or None, model or None, tire_type, expected_life_km, notes or None, tire_inventory_id),
+                )
+                # 22 sep, registro de actividad (ver app/audit.py).
+                log_activity(
+                    "neumaticos", "EDITAR", f'Llanta "{code}" actualizada (datos de inventario)',
+                    entity_type="llanta", entity_id=tire_inventory_id,
+                    entity_url=url_for("neumaticos.inventory_detail", tire_inventory_id=tire_inventory_id),
                 )
                 flash(f'Llanta "{code}" actualizada.', "success")
                 return redirect(next_url or url_for("neumaticos.inventory_detail", tire_inventory_id=tire_inventory_id))
@@ -810,6 +845,14 @@ def new_tire(vehicle_id, position_code):
             )
             db.execute("UPDATE tire_inventory SET status = 'ASIGNADA' WHERE id = ?", (inv_tire["id"],))
             db.commit()
+            # 22 sep, registro de actividad (ver app/audit.py).
+            log_activity(
+                "neumaticos", "MONTAR",
+                f'Llanta "{inv_tire["code"]}" montada en {vehicle["plate"]}, posición '
+                f'{get_position_label(vehicle["vehicle_type"], position_code)}',
+                entity_type="llanta", entity_id=inv_tire["id"],
+                entity_url=url_for("neumaticos.inventory_detail", tire_inventory_id=inv_tire["id"]),
+            )
             flash(f'Llanta "{inv_tire["code"]}" asignada a esta posición.', "success")
             return redirect(url_for("neumaticos.diagram", vehicle_id=vehicle_id))
 
@@ -952,6 +995,22 @@ def replace_tire(tire_id):
         )
         db.execute("UPDATE tire_inventory SET status = 'ASIGNADA' WHERE id = ?", (new_inv_tire["id"],))
         db.commit()
+        # 22 sep, registro de actividad (ver app/audit.py): un solo evento
+        # REEMPLAZAR cubre tanto el retiro de la llanta vieja (ya aplicado por
+        # _apply_disposition arriba) como el montaje de la nueva -- se prefirió
+        # esto a dos entradas separadas (RETIRAR + MONTAR) para que se lea como
+        # una sola acción del usuario en la pantalla de Actividad.
+        old_code = None
+        if old_tire["tire_inventory_id"]:
+            old_inv = query_one("SELECT code FROM tire_inventory WHERE id = ?", (old_tire["tire_inventory_id"],))
+            old_code = old_inv["code"] if old_inv else None
+        log_activity(
+            "neumaticos", "REEMPLAZAR",
+            f'Llanta "{old_code or "sin código"}" reemplazada por "{new_inv_tire["code"]}" en '
+            f'{vehicle["plate"]}, posición {get_position_label(vehicle["vehicle_type"], old_tire["position_code"])}',
+            entity_type="llanta", entity_id=new_inv_tire["id"],
+            entity_url=url_for("neumaticos.inventory_detail", tire_inventory_id=new_inv_tire["id"]),
+        )
         flash(f'Llanta "{new_inv_tire["code"]}" instalada en esta posición.', "success")
         return redirect(url_for("neumaticos.diagram", vehicle_id=old_tire["vehicle_id"]))
 
@@ -1006,6 +1065,21 @@ def retire_tire(tire_id):
                 form=request.form,
             )
 
+        # 22 sep, registro de actividad (ver app/audit.py).
+        retired_code = None
+        if tire["tire_inventory_id"]:
+            retired_inv = query_one("SELECT code FROM tire_inventory WHERE id = ?", (tire["tire_inventory_id"],))
+            retired_code = retired_inv["code"] if retired_inv else None
+        log_activity(
+            "neumaticos", "RETIRAR",
+            f'Llanta "{retired_code or "sin código"}" retirada de {vehicle["plate"]}, posición '
+            f'{get_position_label(vehicle["vehicle_type"], tire["position_code"])}',
+            entity_type="llanta", entity_id=tire["tire_inventory_id"],
+            entity_url=(
+                url_for("neumaticos.inventory_detail", tire_inventory_id=tire["tire_inventory_id"])
+                if tire["tire_inventory_id"] else None
+            ),
+        )
         return redirect(url_for("neumaticos.diagram", vehicle_id=tire["vehicle_id"]))
 
     vehicles, vehicles_data, positions_by_type = _move_destination_data()
@@ -1115,6 +1189,26 @@ def rotate_tires(vehicle_id):
                 (rotation_id, tire["id"], from_code, to_code),
             )
         db.commit()
+
+        # 22 sep, registro de actividad (ver app/audit.py): una entrada por
+        # cada llanta rotada (no una sola para toda la rotación), para que
+        # "Creado por"/Actividad pueda mostrar el historial de cada llanta
+        # física por separado, igual que sus otros movimientos.
+        for tire, from_code, to_code in moves:
+            rotated_code = None
+            if tire["tire_inventory_id"]:
+                rotated_inv = query_one("SELECT code FROM tire_inventory WHERE id = ?", (tire["tire_inventory_id"],))
+                rotated_code = rotated_inv["code"] if rotated_inv else None
+            log_activity(
+                "neumaticos", "ROTAR",
+                f'Llanta "{rotated_code or "sin código"}" rotada de {position_labels.get(from_code, from_code)} '
+                f'a {position_labels.get(to_code, to_code)} en {vehicle["plate"]}',
+                entity_type="llanta", entity_id=tire["tire_inventory_id"],
+                entity_url=(
+                    url_for("neumaticos.inventory_detail", tire_inventory_id=tire["tire_inventory_id"])
+                    if tire["tire_inventory_id"] else None
+                ),
+            )
 
         flash(f"Rotación registrada: {len(moves)} llanta(s) cambiaron de posición.", "success")
         return redirect(url_for("neumaticos.diagram", vehicle_id=vehicle_id))

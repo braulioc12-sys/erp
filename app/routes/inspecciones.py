@@ -2,6 +2,7 @@ from datetime import datetime
 
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 
+from app.audit import get_creator_info, log_activity
 from app.auth import permission_required, validate_csrf
 from app.db import execute, get_db, query_all, query_one
 from app.detailed_checklists import (
@@ -162,6 +163,14 @@ def _save_generic_inspection(trip_id, trip, vehicle_id):
         )
     db.commit()
 
+    # 22 sep, registro de actividad (ver app/audit.py): se busca la placa
+    # recién porque no la teníamos a mano en esta función (solo vehicle_id).
+    vehicle = query_one("SELECT plate FROM vehicles WHERE id = ?", (vehicle_id,))
+    log_activity(
+        "inspecciones", "CREAR", f"Inspección de {vehicle['plate'] if vehicle else vehicle_id}",
+        entity_type="inspeccion", entity_id=inspection_id,
+        entity_url=url_for("inspecciones.detail", inspection_id=inspection_id),
+    )
     flash("Inspección registrada.", "success")
     if trip_id:
         return redirect(url_for("viajes.detail", trip_id=trip_id))
@@ -276,6 +285,13 @@ def _save_detailed_inspection(trip_id, trip, vehicle):
             )
     db.commit()
 
+    # 22 sep, registro de actividad (ver app/audit.py).
+    log_activity(
+        "inspecciones", "CREAR",
+        f"{CHECKLIST_LABELS.get(vehicle_type, 'Checklist')} {checklist_code} ({vehicle['plate']})",
+        entity_type="inspeccion", entity_id=inspection_id,
+        entity_url=url_for("inspecciones.detail", inspection_id=inspection_id),
+    )
     flash(f"{CHECKLIST_LABELS.get(vehicle_type, 'Checklist')} {checklist_code} registrado.", "success")
     if trip_id:
         return redirect(url_for("viajes.detail", trip_id=trip_id))
@@ -298,15 +314,19 @@ def detail(inspection_id):
     if inspection is None:
         abort(404)
     items = query_all("SELECT * FROM inspection_items WHERE inspection_id = ?", (inspection_id,))
+    # 22 sep, pedido de Braulio ("que usuario... etc"): quién y cuándo se
+    # registró esta inspección, según activity_log (ver app/audit.py).
+    creator = get_creator_info("inspeccion", inspection_id)
 
     if inspection["checklist_code"]:
         return render_template(
             "inspecciones/detail_checklist.html", inspection=inspection,
             checklist_label=CHECKLIST_LABELS.get(inspection["vehicle_type"], "Checklist"),
             has_odometer=HAS_ODOMETER.get(inspection["vehicle_type"], True),
+            creator=creator,
             **_group_detailed_items(items, inspection["vehicle_type"]),
         )
-    return render_template("inspecciones/detail.html", inspection=inspection, items=items)
+    return render_template("inspecciones/detail.html", inspection=inspection, items=items, creator=creator)
 
 
 def _group_detailed_items(items, vehicle_type):

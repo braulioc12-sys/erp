@@ -18,6 +18,17 @@
 
 <div class="panel">
   <div class="detail-grid">
+    {# 22 sep, pedido de Braulio ("que usuario... genero guias" / creó la
+       orden): visible solo para quien tiene acceso al módulo de Actividad
+       (Administrador por defecto, ver app/routes/actividad.py) -- mismo
+       criterio que viajes/detail.html. Si la orden es de antes de que
+       existiera este registro, no hay forma de saberlo retroactivamente. #}
+    {% if can(current_user.roles, 'actividad', 'view') %}
+    <div>
+      <span class="muted">Creado por</span><br>
+      {% if creator %}{{ creator.user_name }} — {{ creator.created_at[:16] }}{% else %}No disponible (registro anterior a este historial){% endif %}
+    </div>
+    {% endif %}
     <div><span class="muted">Unidad</span><br>{{ record.vehicle_plate }}</div>
     <div><span class="muted">Fecha</span><br>{{ record.maintenance_date }}</div>
     <div><span class="muted">Estado de la orden</span><br>{{ m.badge(order_status) }}</div>

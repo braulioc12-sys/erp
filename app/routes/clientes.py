@@ -1,5 +1,6 @@
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 
+from app.audit import log_activity
 from app.auth import permission_required, validate_csrf
 from app.db import execute, query_all, query_one
 
@@ -39,7 +40,7 @@ def new():
         if not name:
             flash("El nombre del cliente es obligatorio.", "error")
             return render_template("clientes/form.html", client=request.form, mode="new")
-        execute(
+        client_id = execute(
             "INSERT INTO clients (name, ruc, phone, email, address) VALUES (?, ?, ?, ?, ?)",
             (
                 name,
@@ -48,6 +49,14 @@ def new():
                 request.form.get("email", "").strip(),
                 request.form.get("address", "").strip(),
             ),
+        )
+        # 22 sep, registro de actividad (ver app/audit.py). Sin pantalla de
+        # detalle propia para clientes (solo lista/formulario), el enlace va
+        # a editar, la única vista puntual que existe de este registro.
+        log_activity(
+            "clientes", "CREAR", f"Cliente {name}",
+            entity_type="cliente", entity_id=client_id,
+            entity_url=url_for("clientes.edit", client_id=client_id),
         )
         flash("Cliente creado correctamente.", "success")
         return redirect(url_for("clientes.list_view"))
@@ -78,6 +87,12 @@ def edit(client_id):
                 client_id,
             ),
         )
+        # 22 sep, registro de actividad (ver app/audit.py).
+        log_activity(
+            "clientes", "EDITAR", f"Cliente {name}",
+            entity_type="cliente", entity_id=client_id,
+            entity_url=url_for("clientes.edit", client_id=client_id),
+        )
         flash("Cliente actualizado.", "success")
         return redirect(url_for("clientes.list_view"))
     return render_template("clientes/form.html", client=client, mode="edit", client_id=client_id)
@@ -88,11 +103,26 @@ def edit(client_id):
 def delete(client_id):
     if not validate_csrf():
         abort(400)
+    client = query_one("SELECT * FROM clients WHERE id = ?", (client_id,))
+    if client is None:
+        abort(404)
     in_use = query_one("SELECT COUNT(*) n FROM trips WHERE client_id = ?", (client_id,))["n"]
     if in_use:
         execute("UPDATE clients SET active = 0 WHERE id = ?", (client_id,))
+        # 22 sep, registro de actividad (ver app/audit.py): baja lógica (tiene
+        # viajes asociados) -- DESACTIVAR, no ELIMINAR, ya que el registro sigue existiendo.
+        log_activity(
+            "clientes", "DESACTIVAR", f'Cliente {client["name"]}',
+            entity_type="cliente", entity_id=client_id,
+        )
         flash("El cliente tiene viajes asociados; se marcó como inactivo.", "success")
     else:
         execute("DELETE FROM clients WHERE id = ?", (client_id,))
+        # 22 sep, registro de actividad (ver app/audit.py) -- sin entity_url:
+        # el cliente ya no existe, no hay a dónde enlazar.
+        log_activity(
+            "clientes", "ELIMINAR", f'Cliente {client["name"]}',
+            entity_type="cliente", entity_id=client_id,
+        )
         flash("Cliente eliminado.", "success")
     return redirect(url_for("clientes.list_view"))

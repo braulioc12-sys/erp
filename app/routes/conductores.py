@@ -17,6 +17,7 @@ import uuid
 from flask import Blueprint, Response, abort, flash, redirect, render_template, request, send_from_directory, url_for
 
 from app import storage
+from app.audit import get_creator_info, log_activity
 from app.auth import permission_required, validate_csrf
 from app.bulk_import import DRIVER_COLUMNS, DRIVER_EXAMPLE, XLSX_MIME, build_import_template, read_import_rows
 from app.db import execute, query_all, query_one
@@ -155,7 +156,10 @@ def driver_detail(driver_id):
     driver = query_one("SELECT * FROM drivers WHERE id = ?", (driver_id,))
     if driver is None:
         abort(404)
-    return render_template("conductores/detail.html", driver=driver, driver_id=driver_id)
+    # 22 sep, pedido de Braulio ("que usuario... etc"): quién y cuándo se
+    # registró este conductor, según activity_log (ver app/audit.py).
+    creator = get_creator_info("conductor", driver_id)
+    return render_template("conductores/detail.html", driver=driver, driver_id=driver_id, creator=creator)
 
 
 @bp.route("/<int:driver_id>/foto")
@@ -181,7 +185,7 @@ def new_driver():
             return render_template("conductores/driver_form.html", driver=request.form, mode="new")
         fields = _driver_fields_from_form(request.form)
         photo_filename = _save_driver_photo(request.files.get("photo"))
-        execute(
+        driver_id = execute(
             """INSERT INTO drivers (name, document_number, license_number, license_expiry,
                medical_exam_date, medical_exam_expiry,
                backus_driving_exam_date, backus_driving_exam_expiry,
@@ -189,6 +193,12 @@ def new_driver():
                dds_date, dds_expiry, phone, photo_filename, status)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (*fields[:-1], photo_filename, fields[-1]),
+        )
+        # 22 sep, registro de actividad (ver app/audit.py).
+        log_activity(
+            "conductores", "CREAR", f"Conductor {fields[0]}",
+            entity_type="conductor", entity_id=driver_id,
+            entity_url=url_for("conductores.driver_detail", driver_id=driver_id),
         )
         flash("Conductor registrado.", "success")
         return redirect(url_for("conductores.list_view"))
@@ -219,6 +229,26 @@ def edit_driver(driver_id):
                WHERE id=?""",
             (*fields[:-1], photo_filename, fields[-1], driver_id),
         )
+        # 22 sep, registro de actividad (ver app/audit.py): un solo formulario
+        # cubre datos generales, foto y estado -- se prioriza qué acción
+        # mostrar en Actividad (SUBIR si hay foto nueva, ESTADO si cambió el
+        # estado, EDITAR en cualquier otro caso), mismo criterio que
+        # save_waybill()/toggle_invoiced() en app/routes/viajes.py.
+        new_status = fields[-1]
+        label = f"Conductor {fields[0]}"
+        if new_photo:
+            action = "SUBIR"
+            label += " (foto actualizada)"
+        elif new_status != driver["status"]:
+            action = "ESTADO"
+            label += f": {driver['status']} → {new_status}"
+        else:
+            action = "EDITAR"
+        log_activity(
+            "conductores", action, label,
+            entity_type="conductor", entity_id=driver_id,
+            entity_url=url_for("conductores.driver_detail", driver_id=driver_id),
+        )
         flash("Conductor actualizado.", "success")
         return redirect(url_for("conductores.list_view"))
     return render_template("conductores/driver_form.html", driver=driver, mode="edit", driver_id=driver_id)
@@ -243,8 +273,17 @@ def _driver_has_history(driver_id):
 def delete_driver(driver_id):
     if not validate_csrf():
         abort(400)
+    driver = query_one("SELECT name FROM drivers WHERE id = ?", (driver_id,))
+    if driver is None:
+        abort(404)
     if _driver_has_history(driver_id):
         execute("UPDATE drivers SET status = 'INACTIVO' WHERE id = ?", (driver_id,))
+        # 22 sep, registro de actividad (ver app/audit.py): no se puede borrar
+        # de verdad (tiene historial), así que esto es un cambio de estado.
+        log_activity(
+            "conductores", "ESTADO", f"Conductor {driver['name']}: marcado INACTIVO (tenía historial asociado)",
+            entity_type="conductor", entity_id=driver_id,
+        )
         flash(
             "El conductor tiene historial asociado (viajes o inspecciones); se marcó como "
             "inactivo para no perder ese historial.",
@@ -252,6 +291,10 @@ def delete_driver(driver_id):
         )
     else:
         execute("DELETE FROM drivers WHERE id = ?", (driver_id,))
+        log_activity(
+            "conductores", "ELIMINAR", f"Conductor {driver['name']}",
+            entity_type="conductor", entity_id=driver_id,
+        )
         flash("Conductor eliminado.", "success")
     return redirect(url_for("conductores.list_view"))
 

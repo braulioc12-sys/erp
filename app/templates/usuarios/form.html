@@ -2,6 +2,21 @@
 {% block title %}{{ 'Editar usuario' if mode == 'edit' else 'Nuevo usuario' }}{% endblock %}
 {% block content %}
 <div class="page-header"><h1>{{ 'Editar usuario' if mode == 'edit' else 'Nuevo usuario' }}</h1></div>
+{# 22 sep, pedido de Braulio ("que usuario... etc"): visible solo para quien
+   tiene acceso al módulo de Actividad -- mismo criterio en el resto de
+   módulos instrumentados (ver app/routes/viajes.py detail.html). Este
+   formulario hace de "detalle" del usuario (no hay otra pantalla), por eso
+   va acá en vez de un detail-grid propio. #}
+{% if mode == 'edit' and can(current_user.roles, 'actividad', 'view') %}
+<div class="panel" style="margin-bottom:16px;">
+  <div class="detail-item">
+    <div class="label">Creado por</div>
+    <div class="value">
+      {% if creator %}{{ creator.user_name }} — {{ creator.created_at[:16] }}{% else %}No disponible (registro anterior a este historial){% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
 <form class="form panel" method="post">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 

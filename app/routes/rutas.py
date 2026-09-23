@@ -2,6 +2,7 @@
 usado al confirmar el anticipo de gastos de viaje a un conductor."""
 from flask import Blueprint, Response, abort, flash, redirect, render_template, request, url_for
 
+from app.audit import get_creator_info, log_activity
 from app.auth import permission_required, validate_csrf
 from app.bulk_import import ROUTE_COLUMNS, ROUTE_EXAMPLE, XLSX_MIME, build_import_template, read_import_rows
 from app.db import execute, query_all, query_one
@@ -63,12 +64,26 @@ def add():
             "default_fuel_amount = ?, active = 1 WHERE id = ?",
             (amount, commission, fuel_amount, existing["id"]),
         )
+        # 22 sep, registro de actividad (ver app/audit.py): este formulario
+        # ("+ Agregar nueva ruta") en realidad actualiza si el origen/destino
+        # ya existía -- se registra como EDITAR, no CREAR, para reflejar lo
+        # que de verdad pasó en la base de datos.
+        log_activity(
+            "rutas", "EDITAR", f"Ruta {origin} → {destination} (actualizada vía 'Agregar nueva ruta')",
+            entity_type="ruta", entity_id=existing["id"],
+            entity_url=url_for("rutas.edit", route_id=existing["id"]),
+        )
         flash("Ruta actualizada.", "success")
     else:
-        execute(
+        route_id = execute(
             "INSERT INTO routes (origin, destination, default_expense_amount, "
             "default_commission_amount, default_fuel_amount) VALUES (?, ?, ?, ?, ?)",
             (origin, destination, amount, commission, fuel_amount),
+        )
+        log_activity(
+            "rutas", "CREAR", f"Ruta {origin} → {destination}",
+            entity_type="ruta", entity_id=route_id,
+            entity_url=url_for("rutas.edit", route_id=route_id),
         )
         flash("Ruta agregada.", "success")
     return redirect(url_for("rutas.list_view"))
@@ -110,9 +125,18 @@ def edit(route_id):
             "default_commission_amount = ?, default_fuel_amount = ? WHERE id = ?",
             (origin, destination, amount, commission, fuel_amount, route_id),
         )
+        log_activity(
+            "rutas", "EDITAR", f"Ruta {origin} → {destination}",
+            entity_type="ruta", entity_id=route_id,
+            entity_url=url_for("rutas.edit", route_id=route_id),
+        )
         flash("Ruta actualizada.", "success")
         return redirect(url_for("rutas.list_view"))
-    return render_template("rutas/edit.html", route=route)
+    # 22 sep, pedido de Braulio ("que usuario creo el viaje... etc"): quién y
+    # cuándo se creó esta ruta, según activity_log (ver app/audit.py) -- None
+    # para rutas de antes de que existiera este registro.
+    creator = get_creator_info("ruta", route_id)
+    return render_template("rutas/edit.html", route=route, creator=creator)
 
 
 @bp.route("/<int:route_id>/alternar", methods=["POST"])
@@ -123,7 +147,14 @@ def toggle(route_id):
     route = query_one("SELECT * FROM routes WHERE id = ?", (route_id,))
     if route is None:
         abort(404)
-    execute("UPDATE routes SET active = ? WHERE id = ?", (0 if route["active"] else 1, route_id))
+    new_active = 0 if route["active"] else 1
+    execute("UPDATE routes SET active = ? WHERE id = ?", (new_active, route_id))
+    log_activity(
+        "rutas", "REACTIVAR" if new_active else "DESACTIVAR",
+        f"Ruta {route['origin']} → {route['destination']}",
+        entity_type="ruta", entity_id=route_id,
+        entity_url=url_for("rutas.edit", route_id=route_id),
+    )
     flash("Actualizada." if route["active"] else "Reactivada.", "success")
     return redirect(url_for("rutas.list_view"))
 
@@ -150,6 +181,13 @@ def delete(route_id):
     )["n"]
     if has_history:
         execute("UPDATE routes SET active = 0 WHERE id = ?", (route_id,))
+        log_activity(
+            "rutas", "DESACTIVAR",
+            f"Ruta {route['origin']} → {route['destination']} (se desactivó en vez de eliminar: "
+            "ya tiene liquidaciones de viáticos)",
+            entity_type="ruta", entity_id=route_id,
+            entity_url=url_for("rutas.edit", route_id=route_id),
+        )
         flash(
             "Esta ruta ya se usó en una liquidación de viáticos; se desactivó en vez de "
             "borrarla, para no perder ese historial.",
@@ -157,6 +195,13 @@ def delete(route_id):
         )
     else:
         execute("DELETE FROM routes WHERE id = ?", (route_id,))
+        # 22 sep, registro de actividad: sin entity_url -- la ruta ya no
+        # existe, así que rutas.edit para este id daría 404 (ver
+        # app/routes/actividad.py, que ya maneja entity_url ausente).
+        log_activity(
+            "rutas", "ELIMINAR", f"Ruta {route['origin']} → {route['destination']}",
+            entity_type="ruta", entity_id=route_id,
+        )
         flash("Ruta eliminada.", "success")
     return redirect(url_for("rutas.list_view"))
 
@@ -227,6 +272,15 @@ def import_routes():
             flash(file_error, "error")
             return redirect(url_for("rutas.import_routes"))
         result = _apply_route_import(rows, example_skips)
+        # 22 sep, registro de actividad: una sola entrada para todo el lote
+        # (no una por fila) -- son varios registros a la vez, igual que el
+        # resto de cargas masivas del sistema.
+        if result["created"] or result["updated"]:
+            log_activity(
+                "rutas", "CREAR" if result["created"] else "EDITAR",
+                f"Importación masiva de rutas: {result['created']} creada(s), {result['updated']} actualizada(s)",
+                entity_url=url_for("rutas.list_view"),
+            )
         return render_template(
             "import_result.html", result=result,
             back_url=url_for("rutas.list_view"), retry_url=url_for("rutas.import_routes"),

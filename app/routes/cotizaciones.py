@@ -23,6 +23,7 @@ configuración regional del navegador/impresora de quien lo use).
 """
 from flask import Blueprint, abort, current_app, flash, g, jsonify, redirect, render_template, request, url_for
 
+from app.audit import get_creator_info, log_activity
 from app.auth import permission_required, validate_csrf
 from app.db import execute, get_db, query_all, query_one
 from app.helpers import amount_to_words_pen, parse_date, parse_float, today_str
@@ -248,6 +249,13 @@ def new():
                 ),
             )
         db.commit()
+        # 22 sep, registro de actividad (ver app/audit.py): quién creó esta
+        # cotización -- alimenta "Creado por" en cotizaciones/detail.html.
+        log_activity(
+            "cotizaciones", "CREAR", f"Cotización N° {number} — {client_name}",
+            entity_type="cotizacion", entity_id=quotation_id,
+            entity_url=url_for("cotizaciones.detail", quotation_id=quotation_id),
+        )
         flash(f"Cotización N° {number} creada.", "success")
         return redirect(url_for("cotizaciones.detail", quotation_id=quotation_id))
 
@@ -270,8 +278,11 @@ def detail(quotation_id):
         it["sale_price"] = sale_price
         it["line_total"] = line_total
     totals = _calc_totals(items, quotation["discount_total"], quotation["other_charges_total"])
+    # 22 sep, registro de actividad (ver app/audit.py): "creado por" en el
+    # detalle -- ver new() para dónde se registra el CREAR.
+    creator = get_creator_info("cotizacion", quotation_id)
     return render_template(
-        "cotizaciones/detail.html", quotation=quotation, items=items, totals=totals
+        "cotizaciones/detail.html", quotation=quotation, items=items, totals=totals, creator=creator
     )
 
 
@@ -335,6 +346,12 @@ def edit(quotation_id):
                 ),
             )
         db.commit()
+        # 22 sep, registro de actividad (ver app/audit.py).
+        log_activity(
+            "cotizaciones", "EDITAR", f"Cotización N° {quotation['number']} — {client_name}",
+            entity_type="cotizacion", entity_id=quotation_id,
+            entity_url=url_for("cotizaciones.detail", quotation_id=quotation_id),
+        )
         flash("Cotización actualizada.", "success")
         return redirect(url_for("cotizaciones.detail", quotation_id=quotation_id))
 
@@ -361,6 +378,12 @@ def delete(quotation_id):
     db.execute("DELETE FROM quotation_items WHERE quotation_id = ?", (quotation_id,))
     db.execute("DELETE FROM quotations WHERE id = ?", (quotation_id,))
     db.commit()
+    # 22 sep, registro de actividad (ver app/audit.py) -- sin entity_url: la
+    # cotización ya no existe, no hay a dónde enlazar.
+    log_activity(
+        "cotizaciones", "ELIMINAR", f'Cotización N° {quotation["number"]} — {quotation["client_name"]}',
+        entity_type="cotizacion", entity_id=quotation_id,
+    )
     flash("Cotización eliminada.", "success")
     return redirect(url_for("cotizaciones.list_view"))
 
@@ -377,6 +400,12 @@ def change_status(quotation_id):
     if quotation is None:
         abort(404)
     execute("UPDATE quotations SET status = ? WHERE id = ?", (new_status, quotation_id))
+    # 22 sep, registro de actividad (ver app/audit.py).
+    log_activity(
+        "cotizaciones", "ESTADO", f'Cotización N° {quotation["number"]} — {new_status.title()}',
+        entity_type="cotizacion", entity_id=quotation_id,
+        entity_url=url_for("cotizaciones.detail", quotation_id=quotation_id),
+    )
     flash("Estado de la cotización actualizado.", "success")
     return redirect(url_for("cotizaciones.detail", quotation_id=quotation_id))
 

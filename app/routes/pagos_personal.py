@@ -99,6 +99,7 @@ from datetime import datetime
 from flask import Blueprint, Response, abort, current_app, flash, g, redirect, render_template, request, send_from_directory, url_for
 
 from app import storage
+from app.audit import get_creator_info, log_activity
 from app.auth import permission_required, validate_csrf
 from app.bulk_import import (
     HONORARIOS_TEMPLATE_COLUMNS,
@@ -259,7 +260,11 @@ def new_payment():
         payment_type = request.form.get("payment_type", "")
         period = (request.form.get("period") or "").strip()
         errors = []
-        if not staff_id or query_one("SELECT id FROM staff WHERE id = ?", (staff_id,)) is None:
+        # 22 sep, registro de actividad (ver app/audit.py): se trae el nombre
+        # además del id -- lo necesita el log_activity() de abajo para la
+        # etiqueta que se muestra en Actividad.
+        staff_row = query_one("SELECT id, name FROM staff WHERE id = ?", (staff_id,)) if staff_id else None
+        if staff_row is None:
             errors.append("Elige una persona del catálogo de Personal.")
         if payment_type not in PAYMENT_TYPE_LABELS:
             errors.append("Elige el tipo de comprobante (Planilla o Recibo por honorarios).")
@@ -276,7 +281,7 @@ def new_payment():
         if status == "PAGADO" and not payment_date:
             payment_date = today_str()
 
-        execute(
+        payment_id = execute(
             """INSERT INTO staff_payments
                (staff_id, payment_type, period, amount, concept, status, payment_date, receipt_filename)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -284,6 +289,14 @@ def new_payment():
                 staff_id, payment_type, period, parse_float(request.form.get("amount"), 0),
                 request.form.get("concept", "").strip() or None, status, payment_date, receipt_filename,
             ),
+        )
+        # 22 sep, registro de actividad (ver app/audit.py): quién registró
+        # este pago de Planilla/Honorarios y cuándo.
+        log_activity(
+            "pagos_personal", "CREAR",
+            f"{PAYMENT_TYPE_LABELS.get(payment_type, payment_type)} de {staff_row['name']} — periodo {period}",
+            entity_type="pago_personal", entity_id=payment_id,
+            entity_url=url_for("pagos_personal.edit_payment", payment_id=payment_id),
         )
         flash("Pago registrado.", "success")
         return redirect(url_for("pagos_personal.planilla_placeholder"))
@@ -305,7 +318,9 @@ def edit_payment(payment_id):
         payment_type = request.form.get("payment_type", "")
         period = (request.form.get("period") or "").strip()
         errors = []
-        if not staff_id or query_one("SELECT id FROM staff WHERE id = ?", (staff_id,)) is None:
+        # 22 sep, registro de actividad: mismo criterio que new_payment().
+        staff_row = query_one("SELECT id, name FROM staff WHERE id = ?", (staff_id,)) if staff_id else None
+        if staff_row is None:
             errors.append("Elige una persona del catálogo de Personal.")
         if payment_type not in PAYMENT_TYPE_LABELS:
             errors.append("Elige el tipo de comprobante (Planilla o Recibo por honorarios).")
@@ -332,6 +347,12 @@ def edit_payment(payment_id):
                 payment_id,
             ),
         )
+        log_activity(
+            "pagos_personal", "EDITAR",
+            f"{PAYMENT_TYPE_LABELS.get(payment_type, payment_type)} de {staff_row['name']} — periodo {period}",
+            entity_type="pago_personal", entity_id=payment_id,
+            entity_url=url_for("pagos_personal.edit_payment", payment_id=payment_id),
+        )
         flash("Pago actualizado.", "success")
         return redirect(url_for("pagos_personal.planilla_placeholder"))
 
@@ -343,10 +364,21 @@ def edit_payment(payment_id):
 def delete_payment(payment_id):
     if not validate_csrf():
         abort(400)
-    payment = query_one("SELECT period FROM staff_payments WHERE id = ?", (payment_id,))
+    # 22 sep, registro de actividad: se trae el nombre de la persona (join
+    # con staff) solo para la etiqueta del log, además del period que ya se
+    # traía.
+    payment = query_one(
+        "SELECT p.*, s.name as staff_name FROM staff_payments p JOIN staff s ON s.id = p.staff_id WHERE p.id = ?",
+        (payment_id,),
+    )
     if payment is None:
         abort(404)
     execute("DELETE FROM staff_payments WHERE id = ?", (payment_id,))
+    log_activity(
+        "pagos_personal", "ELIMINAR",
+        f"{PAYMENT_TYPE_LABELS.get(payment['payment_type'], payment['payment_type'])} de {payment['staff_name']} — periodo {payment['period']}",
+        entity_type="pago_personal", entity_id=payment_id,
+    )
     flash("Pago eliminado.", "success")
     return redirect(url_for("pagos_personal.planilla_placeholder"))
 
@@ -359,17 +391,24 @@ def mark_paid(payment_id):
     mechanics_toggle en Mantenimiento)."""
     if not validate_csrf():
         abort(400)
-    payment = query_one("SELECT * FROM staff_payments WHERE id = ?", (payment_id,))
+    # 22 sep, registro de actividad: join con staff solo para la etiqueta.
+    payment = query_one(
+        "SELECT p.*, s.name as staff_name FROM staff_payments p JOIN staff s ON s.id = p.staff_id WHERE p.id = ?",
+        (payment_id,),
+    )
     if payment is None:
         abort(404)
+    label = f"{PAYMENT_TYPE_LABELS.get(payment['payment_type'], payment['payment_type'])} de {payment['staff_name']} — periodo {payment['period']}"
     if payment["status"] == "PAGADO":
         execute("UPDATE staff_payments SET status = 'PENDIENTE', payment_date = NULL WHERE id = ?", (payment_id,))
+        log_activity("pagos_personal", "EDITAR", f"{label} — desmarcado como pagado", entity_type="pago_personal", entity_id=payment_id)
         flash("Pago marcado como pendiente otra vez.", "success")
     else:
         execute(
             "UPDATE staff_payments SET status = 'PAGADO', payment_date = ? WHERE id = ?",
             (today_str(), payment_id),
         )
+        log_activity("pagos_personal", "PAGAR", label, entity_type="pago_personal", entity_id=payment_id)
         flash("Pago marcado como pagado.", "success")
     return redirect(url_for("pagos_personal.planilla_placeholder"))
 
@@ -639,6 +678,15 @@ def telecredito_generate():
         f"""UPDATE staff_payments SET exported_at = ? WHERE id IN ({','.join('?' * len(prepared))})""",
         [today_str()] + [p["id"] for p in prepared],
     )
+    # 22 sep, registro de actividad (ver app/audit.py): un solo registro por
+    # archivo generado (afecta a varios pagos a la vez, no tiene sentido uno
+    # por persona) -- sin entity_id porque no corresponde a un solo registro.
+    log_activity(
+        "pagos_personal", "GENERAR",
+        f"Archivo Telecrédito de {PAYMENT_TYPE_LABELS.get(payment_type, payment_type)} — periodo {period} "
+        f"({len(prepared)} pago(s), cuenta {cuenta_cargo['company_name']})",
+        entity_type="archivo_telecredito",
+    )
 
     filename = f"telecredito_{tipo_slug}_{period}_{now}.txt"
     return Response(
@@ -732,6 +780,11 @@ def _staff_form_context(staff=None):
         "document_type_choices": DOCUMENT_TYPE_CHOICES,
         "currency_labels": CURRENCY_LABELS,
         "account_type_labels": ACCOUNT_TYPE_LABELS,
+        # 22 sep, pedido de Braulio ("que usuario creo... etc"): quién y
+        # cuándo se agregó esta persona al catálogo, según activity_log (ver
+        # app/audit.py) -- None al agregar (todavía no existe) o para
+        # personas de antes de que existiera este registro.
+        "creator": get_creator_info("empleado", staff["id"]) if staff else None,
     }
 
 
@@ -749,7 +802,7 @@ def staff_new():
         account_type = request.form.get("account_type") or "AHORROS"
         if account_type not in ACCOUNT_TYPE_LABELS:
             account_type = "AHORROS"
-        execute(
+        staff_id = execute(
             """INSERT INTO staff (name, document_type, document_number, position, company, driver_id,
                bank_name, account_number, account_type, cci, currency, notes)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -760,6 +813,13 @@ def staff_new():
                 account_type, request.form.get("cci", "").strip() or None, request.form.get("currency") or "S",
                 request.form.get("notes", "").strip() or None,
             ),
+        )
+        # 22 sep, registro de actividad (ver app/audit.py): quién agregó a
+        # esta persona al catálogo de Personal.
+        log_activity(
+            "pagos_personal", "CREAR", f"Persona: {name}",
+            entity_type="empleado", entity_id=staff_id,
+            entity_url=url_for("pagos_personal.staff_edit", staff_id=staff_id),
         )
         flash("Persona agregada al catálogo.", "success")
         return redirect(url_for("pagos_personal.staff_list"))
@@ -794,6 +854,11 @@ def staff_edit(staff_id):
                 request.form.get("notes", "").strip() or None, staff_id,
             ),
         )
+        log_activity(
+            "pagos_personal", "EDITAR", f"Persona: {name}",
+            entity_type="empleado", entity_id=staff_id,
+            entity_url=url_for("pagos_personal.staff_edit", staff_id=staff_id),
+        )
         flash("Datos actualizados.", "success")
         return redirect(url_for("pagos_personal.staff_list"))
     return render_template("pagos_personal/staff_form.html", **_staff_form_context(staff))
@@ -809,6 +874,11 @@ def staff_toggle(staff_id):
         abort(404)
     new_status = "INACTIVO" if staff["status"] == "ACTIVO" else "ACTIVO"
     execute("UPDATE staff SET status = ? WHERE id = ?", (new_status, staff_id))
+    log_activity(
+        "pagos_personal", "DESACTIVAR" if new_status == "INACTIVO" else "REACTIVAR", f"Persona: {staff['name']}",
+        entity_type="empleado", entity_id=staff_id,
+        entity_url=url_for("pagos_personal.staff_edit", staff_id=staff_id),
+    )
     flash("Actualizado." if new_status == "INACTIVO" else "Reactivado.", "success")
     return redirect(url_for("pagos_personal.staff_list"))
 
@@ -898,6 +968,16 @@ def staff_import_txt():
                     updated += 1
 
         result = {"created": created, "updated": updated, "skipped": skipped, "errors": errors}
+        # 22 sep, registro de actividad (ver app/audit.py): UN solo registro
+        # agregado para toda la importación (puede traer muchas personas a
+        # la vez desde varios .txt/.zip) -- mismo criterio que
+        # constancias_import_zip().
+        if created or updated:
+            log_activity(
+                "pagos_personal", "SUBIR",
+                f"Importó datos bancarios desde .txt de Telecrédito ({created} creado(s), {updated} actualizado(s))",
+                entity_type="empleado",
+            )
         return render_template(
             "import_result.html", result=result,
             back_url=url_for("pagos_personal.staff_list"), retry_url=url_for("pagos_personal.staff_import_txt"),
@@ -1015,6 +1095,16 @@ def constancias_import_zip():
             )
             imported += 1
 
+        # 22 sep, registro de actividad (ver app/audit.py): UN solo registro
+        # para toda la carga (puede traer cientos de archivos, ver el
+        # docstring de esta función -- un registro por archivo inundaría la
+        # pantalla de Actividad, que solo muestra las últimas 300 filas).
+        if imported:
+            log_activity(
+                "pagos_personal", "SUBIR",
+                f"Importó {imported} constancia(s) desde un .zip",
+                entity_type="archivo_constancias",
+            )
         flash(f"Se importaron {imported} archivo(s) al archivador de constancias.", "success")
         if skipped_unclassified:
             flash(
@@ -1090,10 +1180,18 @@ def constancias_upload(year, month):
         if not filename:
             rejected.append(file_storage.filename)
             continue
-        execute(
+        voucher_id = execute(
             """INSERT INTO payment_vouchers (period, bank_account_id, payment_type, label, filename, original_filename, uploaded_by)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (period, bank_account_id, payment_type, label, filename, file_storage.filename, g.user["id"]),
+        )
+        # 22 sep, registro de actividad: subida manual (a diferencia de la
+        # carga masiva por .zip) suele ser de pocos archivos a la vez, así
+        # que cada uno queda como su propio registro de "Creado por".
+        log_activity(
+            "pagos_personal", "SUBIR", f"Constancia: {file_storage.filename} — {period}",
+            entity_type="constancia", entity_id=voucher_id,
+            entity_url=url_for("pagos_personal.constancias_file", voucher_id=voucher_id),
         )
         saved += 1
 
@@ -1128,13 +1226,24 @@ def constancias_delete(voucher_id):
     cuándo la mandó ahí. El archivo en sí (disco/S3) tampoco se borra."""
     if not validate_csrf():
         abort(400)
-    voucher = query_one("SELECT period FROM payment_vouchers WHERE id = ? AND deleted_at IS NULL", (voucher_id,))
+    voucher = query_one(
+        "SELECT period, original_filename, filename FROM payment_vouchers WHERE id = ? AND deleted_at IS NULL", (voucher_id,)
+    )
     if voucher is None:
         abort(404)
     year, month = voucher["period"].split("-")
     execute(
         "UPDATE payment_vouchers SET deleted_at = ?, deleted_by = ? WHERE id = ?",
         (now_str(), g.user["id"], voucher_id),
+    )
+    # 22 sep, registro de actividad (ver app/audit.py): además del propio
+    # deleted_at/deleted_by de la tabla (18 sep, ver el docstring de arriba),
+    # esto también queda en activity_log para aparecer en la pantalla de
+    # Actividad junto con el resto del sistema.
+    log_activity(
+        "pagos_personal", "ELIMINAR",
+        f"Constancia: {voucher['original_filename'] or voucher['filename']} — {voucher['period']}",
+        entity_type="constancia", entity_id=voucher_id,
     )
     flash("Constancia enviada a la papelera.", "success")
     return redirect(url_for("pagos_personal.constancias_month_detail", year=int(year), month=int(month)))
@@ -1159,10 +1268,18 @@ def constancias_papelera():
 def constancias_restore(voucher_id):
     if not validate_csrf():
         abort(400)
-    voucher = query_one("SELECT id FROM payment_vouchers WHERE id = ? AND deleted_at IS NOT NULL", (voucher_id,))
+    voucher = query_one(
+        "SELECT id, period, original_filename, filename FROM payment_vouchers WHERE id = ? AND deleted_at IS NOT NULL", (voucher_id,)
+    )
     if voucher is None:
         abort(404)
     execute("UPDATE payment_vouchers SET deleted_at = NULL, deleted_by = NULL WHERE id = ?", (voucher_id,))
+    # 22 sep, registro de actividad: mismo criterio que constancias_delete().
+    log_activity(
+        "pagos_personal", "RESTAURAR",
+        f"Constancia: {voucher['original_filename'] or voucher['filename']} — {voucher['period']}",
+        entity_type="constancia", entity_id=voucher_id,
+    )
     flash("Constancia restaurada.", "success")
     return redirect(url_for("pagos_personal.constancias_papelera"))
 
@@ -1365,6 +1482,13 @@ def honorarios_plantilla_guardar_mes():
                 flash("Marca al menos a una persona con un pago pendiente para quitar.", "error")
             return _back()
         execute(f"DELETE FROM staff_payments WHERE id IN ({','.join('?' * len(to_delete))})", to_delete)
+        # 22 sep, registro de actividad: un solo registro para todo el lote
+        # borrado (afecta a varias personas a la vez).
+        log_activity(
+            "pagos_personal", "ELIMINAR",
+            f"Quitó {len(to_delete)} pago(s) pendiente(s) de honorarios — periodo {period}",
+            entity_type="pago_personal",
+        )
         msg = f"Listo, se quitaron {len(to_delete)} pago(s) pendiente(s) de {period}."
         if locked_skipped:
             msg += f" {locked_skipped} no se tocaron porque ya estaban pagados."
@@ -1400,6 +1524,17 @@ def honorarios_plantilla_guardar_mes():
             created += 1
             synced_payment_ids.append(new_id)
 
+    # 22 sep, registro de actividad: un solo registro agregado para todo lo
+    # que se creó/actualizó en este guardado (afecta a varias personas a la
+    # vez) -- se hace acá, antes de las ramas de abajo, porque "generar" y
+    # "enlazar" también pasan primero por este mismo guardado.
+    if created or updated:
+        log_activity(
+            "pagos_personal", "EDITAR",
+            f"Guardó pagos de honorarios — periodo {period} ({created} nuevo(s), {updated} actualizado(s))",
+            entity_type="pago_personal",
+        )
+
     if action == "generar":
         if not synced_payment_ids:
             flash("Elige al menos una persona (todavía sin pagar) para generar el archivo de Telecrédito.", "error")
@@ -1425,6 +1560,12 @@ def honorarios_plantilla_guardar_mes():
                 WHERE id IN ({','.join('?' * len(synced_payment_ids))})""",
             [voucher_id, payment_date] + synced_payment_ids,
         )
+        log_activity(
+            "pagos_personal", "PAGAR",
+            f"Enlazó constancia a {len(synced_payment_ids)} pago(s) de honorarios — periodo {period}",
+            entity_type="constancia", entity_id=voucher_id,
+            entity_url=url_for("pagos_personal.constancias_file", voucher_id=voucher_id),
+        )
         flash(f"Constancia enlazada a {len(synced_payment_ids)} pago(s) — quedaron marcados como pagados.", "success")
         return _back()
 
@@ -1444,8 +1585,11 @@ def honorarios_plantilla_quitar_mes(payment_id):
     "Desenlazar" la constancia."""
     if not validate_csrf():
         abort(400)
+    # 22 sep, registro de actividad: join con staff solo para la etiqueta.
     payment = query_one(
-        "SELECT * FROM staff_payments WHERE id = ? AND payment_type = 'RECIBO_HONORARIOS'", (payment_id,)
+        """SELECT p.*, s.name as staff_name FROM staff_payments p JOIN staff s ON s.id = p.staff_id
+           WHERE p.id = ? AND p.payment_type = 'RECIBO_HONORARIOS'""",
+        (payment_id,),
     )
     if payment is None:
         abort(404)
@@ -1453,6 +1597,11 @@ def honorarios_plantilla_quitar_mes(payment_id):
         flash("Ese pago ya está pagado -- primero desenlaza la constancia si quieres quitarlo.", "error")
         return redirect(url_for("pagos_personal.honorarios_plantilla", period=payment["period"]))
     execute("DELETE FROM staff_payments WHERE id = ?", (payment_id,))
+    log_activity(
+        "pagos_personal", "ELIMINAR",
+        f"Honorarios de {payment['staff_name']} — periodo {payment['period']}",
+        entity_type="pago_personal", entity_id=payment_id,
+    )
     flash("Listo, se quitó a esa persona de este mes.", "success")
     return redirect(url_for("pagos_personal.honorarios_plantilla", period=payment["period"]))
 
@@ -1465,12 +1614,22 @@ def honorarios_plantilla_desenlazar_constancia(payment_id):
     solo la desenlaza de este pago puntual."""
     if not validate_csrf():
         abort(400)
-    payment = query_one("SELECT * FROM staff_payments WHERE id = ? AND payment_type = 'RECIBO_HONORARIOS'", (payment_id,))
+    # 22 sep, registro de actividad: join con staff solo para la etiqueta.
+    payment = query_one(
+        """SELECT p.*, s.name as staff_name FROM staff_payments p JOIN staff s ON s.id = p.staff_id
+           WHERE p.id = ? AND p.payment_type = 'RECIBO_HONORARIOS'""",
+        (payment_id,),
+    )
     if payment is None:
         abort(404)
     execute(
         "UPDATE staff_payments SET status = 'PENDIENTE', payment_voucher_id = NULL, payment_date = NULL WHERE id = ?",
         (payment_id,),
+    )
+    log_activity(
+        "pagos_personal", "EDITAR",
+        f"Desenlazó constancia de honorarios de {payment['staff_name']} — periodo {payment['period']}",
+        entity_type="pago_personal", entity_id=payment_id,
     )
     flash("Constancia desenlazada — el pago volvió a quedar pendiente.", "success")
     return redirect(url_for("pagos_personal.honorarios_plantilla", period=payment["period"]))
@@ -1483,7 +1642,9 @@ def honorarios_plantilla_add():
         abort(400)
     q = request.form.get("q", "")
     staff_id = request.form.get("staff_id", type=int)
-    staff = query_one("SELECT id FROM staff WHERE id = ?", (staff_id,))
+    # 22 sep, registro de actividad: se trae el nombre además del id, para
+    # la etiqueta del log_activity() de abajo.
+    staff = query_one("SELECT id, name FROM staff WHERE id = ?", (staff_id,))
     if not staff:
         flash("Elige una persona válida del catálogo de Personal.", "error")
         return redirect(url_for("pagos_personal.honorarios_plantilla_admin", q=q))
@@ -1493,9 +1654,13 @@ def honorarios_plantilla_add():
     amount = parse_float(request.form.get("default_amount"), 0)
     concept = request.form.get("default_concept", "").strip() or None
     max_order = query_one("SELECT COALESCE(MAX(sort_order), 0) AS m FROM honorarios_template_items")["m"]
-    execute(
+    item_id = execute(
         "INSERT INTO honorarios_template_items (staff_id, default_amount, default_concept, sort_order) VALUES (?, ?, ?, ?)",
         (staff_id, amount, concept, max_order + 1),
+    )
+    log_activity(
+        "pagos_personal", "CREAR", f"Agregó a {staff['name']} a la plantilla de honorarios",
+        entity_type="plantilla_honorarios_item", entity_id=item_id,
     )
     flash("Persona agregada a la plantilla.", "success")
     return redirect(url_for("pagos_personal.honorarios_plantilla_admin", q=q))
@@ -1507,7 +1672,11 @@ def honorarios_plantilla_edit(item_id):
     if not validate_csrf():
         abort(400)
     q = request.form.get("q", "")
-    item = query_one("SELECT id FROM honorarios_template_items WHERE id = ?", (item_id,))
+    # 22 sep, registro de actividad: join con staff solo para la etiqueta.
+    item = query_one(
+        "SELECT t.id, s.name as staff_name FROM honorarios_template_items t JOIN staff s ON s.id = t.staff_id WHERE t.id = ?",
+        (item_id,),
+    )
     if item is None:
         abort(404)
     amount = parse_float(request.form.get("default_amount"), 0)
@@ -1515,6 +1684,10 @@ def honorarios_plantilla_edit(item_id):
     execute(
         "UPDATE honorarios_template_items SET default_amount = ?, default_concept = ? WHERE id = ?",
         (amount, concept, item_id),
+    )
+    log_activity(
+        "pagos_personal", "EDITAR", f"Plantilla de honorarios de {item['staff_name']}",
+        entity_type="plantilla_honorarios_item", entity_id=item_id,
     )
     flash("Plantilla actualizada.", "success")
     return redirect(url_for("pagos_personal.honorarios_plantilla_admin", q=q))
@@ -1526,10 +1699,20 @@ def honorarios_plantilla_toggle(item_id):
     if not validate_csrf():
         abort(400)
     q = request.form.get("q", "")
-    item = query_one("SELECT active FROM honorarios_template_items WHERE id = ?", (item_id,))
+    # 22 sep, registro de actividad: join con staff solo para la etiqueta.
+    item = query_one(
+        "SELECT t.active, s.name as staff_name FROM honorarios_template_items t JOIN staff s ON s.id = t.staff_id WHERE t.id = ?",
+        (item_id,),
+    )
     if item is None:
         abort(404)
-    execute("UPDATE honorarios_template_items SET active = ? WHERE id = ?", (0 if item["active"] else 1, item_id))
+    new_active = 0 if item["active"] else 1
+    execute("UPDATE honorarios_template_items SET active = ? WHERE id = ?", (new_active, item_id))
+    log_activity(
+        "pagos_personal", "REACTIVAR" if new_active else "DESACTIVAR",
+        f"Plantilla de honorarios de {item['staff_name']}",
+        entity_type="plantilla_honorarios_item", entity_id=item_id,
+    )
     flash("Actualizado.", "success")
     return redirect(url_for("pagos_personal.honorarios_plantilla_admin", q=q))
 
@@ -1543,7 +1726,18 @@ def honorarios_plantilla_remove(item_id):
     if not validate_csrf():
         abort(400)
     q = request.form.get("q", "")
+    # 22 sep, registro de actividad: se trae el nombre ANTES de borrar (una
+    # vez borrada la fila ya no se puede volver a consultar el join).
+    item = query_one(
+        "SELECT s.name as staff_name FROM honorarios_template_items t JOIN staff s ON s.id = t.staff_id WHERE t.id = ?",
+        (item_id,),
+    )
     execute("DELETE FROM honorarios_template_items WHERE id = ?", (item_id,))
+    if item:
+        log_activity(
+            "pagos_personal", "ELIMINAR", f"Quitó a {item['staff_name']} de la plantilla de honorarios",
+            entity_type="plantilla_honorarios_item", entity_id=item_id,
+        )
     flash("Quitada de la plantilla.", "success")
     return redirect(url_for("pagos_personal.honorarios_plantilla_admin", q=q))
 
@@ -1611,6 +1805,14 @@ def honorarios_plantilla_import():
             flash(file_error, "error")
             return redirect(url_for("pagos_personal.honorarios_plantilla_import"))
         result = _apply_honorarios_template_import(rows, example_skips)
+        # 22 sep, registro de actividad: un solo registro agregado para toda
+        # la importación -- mismo criterio que staff_import_txt().
+        if result["created"] or result["updated"]:
+            log_activity(
+                "pagos_personal", "SUBIR",
+                f"Importó plantilla de honorarios desde Excel ({result['created']} creado(s), {result['updated']} actualizado(s))",
+                entity_type="plantilla_honorarios_item",
+            )
         return render_template(
             "import_result.html", result=result,
             back_url=url_for("pagos_personal.honorarios_plantilla_admin"), retry_url=url_for("pagos_personal.honorarios_plantilla_import"),

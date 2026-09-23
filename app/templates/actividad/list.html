@@ -1,0 +1,72 @@
+{% extends 'base.html' %}
+{% block title %}Actividad{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Actividad</h1>
+</div>
+<p class="muted mt-0">Quién hizo qué, en todo el sistema: creación, edición, eliminación de registros, subida de documentos, cambios de estado, generación de guías/facturas, etc. Solo muestra lo ocurrido desde que se activó este registro (22 sep 2026) — no hay historial de antes de esa fecha.</p>
+
+<form class="filters" method="get" style="flex-wrap:wrap;">
+  <label>Módulo
+    <select name="module">
+      <option value="">Todos</option>
+      {% for m in modules_with_activity %}
+      <option value="{{ m }}" {{ 'selected' if module_filter == m }}>{{ module_labels.get(m, m) }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Acción
+    <select name="action">
+      <option value="">Todas</option>
+      {% for a in actions_with_activity %}
+      <option value="{{ a }}" {{ 'selected' if action_filter == a }}>{{ action_labels.get(a, a.title()) }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Usuario
+    <select name="user_id">
+      <option value="">Todos</option>
+      {% for u in users_with_activity %}
+      <option value="{{ u.user_id }}" {{ 'selected' if user_id_filter == u.user_id|string }}>{{ u.user_name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Desde
+    <input type="date" name="from_date" value="{{ from_date }}">
+  </label>
+  <label>Hasta
+    <input type="date" name="to_date" value="{{ to_date }}">
+  </label>
+  <label style="flex:1; min-width:180px;">Buscar
+    <input type="text" name="q" value="{{ q }}" placeholder="Ej. código de viaje, nombre de cliente...">
+  </label>
+  <button class="btn btn-secondary" type="submit">Filtrar</button>
+  {% if module_filter or action_filter or user_id_filter or from_date or to_date or q %}
+  <a class="btn btn-secondary" href="{{ url_for('actividad.list_view') }}">Limpiar</a>
+  {% endif %}
+</form>
+
+{% if total > max_rows %}
+<p class="muted">Mostrando las últimas {{ max_rows }} de {{ total }} coincidencias — acota los filtros (módulo, usuario o fechas) para ver el resto.</p>
+{% endif %}
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Fecha</th><th>Usuario</th><th>Módulo</th><th>Acción</th><th>Detalle</th><th></th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ (r.created_at or '')[:16] }}</td>
+        <td>{{ r.user_name }}</td>
+        <td>{{ module_labels.get(r.module, r.module) }}</td>
+        <td>{{ action_labels.get(r.action, r.action.title()) }}</td>
+        <td class="wrap">{{ r.label or '—' }}</td>
+        <td>{% if r.entity_url %}<a href="{{ r.entity_url }}">Ver</a>{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="table-empty">No hay actividad registrada con estos filtros.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

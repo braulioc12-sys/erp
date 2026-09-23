@@ -13,6 +13,21 @@
 </div>
 
 <div class="detail-grid">
+  {# 22 sep, pedido de Braulio ("que usuario creo el viaje... subio algun
+     doc... etc" -- para TODO el sistema): visible solo para quien tiene
+     acceso al módulo de Actividad (Administrador por defecto, ver
+     app/routes/actividad.py) -- mismo criterio que viajes/detail.html. Si la
+     llanta es de antes de que existiera este registro (o fue sembrada en
+     bloque, ver _seed_default_tire_codes_sqlite en app/db.py), no hay forma
+     de saberlo retroactivamente. #}
+  {% if can(current_user.roles, 'actividad', 'view') %}
+  <div class="detail-item">
+    <div class="label">Creado por</div>
+    <div class="value">
+      {% if creator %}{{ creator.user_name }} — {{ creator.created_at[:16] }}{% else %}No disponible (registro anterior a este historial){% endif %}
+    </div>
+  </div>
+  {% endif %}
   <div class="detail-item"><div class="label">Código</div><div class="value">{{ tire.code }}</div></div>
   <div class="detail-item"><div class="label">Marca</div><div class="value">{{ tire.brand or '—' }}</div></div>
   <div class="detail-item"><div class="label">Modelo</div><div class="value">{{ tire.model or '—' }}</div></div>

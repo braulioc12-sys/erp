@@ -3,6 +3,21 @@
 {% block content %}
 <div class="page-header"><h1>{{ 'Editar persona' if staff and staff.id else 'Agregar persona al catálogo' }}</h1></div>
 
+{% if staff and staff.id and can(current_user.roles, 'actividad', 'view') %}
+{# 22 sep, pedido de Braulio ("que usuario creo el viaje... etc"): visible solo
+   para quien tiene acceso al módulo de Actividad -- mismo criterio que
+   viajes/detail.html. Si la persona es de antes de que existiera este
+   registro, no hay forma de saberlo retroactivamente. #}
+<div class="detail-grid" style="margin-bottom:20px;">
+  <div class="detail-item">
+    <div class="label">Creado por</div>
+    <div class="value">
+      {% if creator %}{{ creator.user_name }} — {{ creator.created_at[:16] }}{% else %}No disponible (registro anterior a este historial){% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <form class="form panel" method="post">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 

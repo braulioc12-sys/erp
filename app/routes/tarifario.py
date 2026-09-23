@@ -15,6 +15,7 @@ ENVASES"/"PT + VACIO"); Lindley trae 1 ("Tarifa"); un cliente nuevo puede
 tener cualquier cantidad -- no está hardcodeado a 1 o 2."""
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 
+from app.audit import log_activity
 from app.auth import permission_required, validate_csrf
 from app.db import execute, query_all, query_one
 from app.helpers import parse_float
@@ -126,6 +127,16 @@ def new():
             (client_id, origin, destination, notes),
         )
         _save_items(route_id, items)
+        # 22 sep, registro de actividad (ver app/audit.py): el nombre del
+        # cliente se saca de la lista ya cargada arriba (`clients`), sin una
+        # consulta aparte -- comparado como texto porque client_id llega del
+        # formulario como string.
+        client_name = next((c["name"] for c in clients if str(c["id"]) == str(client_id)), None)
+        log_activity(
+            "tarifario", "CREAR", f"Tarifa {client_name or ''}: {origin} → {destination}".strip(),
+            entity_type="tarifa", entity_id=route_id,
+            entity_url=url_for("tarifario.edit", route_id=route_id),
+        )
         flash("Ruta y tarifa agregadas al tarifario.", "success")
         return redirect(url_for("tarifario.list_view"))
     return render_template("tarifario/form.html", clients=clients, route=None, items=[], mode="new")
@@ -170,6 +181,12 @@ def edit(route_id):
         # ítems huérfanos si se quitó una fila.
         execute("DELETE FROM tariff_items WHERE tariff_route_id = ?", (route_id,))
         _save_items(route_id, items)
+        client_name = next((c["name"] for c in clients if str(c["id"]) == str(client_id)), None)
+        log_activity(
+            "tarifario", "EDITAR", f"Tarifa {client_name or ''}: {origin} → {destination}".strip(),
+            entity_type="tarifa", entity_id=route_id,
+            entity_url=url_for("tarifario.edit", route_id=route_id),
+        )
         flash("Tarifa actualizada.", "success")
         return redirect(url_for("tarifario.list_view"))
 
@@ -186,7 +203,14 @@ def edit(route_id):
 def delete(route_id):
     if not validate_csrf():
         abort(400)
-    route = query_one("SELECT id FROM tariff_routes WHERE id = ?", (route_id,))
+    # 22 sep, registro de actividad: se trae el nombre del cliente y la ruta
+    # ANTES de borrar (después ya no habría de dónde sacarlos), pero se
+    # registra recién después de que el borrado ya se hizo con éxito.
+    route = query_one(
+        """SELECT r.id, r.origin, r.destination, c.name as client_name
+           FROM tariff_routes r JOIN clients c ON c.id = r.client_id WHERE r.id = ?""",
+        (route_id,),
+    )
     if route is None:
         abort(404)
     # Tarifario es solo un catálogo de referencia (no lo usa ningún
@@ -194,5 +218,9 @@ def delete(route_id):
     # chequeo de "en uso" que sí tiene clientes.delete().
     execute("DELETE FROM tariff_items WHERE tariff_route_id = ?", (route_id,))
     execute("DELETE FROM tariff_routes WHERE id = ?", (route_id,))
+    log_activity(
+        "tarifario", "ELIMINAR", f"Tarifa {route['client_name']}: {route['origin']} → {route['destination']}",
+        entity_type="tarifa", entity_id=route_id,
+    )
     flash("Ruta eliminada del tarifario.", "success")
     return redirect(url_for("tarifario.list_view"))

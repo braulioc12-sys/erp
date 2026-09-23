@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 
 from flask import Blueprint, Response, current_app, flash, redirect, render_template, request, url_for
 
+from app.audit import log_activity
 from app.auth import permission_required, validate_csrf
 from app.db import execute, get_db, query_all, query_one
 from app.gps_stats import combined_daily_stats, daily_stats_all
@@ -300,6 +301,18 @@ def sync_frotcom():
     positions = result["positions"]
     by_external_id = result["by_external_id"]
 
+    # 22 sep, registro de actividad (ver app/audit.py): sincronizar GPS es
+    # una acción manual (el botón "Sincronizar" de Ubicación GPS), a
+    # diferencia del auto-sync en segundo plano (perform_frotcom_sync
+    # llamado desde app/scheduler.py, fuera de una petición -- ahí g.user
+    # no existe, log_activity() simplemente no se llama). No hay un
+    # "entity_id" puntual (afecta a varias unidades a la vez), así que no
+    # se pasa entity_type/entity_id.
+    log_activity(
+        "integraciones", "SINCRONIZAR" if matched else "GENERAR",
+        f"Sincronización manual con Frotcom: {matched} unidad(es) actualizada(s)",
+    )
+
     # IDs que Frotcom sí devolvió pero que ninguna unidad tiene configurados
     # todavía — se muestran tanto si no se sincronizó nada (para diagnosticar
     # un desfase de formato) como si ya se sincronizó algo (para poder mapear
@@ -468,6 +481,12 @@ def trips_history():
         job_id = execute(
             "INSERT INTO frotcom_trip_import_jobs (date_from, date_to, status) VALUES (?, ?, 'PENDIENTE')",
             (date_from_str, date_to_str),
+        )
+        log_activity(
+            "integraciones", "GENERAR",
+            f"Importación de historial de viajes GPS del {date_from_str} al {date_to_str}",
+            entity_type="importacion_gps", entity_id=job_id,
+            entity_url=url_for("integraciones.trips_history"),
         )
         app_obj = current_app._get_current_object()
         thread = threading.Thread(

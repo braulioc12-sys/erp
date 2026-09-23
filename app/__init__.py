@@ -53,6 +53,7 @@ def create_app(config_object=Config):
         tarifario,
         pagos_personal,
         descansos,
+        actividad,
     )
 
     app.register_blueprint(dashboard.bp)
@@ -78,6 +79,7 @@ def create_app(config_object=Config):
     app.register_blueprint(tarifario.bp)
     app.register_blueprint(pagos_personal.bp)
     app.register_blueprint(descansos.bp)
+    app.register_blueprint(actividad.bp)
 
     @app.route("/")
     def index():

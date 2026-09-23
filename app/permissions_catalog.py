@@ -65,6 +65,14 @@ MODULE_LABELS = {
     # (app/routes/descansos.py) -- solo cambia la etiqueta, igual que
     # "Ubicación GPS" arriba.
     "descansos": "Jornada laboral",
+    # 22 sep, pedido de Braulio ("yo como administrador, pueda saber quien
+    # ha hecho cada cosa"): pantalla nueva de Actividad (ver
+    # app/routes/actividad.py) -- por defecto es solo de Administrador
+    # (PERMISSIONS en app/auth.py le da "actividad": set() al resto de
+    # roles), pero queda en este catálogo para poder dársela puntualmente a
+    # otro usuario desde Usuarios > Permisos específicos, igual que
+    # cualquier otro módulo.
+    "actividad": "Actividad",
 }
 
 # module -> [(action, etiqueta), ...] en el orden en que se muestran.
@@ -94,4 +102,5 @@ PERMISSION_CATALOG = {
     "tarifario": [("view", "Ver"), ("edit", "Editar")],
     "pagos_personal": [("view", "Ver"), ("edit", "Editar y generar archivos")],
     "descansos": [("view", "Ver"), ("edit", "Registrar y editar")],
+    "actividad": [("view", "Ver")],
 }

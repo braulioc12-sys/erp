@@ -16,6 +16,7 @@ from flask import (
 )
 
 from app import storage
+from app.audit import get_creator_info, log_activity
 from app.auth import can, login_required, permission_required, validate_csrf
 from app.db import execute, query_all, query_one
 from app.helpers import compress_photo, now_str, parse_date, parse_float, today_str
@@ -569,6 +570,11 @@ def new():
                 None,
             ),
         )
+        log_activity(
+            "viajes", "CREAR", f"Viaje {code} ({origin} → {destination})",
+            entity_type="viaje", entity_id=trip_id,
+            entity_url=url_for("viajes.detail", trip_id=trip_id),
+        )
         flash(f"Viaje {code} creado.", "success")
         for w in (
             _vehicle_open_orders_warning(ownership_fields["vehicle_id"]),
@@ -706,6 +712,11 @@ def edit(trip_id):
                 trip_id,
             ),
         )
+        log_activity(
+            "viajes", "EDITAR", f"Viaje {trip['code']} ({origin} → {destination})",
+            entity_type="viaje", entity_id=trip_id,
+            entity_url=url_for("viajes.detail", trip_id=trip_id),
+        )
         flash("Viaje actualizado.", "success")
         for w in (
             _vehicle_open_orders_warning(ownership_fields["vehicle_id"]),
@@ -755,11 +766,15 @@ def detail(trip_id):
         "SELECT id, series, series_number, sunat_status FROM waybills WHERE trip_id = ? ORDER BY id DESC",
         (trip_id,),
     )
+    # 22 sep, pedido de Braulio ("que usuario creo el viaje... etc"): quién
+    # y cuándo se creó, según activity_log (ver app/audit.py) -- None para
+    # viajes de antes de que existiera este registro.
+    creator = get_creator_info("viaje", trip_id)
     return render_template(
         "viajes/detail.html", trip=trip, expenses=expenses,
         total_expenses=total_expenses, next_statuses=next_statuses, advance=advance,
         payment_term_labels=payment_term_labels, cargo_type_labels=cargo_type_labels,
-        existing_waybills=existing_waybills,
+        existing_waybills=existing_waybills, creator=creator,
     )
 
 
@@ -802,6 +817,11 @@ def change_status(trip_id):
     else:
         execute("UPDATE trips SET status=? WHERE id=?", (new_status, trip_id))
 
+    log_activity(
+        "viajes", "ESTADO", f"Viaje {trip['code']}: {trip['status']} → {new_status}",
+        entity_type="viaje", entity_id=trip_id,
+        entity_url=url_for("viajes.detail", trip_id=trip_id),
+    )
     flash(f"Viaje marcado como {new_status.replace('_', ' ').title()}.", "success")
     return redirect(url_for("viajes.detail", trip_id=trip_id))
 
@@ -860,7 +880,7 @@ def _save_delivery_proof_file(file_storage):
 def save_waybill(trip_id):
     if not validate_csrf():
         abort(400)
-    trip = query_one("SELECT carrier_waybill_filename FROM trips WHERE id = ?", (trip_id,))
+    trip = query_one("SELECT code, carrier_waybill_filename FROM trips WHERE id = ?", (trip_id,))
     if trip is None:
         abort(404)
     number = request.form.get("carrier_waybill_number", "").strip() or None
@@ -869,6 +889,12 @@ def save_waybill(trip_id):
     execute(
         "UPDATE trips SET carrier_waybill_number=?, carrier_waybill_filename=? WHERE id=?",
         (number, filename, trip_id),
+    )
+    log_activity(
+        "viajes", "SUBIR" if new_filename else "EDITAR",
+        f"Guía de transportista del viaje {trip['code']}",
+        entity_type="viaje", entity_id=trip_id,
+        entity_url=url_for("viajes.detail", trip_id=trip_id),
     )
     flash("Guía de transportista guardada.", "success")
     return redirect(url_for("viajes.detail", trip_id=trip_id))
@@ -904,7 +930,7 @@ def waybill_file(trip_id):
 def set_shipper_waybill_decision(trip_id):
     if not validate_csrf():
         abort(400)
-    trip = query_one("SELECT id FROM trips WHERE id = ?", (trip_id,))
+    trip = query_one("SELECT code FROM trips WHERE id = ?", (trip_id,))
     if trip is None:
         abort(404)
     decision = request.form.get("decision", "").strip().upper()
@@ -913,6 +939,12 @@ def set_shipper_waybill_decision(trip_id):
     execute(
         "UPDATE trips SET shipper_waybill_shows_carrier=? WHERE id=?",
         (decision or None, trip_id),
+    )
+    log_activity(
+        "viajes", "EDITAR",
+        f"Viaje {trip['code']}: guía del remitente muestra a Harraso/BRMS = {decision or 'sin responder'}",
+        entity_type="viaje", entity_id=trip_id,
+        entity_url=url_for("viajes.detail", trip_id=trip_id),
     )
     if decision == "SI":
         flash("Guía del remitente: ya figura con nuestros datos como transportista.", "success")
@@ -932,7 +964,7 @@ def _save_shipper_waybill_file(file_storage):
 def save_shipper_waybill(trip_id):
     if not validate_csrf():
         abort(400)
-    trip = query_one("SELECT shipper_waybill_filename FROM trips WHERE id = ?", (trip_id,))
+    trip = query_one("SELECT code, shipper_waybill_filename FROM trips WHERE id = ?", (trip_id,))
     if trip is None:
         abort(404)
     number = request.form.get("shipper_waybill_number", "").strip() or None
@@ -941,6 +973,12 @@ def save_shipper_waybill(trip_id):
     execute(
         "UPDATE trips SET shipper_waybill_number=?, shipper_waybill_filename=? WHERE id=?",
         (number, filename, trip_id),
+    )
+    log_activity(
+        "viajes", "SUBIR" if new_filename else "EDITAR",
+        f"Guía del remitente del viaje {trip['code']}",
+        entity_type="viaje", entity_id=trip_id,
+        entity_url=url_for("viajes.detail", trip_id=trip_id),
     )
     flash("Guía del remitente guardada.", "success")
     return redirect(url_for("viajes.detail", trip_id=trip_id))
@@ -970,7 +1008,7 @@ def shipper_waybill_file(trip_id):
 def save_delivery_proof(trip_id):
     if not validate_csrf():
         abort(400)
-    trip = query_one("SELECT status, delivery_proof_filename FROM trips WHERE id = ?", (trip_id,))
+    trip = query_one("SELECT code, status, delivery_proof_filename FROM trips WHERE id = ?", (trip_id,))
     if trip is None:
         abort(404)
     if trip["status"] != "EN_CURSO":
@@ -984,6 +1022,11 @@ def save_delivery_proof(trip_id):
     execute(
         "UPDATE trips SET delivery_proof_filename=?, status=?, delivered_date=?, actual_end_at=? WHERE id=?",
         (filename, "ENTREGADO", today_str(), now_str(), trip_id),
+    )
+    log_activity(
+        "viajes", "SUBIR", f"Conformidad de entrega del viaje {trip['code']} — marcado como Entregado",
+        entity_type="viaje", entity_id=trip_id,
+        entity_url=url_for("viajes.detail", trip_id=trip_id),
     )
     flash("Conformidad de entrega adjuntada — viaje marcado como Entregado.", "success")
     return redirect(url_for("viajes.detail", trip_id=trip_id))
@@ -1057,11 +1100,17 @@ def container_photo_file(trip_id):
 def toggle_invoiced(trip_id):
     if not validate_csrf():
         abort(400)
-    trip = query_one("SELECT invoiced FROM trips WHERE id = ?", (trip_id,))
+    trip = query_one("SELECT code, invoiced FROM trips WHERE id = ?", (trip_id,))
     if trip is None:
         abort(404)
     new_value = 0 if trip["invoiced"] else 1
     execute("UPDATE trips SET invoiced=? WHERE id=?", (new_value, trip_id))
+    log_activity(
+        "viajes", "FACTURAR" if new_value else "EDITAR",
+        f"Viaje {trip['code']} {'marcado' if new_value else 'desmarcado'} como facturado",
+        entity_type="viaje", entity_id=trip_id,
+        entity_url=url_for("viajes.detail", trip_id=trip_id),
+    )
     flash("Viaje marcado como facturado." if new_value else "Viaje desmarcado como facturado.", "success")
     return redirect(url_for("viajes.detail", trip_id=trip_id))
 
@@ -1071,11 +1120,17 @@ def toggle_invoiced(trip_id):
 def toggle_paid(trip_id):
     if not validate_csrf():
         abort(400)
-    trip = query_one("SELECT paid FROM trips WHERE id = ?", (trip_id,))
+    trip = query_one("SELECT code, paid FROM trips WHERE id = ?", (trip_id,))
     if trip is None:
         abort(404)
     new_value = 0 if trip["paid"] else 1
     execute("UPDATE trips SET paid=? WHERE id=?", (new_value, trip_id))
+    log_activity(
+        "viajes", "PAGAR" if new_value else "EDITAR",
+        f"Viaje {trip['code']} {'marcado' if new_value else 'desmarcado'} como pagado",
+        entity_type="viaje", entity_id=trip_id,
+        entity_url=url_for("viajes.detail", trip_id=trip_id),
+    )
     flash("Viaje marcado como pagado." if new_value else "Viaje desmarcado como pagado.", "success")
     return redirect(url_for("viajes.detail", trip_id=trip_id))
 

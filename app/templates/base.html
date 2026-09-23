@@ -42,6 +42,14 @@
          alfabético que le corresponda, no al final. -->
     <nav class="sidebar-nav">
       <a href="{{ url_for('dashboard.index') }}" class="{{ 'active' if request.blueprint == 'dashboard' }}">Panel</a>
+      {# 22 sep, pedido de Braulio ("como administrador, pueda saber quien
+         ha hecho cada cosa"): módulo nuevo de Actividad -- de solo
+         Administrador por defecto (ver "actividad" en PERMISSIONS,
+         app/auth.py), por eso casi nunca se ve en el menú de los demás
+         roles. #}
+      {% if can(current_user.roles, 'actividad', 'view') %}
+      <a href="{{ url_for('actividad.list_view') }}" class="{{ 'active' if request.blueprint == 'actividad' }}">Actividad</a>
+      {% endif %}
       {% if can(current_user.roles, 'catalogos', 'view') %}
       <a href="{{ url_for('catalogos.list_view') }}" class="{{ 'active' if request.blueprint == 'catalogos' }}">Catálogos</a>
       {% endif %}

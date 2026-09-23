@@ -29,6 +29,7 @@ from app.accounting import (
     resolve_expense_account,
     voucher_label,
 )
+from app.audit import get_creator_info, log_activity
 from app.auth import permission_required, validate_csrf
 from app.db import execute, query_all, query_one
 from app.helpers import now_str, parse_date, parse_float, pretty_label, today_str
@@ -296,6 +297,14 @@ def new_advance(trip_id):
             "INSERT INTO advance_payments (advance_id, amount, payment_date, notes) VALUES (?, ?, ?, ?)",
             (advance_id, amount, given_date, notes),
         )
+        # 22 sep, registro de actividad (ver app/audit.py): la liquidación
+        # nace acá (una por viaje) -- CREAR es el que alimenta el "Creado
+        # por" del detalle de la liquidación (get_creator_info).
+        log_activity(
+            "liquidaciones", "CREAR", f"Liquidación {code} del viaje {trip['code']} — anticipo S/ {amount:.2f}",
+            entity_type="anticipo", entity_id=advance_id,
+            entity_url=url_for("liquidaciones.detail", advance_id=advance_id),
+        )
         flash(f"Anticipo confirmado: {trip['code']} recibió S/ {amount:.2f}. Ya puedes registrar sus gastos.", "success")
         return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
 
@@ -334,6 +343,15 @@ def add_payment(advance_id):
         (advance_id, amount, payment_date, request.form.get("notes", "").strip()),
     )
     _recalc_advance_total(advance_id)
+    # 22 sep, registro de actividad: un anticipo adicional edita el total de
+    # la liquidación (expense_advances.amount_given) -- se registra como
+    # EDITAR sobre la propia liquidación, no como un CREAR aparte (el CREAR
+    # de la liquidación ya quedó registrado en new_advance).
+    log_activity(
+        "liquidaciones", "EDITAR", f"Liquidación {advance['code']}: anticipo adicional de S/ {amount:.2f}",
+        entity_type="anticipo", entity_id=advance_id,
+        entity_url=url_for("liquidaciones.detail", advance_id=advance_id),
+    )
     flash(f"Anticipo adicional registrado: S/ {amount:.2f}.", "success")
     return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
 
@@ -360,6 +378,15 @@ def delete_payment(payment_id):
         return redirect(url_for("liquidaciones.detail", advance_id=advance["id"]))
     execute("DELETE FROM advance_payments WHERE id = ?", (payment_id,))
     _recalc_advance_total(advance["id"])
+    # 22 sep, registro de actividad: se borra una fila de advance_payments,
+    # pero lo que le importa a Braulio es qué liquidación se tocó -- se
+    # registra como EDITAR sobre la liquidación (entity_type="anticipo"),
+    # no como ELIMINAR de un "advance_payment" que no tiene pantalla propia.
+    log_activity(
+        "liquidaciones", "EDITAR", f"Liquidación {advance['code']}: anticipo de S/ {payment['amount']:.2f} eliminado",
+        entity_type="anticipo", entity_id=advance["id"],
+        entity_url=url_for("liquidaciones.detail", advance_id=advance["id"]),
+    )
     flash("Anticipo eliminado.", "success")
     return redirect(url_for("liquidaciones.detail", advance_id=advance["id"]))
 
@@ -483,11 +510,15 @@ def detail(advance_id):
         route = query_one("SELECT * FROM routes WHERE id = ?", (advance["route_id"],))
     if route is None:
         route = find_route(advance["origin"], advance["destination"])
+    # 22 sep, pedido de Braulio ("que usuario creo el viaje... etc"): quién y
+    # cuándo se registró esta liquidación (anticipo), según activity_log —
+    # ver app/audit.py. None para liquidaciones de antes de este registro.
+    creator = get_creator_info("anticipo", advance_id)
     return render_template(
         "liquidaciones/detail.html", advance=advance, expenses=expenses, spent=spent, difference=difference,
         payments=payments, offices=offices, office_labels={code: info["label"] for code, info in offices},
         route=route, today=today_str(), is_admin=("ADMIN" in g.user["roles"]),
-        fuel_rows=_fuel_rows(advance),
+        fuel_rows=_fuel_rows(advance), creator=creator,
         # 10 sep, 3ra ronda, pedido de Braulio: grifos registrados en el
         # catálogo, para elegir uno al agregar combustible acá — ver
         # app/routes/catalogos.py.
@@ -577,6 +608,14 @@ def fuel_entry_new(advance_id):
         ),
     )
     _recalc_fuel_actual(advance_id)
+    # 22 sep, registro de actividad: entrada de combustible agregada a mano
+    # -- se registra como EDITAR de la liquidación (no tiene pantalla propia).
+    log_activity(
+        "liquidaciones", "EDITAR",
+        f"Liquidación {advance['code']}: combustible agregado ({gallons:.2f} gal en {station['business_name']})",
+        entity_type="anticipo", entity_id=advance_id,
+        entity_url=url_for("liquidaciones.detail", advance_id=advance_id),
+    )
     flash("Combustible agregado.", "success")
     return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
 
@@ -597,6 +636,12 @@ def fuel_entry_delete(entry_id):
         return redirect(url_for("liquidaciones.detail", advance_id=advance["id"]))
     execute("DELETE FROM fuel_entries WHERE id = ?", (entry_id,))
     _recalc_fuel_actual(advance["id"])
+    # 22 sep, registro de actividad: ver el mismo criterio en fuel_entry_new.
+    log_activity(
+        "liquidaciones", "EDITAR", f"Liquidación {advance['code']}: entrada de combustible eliminada",
+        entity_type="anticipo", entity_id=advance["id"],
+        entity_url=url_for("liquidaciones.detail", advance_id=advance["id"]),
+    )
     flash("Entrada de combustible eliminada.", "success")
     return redirect(url_for("liquidaciones.detail", advance_id=advance["id"]))
 
@@ -656,6 +701,14 @@ def liquidate(advance_id):
            liquidated_expenses_total = ?, office = ?, voucher_number = ? WHERE id = ?""",
         (spent, office, voucher_number, advance_id),
     )
+    # 22 sep, registro de actividad: cierre de la liquidación -- pedido
+    # explícito de Braulio ("genero guias, etc" incluye este tipo de cierre).
+    log_activity(
+        "liquidaciones", "ESTADO",
+        f"Liquidación {advance['code']} cerrada — oficina {office}, S/ {spent:.2f} en gastos asignados",
+        entity_type="anticipo", entity_id=advance_id,
+        entity_url=url_for("liquidaciones.detail", advance_id=advance_id),
+    )
     flash("Liquidación cerrada.", "success")
     return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
 
@@ -703,6 +756,12 @@ def rrhh_approve(advance_id):
                fuel_adjustment = ?
            WHERE id = ?""",
         (g.user["name"], g.user["id"], fuel_adjustment or None, advance_id),
+    )
+    # 22 sep, registro de actividad: OK final de Administrador para RRHH.
+    log_activity(
+        "liquidaciones", "APROBAR", f"Liquidación {advance['code']} aprobada para RRHH",
+        entity_type="anticipo", entity_id=advance_id,
+        entity_url=url_for("liquidaciones.detail", advance_id=advance_id),
     )
     flash("Liquidación aprobada — ya está lista para enviarse a RRHH.", "success")
     return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
@@ -933,7 +992,7 @@ def new_expense():
                 "info",
             )
 
-        execute(
+        expense_id = execute(
             """INSERT INTO expenses (trip_id, vehicle_id, type, amount, expense_date, description,
                receipt_filename, concept_id, document_number, due_date, provider_ruc, provider_name,
                currency, exchange_rate, voucher_type, fuel_station_id, fuel_city, fuel_station_name,
@@ -957,6 +1016,15 @@ def new_expense():
         # No hace falta filtrar por concepto acá: si no es Combustible, el
         # recálculo simplemente da el mismo total de antes.
         _recalc_fuel_actual_for_trip(trip_id)
+        # 22 sep, registro de actividad (ver app/audit.py): "que usuario...
+        # subio algun doc" -- SUBIR cuando trae comprobante adjunto, CREAR
+        # si no (mismo criterio que save_waybill en viajes.py).
+        log_activity(
+            "liquidaciones", "SUBIR" if receipt_filename else "CREAR",
+            f"Gasto de S/ {amount:.2f} ({expense_type}) registrado",
+            entity_type="gasto", entity_id=expense_id,
+            entity_url=url_for("liquidaciones.edit_expense", expense_id=expense_id),
+        )
         flash("Gasto registrado. Recuerda incluirlo en la liquidación del viaje cuando la cierres.", "success")
         if trip_id:
             advance = query_one("SELECT id FROM expense_advances WHERE trip_id = ?", (trip_id,))
@@ -1055,6 +1123,14 @@ def edit_expense(expense_id):
         _recalc_fuel_actual_for_trip(expense["trip_id"])
         if trip_id != expense["trip_id"]:
             _recalc_fuel_actual_for_trip(trip_id)
+        # 22 sep, registro de actividad: SUBIR si trajo un comprobante nuevo
+        # (mismo criterio que new_expense/save_waybill), EDITAR si no.
+        log_activity(
+            "liquidaciones", "SUBIR" if new_receipt else "EDITAR",
+            f"Gasto de S/ {amount:.2f} ({expense_type}) editado",
+            entity_type="gasto", entity_id=expense_id,
+            entity_url=url_for("liquidaciones.edit_expense", expense_id=expense_id),
+        )
         flash("Gasto actualizado.", "success")
         if trip_id:
             advance = query_one("SELECT id FROM expense_advances WHERE trip_id = ?", (trip_id,))
@@ -1083,6 +1159,12 @@ def delete_expense(expense_id):
     # recalcula el combustible físico de la liquidación de ese viaje — ver
     # _fuel_rows/_recalc_fuel_actual. No hace falta filtrar por concepto acá.
     _recalc_fuel_actual_for_trip(trip_id_for_recalc)
+    # 22 sep, registro de actividad: sin entity_url porque el gasto ya no
+    # existe (no hay a dónde llevar el "Ver").
+    log_activity(
+        "liquidaciones", "ELIMINAR", f"Gasto de S/ {expense['amount']:.2f} ({expense['type']}) eliminado",
+        entity_type="gasto", entity_id=expense_id,
+    )
     flash("Gasto eliminado.", "success")
     return redirect(request.referrer or url_for("liquidaciones.historial"))
 
@@ -1336,6 +1418,15 @@ def whatsapp_review(draft_id):
                resulting_expense_id = ? WHERE id = ?""",
             (g.user["id"], now_str(), expense_id, draft_id),
         )
+        # 22 sep, registro de actividad: APROBAR (pedido explícito del
+        # enunciado para el flujo de revisión de WhatsApp) sobre el gasto
+        # resultante -- es el registro real que queda en el sistema.
+        log_activity(
+            "liquidaciones", "APROBAR",
+            f"Gasto de S/ {amount:.2f} ({expense_type}) aprobado desde borrador de WhatsApp",
+            entity_type="gasto", entity_id=expense_id,
+            entity_url=url_for("liquidaciones.edit_expense", expense_id=expense_id),
+        )
         flash("Gasto registrado a partir de la foto recibida por WhatsApp.", "success")
         if trip_id:
             advance = query_one("SELECT id FROM expense_advances WHERE trip_id = ?", (trip_id,))
@@ -1362,6 +1453,13 @@ def whatsapp_reject(draft_id):
         """UPDATE whatsapp_expense_drafts SET status = 'RECHAZADO', reviewed_by = ?, reviewed_at = ?,
            rejection_reason = ? WHERE id = ?""",
         (g.user["id"], now_str(), request.form.get("rejection_reason", "").strip() or None, draft_id),
+    )
+    # 22 sep, registro de actividad: RECHAZAR (pedido explícito del
+    # enunciado) -- sin entity_url: un borrador rechazado no tiene pantalla
+    # propia (whatsapp_review redirige apenas deja de estar PENDIENTE).
+    log_activity(
+        "liquidaciones", "RECHAZAR", "Borrador de gasto por WhatsApp descartado",
+        entity_type="gasto_whatsapp", entity_id=draft_id,
     )
     flash("Borrador descartado.", "success")
     return redirect(url_for("liquidaciones.whatsapp_list"))
@@ -1464,16 +1562,30 @@ def budgets_add():
     existing = query_one(
         "SELECT id FROM expense_budgets WHERE scope_type = ? AND scope_value = ?", (scope_type, scope_value)
     )
+    scope_label = f"unidad {scope_value}" if scope_type == "VEHICLE" else pretty_label(scope_value)
     if existing:
         execute(
             "UPDATE expense_budgets SET monthly_amount = ?, active = 1 WHERE id = ?",
             (amount, existing["id"]),
         )
+        # 22 sep, registro de actividad: sin pantalla propia por
+        # presupuesto -- entity_url apunta al listado (budgets.html), donde
+        # se editan/alternan todos.
+        log_activity(
+            "liquidaciones", "EDITAR", f"Presupuesto de {scope_label}: S/ {amount:.2f} mensual",
+            entity_type="presupuesto", entity_id=existing["id"],
+            entity_url=url_for("liquidaciones.budgets_list"),
+        )
         flash("Presupuesto actualizado.", "success")
     else:
-        execute(
+        budget_id = execute(
             "INSERT INTO expense_budgets (scope_type, scope_value, monthly_amount) VALUES (?, ?, ?)",
             (scope_type, scope_value, amount),
+        )
+        log_activity(
+            "liquidaciones", "CREAR", f"Presupuesto de {scope_label}: S/ {amount:.2f} mensual",
+            entity_type="presupuesto", entity_id=budget_id,
+            entity_url=url_for("liquidaciones.budgets_list"),
         )
         flash("Presupuesto agregado.", "success")
     return redirect(url_for("liquidaciones.budgets_list"))
@@ -1487,7 +1599,14 @@ def budgets_toggle(budget_id):
     budget = query_one("SELECT * FROM expense_budgets WHERE id = ?", (budget_id,))
     if budget is None:
         abort(404)
-    execute("UPDATE expense_budgets SET active = ? WHERE id = ?", (0 if budget["active"] else 1, budget_id))
+    new_active = 0 if budget["active"] else 1
+    execute("UPDATE expense_budgets SET active = ? WHERE id = ?", (new_active, budget_id))
+    scope_label = f"unidad {budget['scope_value']}" if budget["scope_type"] == "VEHICLE" else pretty_label(budget["scope_value"])
+    log_activity(
+        "liquidaciones", "REACTIVAR" if new_active else "DESACTIVAR", f"Presupuesto de {scope_label}",
+        entity_type="presupuesto", entity_id=budget_id,
+        entity_url=url_for("liquidaciones.budgets_list"),
+    )
     flash("Actualizado." if budget["active"] else "Reactivado.", "success")
     return redirect(url_for("liquidaciones.budgets_list"))
 
@@ -1520,10 +1639,15 @@ def concepts_add():
         return redirect(url_for("liquidaciones.concepts_list"))
 
     max_order = query_one("SELECT COALESCE(MAX(sort_order), -1) m FROM expense_concepts")["m"]
-    execute(
+    concept_id = execute(
         """INSERT INTO expense_concepts (name, account_code, voucher_type_label, document_type_code, sort_order)
            VALUES (?, ?, ?, ?, ?)""",
         (name, account_code, voucher_type_label, document_type_code, max_order + 1),
+    )
+    log_activity(
+        "liquidaciones", "CREAR", f'Concepto de gasto "{name}" ({account_code})',
+        entity_type="concepto_gasto", entity_id=concept_id,
+        entity_url=url_for("liquidaciones.concepts_edit", concept_id=concept_id),
     )
     flash(f'Concepto "{name}" agregado.', "success")
     return redirect(url_for("liquidaciones.concepts_list"))
@@ -1561,6 +1685,11 @@ def concepts_edit(concept_id):
                document_type_code = ? WHERE id = ?""",
             (name, account_code, voucher_type_label, document_type_code, concept_id),
         )
+        log_activity(
+            "liquidaciones", "EDITAR", f'Concepto de gasto "{name}" ({account_code})',
+            entity_type="concepto_gasto", entity_id=concept_id,
+            entity_url=url_for("liquidaciones.concepts_edit", concept_id=concept_id),
+        )
         flash(f'Concepto "{name}" actualizado.', "success")
         return redirect(url_for("liquidaciones.concepts_list"))
 
@@ -1575,7 +1704,13 @@ def concepts_toggle(concept_id):
     concept = query_one("SELECT * FROM expense_concepts WHERE id = ?", (concept_id,))
     if concept is None:
         abort(404)
-    execute("UPDATE expense_concepts SET active = ? WHERE id = ?", (0 if concept["active"] else 1, concept_id))
+    new_active = 0 if concept["active"] else 1
+    execute("UPDATE expense_concepts SET active = ? WHERE id = ?", (new_active, concept_id))
+    log_activity(
+        "liquidaciones", "REACTIVAR" if new_active else "DESACTIVAR", f'Concepto de gasto "{concept["name"]}"',
+        entity_type="concepto_gasto", entity_id=concept_id,
+        entity_url=url_for("liquidaciones.concepts_edit", concept_id=concept_id),
+    )
     flash("Actualizado." if concept["active"] else "Reactivado.", "success")
     return redirect(url_for("liquidaciones.concepts_list"))
 

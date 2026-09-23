@@ -26,6 +26,7 @@ import datetime as dt
 
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 
+from app.audit import log_activity
 from app.auth import permission_required, validate_csrf
 from app.db import execute, query_all, query_one
 from app.helpers import today_str
@@ -222,9 +223,18 @@ def new():
         streak_before = driver_rest_status(driver, as_of=start - dt.timedelta(days=1))["streak_days"] or 0
         required_min = REST_MIN_LONG if streak_before > WORK_LIMIT_SOON else REST_MIN_SHORT
 
-        execute(
+        rest_id = execute(
             "INSERT INTO driver_rests (driver_id, start_date, end_date, days_count, notes) VALUES (?, ?, ?, ?, ?)",
             (driver_id, request.form.get("start_date"), request.form.get("end_date"), days_count, notes),
+        )
+        # 22 sep, registro de actividad (ver app/audit.py): este módulo es una
+        # bitácora sin pantalla de detalle propia -- se registra igual para
+        # que aparezca en Actividad, sin "Creado por" en pantalla (pedido de
+        # Braulio, ver notas del encargo).
+        log_activity(
+            "descansos", "CREAR",
+            f"Descanso de {driver['name']}: {request.form.get('start_date')} a {request.form.get('end_date')} ({days_count} día(s))",
+            entity_type="descanso", entity_id=rest_id,
         )
         flash(f"Descanso registrado: {days_count} día(s) para {driver['name']}.", "success")
         if days_count < required_min:
@@ -268,6 +278,12 @@ def edit(rest_id):
             "UPDATE driver_rests SET start_date=?, end_date=?, days_count=?, notes=? WHERE id=?",
             (request.form.get("start_date"), request.form.get("end_date"), days_count, notes, rest_id),
         )
+        # 22 sep, registro de actividad (ver app/audit.py).
+        log_activity(
+            "descansos", "EDITAR",
+            f"Descanso de {driver['name']}: {request.form.get('start_date')} a {request.form.get('end_date')} ({days_count} día(s))",
+            entity_type="descanso", entity_id=rest_id,
+        )
         flash("Descanso actualizado.", "success")
         return redirect(url_for("descansos.list_view", driver_id=rest["driver_id"]))
 
@@ -282,6 +298,13 @@ def delete(rest_id):
     rest = query_one("SELECT * FROM driver_rests WHERE id = ?", (rest_id,))
     if rest is None:
         abort(404)
+    driver = query_one("SELECT name FROM drivers WHERE id = ?", (rest["driver_id"],))
     execute("DELETE FROM driver_rests WHERE id = ?", (rest_id,))
+    # 22 sep, registro de actividad (ver app/audit.py).
+    log_activity(
+        "descansos", "ELIMINAR",
+        f"Descanso de {driver['name'] if driver else rest['driver_id']}: {rest['start_date']} a {rest['end_date']}",
+        entity_type="descanso", entity_id=rest_id,
+    )
     flash("Descanso eliminado.", "success")
     return redirect(url_for("descansos.list_view", driver_id=rest["driver_id"]))

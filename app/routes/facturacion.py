@@ -14,6 +14,10 @@ from flask import (
     url_for,
 )
 
+# 22 sep, registro de actividad (ver app/audit.py): log_activity() para
+# saber quién generó/editó/envió cada factura, get_creator_info() para el
+# "Creado por" de facturacion/detail.html (mismo patrón que app/routes/viajes.py).
+from app.audit import get_creator_info, log_activity
 from app.auth import permission_required, validate_csrf
 from app.db import execute, get_db, query_all, query_one
 from app.helpers import (
@@ -378,6 +382,16 @@ def new():
             )
         db.commit()
 
+        # 22 sep, registro de actividad (ver app/audit.py): quién generó esta
+        # factura -- el nombre del cliente se toma de la lista `clients` ya
+        # cargada arriba (evita una consulta aparte solo para el label).
+        client_name = next((c["name"] for c in clients if str(c["id"]) == str(client_id)), "")
+        log_activity(
+            "facturacion", "CREAR", f"Factura {number} — {client_name} — S/{total:.2f}",
+            entity_type="factura", entity_id=invoice_id,
+            entity_url=url_for("facturacion.detail", invoice_id=invoice_id),
+        )
+
         if issuer == "HARRASO" and manual_items and total > 400 and not detraction["applies"]:
             flash(
                 "Esta factura supera S/400 e incluye ítems adicionales (no solo viajes) — "
@@ -434,11 +448,16 @@ def detail(invoice_id):
     # sugiere la cuenta del Banco de la Nación de la empresa emisora como
     # punto de partida, editable por si esta factura puntual usa otra.
     company = company_info_for_issuer(invoice["issuer"], current_app.config)
+    # 22 sep, pedido de Braulio ("que usuario creo... la factura"): quién y
+    # cuándo se generó, según activity_log (ver app/audit.py) -- None para
+    # facturas de antes de que existiera este registro.
+    creator = get_creator_info("factura", invoice_id)
     return render_template(
         "facturacion/detail.html", invoice=invoice, items=items,
         default_detraction_account=company.get("bank_nacion_detraction_account", ""),
         detraction_goods_catalog=get_detraction_goods_catalog(),
         detraction_goods_codes=get_detraction_goods_codes(),
+        creator=creator,
     )
 
 
@@ -472,6 +491,12 @@ def update_detraction(invoice_id):
                WHERE id=?""",
             (invoice_id,),
         )
+        # 22 sep, registro de actividad (ver app/audit.py).
+        log_activity(
+            "facturacion", "EDITAR", f"Factura {invoice['number']}: se quitó la detracción",
+            entity_type="factura", entity_id=invoice_id,
+            entity_url=url_for("facturacion.detail", invoice_id=invoice_id),
+        )
         flash("Se quitó la detracción de esta factura.", "success")
         return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
 
@@ -502,6 +527,13 @@ def update_detraction(invoice_id):
            detraction_amount=?, detraction_bank_account=? WHERE id=?""",
         (code, percentage, amount, bank_account, invoice_id),
     )
+    # 22 sep, registro de actividad (ver app/audit.py).
+    log_activity(
+        "facturacion", "EDITAR",
+        f"Factura {invoice['number']}: detracción código {code} ({percentage:.2f}%) — S/{amount:.2f}",
+        entity_type="factura", entity_id=invoice_id,
+        entity_url=url_for("facturacion.detail", invoice_id=invoice_id),
+    )
     flash("Detracción actualizada.", "success")
     return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
 
@@ -514,7 +546,16 @@ def change_status(invoice_id):
     new_status = request.form.get("status")
     if new_status not in ("PENDIENTE", "PAGADA", "VENCIDA", "ANULADA"):
         abort(400)
+    invoice = query_one("SELECT number, status FROM invoices WHERE id = ?", (invoice_id,))
+    if invoice is None:
+        abort(404)
     execute("UPDATE invoices SET status = ? WHERE id = ?", (new_status, invoice_id))
+    # 22 sep, registro de actividad (ver app/audit.py).
+    log_activity(
+        "facturacion", "ESTADO", f"Factura {invoice['number']}: {invoice['status']} → {new_status}",
+        entity_type="factura", entity_id=invoice_id,
+        entity_url=url_for("facturacion.detail", invoice_id=invoice_id),
+    )
     flash("Estado de factura actualizado.", "success")
     return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
 
@@ -591,6 +632,16 @@ def send_sunat(invoice_id):
                 invoice_id,
             ),
         )
+        # 22 sep, registro de actividad (ver app/audit.py): "ENVIAR" cubre
+        # tanto el caso aceptado como el rechazado por SUNAT/tefacturo.pe --
+        # en ambos casos el usuario sí ejecutó la acción de enviar, y el
+        # resultado (aceptado/rechazado) ya queda en el propio label.
+        log_activity(
+            "facturacion", "ENVIAR",
+            f"Factura {invoice['number']} enviada a SUNAT — {'ACEPTADO' if result['accepted'] else 'RECHAZADO'}",
+            entity_type="factura", entity_id=invoice_id,
+            entity_url=url_for("facturacion.detail", invoice_id=invoice_id),
+        )
         if result["accepted"]:
             if ya_existia:
                 flash("Esta factura ya estaba aceptada por SUNAT.", "success")
@@ -602,6 +653,15 @@ def send_sunat(invoice_id):
         execute(
             "UPDATE invoices SET sunat_status='ERROR', sunat_message=?, sunat_sent_at=datetime('now') WHERE id=?",
             (str(exc), invoice_id),
+        )
+        # 22 sep, registro de actividad (ver app/audit.py): también se deja
+        # constancia del intento fallido (error de conexión/config, no un
+        # rechazo de SUNAT) -- Braulio quiere saber quién intentó enviarla,
+        # no solo los envíos que sí llegaron a SUNAT.
+        log_activity(
+            "facturacion", "ENVIAR", f"Factura {invoice['number']}: error al enviar a SUNAT — {exc}",
+            entity_type="factura", entity_id=invoice_id,
+            entity_url=url_for("facturacion.detail", invoice_id=invoice_id),
         )
         flash(f"No se pudo enviar la factura: {exc}", "error")
 

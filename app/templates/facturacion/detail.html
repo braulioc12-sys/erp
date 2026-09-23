@@ -30,6 +30,19 @@
 </div>
 
 <div class="detail-grid">
+  {# 22 sep, pedido de Braulio ("que usuario creo... la factura"): visible
+     solo para quien tiene acceso al módulo de Actividad (Administrador por
+     defecto, ver app/routes/actividad.py) -- mismo criterio que
+     viajes/detail.html. Si la factura es de antes de que existiera este
+     registro, no hay forma de saberlo retroactivamente. #}
+  {% if can(current_user.roles, 'actividad', 'view') %}
+  <div class="detail-item">
+    <div class="label">Creado por</div>
+    <div class="value">
+      {% if creator %}{{ creator.user_name }} — {{ creator.created_at[:16] }}{% else %}No disponible (registro anterior a este historial){% endif %}
+    </div>
+  </div>
+  {% endif %}
   <div class="detail-item"><div class="label">Cliente</div><div class="value">{{ invoice.client_name }}</div></div>
   <div class="detail-item"><div class="label">RUC</div><div class="value">{{ invoice.client_ruc or '—' }}</div></div>
   <div class="detail-item"><div class="label">Empresa que factura</div><div class="value">{{ 'BRMS' if invoice.issuer == 'BRMS' else 'Harraso Transport' }}</div></div>

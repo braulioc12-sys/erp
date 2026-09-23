@@ -29,6 +29,19 @@
 </div>
 
 <div class="detail-grid">
+  {# 22 sep, pedido de Braulio ("que usuario creo el viaje"): visible solo
+     para quien tiene acceso al módulo de Actividad (Administrador por
+     defecto, ver app/routes/actividad.py) -- mismo criterio en el resto de
+     módulos instrumentados. Si el viaje es de antes de que existiera este
+     registro, no hay forma de saberlo retroactivamente. #}
+  {% if can(current_user.roles, 'actividad', 'view') %}
+  <div class="detail-item">
+    <div class="label">Creado por</div>
+    <div class="value">
+      {% if creator %}{{ creator.user_name }} — {{ creator.created_at[:16] }}{% else %}No disponible (registro anterior a este historial){% endif %}
+    </div>
+  </div>
+  {% endif %}
   <div class="detail-item"><div class="label">Cliente</div><div class="value">{{ trip.client_name }}</div></div>
   <div class="detail-item"><div class="label">Empresa que opera</div><div class="value">{{ 'BRMS' if trip.issuer == 'BRMS' else 'Harraso Transport' }}</div></div>
   <div class="detail-item"><div class="label">Ruta</div><div class="value">{{ trip.origin }} → {{ trip.destination }}</div></div>

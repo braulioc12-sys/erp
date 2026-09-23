@@ -2,6 +2,7 @@ from datetime import datetime
 
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 
+from app.audit import get_creator_info, log_activity
 from app.auth import permission_required, validate_csrf
 from app.db import execute, get_db, get_setting, query_all, query_one
 from app.helpers import parse_date, parse_float, today_str
@@ -36,6 +37,26 @@ ORDER_STATUS_LABELS = {
     "EN_PROCESO": "En proceso",
     "TERMINADA": "Terminada",
 }
+
+
+def _order_label(record_id):
+    """22 sep, registro de actividad (ver app/audit.py): etiqueta corta y
+    consistente para cualquier log_activity() sobre una orden de
+    mantenimiento (o algo que le pertenece, como un trabajo o material) --
+    incluye la placa de la unidad para que se reconozca de un vistazo en la
+    pantalla de Actividad, sin tener que abrir la orden. Se usa
+    entity_type="orden_mantenimiento" en todas partes, incluso para
+    trabajos/materiales/cuadrilla que en el schema son tablas aparte -- para
+    Braulio esas acciones son parte del historial de LA ORDEN, no de un
+    registro propio."""
+    row = query_one(
+        """SELECT m.id, v.plate FROM maintenance_records m
+           JOIN vehicles v ON v.id = m.vehicle_id WHERE m.id = ?""",
+        (record_id,),
+    )
+    if row is None:
+        return f"Orden de mantenimiento #{record_id}"
+    return f"Orden de mantenimiento #{record_id} — {row['plate']}"
 
 
 def _lookup_mechanic(raw_mechanic_id):
@@ -292,6 +313,15 @@ def new():
                 estimated_minutes,
             ),
         )
+        # 22 sep, registro de actividad (ver app/audit.py): se registra ni
+        # bien queda insertada la orden, antes de agregarle los
+        # trabajos/materiales marcados (que son parte de esta misma
+        # creación, no ediciones aparte).
+        log_activity(
+            "mantenimiento", "CREAR", f"{_order_label(record_id)} — {record_type}",
+            entity_type="orden_mantenimiento", entity_id=record_id,
+            entity_url=url_for("mantenimiento.detail", record_id=record_id),
+        )
 
         if selected_jobs or selected_materials:
             db = get_db()
@@ -338,9 +368,18 @@ def new():
 def delete(record_id):
     if not validate_csrf():
         abort(400)
+    # 22 sep, registro de actividad: la etiqueta se arma ANTES de borrar
+    # (después ya no habría de dónde sacar la placa de la unidad -- ver
+    # _order_label()), pero se registra recién después de que el borrado ya
+    # se hizo con éxito, como el resto de log_activity().
+    label = _order_label(record_id)
     execute("DELETE FROM maintenance_record_jobs WHERE maintenance_record_id = ?", (record_id,))
     execute("DELETE FROM maintenance_record_materials WHERE maintenance_record_id = ?", (record_id,))
     execute("DELETE FROM maintenance_records WHERE id = ?", (record_id,))
+    log_activity(
+        "mantenimiento", "ELIMINAR", label,
+        entity_type="orden_mantenimiento", entity_id=record_id,
+    )
     flash("Registro de mantenimiento eliminado.", "success")
     return redirect(url_for("mantenimiento.list_view"))
 
@@ -389,12 +428,16 @@ def detail(record_id):
         crew = _job_crew(record_id, j["job_name"], j["mechanic_type"], j["mechanic_count"], j["mechanic_id"], j["mechanic_name"])
         crew_by_job[j["job_name"]] = crew
         labor_cost_by_job[j["job_name"]] = _crew_cost(crew, j["estimated_minutes"], labor_costs)
+    # 22 sep, pedido de Braulio ("que usuario creo... la orden"): quién y
+    # cuándo se creó, según activity_log (ver app/audit.py) -- None para
+    # órdenes de antes de que existiera este registro.
+    creator = get_creator_info("orden_mantenimiento", record_id)
     return render_template(
         "mantenimiento/detail.html", record=record, jobs=jobs, materials=materials, mechanics=mechanics,
         order_status=_order_status(jobs), order_status_labels=ORDER_STATUS_LABELS,
         mechanic_types=MECHANIC_TYPES, available_job_types=available_job_types,
         available_materials=available_materials, labor_costs=labor_costs, materials_total=materials_total,
-        crew_by_job=crew_by_job, labor_cost_by_job=labor_cost_by_job, readonly=readonly,
+        crew_by_job=crew_by_job, labor_cost_by_job=labor_cost_by_job, readonly=readonly, creator=creator,
     )
 
 
@@ -442,8 +485,13 @@ def job_crew_add(record_id):
            VALUES (?, ?, ?, ?, ?, ?)""",
         (record_id, job_name, mechanic_type, count, mechanic_id, mechanic_name),
     )
-    label = f'{count} × {mechanic_type}' + (f' ({mechanic_name})' if mechanic_name else '')
-    flash(f'Se agregó {label} a "{job_name}".', "success")
+    crew_label = f'{count} × {mechanic_type}' + (f' ({mechanic_name})' if mechanic_name else '')
+    log_activity(
+        "mantenimiento", "EDITAR", f'{_order_label(record_id)}: agregó {crew_label} a "{job_name}"',
+        entity_type="orden_mantenimiento", entity_id=record_id,
+        entity_url=url_for("mantenimiento.detail", record_id=record_id),
+    )
+    flash(f'Se agregó {crew_label} a "{job_name}".', "success")
     return redirect(url_for("mantenimiento.detail", record_id=record_id))
 
 
@@ -459,6 +507,12 @@ def job_crew_remove(record_id, crew_id):
     if crew is None:
         abort(404)
     execute("DELETE FROM maintenance_record_job_crew WHERE id = ?", (crew_id,))
+    log_activity(
+        "mantenimiento", "EDITAR",
+        f'{_order_label(record_id)}: quitó {crew["mechanic_count"]} × {crew["mechanic_type"]} de "{crew["job_name"]}"',
+        entity_type="orden_mantenimiento", entity_id=record_id,
+        entity_url=url_for("mantenimiento.detail", record_id=record_id),
+    )
     flash("Se quitó esa combinación de mecánico del trabajo.", "success")
     return redirect(url_for("mantenimiento.detail", record_id=record_id))
 
@@ -499,6 +553,12 @@ def add_more(record_id):
         ((record["cost"] or 0) + added_cost, (record["estimated_minutes"] or 0) + added_minutes, record_id),
     )
     db.commit()
+    added_names = [j["name"] for j in selected_jobs] + [m["name"] for m in selected_materials]
+    log_activity(
+        "mantenimiento", "EDITAR", f"{_order_label(record_id)}: agregó {', '.join(added_names)}",
+        entity_type="orden_mantenimiento", entity_id=record_id,
+        entity_url=url_for("mantenimiento.detail", record_id=record_id),
+    )
     flash("Se agregaron trabajos/materiales a la orden.", "success")
     for w in stock_warnings:
         flash(w, "error")
@@ -524,6 +584,11 @@ def job_set_mechanic_count(record_id):
            WHERE maintenance_record_id = ? AND job_name = ?""",
         (count, record_id, job_name),
     )
+    log_activity(
+        "mantenimiento", "EDITAR", f'{_order_label(record_id)}: cantidad de mecánicos de "{job_name}" = {count}',
+        entity_type="orden_mantenimiento", entity_id=record_id,
+        entity_url=url_for("mantenimiento.detail", record_id=record_id),
+    )
     flash(f'Cantidad de mecánicos de "{job_name}" actualizada a {count}.', "success")
     return redirect(url_for("mantenimiento.detail", record_id=record_id))
 
@@ -546,6 +611,11 @@ def job_set_status(record_id):
         """UPDATE maintenance_record_jobs SET status = ?, completed_at = ?
            WHERE maintenance_record_id = ? AND job_name = ?""",
         (new_status, completed_at, record_id, job_name),
+    )
+    log_activity(
+        "mantenimiento", "ESTADO", f'{_order_label(record_id)}: "{job_name}" → {new_status}',
+        entity_type="orden_mantenimiento", entity_id=record_id,
+        entity_url=url_for("mantenimiento.detail", record_id=record_id),
     )
     flash(
         f'"{job_name}" marcado como {"terminado" if new_status == "TERMINADO" else "pendiente"}.',
@@ -573,6 +643,11 @@ def job_assign_mechanic(record_id):
                WHERE maintenance_record_id = ? AND job_name = ?""",
             (record_id, job_name),
         )
+        log_activity(
+            "mantenimiento", "EDITAR", f'{_order_label(record_id)}: quitó el mecánico asignado a "{job_name}"',
+            entity_type="orden_mantenimiento", entity_id=record_id,
+            entity_url=url_for("mantenimiento.detail", record_id=record_id),
+        )
         flash(f'Se quitó el mecánico asignado a "{job_name}".', "success")
     else:
         mechanic = query_one("SELECT * FROM mechanics WHERE id = ?", (mechanic_id,))
@@ -582,6 +657,11 @@ def job_assign_mechanic(record_id):
             """UPDATE maintenance_record_jobs SET mechanic_id = ?, mechanic_name = ?
                WHERE maintenance_record_id = ? AND job_name = ?""",
             (mechanic["id"], mechanic["name"], record_id, job_name),
+        )
+        log_activity(
+            "mantenimiento", "EDITAR", f'{_order_label(record_id)}: "{mechanic["name"]}" asignado a "{job_name}"',
+            entity_type="orden_mantenimiento", entity_id=record_id,
+            entity_url=url_for("mantenimiento.detail", record_id=record_id),
         )
         flash(f'"{mechanic["name"]}" asignado a "{job_name}".', "success")
     return redirect(url_for("mantenimiento.detail", record_id=record_id))
@@ -611,6 +691,11 @@ def job_set_mechanic_type(record_id):
         """UPDATE maintenance_record_jobs SET mechanic_type = ?
            WHERE maintenance_record_id = ? AND job_name = ?""",
         (mechanic_type, record_id, job_name),
+    )
+    log_activity(
+        "mantenimiento", "EDITAR", f'{_order_label(record_id)}: tipo de mecánico de "{job_name}" = {mechanic_type}',
+        entity_type="orden_mantenimiento", entity_id=record_id,
+        entity_url=url_for("mantenimiento.detail", record_id=record_id),
     )
     flash(f'Tipo de mecánico de "{job_name}" actualizado a {mechanic_type}.', "success")
     return redirect(url_for("mantenimiento.detail", record_id=record_id))
@@ -659,12 +744,22 @@ def jobs_add():
                 "UPDATE maintenance_job_types SET active = 1, estimated_minutes = ? WHERE id = ?",
                 (int(minutes), existing["id"]),
             )
+            log_activity(
+                "mantenimiento", "REACTIVAR", f'Trabajo de catálogo "{name}"',
+                entity_type="tipo_trabajo_mantenimiento", entity_id=existing["id"],
+                entity_url=url_for("mantenimiento.jobs_list"),
+            )
             flash(f'"{name}" reactivado.', "success")
     else:
         max_order = query_one("SELECT COALESCE(MAX(sort_order), -1) m FROM maintenance_job_types")["m"]
-        execute(
+        job_id = execute(
             "INSERT INTO maintenance_job_types (name, estimated_minutes, sort_order) VALUES (?, ?, ?)",
             (name, int(minutes), max_order + 1),
+        )
+        log_activity(
+            "mantenimiento", "CREAR", f'Trabajo de catálogo "{name}"',
+            entity_type="tipo_trabajo_mantenimiento", entity_id=job_id,
+            entity_url=url_for("mantenimiento.jobs_list"),
         )
         flash(f'"{name}" agregado.', "success")
     return redirect(url_for("mantenimiento.jobs_list"))
@@ -692,6 +787,13 @@ def jobs_replace_catalog():
             (name, minutes, order),
         )
     db.commit()
+    # 22 sep, registro de actividad: reemplazo masivo, no hay un solo
+    # entity_id que tenga sentido (se borró el catálogo entero) -- se
+    # registra sin entity_type/entity_id, igual queda el "quién y cuándo".
+    log_activity(
+        "mantenimiento", "REEMPLAZAR", f"Catálogo de trabajos reemplazado ({len(DEFAULT_JOB_TYPES)} trabajos)",
+        entity_url=url_for("mantenimiento.jobs_list"),
+    )
     flash(f"Catálogo de trabajos reemplazado: {len(DEFAULT_JOB_TYPES)} trabajos cargados.", "success")
     return redirect(url_for("mantenimiento.jobs_list"))
 
@@ -705,6 +807,11 @@ def jobs_toggle(job_id):
     if job is None:
         abort(404)
     execute("UPDATE maintenance_job_types SET active = ? WHERE id = ?", (0 if job["active"] else 1, job_id))
+    log_activity(
+        "mantenimiento", "DESACTIVAR" if job["active"] else "REACTIVAR", f'Trabajo de catálogo "{job["name"]}"',
+        entity_type="tipo_trabajo_mantenimiento", entity_id=job_id,
+        entity_url=url_for("mantenimiento.jobs_list"),
+    )
     flash("Actualizado." if job["active"] else "Reactivado.", "success")
     return redirect(url_for("mantenimiento.jobs_list"))
 
@@ -749,12 +856,22 @@ def mechanics_add():
                 "UPDATE mechanics SET active = 1, mechanic_type = ? WHERE id = ?",
                 (mechanic_type, existing["id"]),
             )
+            log_activity(
+                "mantenimiento", "REACTIVAR", f'Mecánico "{name}"',
+                entity_type="mecanico", entity_id=existing["id"],
+                entity_url=url_for("mantenimiento.mechanics_list"),
+            )
             flash(f'"{name}" reactivado.', "success")
     else:
         max_order = query_one("SELECT COALESCE(MAX(sort_order), -1) m FROM mechanics")["m"]
-        execute(
+        mechanic_id = execute(
             "INSERT INTO mechanics (name, mechanic_type, sort_order) VALUES (?, ?, ?)",
             (name, mechanic_type, max_order + 1),
+        )
+        log_activity(
+            "mantenimiento", "CREAR", f'Mecánico "{name}" ({mechanic_type})',
+            entity_type="mecanico", entity_id=mechanic_id,
+            entity_url=url_for("mantenimiento.mechanics_list"),
         )
         flash(f'"{name}" agregado.', "success")
     return redirect(url_for("mantenimiento.mechanics_list"))
@@ -772,6 +889,11 @@ def mechanics_set_type(mechanic_id):
     if mechanic is None:
         abort(404)
     execute("UPDATE mechanics SET mechanic_type = ? WHERE id = ?", (mechanic_type, mechanic_id))
+    log_activity(
+        "mantenimiento", "EDITAR", f'Mecánico "{mechanic["name"]}": tipo = {mechanic_type}',
+        entity_type="mecanico", entity_id=mechanic_id,
+        entity_url=url_for("mantenimiento.mechanics_list"),
+    )
     flash(f'Tipo de "{mechanic["name"]}" actualizado a {mechanic_type}.', "success")
     return redirect(url_for("mantenimiento.mechanics_list"))
 
@@ -785,6 +907,11 @@ def mechanics_toggle(mechanic_id):
     if mechanic is None:
         abort(404)
     execute("UPDATE mechanics SET active = ? WHERE id = ?", (0 if mechanic["active"] else 1, mechanic_id))
+    log_activity(
+        "mantenimiento", "DESACTIVAR" if mechanic["active"] else "REACTIVAR", f'Mecánico "{mechanic["name"]}"',
+        entity_type="mecanico", entity_id=mechanic_id,
+        entity_url=url_for("mantenimiento.mechanics_list"),
+    )
     flash("Actualizado." if mechanic["active"] else "Reactivado.", "success")
     return redirect(url_for("mantenimiento.mechanics_list"))
 
@@ -831,6 +958,10 @@ def set_vehicle_maintenance_status(vehicle_id):
         flash("Esa unidad ya está en mantenimiento.", "info")
         return redirect(next_url)
     execute("UPDATE vehicles SET status = 'MANTENIMIENTO' WHERE id = ?", (vehicle_id,))
+    log_activity(
+        "mantenimiento", "ESTADO", f'Unidad "{vehicle["plate"]}": {vehicle["status"]} → MANTENIMIENTO',
+        entity_type="vehiculo", entity_id=vehicle_id,
+    )
     flash(f'"{vehicle["plate"]}" marcada como en mantenimiento.', "success")
     return redirect(next_url)
 
@@ -859,6 +990,11 @@ def set_vehicle_available_for_scheduling(vehicle_id):
         return redirect(next_url)
     available = 1 if request.form.get("available") == "1" else 0
     execute("UPDATE vehicles SET available_for_scheduling = ? WHERE id = ?", (available, vehicle_id))
+    log_activity(
+        "mantenimiento", "EDITAR",
+        f'Unidad "{vehicle["plate"]}": disponible para programar = {"sí" if available else "no"}',
+        entity_type="vehiculo", entity_id=vehicle_id,
+    )
     flash(
         f'"{vehicle["plate"]}" marcada como {"disponible" if available else "NO disponible"} para programar viajes mientras está en mantenimiento.',
         "success",
@@ -879,7 +1015,7 @@ def update_vehicle_km(vehicle_id):
     emergencia."""
     if not validate_csrf():
         abort(400)
-    vehicle = query_one("SELECT id FROM vehicles WHERE id = ?", (vehicle_id,))
+    vehicle = query_one("SELECT id, plate FROM vehicles WHERE id = ?", (vehicle_id,))
     if vehicle is None:
         abort(404)
     new_km = parse_float(request.form.get("current_km"), None)
@@ -889,6 +1025,10 @@ def update_vehicle_km(vehicle_id):
         execute(
             "UPDATE vehicles SET current_km = ?, current_km_updated_at = ? WHERE id = ?",
             (new_km, today_str(), vehicle_id),
+        )
+        log_activity(
+            "mantenimiento", "EDITAR", f'Unidad "{vehicle["plate"]}": kilometraje corregido a {new_km:g} km',
+            entity_type="vehiculo", entity_id=vehicle_id,
         )
         flash("Kilometraje actualizado.", "success")
     next_url = request.form.get("next") or url_for("mantenimiento.by_vehicle")

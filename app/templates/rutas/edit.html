@@ -2,6 +2,15 @@
 {% block title %}Editar ruta{% endblock %}
 {% block content %}
 <div class="page-header"><h1>Editar ruta</h1></div>
+{# 22 sep, pedido de Braulio ("que usuario creo el viaje... etc"): visible
+   solo para quien tiene acceso al módulo de Actividad -- mismo criterio en
+   el resto de módulos instrumentados. Si la ruta es de antes de que
+   existiera este registro, no hay forma de saberlo retroactivamente. #}
+{% if can(current_user.roles, 'actividad', 'view') %}
+<p class="muted mt-0">
+  Creado por: {% if creator %}{{ creator.user_name }} — {{ creator.created_at[:16] }}{% else %}No disponible (registro anterior a este historial){% endif %}
+</p>
+{% endif %}
 <form class="form panel" method="post" style="max-width: 520px;">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 

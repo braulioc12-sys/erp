@@ -14,6 +14,7 @@ from flask import (
 )
 from openpyxl import load_workbook
 
+from app.audit import get_creator_info, log_activity
 from app.auth import permission_required, validate_csrf
 from app.db import execute, get_db, query_all, query_one
 from app.helpers import company_info_for_issuer, parse_date, parse_float, today_str
@@ -292,6 +293,15 @@ def new(trip_id):
                 None,
             ),
         )
+        # 22 sep, registro de actividad (ver app/audit.py): "genero guias" es
+        # exactamente el ejemplo que dio Braulio al pedir esto -- se registra
+        # como GENERAR (no CREAR) porque es un documento que se emite, no un
+        # registro cualquiera que se da de alta.
+        log_activity(
+            "guias", "GENERAR", f"Guía {series}-{series_number:06d} del viaje {trip['code']}",
+            entity_type="guia", entity_id=waybill_id,
+            entity_url=url_for("guias.detail", waybill_id=waybill_id),
+        )
         flash(f"Guía {series}-{series_number:06d} creada.", "success")
         return redirect(url_for("guias.detail", waybill_id=waybill_id))
 
@@ -319,10 +329,15 @@ def detail(waybill_id):
     )
     if waybill is None:
         abort(404)
+    # 22 sep, pedido de Braulio ("que usuario... genero guias"): quién y
+    # cuándo se generó, según activity_log (ver app/audit.py) -- None para
+    # guías de antes de que existiera este registro.
+    creator = get_creator_info("guia", waybill_id)
     return render_template(
         "guias/detail.html",
         waybill=waybill,
         needs_order_number=_client_needs_order_number(waybill["issuer"], waybill["client_name"]),
+        creator=creator,
     )
 
 
@@ -337,10 +352,16 @@ def save_order_number(waybill_id):
     hay que resolver el trip_id de esta guía."""
     if not validate_csrf():
         abort(400)
-    waybill = query_one("SELECT trip_id FROM waybills WHERE id = ?", (waybill_id,))
+    waybill = query_one("SELECT trip_id, series, series_number FROM waybills WHERE id = ?", (waybill_id,))
     if waybill is None:
         abort(404)
     _set_trip_order_number(waybill["trip_id"], request.form.get("client_order_number"))
+    log_activity(
+        "guias", "EDITAR",
+        f"Guía {waybill['series']}-{waybill['series_number']:06d}: número de pedido actualizado",
+        entity_type="guia", entity_id=waybill_id,
+        entity_url=url_for("guias.detail", waybill_id=waybill_id),
+    )
     flash("Número de pedido guardado.", "success")
     return redirect(url_for("guias.detail", waybill_id=waybill_id))
 
@@ -495,10 +516,19 @@ def link_orders():
 def save_trip_order_number(trip_id):
     if not validate_csrf():
         abort(400)
-    trip = query_one("SELECT id FROM trips WHERE id = ?", (trip_id,))
+    trip = query_one("SELECT id, code FROM trips WHERE id = ?", (trip_id,))
     if trip is None:
         abort(404)
     _set_trip_order_number(trip_id, request.form.get("client_order_number"))
+    # 22 sep, registro de actividad: acá el registro afectado es el propio
+    # viaje (trips.client_order_number), no una guía -- entity_type="viaje"
+    # aunque la acción se haga desde el módulo Guías (pantalla "Enlazar
+    # pedidos").
+    log_activity(
+        "guias", "EDITAR", f"Viaje {trip['code']}: número de pedido actualizado (enlazar pedidos)",
+        entity_type="viaje", entity_id=trip_id,
+        entity_url=url_for("viajes.detail", trip_id=trip_id),
+    )
     flash("Número de pedido guardado.", "success")
     q = request.form.get("q", "").strip()
     return redirect(url_for("guias.link_orders", q=q) if q else url_for("guias.link_orders"))
@@ -537,6 +567,17 @@ def link_orders_upload():
 
     for trip_id, pedido in updates.items():
         execute("UPDATE trips SET client_order_number = ? WHERE id = ?", (pedido, trip_id))
+
+    # 22 sep, registro de actividad: una sola entrada para todo el lote (no
+    # una por viaje) -- son varios registros a la vez, igual que cualquier
+    # otra carga masiva del sistema; sin entity_type/entity_id porque no hay
+    # un único registro al que apunte.
+    if updates:
+        log_activity(
+            "guias", "EDITAR",
+            f"Enlace masivo de pedidos (Excel Naviera Oriente): {len(updates)} viaje(s) actualizado(s)",
+            entity_url=url_for("guias.link_orders"),
+        )
 
     result = {"linked": len(updates), "not_found": not_found}
     return render_template("guias/link_orders_result.html", result=result)
@@ -841,7 +882,17 @@ def sunat_history_upload():
         inserted += 1
     db.commit()
 
+    # 22 sep, registro de actividad: se sube un archivo (Excel de
+    # tefacturo.pe), por eso SUBIR y no GENERAR -- estas guías ya existían de
+    # verdad en SUNAT antes de Harris, solo se están cargando al histórico
+    # (ver el comentario largo más arriba sobre sunat_waybills_history).
     if inserted:
+        log_activity(
+            "guias", "SUBIR",
+            f"Histórico SUNAT ({detected_issuer}): {inserted} guía(s) cargada(s) desde Excel de tefacturo.pe"
+            + (f", {skipped} ya existían" if skipped else ""),
+            entity_url=url_for("guias.sunat_history_list", issuer=detected_issuer),
+        )
         flash(
             f"Se cargaron {inserted} guía(s) nueva(s) al histórico SUNAT."
             + (f" {skipped} ya estaban cargadas (se omitieron)." if skipped else ""),
@@ -936,6 +987,17 @@ def send_sunat(waybill_id):
                 waybill_id,
             ),
         )
+        # 22 sep, registro de actividad: ENVIAR es una acción distinta de
+        # GENERAR (crear la guía) -- se puede reenviar la misma guía varias
+        # veces (ver "ya_existia" arriba), y cada intento queda registrado
+        # con el resultado real (aceptado/rechazado).
+        log_activity(
+            "guias", "ENVIAR",
+            f"Guía {waybill['series']}-{waybill['series_number']:06d}: envío a SUNAT → "
+            + ("ACEPTADO" if result["accepted"] else "RECHAZADO"),
+            entity_type="guia", entity_id=waybill_id,
+            entity_url=url_for("guias.detail", waybill_id=waybill_id),
+        )
         if result["accepted"]:
             if ya_existia:
                 flash("Esta guía ya estaba aceptada por SUNAT.", "success")
@@ -947,6 +1009,12 @@ def send_sunat(waybill_id):
         execute(
             "UPDATE waybills SET sunat_status='ERROR', sunat_message=?, sunat_sent_at=datetime('now') WHERE id=?",
             (str(exc), waybill_id),
+        )
+        log_activity(
+            "guias", "ENVIAR",
+            f"Guía {waybill['series']}-{waybill['series_number']:06d}: envío a SUNAT → ERROR ({exc})",
+            entity_type="guia", entity_id=waybill_id,
+            entity_url=url_for("guias.detail", waybill_id=waybill_id),
         )
         flash(f"No se pudo enviar la guía: {exc}", "error")
 

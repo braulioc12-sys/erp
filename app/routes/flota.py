@@ -14,6 +14,11 @@ from flask import (
 )
 
 from app import storage
+# 22 sep, registro de actividad (ver app/audit.py): log_activity() para
+# saber quién creó/editó/eliminó cada unidad o le subió documentos,
+# get_creator_info() para el "Creado por" de flota/detail.html (mismo
+# patrón que app/routes/viajes.py).
+from app.audit import get_creator_info, log_activity
 from app.auth import permission_required, validate_csrf
 from app.bulk_import import (
     OIL_CHANGE_COLUMNS,
@@ -189,7 +194,14 @@ def vehicle_detail(vehicle_id):
     vehicle = query_one("SELECT * FROM vehicles WHERE id = ?", (vehicle_id,))
     if vehicle is None:
         abort(404)
-    return render_template("flota/detail.html", vehicle=vehicle, document_types=VEHICLE_DOCUMENT_TYPES)
+    # 22 sep, pedido de Braulio ("que usuario creo... la unidad"): quién y
+    # cuándo se registró, según activity_log (ver app/audit.py) -- None para
+    # unidades de antes de que existiera este registro (incluye las
+    # cargadas por la importación masiva original de flota).
+    creator = get_creator_info("vehiculo", vehicle_id)
+    return render_template(
+        "flota/detail.html", vehicle=vehicle, document_types=VEHICLE_DOCUMENT_TYPES, creator=creator
+    )
 
 
 @bp.route("/<int:vehicle_id>/documentos", methods=["POST"])
@@ -209,6 +221,7 @@ def save_vehicle_documents(vehicle_id):
         abort(404)
     updates = []
     params = []
+    uploaded_labels = []
     any_file_sent = False
     for key, column, form_field, label, applies_to, optional in VEHICLE_DOCUMENT_TYPES:
         if vehicle["vehicle_type"] not in applies_to:
@@ -220,9 +233,20 @@ def save_vehicle_documents(vehicle_id):
         if new_filename:
             updates.append(f"{column} = ?")
             params.append(new_filename)
+            uploaded_labels.append(label)
     if updates:
         params.append(vehicle_id)
         execute(f"UPDATE vehicles SET {', '.join(updates)} WHERE id = ?", tuple(params))
+        # 22 sep, registro de actividad (ver app/audit.py): un solo registro
+        # por envío del formulario (no uno por archivo) con la lista de
+        # documentos que sí trajeron un archivo nuevo -- este formulario
+        # puede subir varios documentos a la vez (SOAT, tarjeta de
+        # propiedad, etc.), y Braulio pidió saber "quién subió algún doc".
+        log_activity(
+            "flota", "SUBIR", f"Vehículo {vehicle['plate']}: documento(s) {', '.join(uploaded_labels)}",
+            entity_type="vehiculo", entity_id=vehicle_id,
+            entity_url=url_for("flota.vehicle_detail", vehicle_id=vehicle_id),
+        )
         flash("Documentos actualizados.", "success")
     elif any_file_sent:
         flash("No se pudo guardar el archivo: use PDF, JPG, PNG, WEBP o HEIC.", "error")
@@ -263,15 +287,17 @@ def new_vehicle():
         if existing:
             flash("Ya existe una unidad con esa placa.", "error")
             return render_template("flota/vehicle_form.html", vehicle=request.form, mode="new", owners=_vehicle_owners())
-        execute(
+        brand = request.form.get("brand", "").strip()
+        model = request.form.get("model", "").strip()
+        vehicle_id = execute(
             """INSERT INTO vehicles (plate, brand, model, capacity_kg, status, vehicle_type, notes,
                soat_expiry, technical_review_expiry, current_km, current_km_updated_at, gps_external_id, owner,
                last_oil_change_km, last_oil_change_date, last_oil_change_workshop, last_oil_change_oil)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 plate,
-                request.form.get("brand", "").strip(),
-                request.form.get("model", "").strip(),
+                brand,
+                model,
                 request.form.get("capacity_kg") or None,
                 request.form.get("status", "ACTIVO"),
                 request.form.get("vehicle_type", "CAMION"),
@@ -287,6 +313,12 @@ def new_vehicle():
                 request.form.get("last_oil_change_workshop", "").strip() or None,
                 request.form.get("last_oil_change_oil", "").strip() or None,
             ),
+        )
+        # 22 sep, registro de actividad (ver app/audit.py).
+        log_activity(
+            "flota", "CREAR", f"Vehículo {plate} ({brand} {model})".strip(),
+            entity_type="vehiculo", entity_id=vehicle_id,
+            entity_url=url_for("flota.vehicle_detail", vehicle_id=vehicle_id),
         )
         flash("Unidad registrada.", "success")
         return redirect(url_for("flota.list_view"))
@@ -315,6 +347,9 @@ def edit_vehicle(vehicle_id):
         # Administrador/Mecánico, ver mantenimiento.py) -- este formulario
         # no lo expone para editar.
         available_for_scheduling = vehicle["available_for_scheduling"] if new_status == "MANTENIMIENTO" else 0
+        plate = request.form.get("plate", "").strip().upper()
+        brand = request.form.get("brand", "").strip()
+        model = request.form.get("model", "").strip()
         execute(
             """UPDATE vehicles SET plate=?, brand=?, model=?, capacity_kg=?, status=?, vehicle_type=?, notes=?,
                soat_expiry=?, technical_review_expiry=?,
@@ -323,9 +358,9 @@ def edit_vehicle(vehicle_id):
                available_for_scheduling=?
                WHERE id=?""",
             (
-                request.form.get("plate", "").strip().upper(),
-                request.form.get("brand", "").strip(),
-                request.form.get("model", "").strip(),
+                plate,
+                brand,
+                model,
                 request.form.get("capacity_kg") or None,
                 new_status,
                 request.form.get("vehicle_type", "CAMION"),
@@ -344,6 +379,23 @@ def edit_vehicle(vehicle_id):
                 vehicle_id,
             ),
         )
+        # 22 sep, registro de actividad (ver app/audit.py): este formulario
+        # es el único lugar donde se cambia el estado de una unidad (no hay
+        # una acción de "cambiar estado" aparte, a diferencia de Viajes) --
+        # si el estado cambió, se registra como "ESTADO" (con el label del
+        # cambio); si no, como "EDITAR" genérico.
+        if new_status != vehicle["status"]:
+            log_activity(
+                "flota", "ESTADO", f"Vehículo {plate}: {vehicle['status']} → {new_status}",
+                entity_type="vehiculo", entity_id=vehicle_id,
+                entity_url=url_for("flota.vehicle_detail", vehicle_id=vehicle_id),
+            )
+        else:
+            log_activity(
+                "flota", "EDITAR", f"Vehículo {plate} ({brand} {model})".strip(),
+                entity_type="vehiculo", entity_id=vehicle_id,
+                entity_url=url_for("flota.vehicle_detail", vehicle_id=vehicle_id),
+            )
         flash("Unidad actualizada.", "success")
         return redirect(url_for("flota.list_view"))
     return render_template(
@@ -389,8 +441,21 @@ def _vehicle_has_history(vehicle_id):
 def delete_vehicle(vehicle_id):
     if not validate_csrf():
         abort(400)
+    vehicle = query_one("SELECT plate, brand, model FROM vehicles WHERE id = ?", (vehicle_id,))
+    if vehicle is None:
+        abort(404)
     if _vehicle_has_history(vehicle_id):
         execute("UPDATE vehicles SET status = 'INACTIVO', available_for_scheduling = 0 WHERE id = ?", (vehicle_id,))
+        # 22 sep, registro de actividad (ver app/audit.py): acá "Eliminar" no
+        # borra la fila (se conserva por el historial asociado, ver el
+        # comentario de VEHICLE_HISTORY_TABLES) -- se registra igual como
+        # ELIMINAR porque es la acción que el usuario ejecutó, aclarando en
+        # el label que en realidad quedó inactiva.
+        log_activity(
+            "flota", "ELIMINAR", f"Vehículo {vehicle['plate']} ({vehicle['brand']} {vehicle['model']}) — marcado inactivo (tiene historial asociado)".strip(),
+            entity_type="vehiculo", entity_id=vehicle_id,
+            entity_url=url_for("flota.vehicle_detail", vehicle_id=vehicle_id),
+        )
         flash(
             "La unidad tiene historial asociado (viajes, gastos, mantenimiento, neumáticos o "
             "inspecciones); se marcó como inactiva para no perder ese historial.",
@@ -407,6 +472,13 @@ def delete_vehicle(vehicle_id):
         db.execute("DELETE FROM vehicle_trips WHERE vehicle_id = ?", (vehicle_id,))
         db.execute("DELETE FROM vehicles WHERE id = ?", (vehicle_id,))
         db.commit()
+        # 22 sep, registro de actividad (ver app/audit.py): acá sí se borró
+        # la fila de verdad -- sin entity_url (la propia unidad ya no
+        # existe, un enlace a su detalle daría 404).
+        log_activity(
+            "flota", "ELIMINAR", f"Vehículo {vehicle['plate']} ({vehicle['brand']} {vehicle['model']})".strip(),
+            entity_type="vehiculo", entity_id=vehicle_id,
+        )
         flash("Unidad eliminada.", "success")
     return redirect(url_for("flota.list_view"))
 
@@ -495,6 +567,16 @@ def import_vehicles():
             flash(file_error, "error")
             return redirect(url_for("flota.import_vehicles"))
         result = _apply_vehicle_import(rows, example_skips)
+        # 22 sep, registro de actividad (ver app/audit.py): UN solo registro
+        # por archivo importado (no uno por fila/unidad) con el resumen del
+        # resultado -- evita inundar el historial cuando el archivo trae
+        # decenas o cientos de filas.
+        log_activity(
+            "flota", "SUBIR",
+            f"Importación masiva de unidades: {result['created']} creadas, {result['updated']} actualizadas, "
+            f"{len(result['skipped'])} omitidas, {len(result['errors'])} con error",
+            entity_type="vehiculo",
+        )
         return render_template(
             "import_result.html", result=result,
             back_url=url_for("flota.list_view"), retry_url=url_for("flota.import_vehicles"),
@@ -582,6 +664,15 @@ def import_oil_changes():
             flash(file_error, "error")
             return redirect(url_for("flota.import_oil_changes"))
         result = _apply_oil_change_import(rows, example_skips)
+        # 22 sep, registro de actividad (ver app/audit.py): mismo criterio
+        # que import_vehicles() -- un solo registro por archivo, no uno por
+        # unidad actualizada.
+        log_activity(
+            "flota", "SUBIR",
+            f"Importación masiva de cambios de aceite: {result['updated']} unidades actualizadas, "
+            f"{len(result['skipped'])} omitidas, {len(result['errors'])} con error",
+            entity_type="vehiculo",
+        )
         return render_template(
             "import_result.html", result=result,
             back_url=url_for("flota.list_view"), retry_url=url_for("flota.import_oil_changes"),
