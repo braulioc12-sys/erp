@@ -209,8 +209,8 @@
         </label>
       </div>
       <div class="form-row">
-        <label>Monto detraído (S/) — vacío para calcularlo con el % de arriba
-          <input type="number" name="detraction_amount" step="0.01" min="0">
+        <label>Monto detraído (S/) — se calcula solo con el % elegido; edítalo si tu contador te da otro monto
+          <input type="number" name="detraction_amount" id="detraction-amount" step="0.01" min="0">
         </label>
         <label>Cuenta Banco de la Nación
           <input type="text" name="detraction_bank_account" value="{{ default_detraction_account or '' }}">
@@ -253,15 +253,21 @@
 (function () {
   var tbody = document.getElementById('items-tbody');
 
-  function updateItemsTotal() {
+  function computeItemsTotal() {
     var total = 0;
     tbody.querySelectorAll('.item-row').forEach(function (tr) {
       var qty = parseFloat(tr.querySelector('[name="item_quantity"]').value) || 0;
       var amt = parseFloat(tr.querySelector('[name="item_amount"]').value) || 0;
       total += qty * amt;
     });
+    return total;
+  }
+
+  function updateItemsTotal() {
+    var total = computeItemsTotal();
     document.getElementById('items-total-value').textContent = 'S/ ' + total.toFixed(2);
     updateDetraccionState();
+    recalcDetraccionAmount();
   }
 
   function rowTemplate() {
@@ -326,6 +332,34 @@
   var detraccionGoodPicker = document.getElementById('detraction-good-picker');
   var detraccionCodeInput = document.getElementById('detraction-code');
   var detraccionPercentageInput = document.getElementById('detraction-percentage');
+  var detraccionAmountInput = document.getElementById('detraction-amount');
+
+  // 22 sep, pedido de Braulio ("cuando se coloque debe calcular el sistema
+  // solo el monto de acuerdo al % aplicado"): antes había que dejar el
+  // campo "Monto detraído" vacío para que el servidor lo calculara recién
+  // al guardar -- ahora se calcula solo, al vuelo, apenas se elige un bien
+  // de la lista (o cambia el total de ítems adicionales), usando el %
+  // correspondiente. Sigue siendo editable a mano (por si el contador da
+  // un monto distinto) -- una vez que la persona lo toca directamente, ya
+  // no se le pisa el valor con el cálculo automático.
+  var detraccionAmountEditedManually = false;
+  var settingDetraccionAmountProgrammatically = false;
+  if (detraccionAmountInput) {
+    detraccionAmountInput.addEventListener('input', function () {
+      if (!settingDetraccionAmountProgrammatically) { detraccionAmountEditedManually = true; }
+    });
+  }
+
+  function recalcDetraccionAmount() {
+    if (!detraccionAmountInput || !detraccionPercentageInput) { return; }
+    if (detraccionAmountEditedManually) { return; }
+    var pct = parseFloat(detraccionPercentageInput.value);
+    if (!pct) { return; }
+    var total = computeItemsTotal();
+    settingDetraccionAmountProgrammatically = true;
+    detraccionAmountInput.value = (total * pct / 100).toFixed(2);
+    settingDetraccionAmountProgrammatically = false;
+  }
 
   if (detraccionApplies) {
     detraccionApplies.addEventListener('change', updateDetraccionFieldsVisibility);
@@ -335,6 +369,7 @@
       var opt = detraccionGoodPicker.options[detraccionGoodPicker.selectedIndex];
       detraccionCodeInput.value = opt.value || '';
       detraccionPercentageInput.value = opt.value ? opt.getAttribute('data-pct') : '';
+      recalcDetraccionAmount();
     });
   }
 

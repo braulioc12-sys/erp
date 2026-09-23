@@ -59,7 +59,7 @@
   {% else %}
   <p class="mt-0 muted">Esta factura no tiene detracción aplicada.</p>
   {% endif %}
-  <p class="mt-0"><strong>⚠ Pendiente:</strong> por ahora "Enviar a SUNAT" NO incluye este dato en el comprobante electrónico — la documentación pública de tefacturo.pe no especifica cómo mandarlo. Hasta confirmarlo con su soporte, si de verdad corresponde detracción regístrala también desde el portal de tefacturo.pe para esta factura (tienen una opción "Activar detracción" al emitir).</p>
+  <p class="mt-0"><strong>⚠ Pendiente:</strong> por ahora "Enviar a SUNAT" NO incluye este dato en el comprobante electrónico real (por eso el PDF que emite tefacturo.pe no trae la tabla "Concepto de Detracción", aunque acá arriba sí esté todo bien calculado y guardado). Se volvió a revisar la documentación pública de tefacturo.pe (22 sep) — endpoint de factura, catálogos, ejemplos JSON — y sigue sin aparecer un campo para esto, igual que en la revisión anterior. Su portal web SÍ tiene un toggle "Activar detracción" al emitir a mano, así que su sistema internamente sí lo soporta — el nombre del campo para la API simplemente no está documentado públicamente. Mientras Braulio no consiga ese dato con soporte de tefacturo.pe (mismo canal que ya usaron antes para otras dudas de esta integración), regístrala también desde su portal para esta factura, o avísales el número de comprobante para que la agreguen ellos.</p>
 
   <!-- 22 sep, pedido de Braulio ("recuerda que solo Harraso emite con
        detraccion, BRMS no"): esta sección editable ya no se ofrece para
@@ -108,8 +108,8 @@
         </label>
       </div>
       <div class="form-row">
-        <label>Monto detraído (S/) — déjalo vacío para calcularlo con el % de arriba
-          <input type="number" name="amount" step="0.01" min="0" value="{{ invoice.detraction_amount or '' }}">
+        <label>Monto detraído (S/) — se calcula solo con el % elegido; edítalo si tu contador te da otro monto
+          <input type="number" name="amount" id="detraction-amount-edit" step="0.01" min="0" value="{{ invoice.detraction_amount or '' }}">
         </label>
         <label>Cuenta Banco de la Nación
           <input type="text" name="bank_account" value="{{ invoice.detraction_bank_account or default_detraction_account or '' }}">
@@ -128,11 +128,22 @@
         var picker = document.getElementById('detraction-good-picker-edit');
         var codeInput = document.getElementById('detraction-code-edit');
         var pctInput = document.getElementById('detraction-percentage-edit');
+        var amountInput = document.getElementById('detraction-amount-edit');
+        var invoiceTotal = {{ invoice.amount }};
         if (!picker) { return; }
+        // 22 sep, pedido de Braulio ("cuando se coloque debe calcular el
+        // sistema solo el monto de acuerdo al % aplicado"): al elegir (o
+        // cambiar) el bien de la lista, el monto se recalcula solo con el
+        // total ya facturado -- se puede seguir editando a mano después si
+        // el contador da un monto distinto.
         picker.addEventListener('change', function () {
           var opt = picker.options[picker.selectedIndex];
           codeInput.value = opt.value || '';
+          var pct = opt.value ? parseFloat(opt.getAttribute('data-pct')) : 0;
           pctInput.value = opt.value ? opt.getAttribute('data-pct') : '';
+          if (amountInput && pct) {
+            amountInput.value = (invoiceTotal * pct / 100).toFixed(2);
+          }
         });
       })();
     </script>

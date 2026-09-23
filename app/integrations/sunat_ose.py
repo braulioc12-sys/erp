@@ -447,7 +447,30 @@ def build_invoice_payload(invoice, items, client, company):
     ninguna pista de dónde iría. Se le pidió a Braulio consultarlo
     directamente con el soporte de tefacturo.pe (ellos sí lo soportan desde
     su portal web, con un toggle "Activar detracción" al emitir a mano) —
-    en cuanto tengamos el nombre real del campo, agregarlo acá."""
+    en cuanto tengamos el nombre real del campo, agregarlo acá.
+
+    ACTUALIZACIÓN (22 sep) — Braulio mandó una factura real (FFA1-1176,
+    Harraso, RUC 20610357726) emitida hace tiempo desde el portal de
+    tefacturo.pe que SÍ trae la tabla "Concepto de Detracción" en el PDF
+    (Código del Bien 027, Monto S/393.29, Porcentaje 4.00%, Cuenta Bco. de
+    la Nación 00003351882) — confirma que tefacturo.pe sí soporta esto
+    (al menos desde su portal web) y que el formato esperado en el PDF es
+    ese. Se volvió a revisar la documentación pública en esta fecha
+    (endpoint de factura, catálogos, página de "Ejemplos JSON", el listado
+    de endpoints del MCP server que ofrecen) sin encontrar ningún campo de
+    detracción documentado -- mismo resultado que la revisión anterior. A
+    propósito NO se agrega acá un campo adivinado sin evidencia (a
+    diferencia de `subcontratado`/`pagador` en build_waybill_payload, donde
+    sí había una pista real cerca -- `datosEnvio.transporteSubcontratado`
+    -- que sugería el patrón a seguir): acá no hay ninguna pista, y
+    equivocarse en un campo de detracción (que si el cliente lo lee del
+    ERP y no del PDF real podría depositar mal o no depositar) es peor que
+    dejarlo pendiente con el aviso bien visible que ya tiene detail.html.
+    Braulio: la próxima vez que hables con soporte de tefacturo.pe,
+    pregúntales puntualmente qué campo del JSON de /factura-api/.../factura
+    hay que mandar para reportar detracción (código de bien, %, monto,
+    cuenta del Banco de la Nación) -- en cuanto tengas la respuesta, el
+    cambio acá es rápido."""
     if not client["ruc"]:
         raise SunatOseError(
             f"El cliente '{client['name']}' no tiene RUC registrado; una factura "
