@@ -798,6 +798,71 @@ def _fix_boleta_account_codes_sqlite(conn):
         )
 
 
+# 23 sep, 2da ronda: soporte de tefacturo.pe (Jorge) confirmó por WhatsApp su
+# "Catálogo Tipo de Detracción" completo -- la tabla oficial que mapea cada
+# código SUNAT a la palabra clave que espera su campo `codigoBienServicio`
+# (ver la nota larga en schema.sql y get_detraction_tefacturo_code() en
+# app/helpers.py). Con esto ya no hace falta que Braulio cargue a mano el
+# código de tefacturo.pe de cada concepto que YA estaba en su catálogo desde
+# antes -- se autocompleta acá, una sola vez por concepto (mismo patrón que
+# _fix_boleta_account_codes_* arriba: corre en cada arranque pero solo toca
+# filas que TODAVÍA no tengan nada cargado en esa columna, así que nunca pisa
+# un valor que Braulio haya puesto o corregido a mano desde Catálogos).
+#
+# Los códigos que quedan en `_DETRACTION_GOODS_SEED` pero NO aparecen acá
+# (hoy, solo "006 Algodón") es porque tampoco aparecen en el catálogo de
+# tefacturo.pe -- coincide con la nota de arriba de que ese código ya no
+# está vigente en SUNAT.
+#
+# OJO -- este mismo catálogo de tefacturo.pe trae, para 5 de estos códigos,
+# un porcentaje DISTINTO al que quedó cargado acá (008 Madera 12%→4%, 013
+# Animales vivos 10%→4%, 014 Carnes y despojos comestibles 10%→4%, 015
+# Abonos/cueros/pieles 10%→4%, 017 Harina/pellets de pescado 10%→4%) --
+# coincide con lo que ya advertían las fuentes públicas (ver la nota junto a
+# _DETRACTION_GOODS_SEED en app/helpers.py). A propósito NO se corrige el
+# porcentaje acá (un depósito de detracción con el % equivocado no se puede
+# arreglar después con SUNAT) -- si Braulio confirma con su contador que el
+# de tefacturo.pe es el correcto, se corrige a mano desde Catálogos →
+# Conceptos de detracción. El único código que de verdad usa Harraso hoy
+# (027, transporte de bienes) ya tenía el porcentaje correcto (4%) desde
+# antes, coincide con tefacturo.pe -- no hay ningún cambio ahí.
+_TEFACTURO_CODIGO_BIEN_SERVICIO = {
+    "001": "AZUCAR",
+    "003": "ALCOHOL_ETILICO",
+    "004": "RECURSOS_HIDROBIOLOGICO",
+    "005": "MAIZ_AMARILLO_DURO",
+    "007": "CANA_DE_AZUCAR",
+    "008": "MADERA",
+    "009": "ARENA_Y_PIEDRA",
+    "010": "RESIDUOS",
+    "013": "ANIMALES_VIVOS",
+    "014": "CARNES_Y_DESPOJOS_COMESTIBLES",
+    "015": "ABONOS_CUEROS_Y_PIELES",
+    "016": "ACEITE_DE_PESCADO",
+    "017": "HARIRA_POLVO_MOLUSCOS",
+    "027": "TRANSPORTE_DE_BIENES",
+}
+
+
+def _backfill_tefacturo_codigo_bien_servicio_sqlite(conn):
+    for code, tefacturo_code in _TEFACTURO_CODIGO_BIEN_SERVICIO.items():
+        conn.execute(
+            """UPDATE detraction_concepts SET tefacturo_codigo_bien_servicio = ?
+               WHERE code = ? AND (tefacturo_codigo_bien_servicio IS NULL OR tefacturo_codigo_bien_servicio = '')""",
+            (tefacturo_code, code),
+        )
+
+
+def _backfill_tefacturo_codigo_bien_servicio_postgres(conn):
+    cur = conn.cursor()
+    for code, tefacturo_code in _TEFACTURO_CODIGO_BIEN_SERVICIO.items():
+        cur.execute(
+            """UPDATE detraction_concepts SET tefacturo_codigo_bien_servicio = %s
+               WHERE code = %s AND (tefacturo_codigo_bien_servicio IS NULL OR tefacturo_codigo_bien_servicio = '')""",
+            (tefacturo_code, code),
+        )
+
+
 def _fix_boleta_account_codes_postgres(conn):
     cur = conn.cursor()
     for name, (account_code, doc_code, label) in _BOLETA_ACCOUNT_FIXES.items():
@@ -1211,6 +1276,7 @@ def init_db(app):
             _seed_default_tire_codes_postgres(conn)
             _seed_tarifario_postgres(conn)
             _seed_detraction_concepts_postgres(conn)
+            _backfill_tefacturo_codigo_bien_servicio_postgres(conn)
             conn.commit()
         finally:
             conn.close()
@@ -1228,6 +1294,7 @@ def init_db(app):
         _seed_default_tire_codes_sqlite(conn)
         _seed_tarifario_sqlite(conn)
         _seed_detraction_concepts_sqlite(conn)
+        _backfill_tefacturo_codigo_bien_servicio_sqlite(conn)
         conn.commit()
         conn.close()
 
