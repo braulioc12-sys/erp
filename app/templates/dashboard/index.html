@@ -53,7 +53,7 @@
     ('Mantenimiento por kilometraje', km_alerts),
     ('Presupuestos de gastos', budget_alerts),
     ('Neumáticos', tire_alerts),
-    ('Descansos laborales', descansos_alerts),
+    ('Jornada laboral', descansos_alerts),
   ] %}
   <div class="alert-groups">
     {% for group_label, group_alerts in alert_groups %}
@@ -98,7 +98,7 @@
               <span>{{ '{:,.0f}'.format(a.accumulated_km) }} / {{ '{:,.0f}'.format(a.expected_life_km) }} km ({{ a.percent }}%)</span>
             </div>
             {% endfor %}
-          {% elif group_label == 'Descansos laborales' %}
+          {% elif group_label == 'Jornada laboral' %}
             {% for a in group_alerts %}
             <div class="alert-item">
               <span><strong>{{ a.name }}</strong> {{ 'ya superó el máximo de 12 días trabajados seguidos' if a.overdue else 'ya debería descansar' }}</span>

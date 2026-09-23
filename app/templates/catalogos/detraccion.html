@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+{% block title %}Conceptos de detracción{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Conceptos de detracción</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('catalogos.list_view') }}" class="btn btn-secondary">← Volver a Catálogos</a>
+  </div>
+</div>
+<p class="muted mt-0">Bienes/servicios del catálogo SUNAT que se pueden elegir al confirmar la detracción de una factura de Harraso (Facturación → Generar factura / detalle de una factura). El código "027" (transporte de carga) es además el que usa el sistema para calcular la detracción automática en una factura 100% de viajes — si le cambias el porcentaje acá, ese cálculo automático usa el nuevo valor desde la próxima factura.</p>
+
+{% if can(current_user.roles, 'catalogos', 'edit') %}
+<div class="panel" style="max-width:640px;">
+  <h2 class="mt-0">Agregar concepto</h2>
+  <form method="post" action="{{ url_for('catalogos.detraccion_add') }}" class="filters" style="flex-wrap:wrap;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Código SUNAT
+      <input type="text" name="code" placeholder="Ej. 020" required style="max-width:100px;">
+    </label>
+    <label style="flex:1; min-width:220px;">Nombre del bien/servicio
+      <input type="text" name="name" placeholder="Ej. Bienes gravados con el IGV por renuncia a la exoneración" required>
+    </label>
+    <label>Porcentaje (%)
+      <input type="number" name="percentage" step="0.01" min="0" max="100" placeholder="10" required style="max-width:100px;">
+    </label>
+    <button type="submit" class="btn btn-primary">+ Agregar</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="panel" style="max-width:760px;">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th style="width:110px;">Código</th><th>Nombre</th><th style="width:110px;">Porcentaje</th><th>Estado</th><th style="width:220px;"></th></tr></thead>
+      <tbody>
+        {% for c in concepts %}
+        {% if can(current_user.roles, 'catalogos', 'edit') %}
+        <!-- 22 sep, pedido de Braulio ("se puedan agregar o modificar los
+             conceptos o porcentajes"): a diferencia de Grifos/Bancos (solo
+             activar/desactivar), acá cada fila es directamente un
+             formulario editable -- código, nombre y porcentaje se pueden
+             corregir sin tener que desactivar y volver a crear el
+             concepto. Un solo <form> por fila con DOS botones: "Guardar"
+             (acción normal, guarda los cambios) y "Desactivar"/"Reactivar"
+             (mismo formulario pero con `formaction` apuntando al toggle --
+             ese endpoint ignora code/name/percentage, así que no hay
+             riesgo de pisar un cambio a medio escribir solo por togglear
+             el estado). -->
+        <tr>
+          <form method="post" action="{{ url_for('catalogos.detraccion_edit', concept_id=c.id) }}" style="display:contents;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <td><input type="text" name="code" value="{{ c.code }}" style="width:90px;"></td>
+            <td><input type="text" name="name" value="{{ c.name }}" style="width:100%; min-width:220px;"></td>
+            <td><input type="number" name="percentage" value="{{ c.percentage }}" step="0.01" min="0" max="100" style="width:80px;"></td>
+            <td><span class="badge {{ 'badge-activo' if c.active else 'badge-inactivo' }}">{{ 'Activo' if c.active else 'Inactivo' }}</span></td>
+            <td>
+              <div class="btn-group">
+                <button class="btn btn-primary btn-sm" type="submit">Guardar</button>
+                <button class="btn btn-secondary btn-sm" type="submit" formaction="{{ url_for('catalogos.detraccion_toggle', concept_id=c.id) }}" formnovalidate>{{ 'Desactivar' if c.active else 'Reactivar' }}</button>
+              </div>
+            </td>
+          </form>
+        </tr>
+        {% else %}
+        <tr>
+          <td>{{ c.code }}</td>
+          <td>{{ c.name }}</td>
+          <td>{{ '%g'|format(c.percentage) }}%</td>
+          <td><span class="badge {{ 'badge-activo' if c.active else 'badge-inactivo' }}">{{ 'Activo' if c.active else 'Inactivo' }}</span></td>
+          <td></td>
+        </tr>
+        {% endif %}
+        {% else %}
+        <tr><td colspan="5" class="table-empty">No hay conceptos de detracción registrados.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted" style="margin-top:12px; margin-bottom:0;">Desactivar un concepto lo quita del selector al confirmar una detracción nueva, pero no afecta las facturas que ya lo usan. El código "027" solo se puede desactivar, no eliminar — si lo desactivas, la detracción automática de facturas 100% viajes usa el porcentaje que tenía antes de desactivarlo (no se rompe, pero deja de reflejar cambios futuros que quieras hacerle).</p>
+</div>
+{% endblock %}

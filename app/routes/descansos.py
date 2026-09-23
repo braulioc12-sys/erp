@@ -106,10 +106,21 @@ def driver_rest_status(driver, as_of=None):
     return {"last_rest": last_rest, "status": status, "streak_days": streak_days, "resting_until": None}
 
 
-def all_driver_statuses():
+def all_driver_statuses(q=None):
     """Estado de descanso de todos los conductores activos, ordenado
-    mostrando primero los más urgentes -- para la lista del módulo."""
-    drivers = query_all("SELECT * FROM drivers WHERE status = 'ACTIVO' ORDER BY name")
+    mostrando primero los más urgentes -- para la lista del módulo.
+
+    22 sep, pedido de Braulio ("este debe tener un boton de busqueda de
+    conductor arriba"): `q` filtra por nombre -- LOWER() en ambos lados
+    (mismo patrón que clientes.list_view) para que funcione igual en
+    SQLite (local) y Postgres (producción)."""
+    if q:
+        drivers = query_all(
+            "SELECT * FROM drivers WHERE status = 'ACTIVO' AND LOWER(name) LIKE LOWER(?) ORDER BY name",
+            (f"%{q}%",),
+        )
+    else:
+        drivers = query_all("SELECT * FROM drivers WHERE status = 'ACTIVO' ORDER BY name")
     result = [{"driver": d, **driver_rest_status(d)} for d in drivers]
     result.sort(key=lambda r: (STATUS_ORDER.get(r["status"], 9), -(r["streak_days"] or 0)))
     return result
@@ -147,6 +158,7 @@ def _form_context(mode, driver=None, drivers=None, selected_driver_id=None, hint
 @bp.route("")
 @permission_required("descansos", "view")
 def list_view():
+    q = request.args.get("q", "").strip()
     driver_id = request.args.get("driver_id", type=int)
     if driver_id:
         rests = query_all(
@@ -164,11 +176,12 @@ def list_view():
     drivers = query_all("SELECT * FROM drivers WHERE status = 'ACTIVO' ORDER BY name")
     return render_template(
         "descansos/list.html",
-        statuses=all_driver_statuses(),
+        statuses=all_driver_statuses(q),
         rests=rests,
         drivers=drivers,
         selected_driver=driver_id,
         limits={"soon": WORK_LIMIT_SOON, "max": WORK_LIMIT_MAX},
+        q=q,
     )
 
 

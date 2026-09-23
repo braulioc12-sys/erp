@@ -4,7 +4,7 @@ from datetime import datetime
 
 from PIL import Image, ImageOps
 
-from app.db import query_one
+from app.db import query_all, query_one
 
 
 def next_code(prefix, table, code_column="code"):
@@ -217,6 +217,16 @@ DETRACTION_THRESHOLD = 400.0
 # escribir el código a mano, se elige de esta lista y el código/porcentaje
 # se completan solos (ver facturacion/form.html y facturacion/detail.html).
 #
+# 22 sep, 2da ronda, pedido de Braulio ("en catalogos hay que incluir
+# conceptos de detraccion y en este se puedan agregar o modificar los
+# conceptos o porcentajes"): esta lista dejó de ser la fuente de verdad —
+# ahora vive en la tabla `detraction_concepts`, editable desde Catálogos →
+# Conceptos de detracción (ver app/routes/catalogos.py). Esta constante
+# `_DETRACTION_GOODS_SEED` se queda solo como el contenido con el que se
+# siembra esa tabla la primera vez (ver _seed_detraction_concepts_sqlite/
+# _postgres en app/db.py) — una vez sembrada, editar acá NO cambia nada;
+# hay que editarlo desde Catálogos.
+#
 # Lista tal como la dio Braulio (los primeros códigos "principales" del
 # Anexo de bienes de SUNAT). OJO -- al verificarla contra fuentes públicas
 # actuales (docs.factpro.la/catalogos-sunat, estudiobonilla.pe) aparecieron
@@ -229,8 +239,10 @@ DETRACTION_THRESHOLD = 400.0
 # fuente como códigos YA DEROGADOS (sin vigencia desde ~2014). Confirma con
 # tu contador antes de usar cualquiera de estos cuatro códigos o alguno de
 # esos tres en una factura real -- un depósito de detracción con el
-# porcentaje o código equivocado no se puede corregir después con SUNAT.
-DETRACTION_GOODS_CATALOG = [
+# porcentaje o código equivocado no se puede corregir después con SUNAT
+# (ahora que es editable desde Catálogos, ya se puede corregir ahí mismo
+# apenas tu contador confirme el valor correcto).
+_DETRACTION_GOODS_SEED = [
     ("001", "Azúcar y melaza de caña", 10.0),
     ("003", "Alcohol etílico", 10.0),
     ("004", "Recursos hidrobiológicos", 4.0),
@@ -247,7 +259,43 @@ DETRACTION_GOODS_CATALOG = [
     ("017", "Harina, polvo y \"pellets\" de pescado", 10.0),
     (DETRACTION_CODE, "Transporte y/o traslado de bienes", DETRACTION_PERCENTAGE),
 ]
-DETRACTION_GOODS_CODES = {code for code, _label, _pct in DETRACTION_GOODS_CATALOG}
+
+
+def get_detraction_concepts(only_active=True):
+    """Filas de `detraction_concepts` (código, nombre, porcentaje editables
+    desde Catálogos), ordenadas por sort_order/código."""
+    sql = "SELECT * FROM detraction_concepts"
+    if only_active:
+        sql += " WHERE active = 1"
+    sql += " ORDER BY sort_order, code"
+    return query_all(sql)
+
+
+def get_detraction_goods_catalog(only_active=True):
+    """Mismo contenido que `get_detraction_concepts()`, como lista de
+    tuplas (código, nombre, porcentaje) -- formato que ya esperan
+    facturacion/form.html y facturacion/detail.html para el selector de
+    bienes (`{% for code, label, pct in detraction_goods_catalog %}`), sin
+    tener que tocar esos templates al pasar de la constante fija a la
+    tabla editable."""
+    return [(c["code"], c["name"], c["percentage"]) for c in get_detraction_concepts(only_active)]
+
+
+def get_detraction_goods_codes(only_active=True):
+    return {c["code"] for c in get_detraction_concepts(only_active)}
+
+
+def get_detraction_percentage(code, default=None):
+    """Porcentaje vigente de un código de detracción (activo) según
+    Catálogos → Conceptos de detracción. Si el código no existe o fue
+    desactivado, cae al `default` que le pases -- así, si alguien
+    desactiva por error el código 027 (transporte de carga), el cálculo
+    automático de facturas 100% viajes no se rompe en silencio, solo deja
+    de reflejar un cambio de porcentaje que nunca llegó a guardarse."""
+    row = query_one(
+        "SELECT percentage FROM detraction_concepts WHERE code = ? AND active = 1", (code,)
+    )
+    return row["percentage"] if row else default
 
 
 def compute_detraction(amount, company):
@@ -273,11 +321,16 @@ def compute_detraction(amount, company):
             "amount": None,
             "bank_account": None,
         }
-    detraction_amount = round(amount * DETRACTION_PERCENTAGE / 100, 2)
+    # 22 sep, 2da ronda: el porcentaje del código 027 ahora puede editarse
+    # desde Catálogos → Conceptos de detracción -- se toma de ahí, cayendo
+    # a la constante DETRACTION_PERCENTAGE de arriba solo si ese código no
+    # existe o está desactivado en la tabla (ver get_detraction_percentage).
+    percentage = get_detraction_percentage(DETRACTION_CODE, default=DETRACTION_PERCENTAGE)
+    detraction_amount = round(amount * percentage / 100, 2)
     return {
         "applies": True,
         "code": DETRACTION_CODE,
-        "percentage": DETRACTION_PERCENTAGE,
+        "percentage": percentage,
         "amount": detraction_amount,
         "bank_account": company.get("bank_nacion_detraction_account", ""),
     }

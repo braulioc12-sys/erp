@@ -1657,6 +1657,34 @@ CREATE TABLE IF NOT EXISTS company_bank_accounts (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- 22 sep, pedido de Braulio ("en la parte de catalogos hay que incluir
+-- conceptos de detraccion y en este se puedan agregar o modificar los
+-- conceptos o porcentajes de los que ya tienes registrados para las
+-- facturas"): antes el catálogo de bienes/servicios sujetos a detracción
+-- (código SUNAT, nombre, porcentaje) estaba fijo en código
+-- (DETRACTION_GOODS_CATALOG en app/helpers.py) -- ahora vive en esta
+-- tabla, editable desde Catálogos → Conceptos de detracción, mismo patrón
+-- que Grifos/Bancos arriba (tabla propia, activar/desactivar en vez de
+-- borrar) pero además editable (nombre y porcentaje, y el código si hace
+-- falta corregirlo) porque Braulio pidió explícitamente poder "modificar
+-- los conceptos o porcentajes", no solo activarlos/desactivarlos. Se
+-- siembra una sola vez, en el primer init_db() después de este cambio,
+-- con los mismos 15 códigos/porcentajes que ya venía usando el sistema
+-- (ver _seed_detraction_concepts_sqlite/_postgres en app/db.py) para no
+-- alterar en silencio ninguna factura ya emitida ni el cálculo automático
+-- del código 027 (transporte de carga) -- desde ahí en adelante, Braulio
+-- edita libremente sin que un futuro despliegue lo vuelva a sobreescribir.
+CREATE TABLE IF NOT EXISTS detraction_concepts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL,
+    name TEXT NOT NULL,
+    percentage REAL NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(code)
+);
+
 -- 18 sep, 4ta ronda (pedido de Braulio: "quiero que el menu de Pagos
 -- personal este agrupado por año y luego mes, y una vez que se entra a
 -- cada mes pueda ver pdfs de constancias de pago antiguas, asi mismo para

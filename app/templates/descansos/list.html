@@ -1,15 +1,30 @@
 {% extends 'base.html' %}
 {% import 'partials/macros.html' as m %}
-{% block title %}Descansos laborales{% endblock %}
+{% block title %}Jornada laboral{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>Descansos laborales</h1>
+  <h1>Jornada laboral</h1>
   <div class="page-actions">
     {% if can(current_user.roles, 'descansos', 'edit') %}
     <a href="{{ url_for('descansos.new') }}" class="btn btn-primary">+ Registrar descanso</a>
     {% endif %}
   </div>
 </div>
+
+<!-- 22 sep, pedido de Braulio ("este debe tener un boton de busqueda de
+     conductor arriba"): buscador por nombre arriba de todo, mismo patrón
+     que ya usan Clientes/Flota/Viajes (input "q" + botón "Buscar",
+     LOWER()/LIKE en ambos lados para funcionar igual en SQLite y en
+     Postgres -- ver list_view() en app/routes/descansos.py). Filtra la
+     tabla de "Estado de conductores" de abajo; el selector de conductor
+     del historial (más abajo) es un filtro aparte, ya existía. -->
+<form class="filters" method="get">
+  <label>Buscar conductor
+    <input type="text" name="q" value="{{ q }}" placeholder="Nombre del conductor">
+  </label>
+  <button class="btn btn-secondary" type="submit">Buscar</button>
+  {% if q %}<a class="btn btn-secondary" href="{{ url_for('descansos.list_view') }}">Limpiar</a>{% endif %}
+</form>
 
 <div class="panel">
   <h2 class="mt-0">Estado de conductores</h2>
@@ -48,7 +63,7 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="5" class="table-empty">No hay conductores activos.</td></tr>
+        <tr><td colspan="5" class="table-empty">{{ 'Ningún conductor activo coincide con "' + q + '".' if q else 'No hay conductores activos.' }}</td></tr>
         {% endfor %}
       </tbody>
     </table>

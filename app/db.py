@@ -1047,6 +1047,41 @@ def _seed_tarifario_postgres(conn):
                 )
 
 
+# 22 sep, 2da ronda, pedido de Braulio ("en catalogos hay que incluir
+# conceptos de detraccion y en este se puedan agregar o modificar los
+# conceptos o porcentajes"): siembra la tabla `detraction_concepts` UNA
+# SOLA VEZ (si ya tiene alguna fila, no hace nada -- respeta lo que Braulio
+# ya haya editado/agregado/desactivado desde Catálogos) con el mismo
+# contenido que antes vivía fijo en DETRACTION_GOODS_CATALOG. Import local
+# de app.helpers (no al inicio del archivo) para evitar un import circular:
+# app/helpers.py ya importa de app.db.
+def _seed_detraction_concepts_sqlite(conn):
+    from app.helpers import _DETRACTION_GOODS_SEED
+
+    has_rows = conn.execute("SELECT 1 FROM detraction_concepts LIMIT 1").fetchone()
+    if has_rows:
+        return
+    for order, (code, name, percentage) in enumerate(_DETRACTION_GOODS_SEED):
+        conn.execute(
+            "INSERT INTO detraction_concepts (code, name, percentage, sort_order) VALUES (?, ?, ?, ?)",
+            (code, name, percentage, order),
+        )
+
+
+def _seed_detraction_concepts_postgres(conn):
+    from app.helpers import _DETRACTION_GOODS_SEED
+
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM detraction_concepts LIMIT 1")
+    if cur.fetchone():
+        return
+    for order, (code, name, percentage) in enumerate(_DETRACTION_GOODS_SEED):
+        cur.execute(
+            "INSERT INTO detraction_concepts (code, name, percentage, sort_order) VALUES (%s, %s, %s, %s)",
+            (code, name, percentage, order),
+        )
+
+
 _PRAGMA_LINE_RE = re.compile(r"^\s*PRAGMA\s[^\n]*;\s*$", re.MULTILINE | re.IGNORECASE)
 _CREATE_TABLE_START_RE = re.compile(r"CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\(")
 _COL_REFERENCES_RE = re.compile(r"\s+REFERENCES\s+(\w+)\s*\(([^)]+)\)")
@@ -1170,6 +1205,7 @@ def init_db(app):
             _fix_boleta_account_codes_postgres(conn)
             _seed_default_tire_codes_postgres(conn)
             _seed_tarifario_postgres(conn)
+            _seed_detraction_concepts_postgres(conn)
             conn.commit()
         finally:
             conn.close()
@@ -1186,6 +1222,7 @@ def init_db(app):
         _fix_boleta_account_codes_sqlite(conn)
         _seed_default_tire_codes_sqlite(conn)
         _seed_tarifario_sqlite(conn)
+        _seed_detraction_concepts_sqlite(conn)
         conn.commit()
         conn.close()
 

@@ -60,7 +60,11 @@ MODULE_LABELS = {
     "rrhh": "RRHH",
     "tarifario": "Tarifario",
     "pagos_personal": "Pagos personal",
-    "descansos": "Descansos laborales",
+    # 22 sep, pedido de Braulio ("el menu 'descansos' hay que renombrarlo
+    # por 'jornada laboral'"): mismo módulo/blueprint/permiso "descansos"
+    # (app/routes/descansos.py) -- solo cambia la etiqueta, igual que
+    # "Ubicación GPS" arriba.
+    "descansos": "Jornada laboral",
 }
 
 # module -> [(action, etiqueta), ...] en el orden en que se muestran.

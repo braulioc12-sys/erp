@@ -17,10 +17,10 @@ from flask import (
 from app.auth import permission_required, validate_csrf
 from app.db import execute, get_db, query_all, query_one
 from app.helpers import (
-    DETRACTION_GOODS_CATALOG,
-    DETRACTION_GOODS_CODES,
     company_info_for_issuer,
     compute_detraction,
+    get_detraction_goods_catalog,
+    get_detraction_goods_codes,
     next_code,
     parse_date,
     parse_float,
@@ -311,9 +311,10 @@ def new():
         # confirmar la detracción de una vez en esta misma pantalla (mismos
         # campos y misma validación que update_detraction() en
         # facturacion/detail.html) -- se elige el bien de una lista (ver
-        # DETRACTION_GOODS_CATALOG en app/helpers.py) que completa sola el
-        # código y el porcentaje; el monto se calcula solo si se deja en
-        # blanco. Si NO se marca el switch, o el bien elegido no trae
+        # get_detraction_goods_catalog() en app/helpers.py, que lee de la
+        # tabla `detraction_concepts` -- editable desde Catálogos) que
+        # completa sola el código y el porcentaje; el monto se calcula solo
+        # si se deja en blanco. Si NO se marca el switch, o el bien elegido no trae
         # código/porcentaje válidos, se guarda sin detracción -- igual que
         # siempre, se puede confirmar después desde el detalle de la
         # factura.
@@ -404,7 +405,7 @@ def new():
         "facturacion/form.html", clients=clients, selected_client=selected_client,
         pending_trips=pending_trips, today=today_str(), issuer=issuer,
         default_detraction_account=company.get("bank_nacion_detraction_account", ""),
-        detraction_goods_catalog=DETRACTION_GOODS_CATALOG,
+        detraction_goods_catalog=get_detraction_goods_catalog(),
     )
 
 
@@ -436,8 +437,8 @@ def detail(invoice_id):
     return render_template(
         "facturacion/detail.html", invoice=invoice, items=items,
         default_detraction_account=company.get("bank_nacion_detraction_account", ""),
-        detraction_goods_catalog=DETRACTION_GOODS_CATALOG,
-        detraction_goods_codes=DETRACTION_GOODS_CODES,
+        detraction_goods_catalog=get_detraction_goods_catalog(),
+        detraction_goods_codes=get_detraction_goods_codes(),
     )
 
 
