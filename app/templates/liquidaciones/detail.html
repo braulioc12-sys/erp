@@ -34,32 +34,48 @@
 
 <div class="panel">
   <h2>Anticipos entregados</h2>
+  {% set can_edit_payments = advance.status == 'PENDIENTE' and can(current_user.roles, 'liquidaciones', 'edit') %}
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Fecha</th><th class="text-right">Monto</th><th>Notas</th>{% if advance.status == 'PENDIENTE' and can(current_user.roles, 'liquidaciones', 'edit') %}<th></th>{% endif %}</tr></thead>
+      <thead><tr><th style="width:150px;">Fecha</th><th class="text-right" style="width:130px;">Monto</th><th>Notas</th>{% if can_edit_payments %}<th style="width:170px;"></th>{% endif %}</tr></thead>
       <tbody>
         {% for p in payments %}
+        {% if can_edit_payments %}
+        {# 23 sep, pedido de Braulio ("que tambien debe tener la opcion de
+           editar los [anticipos] que se entregaron"): misma fila-formulario
+           editable que Catálogos > Conceptos de detracción -- un solo
+           <form> por fila con dos botones ("Guardar" guarda los cambios,
+           "Eliminar" usa formaction para apuntar al borrado sin arriesgar
+           pisar una edición a medio escribir). #}
+        <tr>
+          <form method="post" action="{{ url_for('liquidaciones.edit_payment', payment_id=p.id) }}" style="display:contents;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <td><input type="date" name="payment_date" value="{{ p.payment_date }}" required></td>
+            <td><input type="number" step="0.01" name="amount" value="{{ p.amount }}" required style="text-align:right;"></td>
+            <td class="wrap"><input type="text" name="notes" value="{{ p.notes or '' }}" style="width:100%;" placeholder="Ej. Entregado a mitad de viaje"></td>
+            <td>
+              <div class="btn-group">
+                <button type="submit" class="btn btn-primary btn-sm">Guardar</button>
+                {% if payments|length > 1 %}
+                <button type="submit" class="btn btn-secondary btn-sm" formaction="{{ url_for('liquidaciones.delete_payment', payment_id=p.id) }}" formnovalidate onclick="return confirm('¿Eliminar este anticipo?');">Eliminar</button>
+                {% endif %}
+              </div>
+            </td>
+          </form>
+        </tr>
+        {% else %}
         <tr>
           <td>{{ p.payment_date }}</td>
           <td class="text-right">{{ p.amount|money }}</td>
           <td class="wrap">{{ p.notes or '—' }}</td>
-          {% if advance.status == 'PENDIENTE' and can(current_user.roles, 'liquidaciones', 'edit') %}
-          <td>
-            {% if payments|length > 1 %}
-            <form method="post" action="{{ url_for('liquidaciones.delete_payment', payment_id=p.id) }}" onsubmit="return confirm('¿Eliminar este anticipo?');" style="display:inline;">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button type="submit" class="btn btn-secondary btn-sm">Eliminar</button>
-            </form>
-            {% endif %}
-          </td>
-          {% endif %}
         </tr>
+        {% endif %}
         {% endfor %}
       </tbody>
     </table>
   </div>
 
-  {% if advance.status == 'PENDIENTE' and can(current_user.roles, 'liquidaciones', 'edit') %}
+  {% if can_edit_payments %}
   <form method="post" action="{{ url_for('liquidaciones.add_payment', advance_id=advance.id) }}" style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; margin-top:12px; padding:12px; background:var(--bg-soft,#f3f5f8); border-radius:8px;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label style="margin:0;">Monto (S/) *
@@ -73,6 +89,67 @@
     </label>
     <button type="submit" class="btn btn-secondary">+ Agregar anticipo</button>
   </form>
+  {% endif %}
+</div>
+
+{# 23 sep, pedido de Braulio ("Luego de anticipos entregados... que siga el
+   menu de gastos de viaje... Luego el menu de combustible y al final de la
+   hoja debe salir el boton de Liquidar"): el orden visual de los paneles
+   pasa a ser Anticipos -> Gastos -> Combustible, pero el botón "Liquidar"
+   tiene que poder incluir los checkboxes de gastos (que quedan varios
+   paneles arriba) en su mismo POST. Como un <form> no puede envolver el
+   panel de Combustible sin anidar sus propios <form> (agregar
+   combustible/observaciones/eliminar) dentro -- HTML no permite forms
+   anidados y eso rompería esos botones -- el formulario real de "Liquidar"
+   vive en su propio panel al final de la hoja, y cada checkbox de gasto
+   usa el atributo `form="liquidar-form"` (soportado por todos los
+   navegadores modernos) para asociarse a ese formulario sin estar dentro
+   de él en el HTML. #}
+<div class="panel">
+  <h2>Gastos de este viaje</h2>
+  {% set can_liquidate = advance.status == 'PENDIENTE' and can(current_user.roles, 'liquidaciones', 'edit') %}
+  {% if advance.status == 'PENDIENTE' %}
+  <p class="muted mt-0">Marca cuáles de estos gastos entran en la liquidación (por defecto se incluyen todos los que no estén ya en otra liquidación). Elige la oficina y presiona "Liquidar", al final de la hoja, para cerrarla — después ya no se puede editar.</p>
+  {% endif %}
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          {% if can_liquidate %}<th>Incluir</th>{% else %}<th>Incluido</th>{% endif %}
+          <th>Fecha</th><th>Concepto</th><th>Descripción</th><th class="text-right">Monto</th><th>Comprobante</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in expenses %}
+        <tr>
+          <td>
+            {% if can_liquidate %}
+            <input type="checkbox" name="expense_ids" value="{{ e.id }}" form="liquidar-form" {{ 'checked' if not e.expense_advance_id or e.expense_advance_id == advance.id }}>
+            {% else %}
+            {{ '✓' if e.expense_advance_id == advance.id else '—' }}
+            {% endif %}
+          </td>
+          <td>{{ e.expense_date }}</td>
+          <td>{{ e.type|pretty }}</td>
+          <td class="wrap">{{ e.description or '—' }}</td>
+          <td class="text-right">{{ e.amount|money }}</td>
+          <td>{% if e.receipt_filename %}<a href="{{ url_for('liquidaciones.receipt', expense_id=e.id) }}" target="_blank">Ver</a>{% else %}—{% endif %}</td>
+          <td>
+            {% if can(current_user.roles, 'liquidaciones', 'edit') %}
+            <a href="{{ url_for('liquidaciones.edit_expense', expense_id=e.id) }}" class="btn btn-secondary btn-sm">Editar</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="table-empty">Aún no se han registrado gastos para este viaje.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if can(current_user.roles, 'liquidaciones', 'edit') %}
+  <p style="margin-top:16px;"><a href="{{ url_for('liquidaciones.new_expense', trip_id=advance.trip_id) }}" class="btn btn-primary" style="font-size:1rem; padding:14px 26px;">+ Registrar gasto para este viaje</a></p>
   {% endif %}
 </div>
 
@@ -259,69 +336,27 @@
 <div class="panel"><h2>Notas del anticipo</h2><p class="mt-0">{{ advance.notes }}</p></div>
 {% endif %}
 
+{# 23 sep, pedido de Braulio: "al final de la hoja debe salir el boton de
+   Liquidar" -- este es el <form> real que se envía a liquidate() (ver nota
+   más arriba sobre por qué vive acá y no envolviendo el panel de Gastos);
+   los checkboxes de "Incluir" de ese panel se asocian acá con
+   form="liquidar-form". #}
+{% if can_liquidate %}
 <div class="panel">
-  <h2>Gastos de este viaje</h2>
-  {% set can_liquidate = advance.status == 'PENDIENTE' and can(current_user.roles, 'liquidaciones', 'edit') %}
-  {% if advance.status == 'PENDIENTE' %}
-  <p class="muted mt-0">Marca cuáles de estos gastos entran en la liquidación (por defecto se incluyen todos los que no estén ya en otra liquidación). Elige la oficina y presiona "Liquidar" para cerrarla — después ya no se puede editar.</p>
-  {% endif %}
-  {% if can_liquidate %}
-  <form method="post" action="{{ url_for('liquidaciones.liquidate', advance_id=advance.id) }}" onsubmit="return confirm('¿Cerrar esta liquidación con los gastos marcados?');">
+  <h2>Liquidar</h2>
+  <p class="muted mt-0">Elige la oficina y presiona "Liquidar" para cerrar esta liquidación con los gastos marcados arriba — después ya no se puede editar.</p>
+  <form id="liquidar-form" method="post" action="{{ url_for('liquidaciones.liquidate', advance_id=advance.id) }}" onsubmit="return confirm('¿Cerrar esta liquidación con los gastos marcados?');" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:14px; padding:12px; background:var(--bg-soft,#f3f5f8); border-radius:8px;">
-      <label style="margin:0;">Oficina donde se liquida *
-        <select name="office" required>
-          <option value="">-- Elige una oficina --</option>
-          {% for code, info in offices %}
-          <option value="{{ code }}">{{ info.label }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <button type="submit" class="btn btn-primary">Liquidar</button>
-    </div>
-  {% endif %}
-
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          {% if can_liquidate %}<th>Incluir</th>{% else %}<th>Incluido</th>{% endif %}
-          <th>Fecha</th><th>Concepto</th><th>Descripción</th><th class="text-right">Monto</th><th>Comprobante</th><th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for e in expenses %}
-        <tr>
-          <td>
-            {% if can_liquidate %}
-            <input type="checkbox" name="expense_ids" value="{{ e.id }}" {{ 'checked' if not e.expense_advance_id or e.expense_advance_id == advance.id }}>
-            {% else %}
-            {{ '✓' if e.expense_advance_id == advance.id else '—' }}
-            {% endif %}
-          </td>
-          <td>{{ e.expense_date }}</td>
-          <td>{{ e.type|pretty }}</td>
-          <td class="wrap">{{ e.description or '—' }}</td>
-          <td class="text-right">{{ e.amount|money }}</td>
-          <td>{% if e.receipt_filename %}<a href="{{ url_for('liquidaciones.receipt', expense_id=e.id) }}" target="_blank">Ver</a>{% else %}—{% endif %}</td>
-          <td>
-            {% if can(current_user.roles, 'liquidaciones', 'edit') %}
-            <a href="{{ url_for('liquidaciones.edit_expense', expense_id=e.id) }}" class="btn btn-secondary btn-sm">Editar</a>
-            {% endif %}
-          </td>
-        </tr>
-        {% else %}
-        <tr><td colspan="7" class="table-empty">Aún no se han registrado gastos para este viaje.</td></tr>
+    <label style="margin:0;">Oficina donde se liquida *
+      <select name="office" required>
+        <option value="">-- Elige una oficina --</option>
+        {% for code, info in offices %}
+        <option value="{{ code }}">{{ info.label }}</option>
         {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% if can_liquidate %}
+      </select>
+    </label>
+    <button type="submit" class="btn btn-primary" style="font-size:1rem; padding:14px 26px;">Liquidar</button>
   </form>
-  {% endif %}
-
-  {% if can(current_user.roles, 'liquidaciones', 'edit') %}
-  <p style="margin-top:12px;"><a href="{{ url_for('liquidaciones.new_expense', trip_id=advance.trip_id) }}" class="btn btn-secondary btn-sm">+ Registrar gasto para este viaje</a></p>
-  {% endif %}
 </div>
+{% endif %}
 {% endblock %}

@@ -391,6 +391,45 @@ def delete_payment(payment_id):
     return redirect(url_for("liquidaciones.detail", advance_id=advance["id"]))
 
 
+@bp.route("/anticipos/<int:payment_id>/editar", methods=["POST"])
+@permission_required("liquidaciones", "edit")
+def edit_payment(payment_id):
+    # 23 sep, pedido de Braulio ("que tambien debe tener la opcion de editar
+    # los [anticipos] que se entregaron"): antes solo se podía borrar un
+    # anticipo mal cargado y volver a crearlo; ahora cada fila de "Anticipos
+    # entregados" es editable en línea (mismo patrón de fila-formulario que
+    # Catálogos > Conceptos de detracción).
+    if not validate_csrf():
+        abort(400)
+    payment = query_one("SELECT * FROM advance_payments WHERE id = ?", (payment_id,))
+    if payment is None:
+        abort(404)
+    advance = query_one("SELECT * FROM expense_advances WHERE id = ?", (payment["advance_id"],))
+    if advance is None:
+        abort(404)
+    if advance["status"] == "LIQUIDADO":
+        flash("Esta liquidación ya está cerrada.", "error")
+        return redirect(url_for("liquidaciones.detail", advance_id=advance["id"]))
+    amount = parse_float(request.form.get("amount"))
+    if amount <= 0:
+        flash("Indica un monto válido para el anticipo.", "error")
+        return redirect(url_for("liquidaciones.detail", advance_id=advance["id"]))
+    payment_date = parse_date(request.form.get("payment_date")) or payment["payment_date"]
+    notes = request.form.get("notes", "").strip()
+    execute(
+        "UPDATE advance_payments SET amount = ?, payment_date = ?, notes = ? WHERE id = ?",
+        (amount, payment_date, notes, payment_id),
+    )
+    _recalc_advance_total(advance["id"])
+    log_activity(
+        "liquidaciones", "EDITAR", f"Liquidación {advance['code']}: anticipo editado (S/ {amount:.2f})",
+        entity_type="anticipo", entity_id=advance["id"],
+        entity_url=url_for("liquidaciones.detail", advance_id=advance["id"]),
+    )
+    flash("Anticipo actualizado.", "success")
+    return redirect(url_for("liquidaciones.detail", advance_id=advance["id"]))
+
+
 # --- Consumo de combustible: filas de "Gastos" con concepto Combustible
 # (jaladas automático) + entradas agregadas a mano en este mismo panel
 # (10 sep, 2da ronda, pedido de Braulio: "pueden ser varios [grifos] por
