@@ -37,6 +37,9 @@
   <a class="btn btn-secondary" href="{{ url_for('catalogos.detraccion_list') }}">Conceptos de detracción</a>
   <a class="btn btn-secondary" href="{{ url_for('liquidaciones.concepts_list') }}">Conceptos de gastos</a>
   <a class="btn btn-secondary" href="{{ url_for('catalogos.alertas_correo') }}">📧 Alertas por correo</a>
+  {% if 'ADMIN' in current_user.roles %}
+  <a class="btn btn-danger" href="{{ url_for('catalogos.reset_test_data') }}">🗑 Reiniciar datos de prueba</a>
+  {% endif %}
 </div>
 
 <div class="panel" style="max-width:520px;">

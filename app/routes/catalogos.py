@@ -1,12 +1,12 @@
 """Catálogos editables por el administrador: conceptos de mantenimiento,
 tipos de gasto, etc. — para no tener que tocar código cada vez que se
 necesita agregar una opción nueva a un desplegable."""
-from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, current_app, flash, g, redirect, render_template, request, url_for
 
 from app.alerts import alert_recipient_emails, build_alert_sections, total_alert_count
 from app.audit import log_activity
 from app.auth import permission_required, validate_csrf
-from app.db import execute, get_setting, query_all, query_one, set_setting
+from app.db import execute, get_db, get_setting, query_all, query_one, set_setting
 from app.email_sender import send_email
 from app.helpers import get_detraction_concepts, parse_float, today_str
 from app.seed_data import MECHANIC_TYPES, labor_cost_setting_key
@@ -490,3 +490,163 @@ def alertas_correo_enviar():
     else:
         flash(f"No se pudo enviar el correo: {error}", "error")
     return redirect(url_for("catalogos.alertas_correo"))
+
+
+# 23 sep, pedido de Braulio ("cuando empecemos a funcionar en vivo... como
+# hacemos para borrar todos los viajes, mantenimientos, etc que se crearon
+# mientras se iba probando el sistema?"): un botón de un solo uso, solo
+# Administrador, para vaciar de golpe todo lo TRANSACCIONAL que se generó
+# durante las pruebas, sin tocar los catálogos/configuración que sí
+# corresponden usar en producción.
+#
+# Braulio confirmó (23 sep) que Clientes, Conductores y Flota son "una
+# mezcla" de datos reales y de prueba -- a propósito este reseteo NO los
+# toca (tampoco a Personal/RRHH, mismo criterio): esas 4 listas se revisan
+# y limpian a mano, una por una, desde sus propias pantallas (Eliminar/
+# Desactivar), ANTES o DESPUÉS de usar este botón, como Braulio prefiera.
+# Tampoco se toca activity_log (confirmó "dejarlo como está").
+#
+# Cada grupo es (etiqueta, [conteo de filas que se van a borrar], [sentencias
+# DELETE/UPDATE en el orden que respeta las foreign keys -- children antes
+# que su tabla padre; ver el mapa de REFERENCES completo de app/schema.sql]).
+# inventory_items no se borra (es el catálogo de repuestos) pero si su
+# stock_quantity se resetea a 0, ya que ese número se construyó solo a
+# partir de las compras/recepciones de prueba que si se borran acá.
+_RESET_GROUPS = [
+    ("GPS / telemetría (Frotcom)", ["vehicle_location_history", "vehicle_locations", "vehicle_trips", "frotcom_trip_import_jobs"], [
+        "DELETE FROM vehicle_location_history", "DELETE FROM vehicle_locations",
+        "DELETE FROM vehicle_trips", "DELETE FROM frotcom_trip_import_jobs",
+    ]),
+    ("Neumáticos", ["tire_rotation_moves", "tire_rotations", "tire_inspections", "tires", "tire_inventory"], [
+        "DELETE FROM tire_rotation_moves", "DELETE FROM tire_rotations", "DELETE FROM tire_inspections",
+        "UPDATE tires SET moved_to_tire_id = NULL", "DELETE FROM tires", "DELETE FROM tire_inventory",
+    ]),
+    ("Inspecciones", ["inspection_items", "inspections"], [
+        "DELETE FROM inspection_items", "DELETE FROM inspections",
+    ]),
+    ("Mantenimiento (órdenes)", ["maintenance_record_job_crew", "maintenance_record_jobs", "maintenance_record_materials", "maintenance_records"], [
+        "DELETE FROM maintenance_record_job_crew", "DELETE FROM maintenance_record_jobs",
+        "DELETE FROM maintenance_record_materials", "DELETE FROM maintenance_records",
+    ]),
+    ("Inventarios (compras de repuestos)", ["inventory_purchase_reception_items", "inventory_purchase_receptions", "inventory_purchase_items", "inventory_purchases"], [
+        "DELETE FROM inventory_purchase_reception_items", "DELETE FROM inventory_purchase_receptions",
+        "DELETE FROM inventory_purchase_items", "DELETE FROM inventory_purchases",
+        "UPDATE inventory_items SET stock_quantity = 0",
+    ]),
+    ("Facturación", ["invoice_items", "invoices"], [
+        "DELETE FROM invoice_items", "DELETE FROM invoices",
+    ]),
+    ("Guías de remisión", ["waybills", "sunat_waybills_history"], [
+        "DELETE FROM waybills", "DELETE FROM sunat_waybills_history",
+    ]),
+    ("Cotizaciones", ["quotation_items", "quotations"], [
+        "DELETE FROM quotation_items", "DELETE FROM quotations",
+    ]),
+    ("Gastos de WhatsApp (borradores)", ["whatsapp_expense_drafts"], [
+        "DELETE FROM whatsapp_expense_drafts",
+    ]),
+    ("Liquidaciones y gastos de viaje", ["fuel_entries", "advance_payments", "expenses", "expense_advances"], [
+        "DELETE FROM fuel_entries", "DELETE FROM advance_payments",
+        "DELETE FROM expenses", "DELETE FROM expense_advances",
+    ]),
+    ("Pagos de personal (constancias)", ["staff_payments", "payment_vouchers"], [
+        "DELETE FROM staff_payments", "DELETE FROM payment_vouchers",
+    ]),
+    ("Descansos laborales", ["driver_rests"], [
+        "DELETE FROM driver_rests",
+    ]),
+    ("Viajes", ["trips"], [
+        "DELETE FROM trips",
+    ]),
+]
+
+# Tablas que NO se tocan -- se muestran en la pantalla de confirmación para
+# que quede clarísimo qué sigue igual. clients/drivers/vehicles/staff van
+# acá a propósito (mezcla real+prueba, Braulio los revisa a mano).
+_RESET_KEPT_TABLES = [
+    ("Usuarios y permisos", ["users", "user_roles", "user_permission_overrides"]),
+    ("Clientes", ["clients"]),
+    ("Conductores", ["drivers"]),
+    ("Flota (vehículos)", ["vehicles"]),
+    ("Personal / RRHH", ["staff", "honorarios_template_items"]),
+    ("Catálogos y configuración", [
+        "tariff_routes", "tariff_items", "routes", "fuel_stations", "expense_concepts",
+        "detraction_concepts", "inventory_providers", "inventory_items", "maintenance_job_types",
+        "mechanics", "catalog_items", "app_settings", "company_bank_accounts",
+    ]),
+    ("Registro de Actividad (auditoría)", ["activity_log"]),
+]
+
+_RESET_CONFIRMATION_PHRASE = "BORRAR DATOS DE PRUEBA"
+
+
+def _reset_group_counts():
+    return [
+        (label, sum(query_one(f"SELECT COUNT(*) c FROM {t}")["c"] for t in tables))
+        for label, tables, _statements in _RESET_GROUPS
+    ]
+
+
+def _reset_kept_counts():
+    return [
+        (label, sum(query_one(f"SELECT COUNT(*) c FROM {t}")["c"] for t in tables))
+        for label, tables in _RESET_KEPT_TABLES
+    ]
+
+
+@bp.route("/reiniciar-datos-prueba")
+@permission_required("catalogos", "edit")
+def reset_test_data():
+    # "catalogos:edit" ya es exclusivo de ADMIN (ver PERMISSIONS en
+    # app/auth.py), pero dado lo destructivo de esta acción se vuelve a
+    # chequear el rol directamente acá, por si algún día un
+    # permission_override le diera "catalogos:edit" a alguien más.
+    if "ADMIN" not in g.user["roles"]:
+        abort(403)
+    groups = _reset_group_counts()
+    return render_template(
+        "catalogos/reset_test_data.html",
+        groups=groups, total=sum(c for _label, c in groups), kept=_reset_kept_counts(),
+        phrase=_RESET_CONFIRMATION_PHRASE,
+    )
+
+
+@bp.route("/reiniciar-datos-prueba/confirmar", methods=["POST"])
+@permission_required("catalogos", "edit")
+def reset_test_data_confirm():
+    if "ADMIN" not in g.user["roles"]:
+        abort(403)
+    if not validate_csrf():
+        abort(400)
+    typed = (request.form.get("confirmacion") or "").strip().upper()
+    if typed != _RESET_CONFIRMATION_PHRASE:
+        flash(
+            f'Escribiste algo distinto de "{_RESET_CONFIRMATION_PHRASE}" -- no se borró nada. '
+            "Cópialo exactamente como aparece para confirmar.",
+            "error",
+        )
+        return redirect(url_for("catalogos.reset_test_data"))
+
+    counts_before = _reset_group_counts()
+    total_before = sum(c for _label, c in counts_before)
+    db = get_db()
+    for _label, _tables, statements in _RESET_GROUPS:
+        for statement in statements:
+            db.execute(statement)
+    db.commit()
+
+    # 23 sep, registro de actividad: esta sí es una acción que Braulio va a
+    # querer poder rastrear después ("¿quién y cuándo vació la base de
+    # pruebas?") -- se registra ANTES de que activity_log deje de tener
+    # todo lo demás alrededor para darle contexto, ya que este grupo no se
+    # toca (confirmó "dejarlo como está").
+    log_activity(
+        "catalogos", "ELIMINAR",
+        f"Reinicio de datos de prueba: se vaciaron {total_before} registro(s) transaccionales "
+        "(viajes, gastos, liquidaciones, facturas, guías, cotizaciones, mantenimiento, "
+        "inventarios, neumáticos, inspecciones, descansos, GPS, pagos de personal) -- "
+        "clientes, conductores, flota, personal, catálogos, usuarios y el registro de "
+        "actividad NO se tocaron.",
+    )
+    flash(f"Listo: se borraron {total_before} registro(s) de prueba. Los catálogos y usuarios no se tocaron.", "success")
+    return redirect(url_for("catalogos.reset_test_data"))

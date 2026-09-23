@@ -1,0 +1,82 @@
+{% extends 'base.html' %}
+{% block title %}Reiniciar datos de prueba{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Reiniciar datos de prueba</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('catalogos.list_view') }}" class="btn btn-secondary">← Volver a Catálogos</a>
+  </div>
+</div>
+
+<!-- 23 sep, pedido de Braulio ("cuando empecemos a funcionar en vivo...
+     como hacemos para borrar todos los viajes, mantenimientos, etc que se
+     crearon mientras se iba probando el sistema?"): esta pantalla borra de
+     golpe todo lo transaccional (viajes, gastos, facturas, etc.) para
+     arrancar en limpio el día que el sistema pase a producción de verdad.
+     No toca Clientes/Conductores/Flota/Personal (Braulio confirmó que son
+     una mezcla de datos reales y de prueba -- se revisan y limpian a mano,
+     una por una, desde sus propias pantallas) ni Usuarios/Catálogos/
+     Actividad (confirmó "dejarlo como está" para el registro de
+     auditoría). -->
+<div class="panel" style="border:2px solid var(--danger); background:var(--danger-soft,#fdecec);">
+  <h2 class="mt-0" style="color:var(--danger);">⚠ Esto borra datos de verdad, sin poder deshacerlo</h2>
+  <p class="mt-0">Úsalo una sola vez, el día que dejes de usar el sistema para pruebas y empieces a cargar operación real. Antes de continuar:</p>
+  <ol class="mt-0">
+    <li>Si en <strong>Clientes</strong>, <strong>Conductores</strong>, <strong>Flota</strong> o <strong>Personal</strong> quedaron registros de prueba mezclados con los reales, bórralos o desactívalos primero desde sus propias pantallas — este botón no los toca.</li>
+    <li>Considera sacar un respaldo de la base de datos antes de continuar (pídeme ayuda si no sabes cómo).</li>
+  </ol>
+</div>
+
+<div class="panel">
+  <h2 class="mt-0">Se va a borrar (dato en vivo ahora mismo)</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Módulo</th><th class="text-right">Registros</th></tr></thead>
+      <tbody>
+        {% for label, count in groups %}
+        <tr>
+          <td>{{ label }}</td>
+          <td class="text-right">{{ count }}</td>
+        </tr>
+        {% endfor %}
+        <tr style="font-weight:600;">
+          <td>Total</td>
+          <td class="text-right">{{ total }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="panel">
+  <h2 class="mt-0">NO se toca</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Qué</th><th class="text-right">Registros</th></tr></thead>
+      <tbody>
+        {% for label, count in kept %}
+        <tr>
+          <td>{{ label }}</td>
+          <td class="text-right">{{ count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="panel" style="max-width:560px;">
+  <h2 class="mt-0">Confirmar</h2>
+  <p class="mt-0">Para borrar, escribe exactamente esta frase (mayúsculas incluidas):</p>
+  <p class="mt-0"><code style="font-size:1.05em; padding:4px 8px; background:var(--bg-soft,#f3f5f8); border-radius:6px;">{{ phrase }}</code></p>
+  <form method="post" action="{{ url_for('catalogos.reset_test_data_confirm') }}" onsubmit="return confirm('¿Confirmas borrar TODOS los datos de prueba? Esto no se puede deshacer.');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Escribe la frase de confirmación
+      <input type="text" name="confirmacion" autocomplete="off" required>
+    </label>
+    <div class="btn-group">
+      <button type="submit" class="btn btn-danger">Borrar datos de prueba</button>
+    </div>
+  </form>
+</div>
+{% endblock %}
