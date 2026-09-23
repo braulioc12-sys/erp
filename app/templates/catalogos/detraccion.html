@@ -8,6 +8,9 @@
   </div>
 </div>
 <p class="muted mt-0">Bienes/servicios del catálogo SUNAT que se pueden elegir al confirmar la detracción de una factura de Harraso (Facturación → Generar factura / detalle de una factura). El código "027" (transporte de carga) es además el que usa el sistema para calcular la detracción automática en una factura 100% de viajes — si le cambias el porcentaje acá, ese cálculo automático usa el nuevo valor desde la próxima factura.</p>
+<p class="muted">
+  <strong>Código en tefacturo.pe</strong> (23 sep): tefacturo.pe confirmó el formato del envío de detracción a SUNAT, pero su campo "código del bien/servicio" usa una palabra clave propia de ellos (ej. "AZUCAR"), distinta del código SUNAT de la columna "Código" de acá. Mientras un concepto no tenga esta palabra clave cargada, la detracción de sus facturas sigue sin enviarse a SUNAT (se queda solo en el PDF/aviso interno, como hasta ahora) — pídesela a tefacturo.pe para cada concepto que uses y cárgala acá.
+</p>
 
 {% if can(current_user.roles, 'catalogos', 'edit') %}
 <div class="panel" style="max-width:640px;">
@@ -23,6 +26,9 @@
     <label>Porcentaje (%)
       <input type="number" name="percentage" step="0.01" min="0" max="100" placeholder="10" required style="max-width:100px;">
     </label>
+    <label>Código en tefacturo.pe <span class="muted">(opcional)</span>
+      <input type="text" name="tefacturo_codigo_bien_servicio" placeholder="Ej. AZUCAR" style="max-width:160px;">
+    </label>
     <button type="submit" class="btn btn-primary">+ Agregar</button>
   </form>
 </div>
@@ -31,7 +37,7 @@
 <div class="panel" style="max-width:760px;">
   <div class="table-wrap">
     <table>
-      <thead><tr><th style="width:110px;">Código</th><th>Nombre</th><th style="width:110px;">Porcentaje</th><th>Estado</th><th style="width:220px;"></th></tr></thead>
+      <thead><tr><th style="width:110px;">Código</th><th>Nombre</th><th style="width:110px;">Porcentaje</th><th style="width:150px;">Código en tefacturo.pe</th><th>Estado</th><th style="width:220px;"></th></tr></thead>
       <tbody>
         {% for c in concepts %}
         {% if can(current_user.roles, 'catalogos', 'edit') %}
@@ -52,6 +58,7 @@
             <td><input type="text" name="code" value="{{ c.code }}" style="width:90px;"></td>
             <td><input type="text" name="name" value="{{ c.name }}" style="width:100%; min-width:220px;"></td>
             <td><input type="number" name="percentage" value="{{ c.percentage }}" step="0.01" min="0" max="100" style="width:80px;"></td>
+            <td><input type="text" name="tefacturo_codigo_bien_servicio" value="{{ c.tefacturo_codigo_bien_servicio or '' }}" placeholder="Ej. AZUCAR" style="width:130px;"></td>
             <td><span class="badge {{ 'badge-activo' if c.active else 'badge-inactivo' }}">{{ 'Activo' if c.active else 'Inactivo' }}</span></td>
             <td>
               <div class="btn-group">
@@ -66,12 +73,13 @@
           <td>{{ c.code }}</td>
           <td>{{ c.name }}</td>
           <td>{{ '%g'|format(c.percentage) }}%</td>
+          <td>{{ c.tefacturo_codigo_bien_servicio or '⚠ sin configurar' }}</td>
           <td><span class="badge {{ 'badge-activo' if c.active else 'badge-inactivo' }}">{{ 'Activo' if c.active else 'Inactivo' }}</span></td>
           <td></td>
         </tr>
         {% endif %}
         {% else %}
-        <tr><td colspan="5" class="table-empty">No hay conceptos de detracción registrados.</td></tr>
+        <tr><td colspan="6" class="table-empty">No hay conceptos de detracción registrados.</td></tr>
         {% endfor %}
       </tbody>
     </table>

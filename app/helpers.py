@@ -298,6 +298,22 @@ def get_detraction_percentage(code, default=None):
     return row["percentage"] if row else default
 
 
+def get_detraction_tefacturo_code(code):
+    """23 sep: el valor de `codigoBienServicio` que espera tefacturo.pe para
+    este código nuestro de detracción (ver el comentario largo en
+    schema.sql, junto a la columna `tefacturo_codigo_bien_servicio`). Puede
+    no estar configurado todavía (columna en blanco) -- en ese caso
+    devuelve None, y build_invoice_payload() (app/integrations/sunat_ose.py)
+    NO manda el bloque "detraccion" para esa factura (mismo criterio
+    conservador de siempre: mejor no enviarlo que adivinar mal un campo de
+    SUNAT)."""
+    row = query_one(
+        "SELECT tefacturo_codigo_bien_servicio FROM detraction_concepts WHERE code = ?", (code,)
+    )
+    value = row["tefacturo_codigo_bien_servicio"] if row else None
+    return value.strip() if value and value.strip() else None
+
+
 def compute_detraction(amount, company):
     """Calcula si una factura está sujeta a detracción y, si aplica, su
     monto — ver el comentario de las constantes DETRACTION_* arriba.

@@ -196,6 +196,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
+from app.helpers import get_detraction_tefacturo_code
 from app.ubigeo import validar_ubigeo
 
 IGV_RATE = 0.18
@@ -470,7 +471,41 @@ def build_invoice_payload(invoice, items, client, company):
     pregúntales puntualmente qué campo del JSON de /factura-api/.../factura
     hay que mandar para reportar detracción (código de bien, %, monto,
     cuenta del Banco de la Nación) -- en cuanto tengas la respuesta, el
-    cambio acá es rápido."""
+    cambio acá es rápido.
+
+    CONFIRMADO (23 sep) -- tefacturo.pe mandó un JSON de ejemplo real (una
+    factura de OTRO cliente de ellos, con detracción de "Azúcar") que por
+    fin muestra el campo: va un objeto `detraccion` SUELTO en la raíz del
+    payload (mismo nivel que `close2u`/`datosDocumento`/`emisor`/etc.), con
+    esta forma:
+
+        "detraccion": {
+            "codigoBienServicio": "AZUCAR",
+            "numeroCuenta": "00000000",
+            "porcentaje": "12",
+            "redondeo": false
+        }
+
+    `numeroCuenta` (la cuenta del Banco de la Nación) y `porcentaje` salen
+    directo de la factura (`invoice["detraction_bank_account"]`/
+    `invoice["detraction_percentage"]`) -- eso ya se puede mandar sin
+    adivinar nada. `redondeo` se asume `false` (no hay ninguna otra pista de
+    cuándo debería ir en `true`; si algún día tefacturo.pe rechaza un envío
+    por esto, ahí se revisa).
+
+    `codigoBienServicio` SIGUE siendo un misterio parcial: el ejemplo manda
+    "AZUCAR" (el nombre del bien, en mayúsculas sin tilde) en vez del código
+    numérico de SUNAT que usamos internamente acá (027, etc.) -- es
+    evidentemente una palabra clave propia del enum interno de tefacturo.pe,
+    no el mismo catálogo. No hay forma de adivinar la palabra clave exacta
+    para "transporte de bienes por vía terrestre" (o cualquier otro de nuestros
+    conceptos) sin que tefacturo.pe la confirme concepto por concepto -- por
+    eso se agregó una columna editable `tefacturo_codigo_bien_servicio` en
+    Catálogos → Conceptos de detracción (ver schema.sql/app/helpers.py):
+    mientras un concepto no la tenga cargada, `get_detraction_tefacturo_code()`
+    devuelve None y esta función sigue SIN mandar el bloque `detraccion`
+    completo (mismo criterio conservador de siempre) -- la factura se emite
+    igual, solo que sin reportar la detracción a SUNAT todavía."""
     if not client["ruc"]:
         raise SunatOseError(
             f"El cliente '{client['name']}' no tiene RUC registrado; una factura "
@@ -534,7 +569,7 @@ def build_invoice_payload(invoice, items, client, company):
 
     forma_pago = "CREDITO" if invoice["due_date"] else "CONTADO"
 
-    return {
+    payload = {
         "close2u": {
             "tipoIntegracion": "OFFLINE",
             "tipoPlantilla": "01",
@@ -576,6 +611,28 @@ def build_invoice_payload(invoice, items, client, company):
             "tipoOperacion": "VENTA_INTERNA",
         },
     }
+
+    # 23 sep, CONFIRMADO -- ver el bloque "CONFIRMADO (23 sep)" en el
+    # docstring de esta función para la forma exacta del bloque
+    # "detraccion" y por qué `codigoBienServicio` puede seguir faltando.
+    # Solo se agrega cuando la factura tiene detracción aplicada Y el
+    # concepto usado ya tiene su código de tefacturo.pe configurado en
+    # Catálogos → Conceptos de detracción -- si falta cualquiera de las dos
+    # cosas, la factura se emite igual, solo sin reportar la detracción.
+    if invoice["detraction_applies"] and invoice["detraction_code"]:
+        tefacturo_codigo_bien_servicio = get_detraction_tefacturo_code(invoice["detraction_code"])
+        if tefacturo_codigo_bien_servicio:
+            payload["detraccion"] = {
+                "codigoBienServicio": tefacturo_codigo_bien_servicio,
+                "numeroCuenta": invoice["detraction_bank_account"] or "",
+                # Sin decimales de sobra ("12" en vez de "12.00", "5.5" en
+                # vez de "5.50") -- mismo criterio que ya se usa para
+                # mostrar el porcentaje en catalogos/detraccion.html.
+                "porcentaje": f"{invoice['detraction_percentage']:g}",
+                "redondeo": False,
+            }
+
+    return payload
 
 
 def build_waybill_payload(waybill, trip, company, client):

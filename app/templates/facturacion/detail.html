@@ -72,7 +72,13 @@
   {% else %}
   <p class="mt-0 muted">Esta factura no tiene detracción aplicada.</p>
   {% endif %}
-  <p class="mt-0"><strong>⚠ Pendiente:</strong> por ahora "Enviar a SUNAT" NO incluye este dato en el comprobante electrónico real (por eso el PDF que emite tefacturo.pe no trae la tabla "Concepto de Detracción", aunque acá arriba sí esté todo bien calculado y guardado). Se volvió a revisar la documentación pública de tefacturo.pe (22 sep) — endpoint de factura, catálogos, ejemplos JSON — y sigue sin aparecer un campo para esto, igual que en la revisión anterior. Su portal web SÍ tiene un toggle "Activar detracción" al emitir a mano, así que su sistema internamente sí lo soporta — el nombre del campo para la API simplemente no está documentado públicamente. Mientras Braulio no consiga ese dato con soporte de tefacturo.pe (mismo canal que ya usaron antes para otras dudas de esta integración), regístrala también desde su portal para esta factura, o avísales el número de comprobante para que la agreguen ellos.</p>
+  {% if invoice.detraction_applies %}
+  {% if detraction_tefacturo_code %}
+  <p class="mt-0"><strong>✅ Se envía a SUNAT:</strong> "Enviar a SUNAT" ya incluye este dato en el comprobante electrónico real (código de tefacturo.pe: "{{ detraction_tefacturo_code }}").</p>
+  {% else %}
+  <p class="mt-0"><strong>⚠ Pendiente:</strong> por ahora "Enviar a SUNAT" NO incluye este dato en el comprobante electrónico real (por eso el PDF que emite tefacturo.pe no trae la tabla "Concepto de Detracción", aunque acá arriba sí esté todo bien calculado y guardado). tefacturo.pe confirmó (23 sep) el formato del campo, pero usa una palabra clave propia de ellos para el bien/servicio (ej. "AZUCAR") distinta de nuestro código SUNAT ("{{ invoice.detraction_code }}") — falta que Braulio se la pida a tefacturo.pe para este concepto y la cargue en <a href="{{ url_for('catalogos.detraccion_list') }}">Catálogos → Conceptos de detracción</a>. Una vez cargada, esta factura (y cualquier otra que use el mismo concepto) se envía completa desde el próximo "Enviar a SUNAT".</p>
+  {% endif %}
+  {% endif %}
 
   <!-- 22 sep, pedido de Braulio ("recuerda que solo Harraso emite con
        detraccion, BRMS no"): esta sección editable ya no se ofrece para

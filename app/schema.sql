@@ -1682,6 +1682,25 @@ CREATE TABLE IF NOT EXISTS detraction_concepts (
     active INTEGER NOT NULL DEFAULT 1,
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    -- 23 sep, pedido de Braulio: tefacturo.pe le mandó un JSON real de
+    -- ejemplo (factura con detracción de otro cliente de ellos) que por fin
+    -- confirma el bloque "detraccion" del payload de factura:
+    --   "detraccion": {"codigoBienServicio": "AZUCAR", "numeroCuenta": "...",
+    --                   "porcentaje": "12", "redondeo": false}
+    -- OJO: `codigoBienServicio` NO es el código numérico de SUNAT que ya
+    -- usamos acá (027, etc.) -- por el ejemplo ("AZUCAR", no "001"), es una
+    -- palabra clave propia de tefacturo.pe (su propio enum interno,
+    -- probablemente el nombre del bien/servicio en mayúsculas sin tildes).
+    -- No hay forma de adivinar la palabra clave exacta para cada concepto
+    -- nuestro (ej. "transporte de bienes por vía terrestre") sin que
+    -- tefacturo.pe la confirme -- por eso este campo queda editable y en
+    -- blanco por defecto (NULL): mientras un concepto no tenga su código de
+    -- tefacturo.pe cargado acá, build_invoice_payload() (ver
+    -- app/integrations/sunat_ose.py) sigue sin mandar el bloque
+    -- "detraccion" para las facturas que lo usen -- mismo criterio
+    -- conservador de siempre con campos de SUNAT: mejor no enviarlo que
+    -- adivinar mal. Ver Catálogos → Conceptos de detracción.
+    tefacturo_codigo_bien_servicio TEXT,
     UNIQUE(code)
 );
 

@@ -542,6 +542,11 @@ COLUMN_MIGRATIONS = [
     # cantidad, descripcion y monto") -- ver el comentario largo junto a
     # esta columna en schema.sql (CREATE TABLE invoice_items).
     ("invoice_items", "quantity", "REAL NOT NULL DEFAULT 1"),
+    # 23 sep, pedido de Braulio: código propio de tefacturo.pe para el campo
+    # "codigoBienServicio" del bloque "detraccion" del payload de factura --
+    # ver el comentario largo junto a esta columna en schema.sql (CREATE
+    # TABLE detraction_concepts) y app/integrations/sunat_ose.py.
+    ("detraction_concepts", "tefacturo_codigo_bien_servicio", "TEXT"),
 ]
 
 

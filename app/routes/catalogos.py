@@ -315,6 +315,11 @@ def detraccion_add():
     code = request.form.get("code", "").strip()
     name = request.form.get("name", "").strip()
     percentage = parse_float(request.form.get("percentage"), None)
+    # 23 sep, pedido de Braulio: código propio de tefacturo.pe para el
+    # campo "codigoBienServicio" del bloque "detraccion" de la factura (ver
+    # el comentario largo en schema.sql) -- opcional, se puede dejar en
+    # blanco hasta que tefacturo.pe lo confirme para este concepto.
+    tefacturo_code = request.form.get("tefacturo_codigo_bien_servicio", "").strip() or None
 
     errors = []
     if not code:
@@ -334,8 +339,9 @@ def detraccion_add():
             flash(f'Ya existe un concepto con el código "{code}" — edítalo abajo en vez de agregarlo de nuevo.', "error")
         else:
             execute(
-                "UPDATE detraction_concepts SET active = 1, name = ?, percentage = ? WHERE id = ?",
-                (name, percentage, existing["id"]),
+                "UPDATE detraction_concepts SET active = 1, name = ?, percentage = ?, "
+                "tefacturo_codigo_bien_servicio = ? WHERE id = ?",
+                (name, percentage, tefacturo_code, existing["id"]),
             )
             # 22 sep, registro de actividad (ver app/audit.py).
             log_activity(
@@ -346,8 +352,9 @@ def detraccion_add():
     else:
         max_order = query_one("SELECT COALESCE(MAX(sort_order), -1) m FROM detraction_concepts")["m"]
         concept_id = execute(
-            "INSERT INTO detraction_concepts (code, name, percentage, sort_order) VALUES (?, ?, ?, ?)",
-            (code, name, percentage, max_order + 1),
+            "INSERT INTO detraction_concepts (code, name, percentage, sort_order, tefacturo_codigo_bien_servicio) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (code, name, percentage, max_order + 1, tefacturo_code),
         )
         log_activity(
             "catalogos", "CREAR", f"Concepto de detracción: {code} — {name} ({percentage}%)",
@@ -368,6 +375,7 @@ def detraccion_edit(concept_id):
     code = request.form.get("code", "").strip()
     name = request.form.get("name", "").strip()
     percentage = parse_float(request.form.get("percentage"), None)
+    tefacturo_code = request.form.get("tefacturo_codigo_bien_servicio", "").strip() or None
 
     errors = []
     if not code:
@@ -386,8 +394,9 @@ def detraccion_edit(concept_id):
         return redirect(url_for("catalogos.detraccion_list"))
 
     execute(
-        "UPDATE detraction_concepts SET code = ?, name = ?, percentage = ? WHERE id = ?",
-        (code, name, percentage, concept_id),
+        "UPDATE detraction_concepts SET code = ?, name = ?, percentage = ?, "
+        "tefacturo_codigo_bien_servicio = ? WHERE id = ?",
+        (code, name, percentage, tefacturo_code, concept_id),
     )
     # 22 sep, registro de actividad (ver app/audit.py).
     log_activity(

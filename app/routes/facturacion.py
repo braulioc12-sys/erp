@@ -25,6 +25,7 @@ from app.helpers import (
     compute_detraction,
     get_detraction_goods_catalog,
     get_detraction_goods_codes,
+    get_detraction_tefacturo_code,
     next_code,
     parse_date,
     parse_float,
@@ -452,12 +453,19 @@ def detail(invoice_id):
     # cuándo se generó, según activity_log (ver app/audit.py) -- None para
     # facturas de antes de que existiera este registro.
     creator = get_creator_info("factura", invoice_id)
+    # 23 sep: si esta factura tiene detracción, ¿ya se puede reportar a
+    # SUNAT de verdad (ver build_invoice_payload en app/integrations/
+    # sunat_ose.py), o todavía falta cargarle a este concepto su código de
+    # tefacturo.pe en Catálogos → Conceptos de detracción?
+    detraction_tefacturo_code = (
+        get_detraction_tefacturo_code(invoice["detraction_code"]) if invoice["detraction_applies"] else None
+    )
     return render_template(
         "facturacion/detail.html", invoice=invoice, items=items,
         default_detraction_account=company.get("bank_nacion_detraction_account", ""),
         detraction_goods_catalog=get_detraction_goods_catalog(),
         detraction_goods_codes=get_detraction_goods_codes(),
-        creator=creator,
+        creator=creator, detraction_tefacturo_code=detraction_tefacturo_code,
     )
 
 
