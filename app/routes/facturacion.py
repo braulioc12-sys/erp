@@ -469,6 +469,163 @@ def detail(invoice_id):
     )
 
 
+def _invoice_is_locked(invoice):
+    """23 sep, pedido de Braulio ("si una factura aun no ha sido enviada a
+    sunat se deberia poder editar todos los campos"): una vez que SUNAT
+    ACEPTÓ el comprobante, ya no se puede tocar nada de su contenido (el
+    comprobante electrónico real ya quedó emitido con esos datos) — solo
+    hasta ahí se podía editar la detracción (update_detraction, sin este
+    chequeo) y nada más. Una factura ANULADA tampoco se edita. NO_ENVIADA,
+    ERROR y RECHAZADO sí se pueden editar (es justamente el caso de este
+    pedido: corregir un dato — ej. la fecha de emisión — que hizo que
+    tefacturo.pe la rechace, sin tener que anularla y crear una nueva)."""
+    return invoice["sunat_status"] == "ACEPTADO" or invoice["status"] == "ANULADA"
+
+
+def _invoice_lock_reason(invoice):
+    if invoice["sunat_status"] == "ACEPTADO":
+        return "Esta factura ya fue aceptada por SUNAT — el comprobante electrónico ya se emitió así, no se puede editar."
+    if invoice["status"] == "ANULADA":
+        return "Esta factura está anulada — no se puede editar."
+    return None
+
+
+@bp.route("/<int:invoice_id>/editar", methods=["GET", "POST"])
+@permission_required("facturacion", "edit")
+def edit(invoice_id):
+    invoice = query_one("SELECT * FROM invoices WHERE id = ?", (invoice_id,))
+    if invoice is None:
+        abort(404)
+    if _invoice_is_locked(invoice):
+        flash(_invoice_lock_reason(invoice), "error")
+        return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
+
+    clients = query_all("SELECT * FROM clients WHERE active = 1 ORDER BY name")
+    items = query_all(
+        """SELECT ii.*, t.code as trip_code FROM invoice_items ii
+           LEFT JOIN trips t ON t.id = ii.trip_id WHERE ii.invoice_id = ? ORDER BY ii.id""",
+        (invoice_id,),
+    )
+
+    if request.method == "POST":
+        if not validate_csrf():
+            abort(400)
+        # Red de seguridad: si la factura se envió y fue aceptada justo
+        # entre que se abrió este formulario y se guardó, no se aplica el
+        # cambio igual.
+        if _invoice_is_locked(invoice):
+            flash(_invoice_lock_reason(invoice), "error")
+            return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
+
+        client_id = request.form.get("client_id")
+        if not client_id:
+            flash("Selecciona un cliente para la factura.", "error")
+            return redirect(url_for("facturacion.edit", invoice_id=invoice_id))
+        issue_date = parse_date(request.form.get("issue_date")) or invoice["issue_date"]
+        due_date = parse_date(request.form.get("due_date"))
+        notes = request.form.get("notes", "").strip()
+
+        # Ítems ya existentes: se pueden editar (descripción/cantidad/monto)
+        # o marcar para eliminar (checkbox "existing_item_delete", con el id
+        # del ítem como valor). Si el ítem eliminado venía de un viaje, el
+        # viaje vuelve a quedar disponible para facturarse en otra factura
+        # (mismo criterio que "Anular" en Viajes: invoiced solo se prende al
+        # facturar, así que se apaga al sacarlo de esta factura).
+        existing_ids = request.form.getlist("existing_item_id")
+        existing_descriptions = request.form.getlist("existing_item_description")
+        existing_quantities = request.form.getlist("existing_item_quantity")
+        existing_amounts = request.form.getlist("existing_item_amount")
+        delete_ids = set(request.form.getlist("existing_item_delete"))
+        items_by_id = {str(it["id"]): it for it in items}
+
+        kept_rows = []  # (id, description, quantity, amount, trip_id)
+        for item_id, desc, qty_raw, amt_raw in zip_longest(
+            existing_ids, existing_descriptions, existing_quantities, existing_amounts, fillvalue=""
+        ):
+            if not item_id or item_id not in items_by_id:
+                continue
+            if item_id in delete_ids:
+                continue
+            desc = (desc or "").strip()
+            try:
+                qty = float(qty_raw) if qty_raw else 1.0
+            except ValueError:
+                qty = 0
+            try:
+                amt = float(amt_raw)
+            except ValueError:
+                amt = 0
+            if not desc or amt <= 0 or qty <= 0:
+                flash(
+                    f"El ítem \"{items_by_id[item_id]['description']}\" quedó con datos inválidos "
+                    "(descripción, cantidad o monto) — revísalo, no se guardó ningún cambio.",
+                    "error",
+                )
+                return redirect(url_for("facturacion.edit", invoice_id=invoice_id))
+            kept_rows.append((item_id, desc, qty, amt, items_by_id[item_id]["trip_id"]))
+
+        new_manual_items, manual_items_incomplete = _collect_manual_items()
+        if manual_items_incomplete:
+            flash(
+                "Hay una línea nueva a medio llenar (le falta la descripción o el monto) — "
+                "se ignoró esa línea. Revísala antes de guardar si no era esa tu intención.",
+                "error",
+            )
+
+        if not kept_rows and not new_manual_items:
+            flash("Una factura no puede quedar sin ítems — no se guardó ningún cambio.", "error")
+            return redirect(url_for("facturacion.edit", invoice_id=invoice_id))
+
+        total = sum(amt for _id, _d, _q, amt, _t in kept_rows) + sum(
+            line_total for _desc, _qty, _unit, line_total in new_manual_items
+        )
+
+        db = get_db()
+        for item_id, desc, qty, amt, _trip_id in kept_rows:
+            db.execute(
+                "UPDATE invoice_items SET description = ?, quantity = ?, amount = ? WHERE id = ?",
+                (desc, qty, amt, item_id),
+            )
+        for item_id_str, item in items_by_id.items():
+            if item_id_str in delete_ids:
+                db.execute("DELETE FROM invoice_items WHERE id = ?", (item["id"],))
+                if item["trip_id"]:
+                    db.execute("UPDATE trips SET invoiced = 0 WHERE id = ?", (item["trip_id"],))
+        for desc, qty, _unit_amt, line_total in new_manual_items:
+            db.execute(
+                "INSERT INTO invoice_items (invoice_id, trip_id, description, amount, quantity) VALUES (?, NULL, ?, ?, ?)",
+                (invoice_id, desc, line_total, qty),
+            )
+        db.execute(
+            "UPDATE invoices SET client_id = ?, issue_date = ?, due_date = ?, notes = ?, amount = ? WHERE id = ?",
+            (client_id, issue_date, due_date, notes, total, invoice_id),
+        )
+        db.commit()
+
+        log_activity(
+            "facturacion", "EDITAR", f"Factura {invoice['number']}: datos editados (total S/{total:.2f})",
+            entity_type="factura", entity_id=invoice_id,
+            entity_url=url_for("facturacion.detail", invoice_id=invoice_id),
+        )
+        # 23 sep: si el total cambió y la factura ya tenía detracción
+        # confirmada, el monto detraído guardado (calculado sobre el total
+        # VIEJO) puede haber quedado desactualizado -- se avisa en vez de
+        # recalcularlo solo (podría pisar un monto que el contador ya había
+        # ajustado a mano, ver update_detraction()).
+        if invoice["detraction_applies"] and round(total, 2) != round(invoice["amount"], 2):
+            flash(
+                "El total de la factura cambió — revisa el monto de la detracción (más abajo en el detalle), "
+                "puede que ya no corresponda al nuevo total.",
+                "info",
+            )
+        flash("Factura actualizada.", "success")
+        return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
+
+    return render_template(
+        "facturacion/edit.html", invoice=invoice, items=items, clients=clients,
+    )
+
+
 @bp.route("/<int:invoice_id>/detraccion", methods=["POST"])
 @permission_required("facturacion", "edit")
 def update_detraction(invoice_id):
@@ -491,6 +648,11 @@ def update_detraction(invoice_id):
     invoice = query_one("SELECT * FROM invoices WHERE id = ?", (invoice_id,))
     if invoice is None:
         abort(404)
+    # 23 sep: mismo candado que edit() -- una factura ya ACEPTADA por SUNAT
+    # o ANULADA no se toca más, ni siquiera la detracción.
+    if _invoice_is_locked(invoice):
+        flash(_invoice_lock_reason(invoice), "error")
+        return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
 
     if request.form.get("applies") != "on":
         execute(

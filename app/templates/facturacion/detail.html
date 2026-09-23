@@ -5,6 +5,14 @@
 <div class="page-header">
   <h1>Factura {{ invoice.number }} {{ m.badge(invoice.status) }}</h1>
   <div class="page-actions">
+    {# 23 sep, pedido de Braulio ("si una factura aun no ha sido enviada a
+       sunat se deberia poder editar todos los campos"): mientras SUNAT no
+       la haya ACEPTADO (y no esté ANULADA), se puede editar cliente, fechas,
+       notas e ítems desde una pantalla aparte -- ver edit() en
+       app/routes/facturacion.py. #}
+    {% if invoice.sunat_status != 'ACEPTADO' and invoice.status != 'ANULADA' and can(current_user.roles, 'facturacion', 'edit') %}
+    <a href="{{ url_for('facturacion.edit', invoice_id=invoice.id) }}" class="btn btn-secondary">✎ Editar factura</a>
+    {% endif %}
     {% if invoice.status == 'PENDIENTE' %}
     <form method="post" action="{{ url_for('facturacion.change_status', invoice_id=invoice.id) }}" style="display:inline;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -86,7 +94,10 @@
        factura de BRMS quedó con detracción, el panel de arriba la sigue
        mostrando igual, solo que ya no se puede editar/reaplicar desde
        acá (ver también el mismo chequeo en update_detraction()). -->
-  {% if invoice.issuer != 'HARRASO' %}
+  {% if invoice.sunat_status == 'ACEPTADO' or invoice.status == 'ANULADA' %}
+  {# 23 sep: mismo candado que "Editar factura" -- una vez aceptada por
+     SUNAT (o anulada), la detracción tampoco se toca más. #}
+  {% elif invoice.issuer != 'HARRASO' %}
   {% if not invoice.detraction_applies %}
   <p class="mt-0 muted">BRMS no emite comprobantes con detracción — esta sección no aplica para esta factura.</p>
   {% endif %}

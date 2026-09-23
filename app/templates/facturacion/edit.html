@@ -1,0 +1,157 @@
+{% extends 'base.html' %}
+{% block title %}Editar factura {{ invoice.number }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Editar factura {{ invoice.number }}</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('facturacion.detail', invoice_id=invoice.id) }}" class="btn btn-secondary">← Volver al detalle</a>
+  </div>
+</div>
+
+<!-- 23 sep, pedido de Braulio ("si una factura aun no ha sido enviada a
+     sunat se deberia poder editar todos los campos"): esta pantalla solo es
+     alcanzable mientras la factura NO esté ACEPTADO por SUNAT ni ANULADA
+     (ver _invoice_is_locked() en app/routes/facturacion.py) -- justo el
+     caso de una factura RECHAZADA/con ERROR (ej. la fecha de emisión no
+     cumplía la ventana que exige tefacturo.pe), donde hasta ahora la única
+     forma de corregirla era anularla y crear una nueva. Empresa (Harraso/
+     BRMS), serie/número SUNAT y la detracción NO se editan acá: la empresa
+     define a nombre de qué RUC se emite (cambiarla sería otra factura
+     distinta) y la detracción ya tiene su propio editor en el detalle. -->
+<p class="muted mt-0">Empresa que factura: <strong>{{ 'BRMS' if invoice.issuer == 'BRMS' else 'Harraso Transport' }}</strong> · Serie/número SUNAT: <strong>{{ invoice.series }}-{{ '%06d'|format(invoice.series_number) }}</strong> (no se pueden cambiar). La detracción se edita desde el detalle de la factura.</p>
+
+<form class="panel" method="post" id="edit-invoice-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <h2 class="mt-0">Datos generales</h2>
+  <div class="form-row">
+    <label>Cliente *
+      <select name="client_id" required>
+        {% for c in clients %}
+        <option value="{{ c.id }}" {{ 'selected' if c.id == invoice.client_id }}>{{ c.name }}</option>
+        {% endfor %}
+        {% if invoice.client_id not in clients|map(attribute='id')|list %}
+        <option value="{{ invoice.client_id }}" selected>{{ invoice.client_name }} (inactivo)</option>
+        {% endif %}
+      </select>
+    </label>
+  </div>
+  {% if items|selectattr('trip_id')|list %}
+  <p class="muted mt-0">Esta factura incluye viajes ya asignados a su propio cliente — cambiar el cliente de la factura no cambia el cliente del viaje; revisa que siga siendo correcto.</p>
+  {% endif %}
+
+  <div class="form-row">
+    <label>Condición
+      <select id="payment-condition-select">
+        <option value="CONTADO" {{ 'selected' if not invoice.due_date }}>Contado</option>
+        <option value="CREDITO" {{ 'selected' if invoice.due_date }}>Crédito</option>
+      </select>
+    </label>
+    <label>Fecha de emisión
+      <input type="date" name="issue_date" value="{{ invoice.issue_date }}">
+    </label>
+  </div>
+  <div class="form-row" id="due-date-row" style="{{ '' if invoice.due_date else 'display:none;' }}">
+    <label>Fecha de vencimiento
+      <input type="date" name="due_date" id="due-date-input" value="{{ invoice.due_date or '' }}">
+    </label>
+  </div>
+  <label>Notas
+    <textarea name="notes">{{ invoice.notes or '' }}</textarea>
+  </label>
+
+  <h2>Ítems facturados</h2>
+  <p class="muted mt-0">Puedes editar la descripción, cantidad y monto de cada línea, o marcarla para eliminar. Si eliminas un ítem de un viaje, ese viaje vuelve a quedar disponible para facturarse después (no se factura dos veces). El monto de cada línea es el total de esa línea (no un precio unitario).</p>
+  <div class="table-wrap" style="margin-bottom:4px;">
+    <table>
+      <thead>
+        <tr>
+          <th>Viaje</th><th>Descripción</th>
+          <th style="width:10%;">Cantidad</th>
+          <th style="width:15%;">Monto (S/)</th>
+          <th style="width:8%;">Eliminar</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for it in items %}
+        <tr>
+          <td>{% if it.trip_id %}<a href="{{ url_for('viajes.detail', trip_id=it.trip_id) }}" target="_blank">{{ it.trip_code }}</a>{% else %}<span class="muted">— (ítem adicional)</span>{% endif %}</td>
+          <td>
+            <input type="hidden" name="existing_item_id" value="{{ it.id }}">
+            <input type="text" name="existing_item_description" value="{{ it.description }}" style="min-width:200px;">
+          </td>
+          <td><input type="number" name="existing_item_quantity" value="{{ it.quantity }}" min="0.01" step="0.01" style="width:80px;"></td>
+          <td><input type="number" name="existing_item_amount" value="{{ it.amount }}" min="0" step="0.01"></td>
+          <td class="text-right"><input type="checkbox" name="existing_item_delete" value="{{ it.id }}" style="width:auto;"></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Agregar ítem nuevo (opcional)</h3>
+  <div class="table-wrap" style="margin-bottom:4px;">
+    <table id="items-table">
+      <thead>
+        <tr>
+          <th style="width:10%;">Cantidad</th>
+          <th>Descripción</th>
+          <th style="width:15%;">P. unitario (S/)</th>
+          <th style="width:14%;">Subtotal</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="items-tbody"></tbody>
+    </table>
+  </div>
+  <div class="btn-group" style="margin-top:0; margin-bottom:16px;">
+    <button type="button" class="btn btn-secondary" id="btn-add-row">+ Agregar línea</button>
+  </div>
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Guardar cambios</button>
+    <a href="{{ url_for('facturacion.detail', invoice_id=invoice.id) }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+
+<script>
+(function () {
+  var conditionSelect = document.getElementById('payment-condition-select');
+  var dueDateRow = document.getElementById('due-date-row');
+  var dueDateInput = document.getElementById('due-date-input');
+  conditionSelect.addEventListener('change', function () {
+    var isCredito = conditionSelect.value === 'CREDITO';
+    dueDateRow.style.display = isCredito ? '' : 'none';
+    if (!isCredito) { dueDateInput.value = ''; }
+  });
+
+  // Mismo patrón "+ Agregar línea" que Generar factura (ver
+  // facturacion/form.html) -- filas nuevas, cantidad × precio unitario.
+  var tbody = document.getElementById('items-tbody');
+  function rowTemplate() {
+    var tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td><input type="number" name="item_quantity" value="1" min="0.01" step="0.01" style="width:80px;"></td>' +
+      '<td><input type="text" name="item_description" placeholder="Ej. Alquiler de cisterna, setiembre 2026" style="min-width:200px;"></td>' +
+      '<td><input type="number" name="item_amount" min="0" step="0.01" placeholder="0.00"></td>' +
+      '<td class="text-right item-subtotal">S/ 0.00</td>' +
+      '<td><button type="button" class="btn btn-secondary btn-sm btn-remove-row">✕</button></td>';
+    var qtyInput = tr.querySelector('[name="item_quantity"]');
+    var amtInput = tr.querySelector('[name="item_amount"]');
+    var subtotalCell = tr.querySelector('.item-subtotal');
+    function recalcRow() {
+      var qty = parseFloat(qtyInput.value) || 0;
+      var amt = parseFloat(amtInput.value) || 0;
+      subtotalCell.textContent = 'S/ ' + (qty * amt).toFixed(2);
+    }
+    qtyInput.addEventListener('input', recalcRow);
+    amtInput.addEventListener('input', recalcRow);
+    tr.querySelector('.btn-remove-row').addEventListener('click', function () { tr.remove(); });
+    return tr;
+  }
+  document.getElementById('btn-add-row').addEventListener('click', function () {
+    tbody.appendChild(rowTemplate());
+  });
+})();
+</script>
+{% endblock %}
