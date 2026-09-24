@@ -450,6 +450,17 @@ def inventory_detail(tire_inventory_id):
     # app/db.py, que no pasan por inventory_new()).
     creator = get_creator_info("llanta", tire_inventory_id)
 
+    # 24 sep, pedido de Braulio: botones "Dar de baja" y "Eliminar" en esta
+    # pantalla. "Eliminar" (borrado real) solo si esta llanta nunca tuvo
+    # ninguna instalación ni medición registrada -- de lo contrario se
+    # perdería ese historial y además rompería las foreign keys de
+    # tires/tire_inspections hacia esta fila (ver inventory_delete). "Dar
+    # de baja" (marcar RETIRADA) aplica mientras siga DISPONIBLE; si ya
+    # está ASIGNADA se usa el flujo existente "Retirar" desde la
+    # instalación (current_assignment.id), que ya sabe liberar la posición.
+    can_delete = tire["status"] == "DISPONIBLE" and not installation_rows and not inspections
+    can_retire_from_here = tire["status"] == "DISPONIBLE"
+
     return render_template(
         "neumaticos/inventory_detail.html",
         tire=tire,
@@ -465,6 +476,8 @@ def inventory_detail(tire_inventory_id):
         inspections=inspections,
         today=today_str(),
         creator=creator,
+        can_delete=can_delete,
+        can_retire_from_here=can_retire_from_here,
     )
 
 
@@ -664,6 +677,86 @@ def inventory_edit(tire_inventory_id):
         tire=tire,
         form=None,
     )
+
+
+# 24 sep, pedido de Braulio ("en el menu de llantas a la hora de ingresar
+# hay que darle la opcion de que se pueda o dar de baja a la llanta, o
+# eliminar un ingreso de llanta a inventario"): antes, desde el detalle de
+# inventario no había ninguna forma de dar de baja una llanta que todavía
+# no se había instalado en ninguna unidad (DISPONIBLE) -- si ya está
+# ASIGNADA, se sigue usando el flujo existente "Retirar" desde el detalle
+# de esa instalación (retire_tire), que además sabe dejar libre la
+# posición en el diagrama; este botón nuevo solo cubre el caso DISPONIBLE.
+@bp.route("/inventario/<int:tire_inventory_id>/dar-de-baja", methods=["GET", "POST"])
+@permission_required("neumaticos", "inventario")
+def inventory_retire(tire_inventory_id):
+    tire = query_one("SELECT * FROM tire_inventory WHERE id = ?", (tire_inventory_id,))
+    if tire is None:
+        abort(404)
+    if tire["status"] != "DISPONIBLE":
+        flash(
+            "Esta llanta no está disponible en inventario -- si está instalada en una unidad, "
+            'retírala desde el diagrama de esa unidad; si ya fue dada de baja, no hay nada más que hacer.',
+            "error",
+        )
+        return redirect(url_for("neumaticos.inventory_detail", tire_inventory_id=tire_inventory_id))
+
+    if request.method == "POST":
+        if not validate_csrf():
+            abort(400)
+        removed_date = parse_date(request.form.get("removed_date")) or today_str()
+        removal_reason = request.form.get("removal_reason", "").strip()
+        note_line = f"Dada de baja el {removed_date}" + (f": {removal_reason}" if removal_reason else " (sin motivo indicado).")
+        new_notes = f'{tire["notes"]}\n{note_line}' if tire["notes"] else note_line
+        execute(
+            "UPDATE tire_inventory SET status = 'RETIRADA', notes = ? WHERE id = ?",
+            (new_notes, tire_inventory_id),
+        )
+        log_activity(
+            "neumaticos", "RETIRAR",
+            f'Llanta "{tire["code"]}" dada de baja desde el inventario (todavía no estaba instalada)'
+            + (f" -- {removal_reason}" if removal_reason else ""),
+            entity_type="llanta", entity_id=tire_inventory_id,
+            entity_url=url_for("neumaticos.inventory_detail", tire_inventory_id=tire_inventory_id),
+        )
+        flash(f'Llanta "{tire["code"]}" dada de baja.', "success")
+        return redirect(url_for("neumaticos.inventory_detail", tire_inventory_id=tire_inventory_id))
+
+    return render_template("neumaticos/inventory_retire.html", tire=tire, today=today_str())
+
+
+# Mismo pedido del 24 sep: para corregir un código cargado por error. Solo
+# se permite si esta llanta nunca tuvo ninguna instalación ni medición de
+# cocada registrada -- si las tuviera, borrarla perdería ese historial (y
+# de paso violaría las foreign keys de tires/tire_inspections hacia esta
+# fila); en ese caso corresponde "Dar de baja" en vez de eliminarla.
+@bp.route("/inventario/<int:tire_inventory_id>/eliminar", methods=["POST"])
+@permission_required("neumaticos", "inventario")
+def inventory_delete(tire_inventory_id):
+    tire = query_one("SELECT * FROM tire_inventory WHERE id = ?", (tire_inventory_id,))
+    if tire is None:
+        abort(404)
+    if not validate_csrf():
+        abort(400)
+    has_installations = query_one("SELECT 1 FROM tires WHERE tire_inventory_id = ?", (tire_inventory_id,))
+    has_inspections = query_one("SELECT 1 FROM tire_inspections WHERE tire_inventory_id = ?", (tire_inventory_id,))
+    if has_installations or has_inspections:
+        flash(
+            f'No se puede eliminar "{tire["code"]}" porque ya tiene historial de instalaciones o '
+            'mediciones registrado -- usa "Dar de baja" en vez de eliminarla.',
+            "error",
+        )
+        return redirect(url_for("neumaticos.inventory_detail", tire_inventory_id=tire_inventory_id))
+
+    execute("DELETE FROM tire_inventory WHERE id = ?", (tire_inventory_id,))
+    # Sin entity_url: la llanta ya no existe, no hay a dónde enlazar (mismo
+    # criterio que clientes.py al eliminar un cliente).
+    log_activity(
+        "neumaticos", "ELIMINAR", f'Llanta "{tire["code"]}" eliminada del inventario (registro cargado por error)',
+        entity_type="llanta", entity_id=tire_inventory_id,
+    )
+    flash(f'Llanta "{tire["code"]}" eliminada del inventario.', "success")
+    return redirect(url_for("neumaticos.inventory_list"))
 
 
 def _diagram_context(vehicle_id):

@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+{% block title %}Dar de baja — {{ tire.code }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Dar de baja — {{ tire.code }}</h1>
+</div>
+<p class="muted mt-0">Esta llanta está en inventario, todavía sin instalar en ninguna unidad. Al darla de baja queda marcada como <strong>Retirada</strong> y ya no aparece como disponible para asignar.</p>
+
+<form class="form panel" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="form-row">
+    <label>Fecha de baja
+      <input type="date" name="removed_date" value="{{ today }}" required>
+    </label>
+  </div>
+  <label>Motivo (opcional)
+    <input type="text" name="removal_reason" placeholder="Ej. llanta defectuosa, código cargado de más, se vendió">
+  </label>
+  <div class="btn-group">
+    <button type="submit" class="btn btn-danger">Dar de baja</button>
+    <a href="{{ url_for('neumaticos.inventory_detail', tire_inventory_id=tire.id) }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+{% endblock %}

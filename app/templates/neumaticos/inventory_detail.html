@@ -7,6 +7,17 @@
   <div class="page-actions">
     {% if can(current_user.roles, 'neumaticos', 'inventario') %}
     <a href="{{ url_for('neumaticos.inventory_edit', tire_inventory_id=tire.id) }}" class="btn btn-secondary">Editar datos</a>
+    {% if tire.status == 'ASIGNADA' and current_assignment %}
+    <a href="{{ url_for('neumaticos.retire_tire', tire_id=current_assignment.id) }}" class="btn btn-danger">Dar de baja</a>
+    {% elif can_retire_from_here %}
+    <a href="{{ url_for('neumaticos.inventory_retire', tire_inventory_id=tire.id) }}" class="btn btn-danger">Dar de baja</a>
+    {% endif %}
+    {% if can_delete %}
+    <form method="post" action="{{ url_for('neumaticos.inventory_delete', tire_inventory_id=tire.id) }}" style="display:contents;" onsubmit="return confirm('¿Eliminar \'{{ tire.code }}\' del inventario? Esto no se puede deshacer.');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-danger">Eliminar</button>
+    </form>
+    {% endif %}
     {% endif %}
     <a href="{{ url_for('neumaticos.inventory_list') }}" class="btn btn-secondary">← Volver al inventario</a>
   </div>
