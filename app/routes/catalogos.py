@@ -6,7 +6,7 @@ from flask import Blueprint, abort, current_app, flash, g, redirect, render_temp
 from app.alerts import alert_recipient_emails, build_alert_sections, total_alert_count
 from app.audit import log_activity
 from app.auth import permission_required, validate_csrf
-from app.db import execute, get_db, get_setting, query_all, query_one, set_setting
+from app.db import _DEFAULT_TIRE_CODE_NOTE, execute, get_db, get_setting, query_all, query_one, set_setting
 from app.email_sender import send_email
 from app.helpers import get_detraction_concepts, parse_float, today_str
 from app.seed_data import MECHANIC_TYPES, labor_cost_setting_key
@@ -517,9 +517,44 @@ _RESET_GROUPS = [
         "DELETE FROM vehicle_location_history", "DELETE FROM vehicle_locations",
         "DELETE FROM vehicle_trips", "DELETE FROM frotcom_trip_import_jobs",
     ]),
-    ("Neumáticos", ["tire_rotation_moves", "tire_rotations", "tire_inspections", "tires", "tire_inventory"], [
+    # 23 sep, pedido de Braulio: "los neumáticos que asignamos por default a
+    # las unidades, que eran el numero de placa + la posicion, eso no
+    # quiero que se borre" -- las llantas placeholder que
+    # _seed_default_tire_codes_sqlite/_postgres crea en automático para
+    # cada posición sin llanta real todavía (código "<placa>-<n>", con la
+    # nota _DEFAULT_TIRE_CODE_NOTE) NO se borran: se identifican como la
+    # fila ACTIVO de `tires` que todavía tiene esa nota exacta (si ya se
+    # reemplazó por una llanta real vía "Reemplazar", esa fila deja de
+    # estar ACTIVO con esa nota, así que sí se borra como cualquier otro
+    # dato de prueba). Se borran igual el historial de rotaciones e
+    # inspecciones (son datos de prueba), y cualquier otra llanta
+    # (retiradas, de repuesto) que no sea ese placeholder default.
+    # Ojo con NULL en `notes`: "NOT (notes = ?)" es NULL (ni verdadero ni
+    # falso) cuando notes es NULL, así que SQL lo trata como "no cumple la
+    # condición del WHERE" y esa fila NO se borraría -- justo al revés de
+    # lo que se quiere para una llanta de prueba cualquiera (notes NULL,
+    # no es la default). Por eso el "IS NOT NULL" explícito antes de
+    # comparar.
+    ("Neumáticos", [
+        "tire_rotation_moves", "tire_rotations", "tire_inspections",
+        ("tires", "NOT (status = 'ACTIVO' AND notes IS NOT NULL AND notes = ?)", (_DEFAULT_TIRE_CODE_NOTE,)),
+        (
+            "tire_inventory",
+            "id NOT IN (SELECT tire_inventory_id FROM tires WHERE tire_inventory_id IS NOT NULL "
+            "AND status = 'ACTIVO' AND notes IS NOT NULL AND notes = ?)",
+            (_DEFAULT_TIRE_CODE_NOTE,),
+        ),
+    ], [
         "DELETE FROM tire_rotation_moves", "DELETE FROM tire_rotations", "DELETE FROM tire_inspections",
-        "UPDATE tires SET moved_to_tire_id = NULL", "DELETE FROM tires", "DELETE FROM tire_inventory",
+        "UPDATE tires SET moved_to_tire_id = NULL",
+        (
+            "DELETE FROM tires WHERE NOT (status = 'ACTIVO' AND notes IS NOT NULL AND notes = ?)",
+            (_DEFAULT_TIRE_CODE_NOTE,),
+        ),
+        # En este punto `tires` ya solo tiene las llantas default que se
+        # conservan, así que esta subconsulta ya no necesita repetir el
+        # filtro de status/notes.
+        "DELETE FROM tire_inventory WHERE id NOT IN (SELECT tire_inventory_id FROM tires WHERE tire_inventory_id IS NOT NULL)",
     ]),
     ("Inspecciones", ["inspection_items", "inspections"], [
         "DELETE FROM inspection_items", "DELETE FROM inspections",
@@ -575,21 +610,40 @@ _RESET_KEPT_TABLES = [
         "mechanics", "catalog_items", "app_settings", "company_bank_accounts",
     ]),
     ("Registro de Actividad (auditoría)", ["activity_log"]),
+    # 23 sep, pedido de Braulio: las llantas placeholder "<placa>-<posición>"
+    # que el sistema asigna por default a cada posición de la unidad (hasta
+    # que se cargue la llanta física real con "Reemplazar") no son datos de
+    # prueba -- son la configuración base de la flota, así que se muestran
+    # acá aunque técnicamente vivan en las mismas tablas que sí se vacían.
+    ("Neumáticos default (placa + posición, sin reemplazar todavía)", [
+        ("tires", "status = 'ACTIVO' AND notes = ?", (_DEFAULT_TIRE_CODE_NOTE,)),
+    ]),
 ]
 
 _RESET_CONFIRMATION_PHRASE = "BORRAR DATOS DE PRUEBA"
 
 
+def _reset_count_table(table_spec):
+    """table_spec es un nombre de tabla (cuenta todas sus filas) o una
+    tupla (tabla, condición WHERE, params) para contar solo las filas que
+    ese grupo realmente va a borrar (ver Neumáticos: no cuenta las llantas
+    default que se preservan)."""
+    if isinstance(table_spec, tuple):
+        table, where_sql, params = table_spec
+        return query_one(f"SELECT COUNT(*) c FROM {table} WHERE {where_sql}", params)["c"]
+    return query_one(f"SELECT COUNT(*) c FROM {table_spec}")["c"]
+
+
 def _reset_group_counts():
     return [
-        (label, sum(query_one(f"SELECT COUNT(*) c FROM {t}")["c"] for t in tables))
+        (label, sum(_reset_count_table(t) for t in tables))
         for label, tables, _statements in _RESET_GROUPS
     ]
 
 
 def _reset_kept_counts():
     return [
-        (label, sum(query_one(f"SELECT COUNT(*) c FROM {t}")["c"] for t in tables))
+        (label, sum(_reset_count_table(t) for t in tables))
         for label, tables in _RESET_KEPT_TABLES
     ]
 
@@ -632,7 +686,10 @@ def reset_test_data_confirm():
     db = get_db()
     for _label, _tables, statements in _RESET_GROUPS:
         for statement in statements:
-            db.execute(statement)
+            if isinstance(statement, tuple):
+                db.execute(statement[0], statement[1])
+            else:
+                db.execute(statement)
     db.commit()
 
     # 23 sep, registro de actividad: esta sí es una acción que Braulio va a
@@ -645,8 +702,9 @@ def reset_test_data_confirm():
         f"Reinicio de datos de prueba: se vaciaron {total_before} registro(s) transaccionales "
         "(viajes, gastos, liquidaciones, facturas, guías, cotizaciones, mantenimiento, "
         "inventarios, neumáticos, inspecciones, descansos, GPS, pagos de personal) -- "
-        "clientes, conductores, flota, personal, catálogos, usuarios y el registro de "
-        "actividad NO se tocaron.",
+        "clientes, conductores, flota, personal, catálogos, usuarios, el registro de "
+        "actividad y las llantas default de placa+posición (sin reemplazar todavía) "
+        "NO se tocaron.",
     )
     flash(f"Listo: se borraron {total_before} registro(s) de prueba. Los catálogos y usuarios no se tocaron.", "success")
     return redirect(url_for("catalogos.reset_test_data"))
