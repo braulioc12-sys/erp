@@ -99,7 +99,27 @@ class Config:
     # - El RUC de cada empresa YA está en COMPANY_RUC/BRMS_RUC más abajo —
     #   no hace falta repetirlo aquí.
     # Ver README, sección "Facturación electrónica (SUNAT)".
-    TEFACTURO_BASE_URL = os.environ.get("TEFACTURO_BASE_URL", "https://jarvis.tefacturo.pe")
+    #
+    # 24 sep -- BUG encontrado y corregido: el 21 sep se cambió el default
+    # de OSEClient (app/integrations/sunat_ose.py) de
+    # "https://jarvis.tefacturo.pe" (entorno de PRUEBAS) a
+    # "https://tefacturo.pe" (producción, confirmado por soporte técnico de
+    # tefacturo.pe), pero ese cambio SOLO tocó el valor por defecto interno
+    # de la clase (`base_url or "https://tefacturo.pe"`) -- este default de
+    # acá, que es el que build_client_from_config() usa siempre (le pasa
+    # explícitamente el valor de este Config, nunca None), se quedó
+    # apuntando a jarvis. Como Config SIEMPRE entrega un valor no vacío, el
+    # fallback de producción de OSEClient nunca llegaba a activarse: sin
+    # una variable de entorno TEFACTURO_BASE_URL puesta a mano en Render,
+    # el sistema seguía mandando TODO (facturas y guías, de Harraso y de
+    # BRMS) al entorno de pruebas de jarvis, sin que nada lo indicara en
+    # pantalla -- probablemente la causa real de por qué la detracción "sí
+    # funciona en el entorno de pruebas" (Braulio nunca había salido de
+    # ahí). Revisar en Render → variables de entorno si TEFACTURO_BASE_URL
+    # está puesta a mano: si no está, este fix ya la manda a producción de
+    # una vez desplegado; si está puesta a jarvis a propósito, se puede
+    # dejar así mientras se sigue probando.
+    TEFACTURO_BASE_URL = os.environ.get("TEFACTURO_BASE_URL", "https://tefacturo.pe")
     HARRASO_TEFACTURO_EMAIL = os.environ.get("HARRASO_TEFACTURO_EMAIL", "")
     HARRASO_TEFACTURO_PASSWORD = os.environ.get("HARRASO_TEFACTURO_PASSWORD", "")
     BRMS_TEFACTURO_EMAIL = os.environ.get("BRMS_TEFACTURO_EMAIL", "")
