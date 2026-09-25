@@ -191,9 +191,11 @@ simplemente no quedan enviadas a SUNAT hasta que actives y confirmes esta
 integración.
 """
 import base64
+import io
 import json
 import urllib.error
 import urllib.request
+import zipfile
 from datetime import datetime, timedelta, timezone
 
 from app.helpers import get_detraction_tefacturo_code
@@ -423,9 +425,44 @@ class TefacturoClient:
         if not b64:
             raise SunatOseError("tefacturo.pe no devolvió el XML del comprobante.")
         try:
-            return base64.b64decode(b64.strip(), validate=False)
+            raw = base64.b64decode(b64.strip(), validate=False)
         except (ValueError, TypeError) as exc:
             raise SunatOseError(f"El XML devuelto por tefacturo.pe no se pudo decodificar: {exc}")
+        return _unwrap_xml_bytes(raw)
+
+
+def _unwrap_xml_bytes(raw):
+    """24 sep, bug real encontrado por Braulio (factura F-0009, primer
+    intento de descargar el XML): el navegador mostraba "Start tag
+    expected, '<' not found / Encoding error" al abrir el .xml guardado.
+
+    La causa: el campo "xmlFirma" de consultarXml NO es el XML plano en
+    base64 como decía la documentación en prosa -- es un ZIP (el
+    comprobante electrónico firmado que SUNAT distribuye siempre viene
+    empaquetado en un .zip con el XML adentro, con nombre tipo
+    "{ruc}-{tipo}-{serie}-{numero}.xml"). Se nota clarísimo en el propio
+    ejemplo de la documentación de tefacturo.pe (consultar-xml y también
+    consultar-cdr): el base64 de ejemplo empieza con "UEsDBBQA...", que
+    decodificado son los bytes "PK\\x03\\x04" -- la firma estándar de un
+    archivo ZIP. Antes de este fix se guardaban esos bytes del ZIP tal
+    cual con extensión .xml, así que cualquier visor de XML (o el propio
+    navegador) fallaba al intentar interpretarlo como texto/XML plano.
+
+    Este helper detecta la firma ZIP y, si está presente, abre el archivo
+    en memoria y devuelve el contenido del primer .xml que encuentre
+    adentro (que es justamente el XML firmado real). Si en algún momento
+    tefacturo.pe cambia y manda el XML plano sin ZIP, `raw` ya empieza
+    con "<" y se devuelve tal cual, sin intentar descomprimir nada."""
+    if not raw.startswith(b"PK\x03\x04"):
+        return raw
+    with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+        xml_names = [n for n in zf.namelist() if n.lower().endswith(".xml")]
+        if not xml_names:
+            raise SunatOseError(
+                "tefacturo.pe devolvió un ZIP para el XML del comprobante, pero no "
+                "contiene ningún archivo .xml adentro."
+            )
+        return zf.read(xml_names[0])
 
 
 def _extract_base64_pdf(result):
