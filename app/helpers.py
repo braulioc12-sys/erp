@@ -159,7 +159,21 @@ def company_info_for_issuer(issuer, cfg):
     "normal" que ya se usa en Cotizaciones (`COMPANY_BANK_NACION_ACCOUNT`/
     `BRMS_BANK_ACCOUNT`): para Harraso resulta ser la MISMA cuenta
     (confirmado contra una factura real ya emitida), pero BRMS necesita la
-    suya propia (SUNAT asigna una cuenta de detracciones por RUC)."""
+    suya propia (SUNAT asigna una cuenta de detracciones por RUC).
+
+    `igv_exonerado` se agregó el 24 sep, pedido de Braulio ("brms esta en
+    regimen selva, debe facturar sin igv"): BRMS está acogida al Régimen de
+    la Amazonía (Ley N.º 27037, "Ley de Promoción de la Inversión en la
+    Amazonía"), que exonera del IGV a las empresas ubicadas en la selva por
+    sus operaciones dentro de la zona. Esto NO aplicaba a Harraso, que sí
+    factura con el 18% de IGV normal (así funcionó siempre, incluida la
+    F-0009 ya aceptada por SUNAT). Ver el uso de este flag en
+    `build_invoice_payload()` (app/integrations/sunat_ose.py): cuando es
+    True, cada ítem se manda como "EXONERADO_OPERACION_ONEROSA" (en vez de
+    "GRAVADO_OPERACION_ONEROSA") y por el importe TOTAL del ítem, sin restar
+    el 18% de IGV. Si algún día BRMS sí tuviera que facturar alguna
+    operación puntual CON IGV (p. ej. fuera de la Amazonía), avisar — este
+    flag hoy es a nivel de toda la empresa, no por ítem."""
     if issuer == "BRMS":
         legal_suffix = ""  # razón social legal completa de BRMS aún sin confirmar (ver Cotizaciones)
         return {
@@ -172,6 +186,7 @@ def company_info_for_issuer(issuer, cfg):
             "mtc_registration": cfg.get("BRMS_MTC_REGISTRATION", ""),
             "warehouse_code": cfg.get("BRMS_WAREHOUSE_CODE", ""),
             "bank_nacion_detraction_account": cfg.get("BRMS_BANK_NACION_DETRACTION_ACCOUNT", ""),
+            "igv_exonerado": True,
         }
     return {
         "ruc": cfg.get("COMPANY_RUC", ""),
@@ -183,6 +198,7 @@ def company_info_for_issuer(issuer, cfg):
         "mtc_registration": cfg.get("HARRASO_MTC_REGISTRATION", ""),
         "warehouse_code": cfg.get("HARRASO_WAREHOUSE_CODE", ""),
         "bank_nacion_detraction_account": cfg.get("COMPANY_BANK_NACION_ACCOUNT", ""),
+        "igv_exonerado": False,
     }
 
 

@@ -128,7 +128,11 @@ para no perder el rastro; ver también README):
   seria una ampliación aparte del formulario — no incluida en este fix.
 - **IGV**: se asume que todos los ítems de una factura son
   "GRAVADO_OPERACION_ONEROSA" (18%) — igual que el resto del sistema desde
-  el primer intento de esta integración.
+  el primer intento de esta integración. **Actualizado 24 sep**: esto ya NO
+  es así para BRMS (Régimen de la Amazonía / Ley 27037, exonerada de IGV) —
+  ver el flag `igv_exonerado` en `company_info_for_issuer()`
+  (app/helpers.py) y su uso en `build_invoice_payload()` más abajo. Harraso
+  sigue exactamente igual (GRAVADO al 18%).
 
 **Corrección importante (9 sep)**: la versión anterior de `build_waybill_payload()`
 (escrita el 8 sep contra la página pública de documentación de
@@ -618,9 +622,25 @@ def build_invoice_payload(invoice, items, client, company):
             "y factúralo aparte, si de verdad no tiene costo) antes de enviar."
         )
 
+    # 24 sep, pedido de Braulio ("brms esta en regimen selva, debe facturar
+    # sin igv"): BRMS está acogida al Régimen de la Amazonía (Ley 27037) y
+    # no debe facturar con el 18% de IGV -- ver el flag `igv_exonerado` en
+    # `company_info_for_issuer()` (app/helpers.py). Cuando aplica, cada
+    # ítem se manda como "EXONERADO_OPERACION_ONEROSA" y por su importe
+    # TOTAL (no se le resta IGV -- no hay IGV que restar). Harraso sigue
+    # exactamente igual que siempre (GRAVADO al 18%, ver F-0009 ya aceptada
+    # por SUNAT).
+    igv_exonerado = bool(company.get("igv_exonerado"))
+
     detalle = []
     for it in items:
-        gravada, _igv = _split_igv(float(it["amount"]))
+        monto = float(it["amount"])
+        if igv_exonerado:
+            valor_venta = round(monto, 2)
+            tipo_afectacion = "EXONERADO_OPERACION_ONEROSA"
+        else:
+            valor_venta, _igv = _split_igv(monto)
+            tipo_afectacion = "GRAVADO_OPERACION_ONEROSA"
         # 21 sep, pedido de Braulio (ítems manuales sin viaje): sin trip_id,
         # el código de producto se arma con el id del propio ítem de factura
         # en vez de "SERV-None".
@@ -629,7 +649,7 @@ def build_invoice_payload(invoice, items, client, company):
             {
                 "codigoProducto": codigo_producto,
                 "descripcion": it["description"] or "Servicio de transporte de carga",
-                "tipoAfectacion": "GRAVADO_OPERACION_ONEROSA",
+                "tipoAfectacion": tipo_afectacion,
                 # Confirmado contra la API real (8 sep, primer envío real de
                 # Braulio): "SERVICIO" no es un valor aceptado — el propio
                 # error 400 de tefacturo.pe listó el catálogo completo del
@@ -637,7 +657,7 @@ def build_invoice_payload(invoice, items, client, company):
                 # corresponde a un servicio (no un bien físico).
                 "unidadMedida": "UNIDAD_SERVICIOS",
                 "cantidad": "1",
-                "valorVentaUnitarioItem": gravada,
+                "valorVentaUnitarioItem": valor_venta,
             }
         )
 
