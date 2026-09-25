@@ -1165,6 +1165,10 @@ CREATE TABLE IF NOT EXISTS invoices (
     -- sunat_pdf_url pasa a apuntar a la ruta interna que sirve este archivo.
     sunat_pdf_filename TEXT,
     sunat_xml_url TEXT,
+    -- Nombre del archivo XML firmado devuelto por tefacturo.pe
+    -- (consultarXml, 24 sep) — mismo patrón que sunat_pdf_filename de
+    -- arriba.
+    sunat_xml_filename TEXT,
     sunat_cdr_url TEXT,
     sunat_sent_at TEXT,
     -- Detracción (SPOT) — 9 sep, Braulio compartió una factura real ya
@@ -1309,6 +1313,10 @@ CREATE TABLE IF NOT EXISTS waybills (
     -- pasa a apuntar a la ruta interna que sirve este archivo.
     sunat_pdf_filename TEXT,
     sunat_xml_url TEXT,
+    -- Nombre del archivo XML firmado devuelto por tefacturo.pe
+    -- (consultarXml, 24 sep) — mismo patrón que sunat_pdf_filename de
+    -- arriba.
+    sunat_xml_filename TEXT,
     sunat_cdr_url TEXT,
     sunat_sent_at TEXT,
     created_by INTEGER REFERENCES users(id),

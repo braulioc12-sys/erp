@@ -778,6 +778,8 @@ def send_sunat(invoice_id):
 
         pdf_filename = invoice["sunat_pdf_filename"]
         pdf_url = invoice["sunat_pdf_url"]
+        xml_filename = invoice["sunat_xml_filename"]
+        xml_url = invoice["sunat_xml_url"]
         if result["accepted"]:
             try:
                 pdf_bytes = ose_client.get_pdf_bytes("01", invoice["series"], invoice["series_number"])
@@ -788,16 +790,28 @@ def send_sunat(invoice_id):
                 # La factura SÍ quedó aceptada por SUNAT — no descartar eso
                 # solo porque no se pudo descargar/guardar el PDF.
                 flash(f"La factura se aceptó, pero no se pudo descargar su PDF: {pdf_exc}", "error")
+            # 24 sep, pedido de Braulio ("ya funciona genera el pdf, pero
+            # para descargar el xml?"): mismo patrón que el PDF de arriba,
+            # ver get_xml_bytes() en app/integrations/sunat_ose.py. Un
+            # fallo acá tampoco debe pisar el estado ACEPTADO ya logrado.
+            try:
+                xml_bytes = ose_client.get_xml_bytes("01", invoice["series"], invoice["series_number"])
+                xml_filename = f"factura-{invoice_id}-{uuid.uuid4().hex}.xml"
+                save_sunat_document(xml_filename, xml_bytes)
+                xml_url = url_for("facturacion.view_sunat_xml", invoice_id=invoice_id)
+            except SunatOseError as xml_exc:
+                flash(f"La factura se aceptó, pero no se pudo descargar su XML: {xml_exc}", "error")
 
         execute(
             """UPDATE invoices SET sunat_status=?, sunat_message=?, sunat_pdf_url=?, sunat_pdf_filename=?,
-               sunat_xml_url=?, sunat_cdr_url=?, sunat_sent_at=datetime('now') WHERE id=?""",
+               sunat_xml_url=?, sunat_xml_filename=?, sunat_cdr_url=?, sunat_sent_at=datetime('now') WHERE id=?""",
             (
                 "ACEPTADO" if result["accepted"] else "RECHAZADO",
                 result["message"],
                 pdf_url,
                 pdf_filename,
-                result["xml_url"],
+                xml_url,
+                xml_filename,
                 result["cdr_url"],
                 invoice_id,
             ),
@@ -850,3 +864,17 @@ def view_sunat_pdf(invoice_id):
     if using_s3():
         return redirect(sunat_document_url(invoice["sunat_pdf_filename"]))
     return send_from_directory(local_sunat_documents_dir(), invoice["sunat_pdf_filename"])
+
+
+@bp.route("/<int:invoice_id>/xml-sunat")
+@permission_required("facturacion", "view")
+def view_sunat_xml(invoice_id):
+    """Sirve el XML firmado real que devolvió tefacturo.pe al emitir esta
+    factura (24 sep, pedido de Braulio) — mismo patrón que view_sunat_pdf()
+    de arriba."""
+    invoice = query_one("SELECT sunat_xml_filename FROM invoices WHERE id = ?", (invoice_id,))
+    if invoice is None or not invoice["sunat_xml_filename"]:
+        abort(404)
+    if using_s3():
+        return redirect(sunat_document_url(invoice["sunat_xml_filename"]))
+    return send_from_directory(local_sunat_documents_dir(), invoice["sunat_xml_filename"])

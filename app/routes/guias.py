@@ -955,6 +955,8 @@ def send_sunat(waybill_id):
 
         pdf_filename = waybill["sunat_pdf_filename"]
         pdf_url = waybill["sunat_pdf_url"]
+        xml_filename = waybill["sunat_xml_filename"]
+        xml_url = waybill["sunat_xml_url"]
         if result["accepted"]:
             try:
                 # 14 sep, patch 0033: '31' = Guía de Remisión TRANSPORTISTA
@@ -973,16 +975,27 @@ def send_sunat(waybill_id):
                 # hiciera falta (no implementado todavía: solo se descarga
                 # automáticamente justo después de emitir).
                 flash(f"La guía se aceptó, pero no se pudo descargar su PDF: {pdf_exc}", "error")
+            # 24 sep, pedido de Braulio ("ya funciona genera el pdf, pero
+            # para descargar el xml?") -- mismo patrón que el PDF de arriba,
+            # con el mismo tipoComprobante '31' (Guía TRANSPORTISTA).
+            try:
+                xml_bytes = ose_client.get_xml_bytes("31", waybill["series"], waybill["series_number"])
+                xml_filename = f"guia-{waybill_id}-{uuid.uuid4().hex}.xml"
+                save_sunat_document(xml_filename, xml_bytes)
+                xml_url = url_for("guias.view_sunat_xml", waybill_id=waybill_id)
+            except SunatOseError as xml_exc:
+                flash(f"La guía se aceptó, pero no se pudo descargar su XML: {xml_exc}", "error")
 
         execute(
             """UPDATE waybills SET sunat_status=?, sunat_message=?, sunat_pdf_url=?, sunat_pdf_filename=?,
-               sunat_xml_url=?, sunat_cdr_url=?, sunat_sent_at=datetime('now') WHERE id=?""",
+               sunat_xml_url=?, sunat_xml_filename=?, sunat_cdr_url=?, sunat_sent_at=datetime('now') WHERE id=?""",
             (
                 "ACEPTADO" if result["accepted"] else "RECHAZADO",
                 result["message"],
                 pdf_url,
                 pdf_filename,
-                result["xml_url"],
+                xml_url,
+                xml_filename,
                 result["cdr_url"],
                 waybill_id,
             ),
@@ -1033,3 +1046,17 @@ def view_sunat_pdf(waybill_id):
     if using_s3():
         return redirect(sunat_document_url(waybill["sunat_pdf_filename"]))
     return send_from_directory(local_sunat_documents_dir(), waybill["sunat_pdf_filename"])
+
+
+@bp.route("/<int:waybill_id>/xml-sunat")
+@permission_required("guias", "view")
+def view_sunat_xml(waybill_id):
+    """Sirve el XML firmado real que devolvió tefacturo.pe al emitir esta
+    guía (24 sep, pedido de Braulio) — mismo patrón que view_sunat_pdf()
+    de arriba."""
+    waybill = query_one("SELECT sunat_xml_filename FROM waybills WHERE id = ?", (waybill_id,))
+    if waybill is None or not waybill["sunat_xml_filename"]:
+        abort(404)
+    if using_s3():
+        return redirect(sunat_document_url(waybill["sunat_xml_filename"]))
+    return send_from_directory(local_sunat_documents_dir(), waybill["sunat_xml_filename"])

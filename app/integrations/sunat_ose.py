@@ -390,6 +390,43 @@ class TefacturoClient:
         except (ValueError, TypeError) as exc:
             raise SunatOseError(f"El PDF devuelto por tefacturo.pe no se pudo decodificar: {exc}")
 
+    def get_xml_bytes(self, tipo_comprobante, serie, numero):
+        """Descarga el XML firmado de un comprobante ya emitido y devuelve
+        sus bytes (decodificados de base64). 24 sep, pedido de Braulio
+        ("ya funciona genera el pdf, pero para descargar el xml?") --
+        mismo patrón que get_pdf_bytes(), pero contra el endpoint
+        consultarXml confirmado contra la documentación real de tefacturo.pe
+        (https://api.tefacturo.pe/doc/integracion/docs/api/consultar-xml/):
+        PUT /consulta-api/invoice2u/integracion/consultarXml/{ruc} -- a
+        diferencia de consultarPdf, aquí la documentación SÍ confirma que
+        la respuesta siempre viene envuelta en JSON, con el base64 en el
+        campo "xmlFirma" (no "pdf"/"archivo"/etc. como se cubre por las
+        dudas en consultarPdf) -- así que se reutiliza _request() en vez
+        de armar la llamada a mano."""
+        body = {
+            "emisor": int(self.ruc),
+            "numero": int(numero),
+            "serie": serie,
+            "tipoComprobante": tipo_comprobante,
+        }
+        result = self._request(
+            "PUT", f"/consulta-api/invoice2u/integracion/consultarXml/{self.ruc}", body
+        )
+        b64 = None
+        if isinstance(result, dict):
+            b64 = result.get("xmlFirma")
+        if not b64 and isinstance(result, str):
+            # Por si algún día responden como texto plano, igual que a
+            # veces pasa con consultarPdf -- no debería ocurrir según la
+            # documentación, pero no cuesta cubrirlo.
+            b64 = result
+        if not b64:
+            raise SunatOseError("tefacturo.pe no devolvió el XML del comprobante.")
+        try:
+            return base64.b64decode(b64.strip(), validate=False)
+        except (ValueError, TypeError) as exc:
+            raise SunatOseError(f"El XML devuelto por tefacturo.pe no se pudo decodificar: {exc}")
+
 
 def _extract_base64_pdf(result):
     """El manual de tefacturo.pe describe la respuesta de consultarPdf

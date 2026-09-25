@@ -547,6 +547,17 @@ COLUMN_MIGRATIONS = [
     # ver el comentario largo junto a esta columna en schema.sql (CREATE
     # TABLE detraction_concepts) y app/integrations/sunat_ose.py.
     ("detraction_concepts", "tefacturo_codigo_bien_servicio", "TEXT"),
+    # 24 sep, pedido de Braulio ("ya funciona genera el pdf, pero para
+    # descargar el xml?"): igual que sunat_pdf_filename más arriba, pero
+    # para el XML firmado que devuelve tefacturo.pe (consultarXml) -- ver
+    # get_xml_bytes() en app/integrations/sunat_ose.py y send_sunat() en
+    # facturacion.py/guias.py. sunat_xml_url/sunat_cdr_url YA existían en
+    # schema.sql desde el 7 sep (siempre se guardaban en NULL porque nunca
+    # se implementó la descarga real) -- lo único que faltaba era esta
+    # columna para el nombre del archivo guardado en disco/S3, igual que ya
+    # existe para el PDF.
+    ("invoices", "sunat_xml_filename", "TEXT"),
+    ("waybills", "sunat_xml_filename", "TEXT"),
 ]
 
 
