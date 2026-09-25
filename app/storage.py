@@ -202,8 +202,20 @@ def _put_object(prefix, filename, raw_bytes):
     )
 
 
-def _presigned_url(prefix, filename):
+def _presigned_url(prefix, filename, as_attachment=False, download_name=None):
+    """24 sep, pedido de Braulio ("cuando haga click quiero que se
+    descargue, no que se abra en otra ventana del explorador" -- sobre el
+    XML de un comprobante): `as_attachment=True` fuerza la descarga en vez
+    de abrir el archivo en una pestaña nueva, igual que `as_attachment` de
+    Flask para el modo disco local (ver send_from_directory() en
+    facturacion.py/guias.py). `download_name`, si se pasa, es el nombre
+    con el que se descarga el archivo (ej. "F001-000009.xml") en vez del
+    nombre interno con el uuid.hex."""
     content_type, _ = mimetypes.guess_type(filename)
+    if as_attachment:
+        disposition = f'attachment; filename="{download_name or filename}"'
+    else:
+        disposition = "inline"
     return _s3_client().generate_presigned_url(
         "get_object",
         Params={
@@ -217,7 +229,7 @@ def _presigned_url(prefix, filename):
             # de mostrarlos — también se abran bien, sin tener que volver
             # a subirlos.
             "ResponseContentType": content_type or "application/octet-stream",
-            "ResponseContentDisposition": "inline",
+            "ResponseContentDisposition": disposition,
         },
         ExpiresIn=300,
     )
@@ -353,11 +365,14 @@ def save_sunat_document(filename, raw_bytes):
             f.write(raw_bytes)
 
 
-def sunat_document_url(filename):
-    """Igual que receipt_url()/carrier_waybill_url(), pero para un PDF de
+def sunat_document_url(filename, as_attachment=False, download_name=None):
+    """Igual que receipt_url()/carrier_waybill_url(), pero para un PDF/XML de
     SUNAT guardado en S3. En disco local, usar
-    local_sunat_documents_dir() + send_from_directory."""
-    return _presigned_url(_s3_sunat_documents_prefix(), filename)
+    local_sunat_documents_dir() + send_from_directory. `as_attachment`/
+    `download_name`: ver _presigned_url()."""
+    return _presigned_url(
+        _s3_sunat_documents_prefix(), filename, as_attachment=as_attachment, download_name=download_name
+    )
 
 
 def save_vehicle_document(filename, raw_bytes):

@@ -871,10 +871,26 @@ def view_sunat_pdf(invoice_id):
 def view_sunat_xml(invoice_id):
     """Sirve el XML firmado real que devolvió tefacturo.pe al emitir esta
     factura (24 sep, pedido de Braulio) — mismo patrón que view_sunat_pdf()
-    de arriba."""
-    invoice = query_one("SELECT sunat_xml_filename FROM invoices WHERE id = ?", (invoice_id,))
+    de arriba, salvo que este SÍ se descarga como archivo en vez de
+    abrirse en una pestaña nueva (24 sep, segundo pedido: "cuando haga
+    click quiero que se descargue, no que se abra en otra ventana del
+    explorador") — el XML firmado no es algo que uno quiera "ver" en el
+    navegador como el PDF, es un archivo para guardar/mandarle a alguien
+    (el contador, SUNAT, etc.). Se descarga con el nombre de serie/número
+    real (ej. "F001-000009.xml") en vez del nombre interno con el uuid."""
+    invoice = query_one(
+        "SELECT sunat_xml_filename, series, series_number FROM invoices WHERE id = ?", (invoice_id,)
+    )
     if invoice is None or not invoice["sunat_xml_filename"]:
         abort(404)
+    download_name = f"{invoice['series']}-{invoice['series_number']:06d}.xml"
     if using_s3():
-        return redirect(sunat_document_url(invoice["sunat_xml_filename"]))
-    return send_from_directory(local_sunat_documents_dir(), invoice["sunat_xml_filename"])
+        return redirect(
+            sunat_document_url(invoice["sunat_xml_filename"], as_attachment=True, download_name=download_name)
+        )
+    return send_from_directory(
+        local_sunat_documents_dir(),
+        invoice["sunat_xml_filename"],
+        as_attachment=True,
+        download_name=download_name,
+    )

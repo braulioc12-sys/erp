@@ -1053,10 +1053,23 @@ def view_sunat_pdf(waybill_id):
 def view_sunat_xml(waybill_id):
     """Sirve el XML firmado real que devolvió tefacturo.pe al emitir esta
     guía (24 sep, pedido de Braulio) — mismo patrón que view_sunat_pdf()
-    de arriba."""
-    waybill = query_one("SELECT sunat_xml_filename FROM waybills WHERE id = ?", (waybill_id,))
+    de arriba, salvo que este SÍ se descarga como archivo en vez de
+    abrirse en una pestaña nueva (24 sep, segundo pedido: "cuando haga
+    click quiero que se descargue, no que se abra en otra ventana del
+    explorador") — ver el comentario largo en facturacion.view_sunat_xml()."""
+    waybill = query_one(
+        "SELECT sunat_xml_filename, series, series_number FROM waybills WHERE id = ?", (waybill_id,)
+    )
     if waybill is None or not waybill["sunat_xml_filename"]:
         abort(404)
+    download_name = f"{waybill['series']}-{waybill['series_number']:06d}.xml"
     if using_s3():
-        return redirect(sunat_document_url(waybill["sunat_xml_filename"]))
-    return send_from_directory(local_sunat_documents_dir(), waybill["sunat_xml_filename"])
+        return redirect(
+            sunat_document_url(waybill["sunat_xml_filename"], as_attachment=True, download_name=download_name)
+        )
+    return send_from_directory(
+        local_sunat_documents_dir(),
+        waybill["sunat_xml_filename"],
+        as_attachment=True,
+        download_name=download_name,
+    )
