@@ -686,6 +686,36 @@ def build_invoice_payload(invoice, items, client, company):
         },
     }
 
+    # 24 sep, bug real (BRMS, factura a Crédito): tefacturo.pe respondió
+    # 500 con un NullPointerException de su propio conversor Java
+    # (SunatUtil.crearFecha, llamado desde Comun21.getQuota) al emitir una
+    # factura con formaPago=CREDITO. Causa: cuando es a crédito, tefacturo.pe
+    # necesita el cronograma de pago ("cuotas") para armar la fecha de
+    # vencimiento -- este payload nunca lo mandaba (para CONTADO no hace
+    # falta, y por eso las facturas de Harraso sin vencimiento sí
+    # funcionaban). Braulio compartió el JSON de ejemplo real de "Factura
+    # Crédito" de la documentación de tefacturo.pe (la pestaña no cargaba
+    # para revisarla directo): trae un array `cuotas` a nivel raíz del
+    # payload (mismo nivel que "datosDocumento"/"detalleDocumento"), con
+    # `monto` (el total del comprobante CON IGV -- en su ejemplo, un ítem
+    # de 100 sin IGV más 18% da un total de 118, y así aparece en
+    # `cuotas[0].monto`), `fecha` (la fecha de vencimiento), `numero`
+    # ("001" para la única cuota) y `moneda`. Este sistema no maneja
+    # cronogramas de pago a varias cuotas (una sola fecha de vencimiento
+    # por factura, ver invoices.due_date) -- se manda una sola cuota por el
+    # total de la factura, cubre el caso real de Braulio; si en el futuro
+    # hace falta dividir en varias cuotas, hay que rediseñar esto.
+    if forma_pago == "CREDITO":
+        total_con_igv = sum(float(it["amount"]) for it in items)
+        payload["cuotas"] = [
+            {
+                "monto": f"{total_con_igv:.2f}",
+                "fecha": invoice["due_date"],
+                "numero": "001",
+                "moneda": "PEN",
+            }
+        ]
+
     # 23 sep, CONFIRMADO -- ver el bloque "CONFIRMADO (23 sep)" en el
     # docstring de esta función para la forma exacta del bloque
     # "detraccion" y por qué `codigoBienServicio` puede seguir faltando.
