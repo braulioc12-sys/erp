@@ -558,6 +558,11 @@ COLUMN_MIGRATIONS = [
     # existe para el PDF.
     ("invoices", "sunat_xml_filename", "TEXT"),
     ("waybills", "sunat_xml_filename", "TEXT"),
+    # 26 sep, pedido de Braulio ("esta funcionando mal el gps... podemos
+    # habilitar la opcion que diga en la unidad GPS error kilometraje"): ver
+    # el comentario largo junto a esta columna en schema.sql (CREATE TABLE
+    # vehicles) y su uso en perform_frotcom_sync() (app/routes/integraciones.py).
+    ("vehicles", "gps_km_error", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 

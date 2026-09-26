@@ -40,6 +40,10 @@
         </td>
         <td>
           {{ '{:,.0f} km'.format(s.current_km) if s.current_km is not none else 'Sin dato' }}
+          {% if s.gps_km_error %}
+          {{ m.badge('ERROR') }}
+          {% if s.gps_odometer_km is not none %}<span class="muted">(GPS: {{ '{:,.0f} km'.format(s.gps_odometer_km) }})</span>{% endif %}
+          {% endif %}
           {% if s.current_km_updated_at %}<br><span class="muted">Actualizado: {{ s.current_km_updated_at }}</span>{% endif %}
           {% if can(current_user.roles, 'mantenimiento', 'edit') %}
           <details style="margin-top:4px;">
@@ -51,6 +55,12 @@
               <button type="submit" class="btn btn-secondary btn-sm">Guardar</button>
             </form>
           </details>
+          <form method="post" action="{{ url_for('mantenimiento.set_vehicle_gps_km_error', vehicle_id=s.id) }}" style="margin-top:4px;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="next" value="{{ url_for('mantenimiento.by_vehicle') }}">
+            <input type="hidden" name="gps_km_error" value="{{ '0' if s.gps_km_error else '1' }}">
+            <button type="submit" class="btn btn-secondary btn-sm">{{ 'Quitar GPS con error' if s.gps_km_error else 'Marcar GPS con error' }}</button>
+          </form>
           {% endif %}
         </td>
         <td class="text-right">{{ s.n_records }}</td>
@@ -64,5 +74,5 @@
     </tbody>
   </table>
 </div>
-<p class="muted" style="margin-top:10px;">El kilometraje se actualiza solo cada 2 minutos vía GPS (Frotcom) cuando la unidad está sincronizada. "Corregir kilometraje" es solo para cuando el GPS dejó de transmitir y hace falta ajustarlo a mano.</p>
+<p class="muted" style="margin-top:10px;">El kilometraje se actualiza solo cada 2 minutos vía GPS (Frotcom) cuando la unidad está sincronizada. "Corregir kilometraje" es solo para cuando el GPS dejó de transmitir y hace falta ajustarlo a mano. Si el GPS de una unidad reporta un kilometraje que nunca coincide con el físico, usa "Marcar GPS con error": mientras esté activo, el kilometraje deja de actualizarse solo con el GPS (se toma del último valor que ingreses a mano) y el dato del GPS se muestra entre paréntesis solo como referencia.</p>
 {% endblock %}

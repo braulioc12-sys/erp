@@ -108,6 +108,21 @@ CREATE TABLE IF NOT EXISTS vehicles (
     notes TEXT,
     current_km REAL,
     current_km_updated_at TEXT,
+    -- 26 sep, pedido de Braulio ("hay algunas unidades que el kilometraje
+    -- del gps es distinto al fisico... esta funcionando mal el gps"):
+    -- cuando el GPS de una unidad reporta un kilometraje que no coincide
+    -- con el físico, se activa este flag y la sincronización automática
+    -- con Frotcom (perform_frotcom_sync() en app/routes/integraciones.py)
+    -- deja de pisar `current_km` con el dato del GPS -- current_km pasa a
+    -- depender solo de lo que se ingrese a mano (Flota -> Editar unidad, o
+    -- Mantenimiento -> Por unidad "Corregir kilometraje"). El dato crudo
+    -- del GPS se sigue recibiendo y guardando igual en
+    -- vehicle_locations.odometer_km (nunca se deja de sincronizar) y se
+    -- muestra entre paréntesis junto al kilometraje manual, como
+    -- referencia -- ver vehicle_detail() en app/routes/flota.py y
+    -- by_vehicle() en app/routes/mantenimiento.py. Sin CHECK: booleano
+    -- simple (0/1), igual que available_for_scheduling más abajo.
+    gps_km_error INTEGER NOT NULL DEFAULT 0,
     -- Último cambio de aceite (3 sep, pedido de Braulio: carga masiva desde
     -- un Excel con el historial de cambios de varias placas — ver
     -- app/bulk_import.py OIL_CHANGE_COLUMNS y app/routes/flota.py

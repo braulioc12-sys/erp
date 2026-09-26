@@ -23,6 +23,10 @@
     <div>
       <span class="muted">Kilometraje actual</span><br>
       <strong style="font-size:1.2em;">{{ '{:,.0f} km'.format(filtered_vehicle.current_km) if filtered_vehicle.current_km is not none else 'Sin dato' }}</strong>
+      {% if filtered_vehicle.gps_km_error %}
+      {{ m.badge('ERROR') }}
+      {% if filtered_vehicle.gps_odometer_km is not none %}<span class="muted">(GPS: {{ '{:,.0f} km'.format(filtered_vehicle.gps_odometer_km) }})</span>{% endif %}
+      {% endif %}
       {% if filtered_vehicle.current_km_updated_at %}<span class="muted"> — actualizado: {{ filtered_vehicle.current_km_updated_at }}</span>{% endif %}
     </div>
 {% if can(current_user.roles, 'mantenimiento', 'edit') and not readonly %}

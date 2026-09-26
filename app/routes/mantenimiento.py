@@ -237,7 +237,14 @@ def list_view():
             status_by_record[r["id"]] = _order_status(jobs_grouped.get(r["id"], []))
 
     filtered_vehicle = (
-        query_one("SELECT id, plate, current_km, current_km_updated_at FROM vehicles WHERE id = ?", (vehicle_id,))
+        query_one(
+            """SELECT v.id, v.plate, v.current_km, v.current_km_updated_at, v.gps_km_error,
+                      vl.odometer_km AS gps_odometer_km
+               FROM vehicles v
+               LEFT JOIN vehicle_locations vl ON vl.vehicle_id = v.id
+               WHERE v.id = ?""",
+            (vehicle_id,),
+        )
         if vehicle_id else None
     )
     return render_template(
@@ -923,11 +930,13 @@ def mechanics_toggle(mechanic_id):
 def by_vehicle():
     summary = query_all(
         """SELECT v.id, v.plate, v.current_km, v.current_km_updated_at, v.status, v.available_for_scheduling,
+                  v.gps_km_error, MAX(vl.odometer_km) AS gps_odometer_km,
                   COUNT(m.id) as n_records,
                   COALESCE(SUM(m.cost), 0) as total_cost,
                   MAX(m.maintenance_date) as last_date
            FROM vehicles v
            LEFT JOIN maintenance_records m ON m.vehicle_id = v.id
+           LEFT JOIN vehicle_locations vl ON vl.vehicle_id = v.id
            GROUP BY v.id
            ORDER BY v.plate"""
     )
@@ -999,6 +1008,37 @@ def set_vehicle_available_for_scheduling(vehicle_id):
         f'"{vehicle["plate"]}" marcada como {"disponible" if available else "NO disponible"} para programar viajes mientras está en mantenimiento.',
         "success",
     )
+    return redirect(next_url)
+
+
+@bp.route("/unidad/<int:vehicle_id>/gps-km-error", methods=["POST"])
+@permission_required("mantenimiento", "edit")
+def set_vehicle_gps_km_error(vehicle_id):
+    """26 sep, pedido de Braulio ("hay algunas unidades que el kilometraje
+    del gps es distinto al fisico... podemos habilitar la opcion que diga
+    en la unidad GPS error kilometraje"): atajo para activar/desactivar el
+    flag `gps_km_error` directamente desde "Por unidad", sin ir a Flota ->
+    Editar unidad (mismo criterio que "Marcar disponible"/"Corregir
+    kilometraje" ya en esta misma pantalla). Mientras está activo,
+    perform_frotcom_sync() (integraciones.py) deja de actualizar
+    `current_km` con el dato del GPS -- ver ese archivo para el detalle."""
+    if not validate_csrf():
+        abort(400)
+    vehicle = query_one("SELECT id, plate FROM vehicles WHERE id = ?", (vehicle_id,))
+    if vehicle is None:
+        abort(404)
+    gps_km_error = 1 if request.form.get("gps_km_error") == "1" else 0
+    execute("UPDATE vehicles SET gps_km_error = ? WHERE id = ?", (gps_km_error, vehicle_id))
+    log_activity(
+        "mantenimiento", "EDITAR",
+        f'Unidad "{vehicle["plate"]}": GPS con error de kilometraje = {"sí" if gps_km_error else "no"}',
+        entity_type="vehiculo", entity_id=vehicle_id,
+    )
+    flash(
+        f'"{vehicle["plate"]}": {"marcada con GPS con error de kilometraje (el GPS ya no actualiza su kilometraje automáticamente)" if gps_km_error else "el GPS vuelve a actualizar su kilometraje automáticamente"}.',
+        "success",
+    )
+    next_url = request.form.get("next") or url_for("mantenimiento.by_vehicle")
     return redirect(next_url)
 
 

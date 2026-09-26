@@ -51,13 +51,22 @@
   <h2>Kilometraje</h2>
   <div class="detail-grid">
     <div class="detail-item">
-      <div class="label">Kilometraje actual</div>
-      <div class="value" style="font-size:1.3em;">{{ '{:,.0f} km'.format(vehicle.current_km) if vehicle.current_km is not none else 'Sin dato' }}</div>
+      <div class="label">Kilometraje actual{% if vehicle.gps_km_error %} <span class="muted">(manual)</span>{% endif %}</div>
+      <div class="value" style="font-size:1.3em;">
+        {{ '{:,.0f} km'.format(vehicle.current_km) if vehicle.current_km is not none else 'Sin dato' }}
+        {% if vehicle.gps_km_error and gps_location and gps_location.odometer_km is not none %}
+        <span class="muted" style="font-size:0.7em;">(GPS: {{ '{:,.0f} km'.format(gps_location.odometer_km) }})</span>
+        {% endif %}
+      </div>
     </div>
     <div class="detail-item"><div class="label">Última actualización</div><div class="value">{{ vehicle.current_km_updated_at or '—' }}</div></div>
     <div class="detail-item"><div class="label">ID en el proveedor de GPS</div><div class="value">{{ vehicle.gps_external_id or '—' }}</div></div>
   </div>
-  <p class="muted" style="margin-bottom:0;">Se actualiza solo cada 2 minutos vía GPS (Frotcom) cuando la unidad está sincronizada. Para corregirlo a mano (por ejemplo, si el GPS dejó de transmitir), puedes hacerlo desde "Editar" arriba o desde Mantenimiento → Historial y costos por unidad.</p>
+  {% if vehicle.gps_km_error %}
+  <p class="muted" style="margin-bottom:0;">{{ m.badge('ERROR') }} GPS con error de kilometraje — el kilometraje de arriba ya NO se actualiza solo con el GPS, se toma del último valor ingresado a mano (desde "Editar" o desde Mantenimiento → Historial y costos por unidad); el dato crudo del GPS se muestra entre paréntesis solo como referencia.</p>
+  {% else %}
+  <p class="muted" style="margin-bottom:0;">Se actualiza solo cada 2 minutos vía GPS (Frotcom) cuando la unidad está sincronizada. Para corregirlo a mano (por ejemplo, si el GPS dejó de transmitir), puedes hacerlo desde "Editar" arriba o desde Mantenimiento → Historial y costos por unidad. Si el GPS de esta unidad reporta un kilometraje que nunca coincide con el físico, marca "GPS con error de kilometraje" en "Editar".</p>
+  {% endif %}
 </div>
 
 {% if vehicle.last_oil_change_km is not none or vehicle.last_oil_change_date or vehicle.last_oil_change_workshop or vehicle.last_oil_change_oil %}

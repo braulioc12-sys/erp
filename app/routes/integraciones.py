@@ -182,8 +182,19 @@ def perform_frotcom_sync(client=None):
 
     positions = client.get_vehicle_positions()
 
-    vehicles = query_all("SELECT id, gps_external_id FROM vehicles WHERE gps_external_id IS NOT NULL")
+    vehicles = query_all(
+        "SELECT id, gps_external_id, gps_km_error FROM vehicles WHERE gps_external_id IS NOT NULL"
+    )
     by_external_id = {v["gps_external_id"]: v["id"] for v in vehicles}
+    # 26 sep, pedido de Braulio ("hay unidades que el kilometraje del gps es
+    # distinto al fisico"): mientras este flag esté activo para una unidad,
+    # el sync SIGUE guardando el dato crudo del GPS en vehicle_locations/
+    # vehicle_location_history (líneas de abajo, sin cambios -- se muestra
+    # entre paréntesis como referencia, ver flota/detail.html), pero deja de
+    # pisar `vehicles.current_km` con ese dato -- current_km queda en lo
+    # último que se ingresó a mano (Flota -> Editar unidad, o Mantenimiento
+    # -> Por unidad "Corregir kilometraje").
+    gps_km_error_by_id = {v["id"]: bool(v["gps_km_error"]) for v in vehicles}
 
     db = get_db()
     matched = 0
@@ -213,7 +224,7 @@ def perform_frotcom_sync(client=None):
                VALUES (?, ?, ?, ?, ?, ?)""",
             (vehicle_id, pos["latitude"], pos["longitude"], pos["speed_kmh"], pos["odometer_km"], pos["recorded_at"]),
         )
-        if pos.get("odometer_km"):
+        if pos.get("odometer_km") and not gps_km_error_by_id.get(vehicle_id):
             db.execute(
                 "UPDATE vehicles SET current_km = ?, current_km_updated_at = ? WHERE id = ?",
                 (pos["odometer_km"], today_str(), vehicle_id),

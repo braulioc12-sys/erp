@@ -75,6 +75,11 @@
   {% if mode == 'edit' and vehicle and vehicle.current_km_updated_at %}
   <p class="muted" style="margin-top:-8px;">Última actualización de kilometraje: {{ vehicle.current_km_updated_at }}</p>
   {% endif %}
+  <label style="flex-direction: row; align-items: center; gap: 8px;">
+    <input type="checkbox" name="gps_km_error" value="1" style="width:auto;" {{ 'checked' if vehicle and vehicle.gps_km_error }}>
+    GPS con error de kilometraje
+  </label>
+  <p class="muted" style="margin-top:-8px;">Actívalo si el kilometraje que reporta el GPS de esta unidad no coincide con el físico. Mientras esté activo, la sincronización automática con el GPS deja de actualizar el kilometraje de la unidad — el kilometraje se toma solo de lo que ingreses aquí (o desde Mantenimiento → Por unidad); el dato del GPS se sigue mostrando entre paréntesis como referencia.</p>
 
   <div class="section-title">Último cambio de aceite</div>
   <div class="form-row">

@@ -199,8 +199,19 @@ def vehicle_detail(vehicle_id):
     # unidades de antes de que existiera este registro (incluye las
     # cargadas por la importación masiva original de flota).
     creator = get_creator_info("vehiculo", vehicle_id)
+    # 26 sep, pedido de Braulio ("GPS error kilometraje... que muestre entre
+    # () el kilometraje que muestra el gps"): dato crudo del GPS (siempre se
+    # sigue recibiendo, ver perform_frotcom_sync en integraciones.py), para
+    # mostrarlo junto al kilometraje manual cuando gps_km_error está activo.
+    gps_location = query_one(
+        "SELECT odometer_km, updated_at FROM vehicle_locations WHERE vehicle_id = ?", (vehicle_id,)
+    )
     return render_template(
-        "flota/detail.html", vehicle=vehicle, document_types=VEHICLE_DOCUMENT_TYPES, creator=creator
+        "flota/detail.html",
+        vehicle=vehicle,
+        document_types=VEHICLE_DOCUMENT_TYPES,
+        creator=creator,
+        gps_location=gps_location,
     )
 
 
@@ -292,8 +303,9 @@ def new_vehicle():
         vehicle_id = execute(
             """INSERT INTO vehicles (plate, brand, model, capacity_kg, status, vehicle_type, notes,
                soat_expiry, technical_review_expiry, current_km, current_km_updated_at, gps_external_id, owner,
-               last_oil_change_km, last_oil_change_date, last_oil_change_workshop, last_oil_change_oil)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               last_oil_change_km, last_oil_change_date, last_oil_change_workshop, last_oil_change_oil,
+               gps_km_error)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 plate,
                 brand,
@@ -312,6 +324,7 @@ def new_vehicle():
                 parse_date(request.form.get("last_oil_change_date")),
                 request.form.get("last_oil_change_workshop", "").strip() or None,
                 request.form.get("last_oil_change_oil", "").strip() or None,
+                1 if request.form.get("gps_km_error") else 0,
             ),
         )
         # 22 sep, registro de actividad (ver app/audit.py).
@@ -350,12 +363,13 @@ def edit_vehicle(vehicle_id):
         plate = request.form.get("plate", "").strip().upper()
         brand = request.form.get("brand", "").strip()
         model = request.form.get("model", "").strip()
+        gps_km_error = 1 if request.form.get("gps_km_error") else 0
         execute(
             """UPDATE vehicles SET plate=?, brand=?, model=?, capacity_kg=?, status=?, vehicle_type=?, notes=?,
                soat_expiry=?, technical_review_expiry=?,
                current_km=?, current_km_updated_at=?, gps_external_id=?, owner=?,
                last_oil_change_km=?, last_oil_change_date=?, last_oil_change_workshop=?, last_oil_change_oil=?,
-               available_for_scheduling=?
+               available_for_scheduling=?, gps_km_error=?
                WHERE id=?""",
             (
                 plate,
@@ -376,6 +390,7 @@ def edit_vehicle(vehicle_id):
                 request.form.get("last_oil_change_workshop", "").strip() or None,
                 request.form.get("last_oil_change_oil", "").strip() or None,
                 available_for_scheduling,
+                gps_km_error,
                 vehicle_id,
             ),
         )
