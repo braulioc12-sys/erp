@@ -31,6 +31,7 @@ from app.helpers import (
     parse_float,
     today_str,
 )
+from app.integrations.ai_vision import AiVisionError, extract_invoice_fields_from_image
 from app.integrations.sunat_ose import (
     SunatOseError,
     build_client_from_config,
@@ -213,6 +214,251 @@ def quick_new_client():
     if not issuer:
         return redirect(url_for("facturacion.list_view"))
     return redirect(url_for("facturacion.new", issuer=issuer, client_id=client_id))
+
+
+def _match_client_by_name(name):
+    """28 sep, "Facturar desde imagen": intenta calzar el nombre que la IA
+    leyó en la columna "Sociedad" del screenshot con un cliente YA
+    registrado. Solo se da por encontrado un match exacto (sin importar
+    mayúsculas) o, si no hay exacto, un ÚNICO candidato por coincidencia
+    parcial -- con cero o más de un candidato se devuelve None y
+    from_image_confirm() lo deja sin seleccionar para que Braulio elija (o
+    cree el cliente) a mano: nunca se adivina el cliente de una factura
+    real."""
+    if not name:
+        return None
+    exact = query_one("SELECT id FROM clients WHERE active = 1 AND LOWER(name) = LOWER(?)", (name,))
+    if exact:
+        return exact["id"]
+    partial = query_all("SELECT id FROM clients WHERE active = 1 AND LOWER(name) LIKE LOWER(?)", (f"%{name}%",))
+    if len(partial) == 1:
+        return partial[0]["id"]
+    return None
+
+
+@bp.route("/desde-imagen")
+@permission_required("facturacion", "edit")
+def from_image_upload():
+    """28 sep, pedido de Braulio ("quiero que yo subiendo una imagen crees
+    la factura como la 13"): pantalla para subir el screenshot del portal
+    del cliente (columnas "Documento de compra"/OC, "Número HES",
+    "Sociedad" e "Imp. recepcionado") -- ver app/integrations/ai_vision.py
+    para la extracción con IA y from_image_confirm() más abajo para la
+    revisión obligatoria antes de crear la factura de verdad."""
+    issuer = request.args.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        flash("Elige primero la empresa (Harraso o BRMS) para facturar desde una imagen.", "error")
+        return redirect(url_for("facturacion.list_view"))
+    return render_template("facturacion/from_image_upload.html", issuer=issuer)
+
+
+@bp.route("/desde-imagen/extraer", methods=["POST"])
+@permission_required("facturacion", "edit")
+def from_image_extract():
+    """Lee la imagen subida con IA (ver app/integrations/ai_vision.py) y
+    manda a la pantalla de confirmación con lo que se pudo extraer -- nunca
+    crea la factura directo desde acá."""
+    if not validate_csrf():
+        abort(400)
+    issuer = request.form.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        flash("Elige primero la empresa (Harraso o BRMS) para facturar desde una imagen.", "error")
+        return redirect(url_for("facturacion.list_view"))
+
+    file_storage = request.files.get("image")
+    if not file_storage or not file_storage.filename:
+        flash("Sube una imagen (screenshot) para poder leerla.", "error")
+        return redirect(url_for("facturacion.from_image_upload", issuer=issuer))
+    raw_bytes = file_storage.read()
+    if not raw_bytes:
+        flash("La imagen llegó vacía — intenta subirla de nuevo.", "error")
+        return redirect(url_for("facturacion.from_image_upload", issuer=issuer))
+
+    try:
+        fields = extract_invoice_fields_from_image(
+            raw_bytes, file_storage.mimetype, current_app.config.get("ANTHROPIC_API_KEY", "")
+        )
+    except AiVisionError as exc:
+        flash(f"No se pudo leer la imagen: {exc}", "error")
+        return redirect(url_for("facturacion.from_image_upload", issuer=issuer))
+
+    client_id = _match_client_by_name(fields["sociedad"])
+    return redirect(
+        url_for(
+            "facturacion.from_image_confirm",
+            issuer=issuer,
+            numero_oc=fields["numero_oc"] or "",
+            numero_hes=fields["numero_hes"] or "",
+            sociedad=fields["sociedad"] or "",
+            monto=fields["monto"] if fields["monto"] is not None else "",
+            client_id=client_id or "",
+        )
+    )
+
+
+@bp.route("/desde-imagen/confirmar")
+@permission_required("facturacion", "edit")
+def from_image_confirm():
+    """Pantalla de revisión: muestra lo que se extrajo de la imagen ya
+    precargado en un formulario editable -- el único dato que llega SIEMPRE
+    vacío es la fecha de vencimiento (pedido explícito de Braulio: "el
+    unico campo que debe quedar sin completar debe ser el de fecha de
+    vencimiento... y yo poner manualmente la fecha", ya que todas estas
+    facturas son a crédito). Nada se guarda en la base de datos hasta que
+    se confirme en from_image_create()."""
+    issuer = request.args.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        flash("Elige primero la empresa (Harraso o BRMS) para facturar desde una imagen.", "error")
+        return redirect(url_for("facturacion.list_view"))
+    clients = query_all("SELECT * FROM clients WHERE active = 1 ORDER BY name")
+    return render_template(
+        "facturacion/from_image_confirm.html",
+        issuer=issuer,
+        clients=clients,
+        client_id=request.args.get("client_id", type=int),
+        numero_oc=request.args.get("numero_oc", ""),
+        numero_hes=request.args.get("numero_hes", ""),
+        sociedad=request.args.get("sociedad", ""),
+        monto=request.args.get("monto", ""),
+        today=today_str(),
+    )
+
+
+@bp.route("/desde-imagen/cliente-nuevo", methods=["POST"])
+@permission_required("facturacion", "edit")
+def from_image_new_client():
+    """Mismo criterio que quick_new_client() más arriba (crear un cliente
+    sin perder lo ya completado), pero para volver a la pantalla de
+    confirmación de "Facturar desde imagen" en vez de a new() -- por eso
+    los datos ya extraídos (OC, HES, Sociedad, monto) viajan como campos
+    ocultos en el mini-formulario de facturacion/from_image_confirm.html y
+    se reenvían acá para no perderlos al crear el cliente."""
+    if not validate_csrf():
+        abort(400)
+    issuer = request.form.get("issuer", "").strip().upper()
+    carry = {
+        "numero_oc": request.form.get("numero_oc", ""),
+        "numero_hes": request.form.get("numero_hes", ""),
+        "sociedad": request.form.get("sociedad", ""),
+        "monto": request.form.get("monto", ""),
+    }
+    if issuer not in ISSUER_CHOICES:
+        flash("Elige primero la empresa (Harraso o BRMS) para facturar desde una imagen.", "error")
+        return redirect(url_for("facturacion.list_view"))
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("El nombre del cliente nuevo es obligatorio.", "error")
+        return redirect(url_for("facturacion.from_image_confirm", issuer=issuer, **carry))
+    client_id = execute(
+        "INSERT INTO clients (name, ruc, phone, email, address) VALUES (?, ?, ?, ?, ?)",
+        (
+            name,
+            request.form.get("ruc", "").strip(),
+            request.form.get("phone", "").strip(),
+            request.form.get("email", "").strip(),
+            request.form.get("address", "").strip(),
+        ),
+    )
+    flash(f"Cliente '{name}' creado — ya puedes facturarle.", "success")
+    return redirect(url_for("facturacion.from_image_confirm", issuer=issuer, client_id=client_id, **carry))
+
+
+@bp.route("/desde-imagen/crear", methods=["POST"])
+@permission_required("facturacion", "edit")
+def from_image_create():
+    """Crea la factura de verdad con lo confirmado en
+    facturacion/from_image_confirm.html: un único ítem manual (sin viaje)
+    con la descripción fija que pidió Braulio ("POR EL SERVICIO DE
+    TRANSPORTE DE CERVEZA Y ENVASES SEGUN OC ... HES ..."). Mismo patrón de
+    INSERT que new() más arriba, simplificado (un solo ítem, sin viajes):
+    detracción se calcula automático solo para Harraso (BRMS nunca aplica,
+    igual que en new()) y no se ofrece confirmarla manualmente acá -- si
+    hiciera falta, se ajusta después desde el detalle de la factura, igual
+    que cualquier otra."""
+    if not validate_csrf():
+        abort(400)
+    issuer = request.form.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        flash("Elige primero la empresa (Harraso o BRMS) para facturar desde una imagen.", "error")
+        return redirect(url_for("facturacion.list_view"))
+
+    client_id = request.form.get("client_id")
+    numero_oc = request.form.get("numero_oc", "").strip()
+    numero_hes = request.form.get("numero_hes", "").strip()
+    monto = parse_float(request.form.get("monto"), None)
+    issue_date = parse_date(request.form.get("issue_date")) or today_str()
+    due_date = parse_date(request.form.get("due_date"))
+    sociedad = request.form.get("sociedad", "")
+
+    def _back_to_confirm():
+        return redirect(
+            url_for(
+                "facturacion.from_image_confirm", issuer=issuer, client_id=client_id or "",
+                numero_oc=numero_oc, numero_hes=numero_hes, sociedad=sociedad,
+                monto=request.form.get("monto", ""),
+            )
+        )
+
+    if not client_id:
+        flash("Selecciona o crea el cliente antes de generar la factura.", "error")
+        return _back_to_confirm()
+    if not numero_oc or not numero_hes:
+        flash("Completa el número de OC y el número de HES.", "error")
+        return _back_to_confirm()
+    if not monto or monto <= 0:
+        flash("Ingresa un monto válido.", "error")
+        return _back_to_confirm()
+
+    description = f"POR EL SERVICIO DE TRANSPORTE DE CERVEZA Y ENVASES SEGUN OC {numero_oc} HES {numero_hes}"
+    company = company_info_for_issuer(issuer, current_app.config)
+    # Mismo cálculo automático de detracción que ya usa new() para
+    # facturas 100% de viajes (código 027, 4% sobre S/400) -- BRMS nunca
+    # aplica (ver company_info_for_issuer/comentario en new() más arriba).
+    detraction = (
+        compute_detraction(monto, company)
+        if issuer == "HARRASO"
+        else {"applies": False, "code": None, "percentage": None, "amount": None, "bank_account": None}
+    )
+
+    number = next_code("F", "invoices")
+    series = current_app.config["INVOICE_SERIES"]
+    series_number = _next_series_number(series)
+
+    db = get_db()
+    cur = db.execute(
+        """INSERT INTO invoices (number, client_id, issue_date, due_date, amount, notes, series, series_number, issuer,
+           detraction_applies, detraction_code, detraction_percentage, detraction_amount, detraction_bank_account)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            number, client_id, issue_date, due_date, monto, "", series, series_number, issuer,
+            1 if detraction["applies"] else 0,
+            detraction["code"], detraction["percentage"], detraction["amount"], detraction["bank_account"],
+        ),
+    )
+    invoice_id = cur.lastrowid
+    db.execute(
+        "INSERT INTO invoice_items (invoice_id, trip_id, description, amount, quantity) VALUES (?, NULL, ?, ?, 1)",
+        (invoice_id, description, monto),
+    )
+    db.commit()
+
+    client_row = query_one("SELECT name FROM clients WHERE id = ?", (client_id,))
+    log_activity(
+        "facturacion", "CREAR",
+        f"Factura {number} — {client_row['name'] if client_row else ''} — S/{monto:.2f} "
+        f"(desde imagen, OC {numero_oc} HES {numero_hes})",
+        entity_type="factura", entity_id=invoice_id,
+        entity_url=url_for("facturacion.detail", invoice_id=invoice_id),
+    )
+    if not due_date:
+        flash(
+            f"Factura {number} generada por {monto:.2f} — es a crédito, no olvides poner la fecha "
+            "de vencimiento desde el detalle antes de enviarla a SUNAT.",
+            "info",
+        )
+    else:
+        flash(f"Factura {number} generada por {monto:.2f}.", "success")
+    return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
 
 
 @bp.route("/nuevo", methods=["GET", "POST"])

@@ -1,0 +1,22 @@
+{% extends 'base.html' %}
+{% block title %}Facturar desde imagen{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Facturar desde imagen — {{ 'BRMS' if issuer == 'BRMS' else 'Harraso Transport' }}</h1></div>
+<p class="company-switch"><a href="{{ url_for('facturacion.list_view', issuer=issuer) }}">↺ Volver a Facturación</a></p>
+
+<div class="panel">
+  <p class="mt-0">Sube el screenshot del portal del cliente (la tabla "Listado entrega de mercancías/HES") y se leerán automáticamente el número de OC, el número de HES, el cliente ("Sociedad") y el importe — en la siguiente pantalla podrás revisar y corregir todo antes de crear la factura.</p>
+  <form method="post" action="{{ url_for('facturacion.from_image_extract') }}" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="issuer" value="{{ issuer }}">
+    <label>Screenshot (JPG, PNG, WEBP o GIF)
+      <input type="file" name="image" accept="image/jpeg,image/png,image/webp,image/gif" required>
+    </label>
+    <div class="btn-group" style="margin-top:12px;">
+      <button type="submit" class="btn btn-primary">Leer imagen y continuar</button>
+      <a href="{{ url_for('facturacion.new', issuer=issuer) }}" class="btn btn-secondary">Prefiero llenarla a mano</a>
+    </div>
+  </form>
+  <p class="muted" style="margin-top:12px; margin-bottom:0;">La factura se genera como a crédito — la fecha de vencimiento nunca se completa sola, la pones tú a mano en la siguiente pantalla.</p>
+</div>
+{% endblock %}

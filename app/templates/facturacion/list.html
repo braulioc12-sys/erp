@@ -8,6 +8,7 @@
   {% if issuer %}
   <div class="page-actions">
     <a href="{{ url_for('facturacion.new', issuer=issuer) }}" class="btn btn-primary">+ Generar factura</a>
+    <a href="{{ url_for('facturacion.from_image_upload', issuer=issuer) }}" class="btn btn-secondary">Facturar desde imagen</a>
   </div>
   {% endif %}
 </div>

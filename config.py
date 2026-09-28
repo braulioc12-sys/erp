@@ -239,3 +239,16 @@ class Config:
     # peticiones (nunca queda abierto sin querer). Ver n8n/README-n8n.md
     # para cómo configurarlo en el workflow.
     N8N_WEBHOOK_TOKEN = os.environ.get("N8N_WEBHOOK_TOKEN", "")
+
+    # 28 sep, pedido de Braulio ("quiero que yo subiendo una imagen crees
+    # la factura"): API key de Anthropic para leer con IA (con visión) el
+    # screenshot del portal del cliente (documento de compra/OC, HES,
+    # Sociedad, importe recepcionado) y precargar una factura de
+    # Facturación → "Facturar desde imagen" (ver
+    # app/integrations/ai_vision.py y app/routes/facturacion.py). A
+    # diferencia de la extracción de WhatsApp (que corre en n8n, ver
+    # N8N_WEBHOOK_TOKEN arriba), acá la llamada a la IA la hace el propio
+    # ERP -- necesita su PROPIA API key (console.anthropic.com), distinta
+    # de la que usa n8n. Vacía por defecto: mientras esté vacía, "Facturar
+    # desde imagen" avisa que falta configurarla en vez de fallar feo.
+    ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")

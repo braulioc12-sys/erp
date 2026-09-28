@@ -1,0 +1,110 @@
+{% extends 'base.html' %}
+{% block title %}Confirmar factura desde imagen{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Confirmar factura desde imagen — {{ 'BRMS' if issuer == 'BRMS' else 'Harraso Transport' }}</h1></div>
+<p class="company-switch"><a href="{{ url_for('facturacion.from_image_upload', issuer=issuer) }}">↺ Subir otra imagen</a></p>
+
+<div class="panel">
+  <p class="mt-0">Esto es lo que se leyó de la imagen — revisa y corrige lo que haga falta antes de generar la factura. Recuerda poner la fecha de vencimiento (es a crédito).</p>
+  <form method="post" action="{{ url_for('facturacion.from_image_create') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="issuer" value="{{ issuer }}">
+    <input type="hidden" name="sociedad" value="{{ sociedad }}">
+
+    <label>Cliente {% if not client_id %}<span class="muted">— no se encontró un cliente exacto para "{{ sociedad }}", elige uno o créalo abajo</span>{% endif %}
+      <select name="client_id" required>
+        <option value="">-- Selecciona un cliente --</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}" {{ 'selected' if client_id == c.id }}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <p class="mt-0" style="margin-bottom:0;">
+      <button type="button" class="btn btn-secondary" id="btn-toggle-new-client" style="font-size:0.9em;">+ Registrar cliente nuevo</button>
+    </p>
+
+    <div class="form-row">
+      <label>Número de OC (documento de compra)
+        <input type="text" name="numero_oc" value="{{ numero_oc }}" required>
+      </label>
+      <label>Número de HES
+        <input type="text" name="numero_hes" value="{{ numero_hes }}" required>
+      </label>
+    </div>
+    <p class="muted" style="margin-top:-8px;">La factura llevará un ítem con la descripción: "POR EL SERVICIO DE TRANSPORTE DE CERVEZA Y ENVASES SEGUN OC {{ numero_oc or '___' }} HES {{ numero_hes or '___' }}".</p>
+
+    <div class="form-row">
+      <label>Monto (S/, incluye IGV)
+        <input type="number" step="0.01" name="monto" value="{{ monto }}" required>
+      </label>
+      <label>Fecha de emisión
+        <input type="date" name="issue_date" value="{{ today }}">
+      </label>
+    </div>
+
+    <label>Fecha de vencimiento (a crédito — complétala tú)
+      <input type="date" name="due_date" value="">
+    </label>
+
+    <div class="btn-group" style="margin-top:12px;">
+      <button type="submit" class="btn btn-primary">Crear factura</button>
+      <a href="{{ url_for('facturacion.new', issuer=issuer, client_id=client_id) }}" class="btn btn-secondary">Prefiero llenarla a mano</a>
+    </div>
+  </form>
+
+  <!-- Mismo criterio que "+ Registrar cliente nuevo" en facturacion/form.html
+       (ver quick_new_client()) -- acá los datos ya leídos de la imagen viajan
+       como campos ocultos para no perderlos al crear el cliente (ver
+       from_image_new_client() en app/routes/facturacion.py). -->
+  <form method="post" action="{{ url_for('facturacion.from_image_new_client') }}" id="new-client-form" style="display:none; margin-top:12px; padding-top:12px; border-top:1px solid var(--border, #e2e5eb);">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="issuer" value="{{ issuer }}">
+    <input type="hidden" name="numero_oc" value="{{ numero_oc }}">
+    <input type="hidden" name="numero_hes" value="{{ numero_hes }}">
+    <input type="hidden" name="monto" value="{{ monto }}">
+    <input type="hidden" name="sociedad" value="{{ sociedad }}">
+    <div class="form-row">
+      <label>Nombre / Razón social *
+        <input type="text" name="name" value="{{ sociedad }}" required>
+      </label>
+      <label>RUC
+        <input type="text" name="ruc">
+      </label>
+    </div>
+    <div class="form-row">
+      <label>Dirección
+        <input type="text" name="address">
+      </label>
+      <label>Teléfono
+        <input type="text" name="phone">
+      </label>
+      <label>Correo
+        <input type="email" name="email">
+      </label>
+    </div>
+    <p class="muted mt-0">El RUC es obligatorio para poder enviarle una factura electrónica a SUNAT más adelante — puedes crearlo sin RUC ahora y completarlo después desde Clientes.</p>
+    <div class="btn-group">
+      <button type="submit" class="btn btn-primary">Crear cliente y continuar</button>
+      <button type="button" class="btn btn-secondary" id="btn-cancel-new-client">Cancelar</button>
+    </div>
+  </form>
+</div>
+
+<script>
+(function () {
+  var toggleBtn = document.getElementById('btn-toggle-new-client');
+  var cancelBtn = document.getElementById('btn-cancel-new-client');
+  var newClientForm = document.getElementById('new-client-form');
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', function () {
+      newClientForm.style.display = newClientForm.style.display === 'none' ? 'block' : 'none';
+    });
+  }
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', function () {
+      newClientForm.style.display = 'none';
+    });
+  }
+})();
+</script>
+{% endblock %}
