@@ -5,18 +5,79 @@
 <p class="company-switch"><a href="{{ url_for('facturacion.list_view', issuer=issuer) }}">↺ Volver a Facturación</a></p>
 
 <div class="panel">
-  <p class="mt-0">Sube el screenshot del portal del cliente (la tabla "Listado entrega de mercancías/HES") y se leerán automáticamente el número de OC, el número de HES, el cliente ("Sociedad") y el importe — en la siguiente pantalla podrás revisar y corregir todo antes de crear la factura.</p>
-  <form method="post" action="{{ url_for('facturacion.from_image_extract') }}" enctype="multipart/form-data">
+  <p class="mt-0">Pega el screenshot del portal del cliente (Ctrl+V, justo después de recortarlo con la herramienta de captura — sin necesidad de guardarlo como archivo) o, si prefieres, selecciona el archivo. Se leerán automáticamente el número de OC, el número de HES, el cliente ("Sociedad") y el importe — en la siguiente pantalla podrás revisar y corregir todo antes de crear la factura.</p>
+  <form method="post" action="{{ url_for('facturacion.from_image_extract') }}" enctype="multipart/form-data" id="from-image-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="issuer" value="{{ issuer }}">
-    <label>Screenshot (JPG, PNG, WEBP o GIF)
-      <input type="file" name="image" accept="image/jpeg,image/png,image/webp,image/gif" required>
-    </label>
+    <input type="file" name="image" id="image-input" accept="image/jpeg,image/png,image/webp,image/gif" required style="display:none;">
+
+    <div id="paste-zone" tabindex="0" style="border:2px dashed var(--border, #d0d5dd); border-radius:8px; padding:24px; text-align:center; cursor:pointer; outline:none;">
+      <div id="paste-zone-text">Haz clic acá y presiona Ctrl+V para pegar la captura — o haz clic para elegir un archivo.</div>
+      <img id="paste-preview" style="display:none; max-width:100%; max-height:280px; margin-top:12px; border-radius:4px;">
+    </div>
+
     <div class="btn-group" style="margin-top:12px;">
-      <button type="submit" class="btn btn-primary">Leer imagen y continuar</button>
+      <button type="submit" class="btn btn-primary" id="submit-btn" disabled>Leer imagen y continuar</button>
       <a href="{{ url_for('facturacion.new', issuer=issuer) }}" class="btn btn-secondary">Prefiero llenarla a mano</a>
     </div>
   </form>
   <p class="muted" style="margin-top:12px; margin-bottom:0;">La factura se genera como a crédito — la fecha de vencimiento nunca se completa sola, la pones tú a mano en la siguiente pantalla.</p>
 </div>
+
+<script>
+(function () {
+  var zone = document.getElementById('paste-zone');
+  var zoneText = document.getElementById('paste-zone-text');
+  var preview = document.getElementById('paste-preview');
+  var fileInput = document.getElementById('image-input');
+  var submitBtn = document.getElementById('submit-btn');
+
+  function showPreview(file) {
+    preview.src = URL.createObjectURL(file);
+    preview.style.display = 'block';
+    zoneText.textContent = 'Imagen lista — puedes pegar otra para reemplazarla, o dale "Leer imagen y continuar".';
+    submitBtn.disabled = false;
+  }
+
+  function useFileFromPaste(file) {
+    if (!file || file.type.indexOf('image/') !== 0) {
+      return;
+    }
+    try {
+      var dt = new DataTransfer();
+      dt.items.add(file);
+      fileInput.files = dt.files;
+    } catch (e) {
+      // Navegador viejo sin soporte de DataTransfer para esto -- el input
+      // de archivo sigue disponible como respaldo (clic en la zona).
+      return;
+    }
+    showPreview(file);
+  }
+
+  // Pegar en cualquier parte de la página (no solo con el foco en la zona)
+  // -- Ctrl+V funciona igual apenas se copió la captura con la herramienta
+  // de recorte de Windows/Mac, sin haberla guardado como archivo.
+  document.addEventListener('paste', function (e) {
+    var items = (e.clipboardData || window.clipboardData).items;
+    if (!items) return;
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image/') === 0) {
+        useFileFromPaste(items[i].getAsFile());
+        e.preventDefault();
+        break;
+      }
+    }
+  });
+
+  zone.addEventListener('click', function () {
+    fileInput.click();
+  });
+  fileInput.addEventListener('change', function () {
+    if (fileInput.files && fileInput.files[0]) {
+      showPreview(fileInput.files[0]);
+    }
+  });
+})();
+</script>
 {% endblock %}
