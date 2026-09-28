@@ -88,9 +88,19 @@ def _compress_image(raw_bytes):
 # en vez de inventar/adivinar un dato que no se ve con confianza en la
 # imagen (es un documento fiscal real, mejor un campo vacío para completar
 # a mano que un dato incorrecto).
+#
+# 28 sep, pedido de Braulio (compartió una captura con 3 filas -- "si subo
+# una imagen asi, y solo quiero facturar la del medio, como seria? Siempre
+# es solo una factura por pedido a la vez"): antes esto solo devolvía UN
+# objeto (la primera fila) -- ahora devuelve TODAS las filas visibles, y es
+# from_image_extract() (app/routes/facturacion.py) quien decide: con una
+# sola fila sigue yendo directo a la pantalla de confirmación (como
+# siempre), con varias filas primero muestra un selector para elegir CUÁL
+# fila facturar (nunca se combinan varias filas en una sola factura).
 _PROMPT = """Esta imagen es un screenshot del portal de un cliente, con una tabla de \
-"entrega de mercancías" o "HES" (hoja de entrada de servicio). Extrae EXACTAMENTE estos \
-4 datos de la tabla:
+"entrega de mercancías" o "HES" (hoja de entrada de servicio), donde cada FILA es un \
+pedido/entrega distinto que se factura por separado (nunca se combina más de una fila en \
+una sola factura). Extrae EXACTAMENTE estos 4 datos de CADA fila de la tabla:
 
 - numero_oc: el número que aparece en la columna "Documento de compra" (la orden de compra).
 - numero_hes: el número que aparece en la columna "Número HES".
@@ -101,20 +111,25 @@ como número plano SIN separador de miles y con punto decimal (ejemplo: si en la
 moneda (ej. "PEN"), no la incluyas en "monto", va aparte en "moneda".
 - moneda: el código de moneda si aparece junto al importe (ej. "PEN"), o null si no aparece.
 
-Si hay más de una fila en la tabla, usa la PRIMERA fila con datos.
+Responde ÚNICAMENTE con un objeto JSON de la forma {"filas": [...]}, donde "filas" es un \
+arreglo con UN elemento por cada fila de la tabla (en el mismo orden en que aparecen), y cada \
+elemento es un objeto con exactamente esas 5 claves (numero_oc, numero_hes, sociedad, monto, \
+moneda). Si la tabla solo tiene una fila, igual responde con el arreglo de un solo elemento. \
+No agrupes ni combines filas distintas en un solo elemento, aunque compartan la misma \
+"Sociedad". Sin texto antes ni después del JSON, sin bloque de código markdown. Si no puedes \
+leer algún dato con confianza, pon su valor en null -- nunca inventes ni adivines un número o \
+nombre que no se vea claro en la imagen."""
 
-Responde ÚNICAMENTE con un objeto JSON con exactamente estas 5 claves (numero_oc, numero_hes, \
-sociedad, monto, moneda), sin texto antes ni después, sin bloque de código markdown. Si no \
-puedes leer algún dato con confianza, pon su valor en null -- nunca inventes ni adivines un \
-número o nombre que no se vea claro en la imagen."""
 
-
-def extract_invoice_fields_from_image(raw_bytes, mime_type, api_key, timeout=45):
-    """Manda la imagen a Anthropic (Claude con visión) y devuelve un dict
-    {numero_oc, numero_hes, sociedad, monto, moneda} -- cualquier campo que
-    la IA no haya podido leer con confianza llega como None. Lanza
-    AiVisionError si falta la API key, si no se pudo contactar a Anthropic,
-    o si la respuesta no se pudo interpretar como el JSON esperado."""
+def extract_invoice_rows_from_image(raw_bytes, mime_type, api_key, timeout=45):
+    """Manda la imagen a Anthropic (Claude con visión) y devuelve una lista
+    de dicts {numero_oc, numero_hes, sociedad, monto, moneda} -- uno por
+    cada fila que la IA identificó en la tabla del screenshot (nunca vacía
+    si la respuesta fue válida: al menos un elemento). Cualquier campo que
+    la IA no haya podido leer con confianza llega como None dentro de su
+    fila. Lanza AiVisionError si falta la API key, si no se pudo contactar
+    a Anthropic, o si la respuesta no se pudo interpretar como el JSON
+    esperado."""
     if not api_key:
         raise AiVisionError(
             "La lectura automática de screenshots no está configurada todavía "
@@ -189,13 +204,26 @@ def extract_invoice_fields_from_image(raw_bytes, mime_type, api_key, timeout=45)
     except (json.JSONDecodeError, ValueError) as exc:
         raise AiVisionError(f"No se pudo interpretar el JSON devuelto por la IA: {exc} -- texto: {text[:500]}")
 
-    return {
-        "numero_oc": _clean_str(data.get("numero_oc")),
-        "numero_hes": _clean_str(data.get("numero_hes")),
-        "sociedad": _clean_str(data.get("sociedad")),
-        "monto": _clean_float(data.get("monto")),
-        "moneda": _clean_str(data.get("moneda")),
-    }
+    filas = data.get("filas") if isinstance(data, dict) else None
+    if not isinstance(filas, list) or not filas:
+        raise AiVisionError(f"La IA no devolvió ninguna fila reconocible en la imagen: {text[:500]}")
+
+    rows = []
+    for fila in filas:
+        if not isinstance(fila, dict):
+            continue
+        rows.append(
+            {
+                "numero_oc": _clean_str(fila.get("numero_oc")),
+                "numero_hes": _clean_str(fila.get("numero_hes")),
+                "sociedad": _clean_str(fila.get("sociedad")),
+                "monto": _clean_float(fila.get("monto")),
+                "moneda": _clean_str(fila.get("moneda")),
+            }
+        )
+    if not rows:
+        raise AiVisionError(f"La IA no devolvió ninguna fila reconocible en la imagen: {text[:500]}")
+    return rows
 
 
 def _clean_str(value):

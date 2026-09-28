@@ -31,7 +31,7 @@ from app.helpers import (
     parse_float,
     today_str,
 )
-from app.integrations.ai_vision import AiVisionError, extract_invoice_fields_from_image
+from app.integrations.ai_vision import AiVisionError, extract_invoice_rows_from_image
 from app.integrations.sunat_ose import (
     SunatOseError,
     build_client_from_config,
@@ -275,50 +275,75 @@ def from_image_extract():
         return redirect(url_for("facturacion.from_image_upload", issuer=issuer))
 
     try:
-        fields = extract_invoice_fields_from_image(
+        rows = extract_invoice_rows_from_image(
             raw_bytes, file_storage.mimetype, current_app.config.get("ANTHROPIC_API_KEY", "")
         )
     except AiVisionError as exc:
         flash(f"No se pudo leer la imagen: {exc}", "error")
         return redirect(url_for("facturacion.from_image_upload", issuer=issuer))
 
-    client_id = _match_client_by_name(fields["sociedad"])
-    return redirect(
-        url_for(
-            "facturacion.from_image_confirm",
-            issuer=issuer,
-            numero_oc=fields["numero_oc"] or "",
-            numero_hes=fields["numero_hes"] or "",
-            sociedad=fields["sociedad"] or "",
-            monto=fields["monto"] if fields["monto"] is not None else "",
-            client_id=client_id or "",
-        )
+    # 28 sep, pedido de Braulio (compartió una captura con 3 filas -- "si
+    # subo una imagen asi, y solo quiero facturar la del medio, como seria?
+    # Siempre es solo una factura por pedido a la vez, no se puede poner
+    # todos en una sola factura"): con una sola fila se sigue yendo directo
+    # a la confirmación (como antes); con varias, primero hay que elegir
+    # CUÁL -- nunca se combinan filas distintas en una sola factura.
+    if len(rows) == 1:
+        return redirect(_confirm_url(issuer, rows[0]))
+    return render_template("facturacion/from_image_pick_row.html", issuer=issuer, rows=rows)
+
+
+def _confirm_url(issuer, row):
+    return url_for(
+        "facturacion.from_image_confirm",
+        issuer=issuer,
+        numero_oc=row["numero_oc"] or "",
+        numero_hes=row["numero_hes"] or "",
+        sociedad=row["sociedad"] or "",
+        monto=row["monto"] if row["monto"] is not None else "",
     )
 
 
 @bp.route("/desde-imagen/confirmar")
 @permission_required("facturacion", "edit")
 def from_image_confirm():
-    """Pantalla de revisión: muestra lo que se extrajo de la imagen ya
-    precargado en un formulario editable -- el único dato que llega SIEMPRE
-    vacío es la fecha de vencimiento (pedido explícito de Braulio: "el
-    unico campo que debe quedar sin completar debe ser el de fecha de
-    vencimiento... y yo poner manualmente la fecha", ya que todas estas
-    facturas son a crédito). Nada se guarda en la base de datos hasta que
-    se confirme en from_image_create()."""
+    """Pantalla de revisión: muestra lo que se extrajo de la imagen (de la
+    fila elegida, si el screenshot tenía varias -- ver from_image_extract()
+    y from_image_pick_row.html) ya precargado en un formulario editable --
+    el único dato que llega SIEMPRE vacío es la fecha de vencimiento
+    (pedido explícito de Braulio: "el unico campo que debe quedar sin
+    completar debe ser el de fecha de vencimiento... y yo poner
+    manualmente la fecha", ya que todas estas facturas son a crédito).
+    Nada se guarda en la base de datos hasta que se confirme en
+    from_image_create().
+
+    El cliente se calza por nombre (ver _match_client_by_name()) siempre
+    acá, a partir de "sociedad" -- no antes, en from_image_extract() -- así
+    funciona igual sin importar de dónde se llegue: extracción directa (una
+    sola fila), el selector de filas, o el "volver" de
+    from_image_new_client() después de crear un cliente nuevo (que además
+    ya calza exacto, porque se creó con ese mismo nombre)."""
     issuer = request.args.get("issuer", "").strip().upper()
     if issuer not in ISSUER_CHOICES:
         flash("Elige primero la empresa (Harraso o BRMS) para facturar desde una imagen.", "error")
         return redirect(url_for("facturacion.list_view"))
     clients = query_all("SELECT * FROM clients WHERE active = 1 ORDER BY name")
+    sociedad = request.args.get("sociedad", "")
+    # Si se llega con un client_id explícito (volviendo de crear un cliente
+    # nuevo en from_image_new_client(), cuyo nombre pudo haberse editado en
+    # ese mini-formulario y ya no calzar con "sociedad" tal cual la leyó la
+    # IA), se respeta ESE cliente sin volver a adivinar por nombre.
+    client_id = request.args.get("client_id", type=int)
+    if client_id is None:
+        client_id = _match_client_by_name(sociedad)
     return render_template(
         "facturacion/from_image_confirm.html",
         issuer=issuer,
         clients=clients,
-        client_id=request.args.get("client_id", type=int),
+        client_id=client_id,
         numero_oc=request.args.get("numero_oc", ""),
         numero_hes=request.args.get("numero_hes", ""),
-        sociedad=request.args.get("sociedad", ""),
+        sociedad=sociedad,
         monto=request.args.get("monto", ""),
         today=today_str(),
     )

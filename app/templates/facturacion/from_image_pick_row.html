@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% block title %}Elegir fila a facturar{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Elegir qué facturar — {{ 'BRMS' if issuer == 'BRMS' else 'Harraso Transport' }}</h1></div>
+<p class="company-switch"><a href="{{ url_for('facturacion.from_image_upload', issuer=issuer) }}">↺ Subir otra imagen</a></p>
+
+<div class="panel">
+  <p class="mt-0">La imagen tiene {{ rows|length }} filas — elige cuál quieres facturar (siempre una factura por pedido/HES, nunca se combinan varias filas en una sola).</p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Número de OC</th>
+          <th>Número HES</th>
+          <th>Sociedad</th>
+          <th class="text-right">Monto</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.numero_oc or '—' }}</td>
+          <td>{{ row.numero_hes or '—' }}</td>
+          <td>{{ row.sociedad or '—' }}</td>
+          <td class="text-right">{{ '%.2f'|format(row.monto) if row.monto is not none else '—' }}{{ ' ' ~ row.moneda if row.moneda }}</td>
+          <td>
+            <a class="btn btn-primary btn-sm" href="{{ url_for('facturacion.from_image_confirm', issuer=issuer, numero_oc=row.numero_oc or '', numero_hes=row.numero_hes or '', sociedad=row.sociedad or '', monto=row.monto if row.monto is not none else '') }}">Facturar esta</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
