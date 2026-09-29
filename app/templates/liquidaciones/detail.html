@@ -3,8 +3,12 @@
 {% block title %}Liquidación — Viaje {{ advance.trip_code }}{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>Liquidación {{ advance.code + ' — ' if advance.code }}Viaje {{ advance.trip_code }} {{ m.badge(advance.status) }}</h1>
+  <h1>
+    Liquidación {{ advance.code + ' — ' if advance.code }}Viaje {{ advance.trip_code }}{% if return_trip %} + Vuelta {{ return_trip.code }}{% endif %}
+    {{ m.badge(advance.status) }}
+  </h1>
   <div class="page-actions">
+    <a href="{{ url_for('liquidaciones.print_view', advance_id=advance.id) }}" class="btn btn-secondary" target="_blank">🖨️ Imprimir / PDF</a>
     <a href="{{ url_for('viajes.detail', trip_id=advance.trip_id) }}" class="btn btn-secondary">← Volver al viaje</a>
   </div>
 </div>
@@ -23,9 +27,24 @@
     </div>
   </div>
   {% endif %}
+  {# 29 sep, pedido de Braulio: "en la liquidacion debe aparecer el viaje de
+     ida y vuelta, contando los anticipos y gastos efectuados de los 2" --
+     esta liquidación ya agrega los anticipos/gastos de ambos viajes (viven
+     los dos bajo advance.trip_id, la ida -- ver _liquidacion_anchor_trip_id
+     en app/routes/liquidaciones.py); esto solo hace visibles los dos viajes
+     enlazados. #}
+  <div class="detail-item">
+    <div class="label">Viaje{{ 's' if return_trip }}</div>
+    <div class="value">
+      <a href="{{ url_for('viajes.detail', trip_id=advance.trip_id) }}">Ida {{ advance.trip_code }}</a>
+      {% if return_trip %}
+      · <a href="{{ url_for('viajes.detail', trip_id=return_trip.id) }}">Vuelta {{ return_trip.code }}</a>
+      {% endif %}
+    </div>
+  </div>
   <div class="detail-item"><div class="label">Ruta</div><div class="value">{{ advance.origin }} → {{ advance.destination }}</div></div>
   <div class="detail-item"><div class="label">Total entregado ({{ payments|length }} anticipo{{ 's' if payments|length != 1 }})</div><div class="value">{{ advance.amount_given|money }}</div></div>
-  <div class="detail-item"><div class="label">Gastado hasta ahora (todos los gastos del viaje)</div><div class="value">{{ spent|money }}</div></div>
+  <div class="detail-item"><div class="label">Gastado hasta ahora ({{ 'todos los gastos de ida + vuelta' if return_trip else 'todos los gastos del viaje' }})</div><div class="value">{{ spent|money }}</div></div>
   <div class="detail-item">
     <div class="label">{{ 'Saldo a favor' if difference >= 0 else 'Exceso sobre lo entregado' }}</div>
     <div class="value" style="color:{{ 'var(--success)' if difference >= 0 else 'var(--danger)' }};">{{ (difference if difference >= 0 else -difference)|money }}</div>
@@ -106,7 +125,7 @@
    navegadores modernos) para asociarse a ese formulario sin estar dentro
    de él en el HTML. #}
 <div class="panel">
-  <h2>Gastos de este viaje</h2>
+  <h2>{{ 'Gastos de este viaje redondo (ida + vuelta)' if return_trip else 'Gastos de este viaje' }}</h2>
   {% set can_liquidate = advance.status == 'PENDIENTE' and can(current_user.roles, 'liquidaciones', 'edit') %}
   {% if advance.status == 'PENDIENTE' %}
   <p class="muted mt-0">Marca cuáles de estos gastos entran en la liquidación (por defecto se incluyen todos los que no estén ya en otra liquidación). Elige la oficina y presiona "Liquidar", al final de la hoja, para cerrarla — después ya no se puede editar.</p>
@@ -148,8 +167,14 @@
     </table>
   </div>
 
-  {% if can(current_user.roles, 'liquidaciones', 'edit') %}
+  {# 29 sep, pedido de Braulio: "una vez que la liquidacion este cerrada no
+     debe poder agregarse mas gastos" -- este link ya no se muestra cuando
+     la liquidación está LIQUIDADA (el servidor igual lo bloquea si alguien
+     entra por una URL vieja, ver new_expense() en app/routes/liquidaciones.py). #}
+  {% if advance.status == 'PENDIENTE' and can(current_user.roles, 'liquidaciones', 'edit') %}
   <p style="margin-top:16px;"><a href="{{ url_for('liquidaciones.new_expense', trip_id=advance.trip_id) }}" class="btn btn-primary" style="font-size:1rem; padding:14px 26px;">+ Registrar gasto para este viaje</a></p>
+  {% elif advance.status == 'LIQUIDADO' %}
+  <p class="muted" style="margin-top:16px;">Esta liquidación ya está cerrada — no se pueden agregar más gastos. {% if is_admin %}Puedes reabrirla más abajo si detectaste un error.{% endif %}</p>
   {% endif %}
 </div>
 
@@ -328,6 +353,19 @@
   <p class="mt-0" style="color:var(--success);">✓ Lista para enviarse a RRHH — aprobada el {{ advance.rrhh_approved_at }} por <strong>{{ advance.rrhh_approved_by_name }}</strong>.</p>
   {% else %}
   <p class="mt-0" style="color:var(--success);">✓ Sin exceso de combustible — lista para enviarse a RRHH.</p>
+  {% endif %}
+  {# 29 sep, pedido de Braulio: "habilitar la opcion de editar liquidacion
+     para poder editar errores quizas que se detectaron luego de cerrarla,
+     como anticipos o consumos de combustible" -- reabrir vuelve el estado a
+     PENDIENTE y desbloquea solos todos los formularios de edición de más
+     arriba (ver reopen() en app/routes/liquidaciones.py). Exclusivo de
+     Administrador; advertencia más fuerte si ya estaba aprobada para RRHH. #}
+  {% if is_admin %}
+  <form method="post" action="{{ url_for('liquidaciones.reopen', advance_id=advance.id) }}" style="margin-top:12px;"
+        onsubmit="return confirm('{{ '¡Esta liquidación ya fue aprobada para RRHH! ¿Reabrirla igual para corregir un error? Habrá que volver a aprobarla después.' if advance.rrhh_approved_at else '¿Reabrir esta liquidación para corregir un error (anticipos, gastos, combustible)? Habrá que volver a cerrarla después.' }}');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-secondary btn-sm">Reabrir liquidación</button>
+  </form>
   {% endif %}
 </div>
 {% endif %}

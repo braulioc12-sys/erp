@@ -16,6 +16,7 @@ import io
 import os
 import secrets
 import uuid
+from datetime import datetime
 
 from flask import Blueprint, Response, abort, current_app, flash, g, jsonify, redirect, render_template, request, send_from_directory, url_for
 from PIL import Image, ImageOps
@@ -41,6 +42,26 @@ from app.routes.viajes import ISSUER_CHOICES
 from app import storage
 
 bp = Blueprint("liquidaciones", __name__, url_prefix="/liquidaciones")
+
+
+def _liquidacion_anchor_trip_id(trip_id):
+    """29 sep, pedido de Braulio (ida/vuelta): "ambos igual estan siendo
+    amarrados a la misma liquidacion de ida" -- la liquidación (anticipo +
+    gastos) de un viaje redondo vive siempre en el trip_id de la IDA (ver
+    el comentario largo en viajes.detail(), liquidacion_trip_id). Esto
+    normaliza cualquier trip_id que llegue (por ejemplo el de una vuelta,
+    si se entra directo por la URL) al id que realmente hay que usar."""
+    trip = query_one("SELECT id, return_of_trip_id FROM trips WHERE id = ?", (trip_id,))
+    if trip is None:
+        return trip_id
+    return trip["return_of_trip_id"] or trip["id"]
+
+
+def _paired_trip(ida_trip_id):
+    """El viaje de vuelta de esta ida, si ya se creó (ver return_of_trip_id
+    en schema.sql) -- para mostrar "Viaje H-0032 + Vuelta H-0033" en el
+    detalle/impresión de una liquidación compartida."""
+    return query_one("SELECT id, code FROM trips WHERE return_of_trip_id = ?", (ida_trip_id,))
 
 ALLOWED_RECEIPT_EXTENSIONS = {".png", ".jpg", ".jpeg", ".pdf", ".webp", ".heic", ".heif"}
 
@@ -570,15 +591,61 @@ def detail(advance_id):
     # cuándo se registró esta liquidación (anticipo), según activity_log —
     # ver app/audit.py. None para liquidaciones de antes de este registro.
     creator = get_creator_info("anticipo", advance_id)
+    # 29 sep, pedido de Braulio: "en la liquidacion debe aparecer el viaje de
+    # ida y vuelta" -- advance.trip_id siempre apunta a la ida (ver
+    # _liquidacion_anchor_trip_id), así que el viaje de vuelta, si ya se
+    # creó, es el que tiene return_of_trip_id = advance.trip_id.
+    return_trip = _paired_trip(advance["trip_id"])
     return render_template(
         "liquidaciones/detail.html", advance=advance, expenses=expenses, spent=spent, difference=difference,
         payments=payments, offices=offices, office_labels={code: info["label"] for code, info in offices},
         route=route, today=today_str(), is_admin=("ADMIN" in g.user["roles"]),
-        fuel_rows=_fuel_rows(advance), creator=creator,
+        fuel_rows=_fuel_rows(advance), creator=creator, return_trip=return_trip,
         # 10 sep, 3ra ronda, pedido de Braulio: grifos registrados en el
         # catálogo, para elegir uno al agregar combustible acá — ver
         # app/routes/catalogos.py.
         fuel_stations=query_all("SELECT * FROM fuel_stations WHERE active = 1 ORDER BY city, business_name"),
+    )
+
+
+@bp.route("/<int:advance_id>/imprimir")
+@permission_required("liquidaciones", "view")
+def print_view(advance_id):
+    """29 sep, pedido de Braulio ("debe haber la opcion de poder imprimirla
+    para verla en pdf"): página independiente para imprimir/guardar como
+    PDF desde el propio diálogo de impresión del navegador — mismo patrón
+    que inspecciones/print.html y cotizaciones/pdf.html, sin depender de
+    ninguna librería de generación de PDF en el servidor."""
+    advance = query_one(
+        """SELECT a.*, t.code as trip_code, t.origin, t.destination, t.status as trip_status,
+                  t.issuer as trip_issuer, d.name as driver_name, d2.name as driver2_name,
+                  v.plate as vehicle_plate
+           FROM expense_advances a
+           JOIN trips t ON t.id = a.trip_id
+           LEFT JOIN drivers d ON d.id = t.driver_id
+           LEFT JOIN drivers d2 ON d2.id = t.driver2_id
+           LEFT JOIN vehicles v ON v.id = t.vehicle_id
+           WHERE a.id = ?""",
+        (advance_id,),
+    )
+    if advance is None:
+        abort(404)
+    expenses = query_all(
+        "SELECT * FROM expenses WHERE trip_id = ? ORDER BY expense_date", (advance["trip_id"],)
+    )
+    payments = query_all(
+        "SELECT * FROM advance_payments WHERE advance_id = ? ORDER BY payment_date, id", (advance_id,)
+    )
+    spent = sum(e["amount"] for e in expenses)
+    difference = advance["amount_given"] - spent
+    offices = office_choices()
+    office_labels = {code: info["label"] for code, info in offices}
+    return_trip = _paired_trip(advance["trip_id"])
+    generated_at = datetime.now().strftime("%d/%m/%Y %H:%M")
+    return render_template(
+        "liquidaciones/print.html", advance=advance, expenses=expenses, spent=spent, difference=difference,
+        payments=payments, office_labels=office_labels, fuel_rows=_fuel_rows(advance),
+        return_trip=return_trip, generated_at=generated_at,
     )
 
 
@@ -823,6 +890,61 @@ def rrhh_approve(advance_id):
     return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
 
 
+@bp.route("/<int:advance_id>/reabrir", methods=["POST"])
+@permission_required("liquidaciones", "edit")
+def reopen(advance_id):
+    """29 sep, pedido de Braulio: "hay que habilitar la opcion de editar
+    liquidacion para poder editar errores quizas que se detectaron luego de
+    cerrarla, como anticipos o consumos de combustible" -- en vez de armar
+    un modo de edición aparte, esto simplemente regresa el estado a
+    PENDIENTE (y limpia los datos del cierre): casi todos los formularios de
+    edición del detalle (anticipos, gastos, combustible) ya están escritos
+    para desbloquearse solos con status == 'PENDIENTE', así que reabrir deja
+    editar todo eso "gratis" sin duplicar esa lógica.
+
+    Exclusivo de Administrador (mismo criterio/chequeo por ROL que
+    rrhh_approve(), no solo el permiso "edit" del módulo, que también tiene
+    Contabilidad): reabrir una liquidación ya cerrada -- y potencialmente ya
+    aprobada para RRHH o ya aparecida en el resumen contable de un mes -- es
+    una operación sensible que no debería quedar disponible para cualquiera
+    con acceso de edición al módulo."""
+    if not validate_csrf():
+        abort(400)
+    if "ADMIN" not in g.user["roles"]:
+        flash("Solo un Administrador puede reabrir una liquidación ya cerrada.", "error")
+        return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
+    advance = query_one("SELECT * FROM expense_advances WHERE id = ?", (advance_id,))
+    if advance is None:
+        abort(404)
+    if advance["status"] != "LIQUIDADO":
+        flash("Esta liquidación ya está abierta.", "error")
+        return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
+
+    was_rrhh_approved = bool(advance["rrhh_approved_at"])
+    execute(
+        """UPDATE expense_advances
+           SET status = 'PENDIENTE', liquidated_at = NULL, liquidated_expenses_total = NULL,
+               office = NULL, voucher_number = NULL, rrhh_approved_at = NULL,
+               rrhh_approved_by_name = NULL, rrhh_approved_by_user_id = NULL, fuel_adjustment = NULL
+           WHERE id = ?""",
+        (advance_id,),
+    )
+    # 22 sep, registro de actividad: reapertura de una liquidación cerrada.
+    log_activity(
+        "liquidaciones", "ESTADO",
+        f"Liquidación {advance['code']} reabierta para corregir errores"
+        + (" (ya estaba aprobada para RRHH)" if was_rrhh_approved else ""),
+        entity_type="anticipo", entity_id=advance_id,
+        entity_url=url_for("liquidaciones.detail", advance_id=advance_id),
+    )
+    flash(
+        "Liquidación reabierta — ya se puede editar (anticipos, gastos, combustible). "
+        "Recuerda volver a cerrarla cuando termines de corregir.",
+        "success",
+    )
+    return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
+
+
 # --- Gastos individuales de un viaje (o de una unidad, sin viaje) ---
 
 def _expense_concepts(only_active=True, exclude_vale=False):
@@ -967,7 +1089,27 @@ def _resolve_fuel_station(concept):
 @bp.route("/gastos/nuevo", methods=["GET", "POST"])
 @permission_required("liquidaciones", "edit")
 def new_expense():
-    ctx = _expense_form_context(preselected_trip=request.args.get("trip_id", type=int))
+    raw_preselected = request.args.get("trip_id", type=int)
+    preselected_trip = _liquidacion_anchor_trip_id(raw_preselected) if raw_preselected else None
+    # 29 sep, pedido de Braulio: "una vez que la liquidacion este cerrada no
+    # debe poder agregarse mas gastos" -- si el viaje (ya anclado a la ida)
+    # ya tiene su liquidación LIQUIDADA, ni se deja entrar al formulario por
+    # este link (el POST de abajo repite el mismo chequeo por si el campo
+    # oculto trip_id llega igual con el form ya abierto).
+    if preselected_trip:
+        closed_advance = query_one(
+            "SELECT id FROM expense_advances WHERE trip_id = ? AND status = 'LIQUIDADO'",
+            (preselected_trip,),
+        )
+        if closed_advance:
+            flash(
+                "Esta liquidación ya está cerrada — no se pueden agregar más gastos. "
+                "Si detectaste un error, reábrela primero desde su detalle.",
+                "error",
+            )
+            return redirect(url_for("liquidaciones.detail", advance_id=closed_advance["id"]))
+
+    ctx = _expense_form_context(preselected_trip=preselected_trip)
 
     if request.method == "POST":
         if not validate_csrf():
@@ -992,9 +1134,23 @@ def new_expense():
         # el id de una vuelta por cualquier otro camino (ej. el
         # desplegable de viajes del formulario general de Liquidaciones).
         if trip_id:
-            trip_for_anchor = query_one("SELECT return_of_trip_id FROM trips WHERE id = ?", (trip_id,))
-            if trip_for_anchor and trip_for_anchor["return_of_trip_id"]:
-                trip_id = trip_for_anchor["return_of_trip_id"]
+            trip_id = _liquidacion_anchor_trip_id(int(trip_id))
+        # 29 sep, pedido de Braulio: bloquear si la liquidación de ese viaje
+        # (ya anclada a la ida) ya está cerrada -- el GET de arriba ya evita
+        # llegar acá con el link normal, esto cubre un form ya abierto
+        # cuando alguien más cerró la liquidación, o una URL armada a mano.
+        if trip_id:
+            closed_advance = query_one(
+                "SELECT id FROM expense_advances WHERE trip_id = ? AND status = 'LIQUIDADO'",
+                (trip_id,),
+            )
+            if closed_advance:
+                flash(
+                    "Esta liquidación ya está cerrada — no se pueden agregar más gastos. "
+                    "Si detectaste un error, reábrela primero desde su detalle.",
+                    "error",
+                )
+                return redirect(url_for("liquidaciones.detail", advance_id=closed_advance["id"]))
         vehicle_id = request.form.get("vehicle_id") or None
         # Tipo de comprobante (10 sep, pedido de Braulio): se pide ANTES del
         # concepto en el formulario. "factura" fuerza la cuenta/documento del

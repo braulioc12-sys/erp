@@ -346,11 +346,16 @@
       </tbody>
     </table>
   </div>
-  {% if can(current_user.roles, 'liquidaciones', 'edit') %}
   {# 29 sep, ida/vuelta: liquidacion_trip_id siempre ancla al viaje de ida,
      así el gasto se suma a la misma liquidación sin importar desde cuál
-     de las 2 pantallas se registre. #}
+     de las 2 pantallas se registre. 29 sep, pedido de Braulio: "una vez que
+     la liquidacion este cerrada no debe poder agregarse mas gastos" -- si
+     ya hay una liquidación y está LIQUIDADA, no se muestra el link acá
+     tampoco (el servidor bloquea igual si se entra por una URL vieja). #}
+  {% if can(current_user.roles, 'liquidaciones', 'edit') and (not advance or advance.status != 'LIQUIDADO') %}
   <p style="margin-top:12px;"><a href="{{ url_for('liquidaciones.new_expense', trip_id=liquidacion_trip_id) }}" class="btn btn-secondary btn-sm">+ Registrar gasto para este viaje</a></p>
+  {% elif advance and advance.status == 'LIQUIDADO' %}
+  <p class="muted" style="margin-top:12px;">La liquidación de este viaje ya está cerrada — no se pueden agregar más gastos.</p>
   {% endif %}
 </div>
 {% endif %}

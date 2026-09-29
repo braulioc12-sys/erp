@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Liquidación {{ advance.code + ' — ' if advance.code }}Viaje {{ advance.trip_code }}</title>
+  <style>
+    :root {
+      --primary: #1d4ed8;
+      --text: #1c2430;
+      --text-muted: #667085;
+      --border: #d0d5dd;
+      --soft: #e8edfc;
+      --success: #0f9d58;
+      --danger: #c0392b;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text); font-size: 13px; line-height: 1.5;
+      max-width: 820px; margin: 0 auto; padding: 28px 32px;
+    }
+
+    .print-toolbar { text-align: right; margin-bottom: 18px; }
+    .print-toolbar button {
+      background: var(--primary); color: #fff; border: none; border-radius: 8px;
+      padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer;
+    }
+    .print-toolbar button:hover { background: #1737a6; }
+    .print-toolbar .hint { display: block; margin-top: 6px; font-size: 12px; color: var(--text-muted); }
+
+    .doc-header {
+      display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 3px solid var(--primary); padding-bottom: 14px; margin-bottom: 18px;
+    }
+    .doc-header img { max-height: 56px; display: block; }
+    .doc-header .logos { display: flex; align-items: center; gap: 14px; }
+    .doc-header .title { text-align: right; }
+    .doc-header .title h1 { margin: 0; font-size: 19px; color: var(--primary); }
+    .doc-header .title .sub { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+
+    .meta-grid {
+      display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 24px;
+      margin-bottom: 20px;
+    }
+    .meta-item .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); }
+    .meta-item .value { font-size: 14px; font-weight: 600; }
+
+    h2 { font-size: 15px; color: var(--primary); margin: 22px 0 10px 0; }
+
+    table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+    th, td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; font-size: 12.5px; }
+    th { background: var(--soft); color: var(--primary); font-weight: 600; }
+    tr:nth-child(even) td { background: #fafbfc; }
+    .text-right { text-align: right; }
+
+    .totals-box {
+      display: flex; justify-content: flex-end; gap: 28px; margin: 10px 0 8px 0;
+      font-size: 13px;
+    }
+    .totals-box .item { text-align: right; }
+    .totals-box .item .label { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
+    .totals-box .item .value { font-weight: 700; font-size: 15px; }
+
+    .notes-box { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin: 8px 0 22px 0; font-size: 12.5px; }
+    .status-box { border-radius: 8px; padding: 10px 14px; margin: 8px 0 22px 0; font-size: 12.5px; border: 1px solid var(--border); }
+
+    .signatures { display: grid; grid-template-columns: repeat(2, 1fr); gap: 40px; margin-top: 50px; }
+    .signature-line { border-top: 1px solid var(--text); padding-top: 6px; text-align: center; font-size: 12px; color: var(--text-muted); }
+
+    .doc-footer { margin-top: 30px; font-size: 10.5px; color: var(--text-muted); text-align: center; border-top: 1px solid var(--border); padding-top: 10px; }
+
+    @media print {
+      .print-toolbar { display: none; }
+      body { padding: 0; max-width: none; }
+      @page { margin: 16mm 14mm; }
+    }
+  </style>
+</head>
+<body>
+  <div class="print-toolbar">
+    <button onclick="window.print()">🖨️ Imprimir / Guardar como PDF</button>
+    <span class="hint">En el diálogo de impresión, elige "Guardar como PDF" como destino/impresora.</span>
+  </div>
+
+  <div class="doc-header">
+    <div class="logos">
+      <img src="{{ url_for('static', filename='img/logo-lockup.png') }}" alt="{{ company_name }}">
+      {% if advance.trip_issuer == 'BRMS' %}
+      <img src="{{ url_for('static', filename='img/logo-brms.png') }}" alt="BRMS">
+      {% endif %}
+    </div>
+    <div class="title">
+      <h1>Liquidación de Viaje</h1>
+      <div class="sub">{{ company_name }} · Generado el {{ generated_at }}</div>
+    </div>
+  </div>
+
+  <div class="meta-grid">
+    <div class="meta-item"><div class="label">Liquidación</div><div class="value">{{ advance.code or '—' }} {{ 'PENDIENTE' if advance.status == 'PENDIENTE' else 'LIQUIDADO' }}</div></div>
+    <div class="meta-item">
+      <div class="label">Viaje{{ 's' if return_trip }}</div>
+      <div class="value">Ida {{ advance.trip_code }}{% if return_trip %} + Vuelta {{ return_trip.code }}{% endif %}</div>
+    </div>
+    <div class="meta-item"><div class="label">Ruta</div><div class="value">{{ advance.origin }} → {{ advance.destination }}</div></div>
+    <div class="meta-item"><div class="label">Unidad</div><div class="value">{{ advance.vehicle_plate or '—' }}</div></div>
+    <div class="meta-item"><div class="label">Conductor(es)</div><div class="value">{{ advance.driver_name or '—' }}{% if advance.driver2_name %} / {{ advance.driver2_name }}{% endif %}</div></div>
+    <div class="meta-item"><div class="label">Fecha de anticipo</div><div class="value">{{ advance.given_date or '—' }}</div></div>
+    {% if advance.status == 'LIQUIDADO' %}
+    <div class="meta-item"><div class="label">Cerrada el</div><div class="value">{{ advance.liquidated_at }}</div></div>
+    <div class="meta-item">
+      <div class="label">Oficina / Voucher</div>
+      <div class="value">{{ office_labels.get(advance.office, advance.office or '—') }} · {{ '%02d'|format(advance.voucher_number) if advance.voucher_number else '—' }}</div>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if return_trip %}
+  <div class="notes-box">Esta liquidación reúne los anticipos y gastos del viaje redondo completo: ida {{ advance.trip_code }} y vuelta {{ return_trip.code }}.</div>
+  {% endif %}
+
+  <h2>Anticipos entregados</h2>
+  <table>
+    <thead><tr><th>Fecha</th><th class="text-right">Monto</th><th>Notas</th></tr></thead>
+    <tbody>
+      {% for p in payments %}
+      <tr>
+        <td>{{ p.payment_date }}</td>
+        <td class="text-right">{{ p.amount|money }}</td>
+        <td>{{ p.notes or '—' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3">Sin anticipos registrados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Gastos</h2>
+  <table>
+    <thead><tr><th>Fecha</th><th>Concepto</th><th>Descripción</th><th class="text-right">Monto</th><th>Incluido</th></tr></thead>
+    <tbody>
+      {% for e in expenses %}
+      <tr>
+        <td>{{ e.expense_date }}</td>
+        <td>{{ e.type|pretty }}</td>
+        <td>{{ e.description or '—' }}</td>
+        <td class="text-right">{{ e.amount|money }}</td>
+        <td>{{ '✓' if e.expense_advance_id == advance.id else '—' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5">Sin gastos registrados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if fuel_rows %}
+  <h2>Consumo de combustible</h2>
+  <table>
+    <thead>
+      <tr><th>Ciudad</th><th>Grifo</th><th>N° vale/factura</th><th class="text-right">Galones</th><th class="text-right">P. Unit.</th><th class="text-right">P. Total</th></tr>
+    </thead>
+    <tbody>
+      {% for row in fuel_rows %}
+      <tr>
+        <td>{{ row.city or '—' }}</td>
+        <td>{{ row.station_name or '—' }}</td>
+        <td>{{ row.document_number or '—' }}</td>
+        <td class="text-right">{{ '%.2f'|format(row.gallons) if row.gallons else '—' }}</td>
+        <td class="text-right">{{ row.unit_price|money if row.unit_price is not none else '—' }}</td>
+        <td class="text-right">{{ row.total|money if row.total is not none else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="meta-grid" style="margin-bottom:8px;">
+    <div class="meta-item"><div class="label">Combustible físico</div><div class="value">{{ '%.2f gal'|format(advance.fuel_actual) if advance.fuel_actual is not none else '—' }}</div></div>
+    <div class="meta-item"><div class="label">Exceso</div><div class="value">{{ '%.2f gal'|format(advance.fuel_excess) if advance.fuel_excess is not none else '—' }}</div></div>
+  </div>
+  {% endif %}
+
+  <div class="totals-box">
+    <div class="item"><div class="label">Total entregado</div><div class="value">{{ advance.amount_given|money }}</div></div>
+    <div class="item"><div class="label">Total gastado</div><div class="value">{{ spent|money }}</div></div>
+    <div class="item">
+      <div class="label">{{ 'Saldo a favor' if difference >= 0 else 'Exceso sobre lo entregado' }}</div>
+      <div class="value" style="color:{{ 'var(--success)' if difference >= 0 else 'var(--danger)' }};">{{ (difference if difference >= 0 else -difference)|money }}</div>
+    </div>
+  </div>
+
+  {% if advance.notes %}
+  <h2>Notas del anticipo</h2>
+  <div class="notes-box">{{ advance.notes }}</div>
+  {% endif %}
+
+  {% if advance.status == 'LIQUIDADO' %}
+  <div class="status-box">
+    {% if advance.rrhh_approved_at %}
+    <span style="color:var(--success); font-weight:600;">✓ Aprobada para RRHH el {{ advance.rrhh_approved_at }} por {{ advance.rrhh_approved_by_name }}.</span>
+    {% else %}
+    <span>Pendiente de aprobación para RRHH.</span>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div class="signatures">
+    <div class="signature-line">Firma del conductor</div>
+    <div class="signature-line">Firma del responsable / supervisor</div>
+  </div>
+
+  <div class="doc-footer">{{ company_name }} — Documento generado automáticamente por el sistema el {{ generated_at }}</div>
+</body>
+</html>
