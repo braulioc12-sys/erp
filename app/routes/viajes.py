@@ -413,6 +413,16 @@ def _selected_route_id_for_edit(trip):
     return str(route["id"]) if route else "__current__"
 
 
+def _return_trip_of(trip_id):
+    """29 sep, pedido de Braulio ("los viajes de ambas empresas contienen un
+    ida y vuelta... debemos tener 2 pantallas"): el viaje de vuelta de un
+    viaje de ida dado, si ya se creó -- ver return_of_trip_id en
+    schema.sql y new_return_trip() más abajo."""
+    return query_one(
+        "SELECT id, code, status FROM trips WHERE return_of_trip_id = ?", (trip_id,)
+    )
+
+
 def _ownership_and_third_party_fields(form):
     """Resuelve, a partir del formulario, los campos de unidad propia vs.
     tercero (3 sep, pedido de Braulio). Devuelve un dict listo para pasar
@@ -735,6 +745,174 @@ def edit(trip_id):
     )
 
 
+@bp.route("/<int:trip_id>/vuelta/nuevo", methods=["GET", "POST"])
+@permission_required("viajes", "edit")
+def new_return_trip(trip_id):
+    """29 sep, pedido de Braulio ("Los viajes de ambas empresas continenen
+    un ida y vuelta... debemos tener 2 pantallas"): crea el viaje de VUELTA
+    como un viaje de la tabla trips más -- su propio código, factura,
+    comisión, GPS, inspecciones, guías, conformidad de entrega, etc. -- en
+    vez de duplicar todos esos campos en el mismo registro de la ida (ver
+    el comentario largo junto a return_of_trip_id en schema.sql). Cliente,
+    tipo de carga, conductor(es) y unidad/tercero se precargan iguales a
+    los del viaje de ida pero quedan editables (pedido explícito de
+    Braulio); origen/destino se intercambian respecto a la ida y se intenta
+    preseleccionar la ruta inversa del catálogo si existe. Tarifa y
+    comisión NO se precargan -- la vuelta se factura y comisiona aparte,
+    como cualquier viaje nuevo (se sugieren según la ruta elegida)."""
+    outbound = query_one("SELECT * FROM trips WHERE id = ?", (trip_id,))
+    if outbound is None:
+        abort(404)
+    if outbound["return_of_trip_id"]:
+        flash("Este viaje ya es una vuelta -- no se puede crear una vuelta de una vuelta.", "error")
+        return redirect(url_for("viajes.detail", trip_id=trip_id))
+    existing_return = _return_trip_of(trip_id)
+    if existing_return:
+        flash(f"Este viaje ya tiene un viaje de vuelta: {existing_return['code']}.", "info")
+        return redirect(url_for("viajes.detail", trip_id=existing_return["id"]))
+
+    clients = query_all("SELECT * FROM clients WHERE active = 1 ORDER BY name")
+    vehicles = _active_vehicles(outbound["vehicle_id"])
+    trailers = _active_trailers(outbound["trailer_vehicle_id"])
+    drivers = query_all(
+        "SELECT * FROM drivers WHERE status = 'ACTIVO' OR id = ? OR id = ? ORDER BY name",
+        (outbound["driver_id"], outbound["driver2_id"]),
+    )
+    routes = _active_routes()
+    # Ruta preseleccionada: la inversa de la ida (destino → origen), si ya
+    # está en el catálogo activo -- si no, el despachador debe elegir una
+    # (igual que cualquier viaje nuevo, ver _resolve_route_selection()).
+    reverse_route = find_route(outbound["destination"], outbound["origin"])
+    default_route_id = str(reverse_route["id"]) if reverse_route else ""
+
+    if request.method == "POST":
+        if not validate_csrf():
+            abort(400)
+        client_id = request.form.get("client_id")
+        origin, destination, route, route_error = _resolve_route_selection(request.form)
+        scheduled_date = parse_date(request.form.get("scheduled_date"))
+        double_driver = bool(request.form.get("double_driver"))
+        single_leg = bool(request.form.get("single_leg"))
+        driver_id = request.form.get("driver_id") or None
+        driver2_id = (request.form.get("driver2_id") or None) if double_driver else None
+        issuer = outbound["issuer"]  # heredado de la ida, no editable -- ver viajes/form.html modo "vuelta"
+        cargo_type = _parse_cargo_type(request.form)
+        if cargo_type == "CONTENEDOR":
+            container_code = _parse_container_code(request.form)
+            container_photo_filename = _save_container_photo_file(request.files.get("container_photo"))
+        else:
+            container_code = None
+            container_photo_filename = None
+        ownership_fields, ownership_errors = _ownership_and_third_party_fields(request.form)
+        errors = list(ownership_errors)
+        if not client_id:
+            errors.append("Selecciona un cliente.")
+        if route_error:
+            errors.append(route_error)
+        if not scheduled_date:
+            errors.append("La fecha de salida no es válida.")
+        if not cargo_type:
+            errors.append("Selecciona el tipo de carga.")
+        if double_driver:
+            if not driver2_id:
+                errors.append("Selecciona el segundo conductor (viaje de doble conductor).")
+            elif driver_id and driver2_id == driver_id:
+                errors.append("El segundo conductor debe ser distinto del primero.")
+
+        if errors:
+            for e in errors:
+                flash(e, "error")
+            return render_template(
+                "viajes/form.html", trip=request.form, mode="vuelta", outbound_trip=outbound,
+                clients=clients, vehicles=vehicles, trailers=trailers, drivers=drivers, routes=routes,
+                selected_route_id=request.form.get("route_id", ""),
+                cargo_types=CARGO_TYPES, payment_terms=PAYMENT_TERMS,
+                open_maintenance_vehicle_ids=_vehicles_with_open_maintenance_orders(),
+            )
+
+        code = _next_trip_code(issuer)
+        driver_commission = _resolve_commission(
+            request.form, origin, destination, route,
+            double_driver=double_driver, single_leg=single_leg,
+        )
+        new_trip_id = execute(
+            """INSERT INTO trips (code, client_id, vehicle_id, trailer_vehicle_id, driver_id, driver2_id,
+               return_of_trip_id, origin, destination, cargo_description, cargo_weight_kg, cargo_type,
+               container_code, container_photo_filename, scheduled_date, rate,
+               driver_commission, double_driver, single_leg, notes, issuer, ownership,
+               third_party_name, third_party_unit, third_party_rate, third_party_payment_term, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                code,
+                client_id,
+                ownership_fields["vehicle_id"],
+                ownership_fields["trailer_vehicle_id"],
+                driver_id,
+                driver2_id,
+                trip_id,
+                origin,
+                destination,
+                request.form.get("cargo_description", "").strip(),
+                parse_float(request.form.get("cargo_weight_kg"), None),
+                cargo_type,
+                container_code,
+                container_photo_filename,
+                scheduled_date,
+                parse_float(request.form.get("rate")),
+                driver_commission,
+                int(double_driver),
+                int(single_leg),
+                request.form.get("notes", "").strip(),
+                issuer,
+                ownership_fields["ownership"],
+                ownership_fields["third_party_name"],
+                ownership_fields["third_party_unit"],
+                ownership_fields["third_party_rate"],
+                ownership_fields["third_party_payment_term"],
+                None,
+            ),
+        )
+        log_activity(
+            "viajes", "CREAR", f"Viaje {code} ({origin} → {destination}) — vuelta de {outbound['code']}",
+            entity_type="viaje", entity_id=new_trip_id,
+            entity_url=url_for("viajes.detail", trip_id=new_trip_id),
+        )
+        flash(f"Viaje de vuelta {code} creado.", "success")
+        for w in (
+            _vehicle_open_orders_warning(ownership_fields["vehicle_id"]),
+            _vehicle_open_orders_warning(ownership_fields["trailer_vehicle_id"]),
+        ):
+            if w:
+                flash(w, "info")
+        return redirect(url_for("viajes.detail", trip_id=new_trip_id))
+
+    prefill = {
+        "client_id": outbound["client_id"],
+        "issuer": outbound["issuer"],
+        "ownership": outbound["ownership"],
+        "vehicle_id": outbound["vehicle_id"],
+        "trailer_vehicle_id": outbound["trailer_vehicle_id"],
+        "driver_id": outbound["driver_id"],
+        "driver2_id": outbound["driver2_id"],
+        "double_driver": outbound["double_driver"],
+        "single_leg": outbound["single_leg"],
+        "cargo_type": outbound["cargo_type"],
+        "container_code": outbound["container_code"],
+        "third_party_name": outbound["third_party_name"],
+        "third_party_unit": outbound["third_party_unit"],
+        "third_party_rate": outbound["third_party_rate"],
+        "third_party_payment_term": outbound["third_party_payment_term"],
+        "scheduled_date": today_str(),
+        "rate": 0,
+    }
+    return render_template(
+        "viajes/form.html", trip=prefill, mode="vuelta", outbound_trip=outbound,
+        clients=clients, vehicles=vehicles, trailers=trailers, drivers=drivers, routes=routes, today=today_str(),
+        selected_route_id=default_route_id, cargo_types=CARGO_TYPES, payment_terms=PAYMENT_TERMS,
+        open_maintenance_vehicle_ids=_vehicles_with_open_maintenance_orders(),
+    )
+
+
 @bp.route("/<int:trip_id>")
 @permission_required("viajes", "view")
 def detail(trip_id):
@@ -770,11 +948,28 @@ def detail(trip_id):
     # y cuándo se creó, según activity_log (ver app/audit.py) -- None para
     # viajes de antes de que existiera este registro.
     creator = get_creator_info("viaje", trip_id)
+    # 29 sep, pedido de Braulio (ida/vuelta): si este viaje ES una vuelta,
+    # `outbound_trip` es su viaje de ida; si este viaje ES una ida,
+    # `return_trip` es su vuelta ya creada (o None si todavía no se creó
+    # -- ver el botón "Crear viaje de vuelta" en viajes/detail.html). La
+    # conformidad de entrega es opcional únicamente en la vuelta de Harraso
+    # (en BRMS sigue siendo obligatoria, igual que en cualquier ida) -- ver
+    # change_status().
+    outbound_trip = None
+    return_trip = None
+    if trip["return_of_trip_id"]:
+        outbound_trip = query_one(
+            "SELECT id, code, origin, destination FROM trips WHERE id = ?", (trip["return_of_trip_id"],)
+        )
+    else:
+        return_trip = _return_trip_of(trip_id)
+    conformidad_opcional = bool(trip["return_of_trip_id"]) and trip["issuer"] == "HARRASO"
     return render_template(
         "viajes/detail.html", trip=trip, expenses=expenses,
         total_expenses=total_expenses, next_statuses=next_statuses, advance=advance,
         payment_term_labels=payment_term_labels, cargo_type_labels=cargo_type_labels,
         existing_waybills=existing_waybills, creator=creator,
+        outbound_trip=outbound_trip, return_trip=return_trip, conformidad_opcional=conformidad_opcional,
     )
 
 
@@ -798,7 +993,17 @@ def change_status(trip_id):
         # llegar a ENTREGADO sin ese archivo, sin importar por dónde se
         # mande el POST (el flujo normal es save_delivery_proof(), que
         # adjunta el archivo y hace esta misma transición en un solo paso).
-        if not trip["delivery_proof_filename"]:
+        #
+        # 29 sep, pedido de Braulio (ida/vuelta): "en el caso de Harraso
+        # para la vuelta la conformidad es opcional, en BRMS si es
+        # obligatorio" -- única excepción a lo de arriba: un viaje que ES
+        # una vuelta (return_of_trip_id) de Harraso puede marcarse
+        # Entregado sin el archivo (ver el botón correspondiente en
+        # viajes/detail.html, que manda este mismo POST directo). Cualquier
+        # otro caso -- ida de cualquier empresa, o vuelta de BRMS -- sigue
+        # exigiendo el archivo igual que siempre.
+        conformidad_opcional = bool(trip["return_of_trip_id"]) and trip["issuer"] == "HARRASO"
+        if not trip["delivery_proof_filename"] and not conformidad_opcional:
             flash("Antes de marcar el viaje como Entregado, adjunta la conformidad de entrega.", "error")
             return redirect(url_for("viajes.detail", trip_id=trip_id))
         # 31 ago: además de la fecha (ya existía), se guarda el momento
@@ -837,7 +1042,20 @@ def _trip_delete_block_reason(trip_id):
     _waybill_delete_block_reason() en app/routes/guias.py). Cualquier otra
     cosa asociada (inspecciones, liquidación, guía NO enviada, ítems de
     factura NO aceptada) sí se borra en cascada junto con el viaje -- ver
-    delete_trip()."""
+    delete_trip().
+
+    29 sep, pedido de Braulio (ida/vuelta): tampoco se puede borrar un
+    viaje de ida que todavía tiene un viaje de vuelta enlazado -- ese
+    viaje de vuelta es un registro aparte, con su propia factura/GPS/etc.
+    (ver return_of_trip_id en schema.sql), y no está contemplado en el
+    borrado en cascada de acá; hay que borrar (o cancelar) primero la
+    vuelta."""
+    linked_return = _return_trip_of(trip_id)
+    if linked_return:
+        return (
+            f"Este viaje de ida tiene un viaje de vuelta enlazado ({linked_return['code']}) — bórralo (o "
+            "cancélalo) primero antes de borrar este viaje."
+        )
     invoice = query_one(
         """SELECT i.number FROM invoices i JOIN invoice_items ii ON ii.invoice_id = i.id
            WHERE ii.trip_id = ? AND i.sunat_status = 'ACEPTADO' LIMIT 1""",

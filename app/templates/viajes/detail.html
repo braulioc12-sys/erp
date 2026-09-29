@@ -13,24 +13,38 @@
       {# 4 sep: "Entregado" ya no se marca con este botón genérico — hay
          que adjuntar la conformidad de entrega primero (ver el panel
          "Conformidad de entrega" más abajo, visible mientras el viaje está
-         en curso), que hace la transición como parte de esa misma acción. #}
-      {% if s != 'ENTREGADO' %}
+         en curso), que hace la transición como parte de esa misma acción.
+         29 sep, pedido de Braulio (ida/vuelta): excepto cuando la
+         conformidad es opcional (vuelta de Harraso) -- ahí sí se puede
+         marcar Entregado directo con este botón, sin conformidad. #}
+      {% if s != 'ENTREGADO' or conformidad_opcional %}
       <form method="post" action="{{ url_for('viajes.change_status', trip_id=trip.id) }}" style="display:inline;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="status" value="{{ s }}">
-        <button type="submit" class="btn {{ 'btn-danger' if s == 'CANCELADO' else 'btn-primary' }}">
-          Marcar {{ s.replace('_', ' ').title() }}
+        <button type="submit" class="btn {{ 'btn-danger' if s == 'CANCELADO' else 'btn-primary' }}"
+          {% if s == 'ENTREGADO' %}onclick="return confirm('¿Marcar como Entregado SIN conformidad de entrega? Es opcional para esta vuelta, pero puedes adjuntarla más abajo si la consigues.');"{% endif %}>
+          Marcar {{ s.replace('_', ' ').title() }}{{ ' (sin conformidad)' if s == 'ENTREGADO' }}
         </button>
       </form>
       {% endif %}
       {% endfor %}
+      {# 29 sep, pedido de Braulio (ida/vuelta): "una vez creado el viaje
+         debemos tener 2 pantallas... la vuelta" -- se ofrece crear la
+         vuelta desde el viaje de ida, una sola vez (si ya tiene una, se
+         muestra el link a esa en vez de este botón, ver más abajo). No
+         aplica a un viaje que ya ES una vuelta (sin cadenas ida→vuelta→vuelta)
+         ni a uno cancelado. #}
+      {% if not trip.return_of_trip_id and not return_trip and trip.status != 'CANCELADO' %}
+      <a href="{{ url_for('viajes.new_return_trip', trip_id=trip.id) }}" class="btn btn-secondary">↩ Crear viaje de vuelta</a>
+      {% endif %}
     {% endif %}
     {# 29 sep, pedido de Braulio: borrado, solo para Administrador (permiso
        "delete") -- borra en cascada todo lo relacionado (inspecciones,
        liquidación, guía e ítems de factura), salvo que ya tenga una
-       factura o guía ACEPTADA por SUNAT (ver _trip_delete_block_reason()
-       en app/routes/viajes.py), en cuyo caso el botón se muestra igual
-       pero el servidor lo bloquea con un mensaje claro. #}
+       factura o guía ACEPTADA por SUNAT, o un viaje de vuelta enlazado
+       (ver _trip_delete_block_reason() en app/routes/viajes.py), en cuyo
+       caso el botón se muestra igual pero el servidor lo bloquea con un
+       mensaje claro. #}
     {% if can(current_user.roles, 'viajes', 'delete') %}
     <form method="post" action="{{ url_for('viajes.delete_trip', trip_id=trip.id) }}" style="display:inline;" onsubmit="return confirm('¿Eliminar este viaje POR COMPLETO, junto con su liquidación, inspecciones, guía y factura asociadas? Esta acción no se puede deshacer.');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -39,6 +53,14 @@
     {% endif %}
   </div>
 </div>
+
+{# 29 sep, pedido de Braulio (ida/vuelta): rótulo/enlace entre el viaje de
+   ida y su vuelta, en cualquiera de las 2 pantallas. #}
+{% if outbound_trip %}
+<p class="muted" style="margin-top:-12px; margin-bottom:16px;">Viaje de <strong>vuelta</strong> del viaje <a href="{{ url_for('viajes.detail', trip_id=outbound_trip.id) }}">{{ outbound_trip.code }}</a> ({{ outbound_trip.origin }} → {{ outbound_trip.destination }}).</p>
+{% elif return_trip %}
+<p class="muted" style="margin-top:-12px; margin-bottom:16px;">Tiene un viaje de <strong>vuelta</strong> enlazado: <a href="{{ url_for('viajes.detail', trip_id=return_trip.id) }}">{{ return_trip.code }}</a> {{ m.badge(return_trip.status) }}.</p>
+{% endif %}
 
 <div class="detail-grid">
   {# 22 sep, pedido de Braulio ("que usuario creo el viaje"): visible solo
@@ -237,7 +259,11 @@
     </div>
   </div>
   {% if trip.status == 'EN_CURSO' and can(current_user.roles, 'viajes', 'edit') %}
+  {% if conformidad_opcional %}
+  <p class="muted mt-0">La conformidad de entrega es <strong>opcional</strong> para esta vuelta (Harraso) — puedes adjuntarla aquí si la consigues, o usar el botón "Marcar Entregado (sin conformidad)" de arriba para cerrar el viaje sin ella.</p>
+  {% else %}
   <p class="muted mt-0">Adjunta la foto o el PDF de la conformidad de entrega firmada para poder marcar el viaje como Entregado.</p>
+  {% endif %}
   <form method="post" action="{{ url_for('viajes.save_delivery_proof', trip_id=trip.id) }}" enctype="multipart/form-data" class="form" style="max-width:520px;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>Archivo (foto o PDF) *

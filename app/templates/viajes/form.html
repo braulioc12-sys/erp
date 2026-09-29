@@ -1,7 +1,15 @@
 {% extends 'base.html' %}
-{% block title %}{{ 'Editar viaje' if mode == 'edit' else 'Nuevo viaje' }}{% endblock %}
+{% block title %}{{ 'Editar viaje' if mode == 'edit' else ('Nuevo viaje de vuelta' if mode == 'vuelta' else 'Nuevo viaje') }}{% endblock %}
 {% block content %}
-<div class="page-header"><h1>{{ 'Editar viaje' if mode == 'edit' else 'Nuevo viaje' }}</h1></div>
+<div class="page-header"><h1>{{ 'Editar viaje' if mode == 'edit' else ('Nuevo viaje de vuelta' if mode == 'vuelta' else 'Nuevo viaje') }}</h1></div>
+{# 29 sep, pedido de Braulio (ida/vuelta): este formulario crea el viaje de
+   VUELTA como un viaje nuevo más (ver new_return_trip() en
+   app/routes/viajes.py) -- se muestra el mismo bloque de campos editables
+   que "editar" (empresa fija, eso sí -- se hereda de la ida, ver más
+   abajo), con los valores precargados desde el viaje de ida. #}
+{% if mode == 'vuelta' and outbound_trip %}
+<p class="muted" style="margin-top:-8px; margin-bottom:16px;">Viaje de vuelta del viaje <strong>{{ outbound_trip.code }}</strong> ({{ outbound_trip.origin }} → {{ outbound_trip.destination }}).</p>
+{% endif %}
 <form class="form panel" method="post" enctype="multipart/form-data" style="max-width: 760px;">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
@@ -32,6 +40,7 @@
   {% set current_issuer = trip.issuer if trip else (preset_issuer or 'HARRASO') %}
   {% set current_ownership = trip.ownership if trip else (preset_ownership or 'PROPIA') %}
 
+  {% if mode in ('edit', 'vuelta') %}
   {% if mode == 'edit' %}
   <div class="form-row">
     <label>Empresa que opera el viaje *
@@ -49,6 +58,21 @@
       </select>
     </label>
   </div>
+  {% else %}
+  {# mode == 'vuelta': la empresa se hereda del viaje de ida y no se puede
+     cambiar (una vuelta de un viaje de Harraso sigue siendo de Harraso) --
+     ver new_return_trip() en app/routes/viajes.py. #}
+  <input type="hidden" name="issuer" value="{{ current_issuer }}">
+  <p class="muted" style="margin-top:-4px;">Empresa: <strong>{{ 'BRMS' if current_issuer == 'BRMS' else 'Harraso Transport' }}</strong> (la misma del viaje de ida — no se puede cambiar)</p>
+  <label>Tipo de carga *
+    <select name="cargo_type" id="trip-cargo-type" required>
+      <option value="">-- Selecciona --</option>
+      {% for value, label in cargo_types %}
+      <option value="{{ value }}" {{ 'selected' if trip and trip.cargo_type == value }}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% endif %}
 
   <div id="trip-container-fields" style="display:none;">
     <div class="form-row">
@@ -272,7 +296,11 @@
 
   <div class="btn-group">
     <button type="submit" class="btn btn-primary">Guardar</button>
+    {% if mode == 'vuelta' and outbound_trip %}
+    <a href="{{ url_for('viajes.detail', trip_id=outbound_trip.id) }}" class="btn btn-secondary">Cancelar</a>
+    {% else %}
     <a href="{{ url_for('viajes.list_view') }}" class="btn btn-secondary">Cancelar</a>
+    {% endif %}
   </div>
 </form>
 

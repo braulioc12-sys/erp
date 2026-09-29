@@ -570,6 +570,10 @@ COLUMN_MIGRATIONS = [
     ("drivers", "license_filename", "TEXT"),
     ("drivers", "dni_filename", "TEXT"),
     ("drivers", "medical_exam_filename", "TEXT"),
+    # 29 sep, pedido de Braulio ("los viajes de ambas empresas contienen un
+    # ida y vuelta... debemos tener 2 pantallas"): ver el comentario largo
+    # junto a esta columna en schema.sql (CREATE TABLE trips).
+    ("trips", "return_of_trip_id", "INTEGER"),
 ]
 
 

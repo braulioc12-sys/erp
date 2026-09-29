@@ -246,6 +246,16 @@ CREATE TABLE IF NOT EXISTS trips (
     driver_id INTEGER REFERENCES drivers(id),
     -- Segundo conductor, solo cuando double_driver = 1 (viaje "doble conductor").
     driver2_id INTEGER REFERENCES drivers(id),
+    -- 29 sep, pedido de Braulio ("Los viajes de ambas empresas continenen un
+    -- ida y vuelta... debemos tener 2 pantallas"): el viaje de VUELTA es un
+    -- viaje normal más, con su propio código/pantalla (puede llevar otro
+    -- cliente, tener su propia tarifa/comisión, facturarse aparte, etc.) --
+    -- esta columna solo marca el ENLACE: se guarda en el viaje de vuelta,
+    -- apuntando al id de su viaje de ida. NULL en cualquier viaje normal y
+    -- en el propio viaje de ida (la relación es de un solo sentido: desde
+    -- la vuelta hacia la ida, nunca al revés) -- ver
+    -- new_return_trip()/_return_trip_of() en app/routes/viajes.py.
+    return_of_trip_id INTEGER REFERENCES trips(id),
     origin TEXT NOT NULL,
     destination TEXT NOT NULL,
     cargo_description TEXT,
