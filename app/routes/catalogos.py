@@ -513,10 +513,6 @@ def alertas_correo_enviar():
 # stock_quantity se resetea a 0, ya que ese número se construyó solo a
 # partir de las compras/recepciones de prueba que si se borran acá.
 _RESET_GROUPS = [
-    ("GPS / telemetría (Frotcom)", ["vehicle_location_history", "vehicle_locations", "vehicle_trips", "frotcom_trip_import_jobs"], [
-        "DELETE FROM vehicle_location_history", "DELETE FROM vehicle_locations",
-        "DELETE FROM vehicle_trips", "DELETE FROM frotcom_trip_import_jobs",
-    ]),
     # 23 sep, pedido de Braulio: "los neumáticos que asignamos por default a
     # las unidades, que eran el numero de placa + la posicion, eso no
     # quiero que se borre" -- las llantas placeholder que
@@ -574,9 +570,6 @@ _RESET_GROUPS = [
     ("Guías de remisión", ["waybills", "sunat_waybills_history"], [
         "DELETE FROM waybills", "DELETE FROM sunat_waybills_history",
     ]),
-    ("Cotizaciones", ["quotation_items", "quotations"], [
-        "DELETE FROM quotation_items", "DELETE FROM quotations",
-    ]),
     ("Gastos de WhatsApp (borradores)", ["whatsapp_expense_drafts"], [
         "DELETE FROM whatsapp_expense_drafts",
     ]),
@@ -610,6 +603,14 @@ _RESET_KEPT_TABLES = [
         "mechanics", "catalog_items", "app_settings", "company_bank_accounts",
     ]),
     ("Registro de Actividad (auditoría)", ["activity_log"]),
+    # 29 sep, pedido de Braulio ("que no borre cotizaciones ni gps /
+    # frotcom"): estos dos grupos vivían en _RESET_GROUPS (sí se borraban) --
+    # se mueven acá para que el reseteo los deje intactos, igual que
+    # clientes/conductores/flota/etc.
+    ("Cotizaciones", ["quotations", "quotation_items"]),
+    ("GPS / telemetría (Frotcom)", [
+        "vehicle_location_history", "vehicle_locations", "vehicle_trips", "frotcom_trip_import_jobs",
+    ]),
     # 23 sep, pedido de Braulio: las llantas placeholder "<placa>-<posición>"
     # que el sistema asigna por default a cada posición de la unidad (hasta
     # que se cargue la llanta física real con "Reemplazar") no son datos de
@@ -700,11 +701,11 @@ def reset_test_data_confirm():
     log_activity(
         "catalogos", "ELIMINAR",
         f"Reinicio de datos de prueba: se vaciaron {total_before} registro(s) transaccionales "
-        "(viajes, gastos, liquidaciones, facturas, guías, cotizaciones, mantenimiento, "
-        "inventarios, neumáticos, inspecciones, descansos, GPS, pagos de personal) -- "
+        "(viajes, gastos, liquidaciones, facturas, guías, mantenimiento, "
+        "inventarios, neumáticos, inspecciones, descansos, pagos de personal) -- "
         "clientes, conductores, flota, personal, catálogos, usuarios, el registro de "
-        "actividad y las llantas default de placa+posición (sin reemplazar todavía) "
-        "NO se tocaron.",
+        "actividad, cotizaciones, GPS/Frotcom y las llantas default de placa+posición "
+        "(sin reemplazar todavía) NO se tocaron.",
     )
     flash(f"Listo: se borraron {total_before} registro(s) de prueba. Los catálogos y usuarios no se tocaron.", "success")
     return redirect(url_for("catalogos.reset_test_data"))

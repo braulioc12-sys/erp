@@ -563,6 +563,13 @@ COLUMN_MIGRATIONS = [
     # el comentario largo junto a esta columna en schema.sql (CREATE TABLE
     # vehicles) y su uso en perform_frotcom_sync() (app/routes/integraciones.py).
     ("vehicles", "gps_km_error", "INTEGER NOT NULL DEFAULT 0"),
+    # 29 sep, pedido de Braulio ("quiero que se pueda subir y luego poder
+    # visualizar su brevete, DNI y examen medico ocupacional"): ver el
+    # comentario largo junto a estas columnas en schema.sql (CREATE TABLE
+    # drivers) y su uso en DRIVER_DOCUMENT_TYPES (app/routes/conductores.py).
+    ("drivers", "license_filename", "TEXT"),
+    ("drivers", "dni_filename", "TEXT"),
+    ("drivers", "medical_exam_filename", "TEXT"),
 ]
 
 

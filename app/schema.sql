@@ -204,6 +204,18 @@ CREATE TABLE IF NOT EXISTS drivers (
     -- mecanismo que los comprobantes de gastos (ver app/storage.py, bajo
     -- un prefijo/carpeta separada para no mezclarlos).
     photo_filename TEXT,
+    -- 29 sep, pedido de Braulio ("quiero que se pueda subir y luego poder
+    -- visualizar su brevete, DNI y examen medico ocupacional"): escaneo/foto
+    -- (o PDF) de cada uno de estos 3 documentos -- mismo mecanismo que los
+    -- documentos escaneados de Flota (ver DRIVER_DOCUMENT_TYPES en
+    -- app/routes/conductores.py y save_driver_document()/driver_document_url()
+    -- en app/storage.py), bajo su propio prefijo/carpeta separado de la foto
+    -- del conductor. Son archivos aparte de license_number/license_expiry y
+    -- medical_exam_date/medical_exam_expiry de arriba (esos son solo las
+    -- fechas para las alertas de vencimiento; esto es el documento en sí).
+    license_filename TEXT,
+    dni_filename TEXT,
+    medical_exam_filename TEXT,
     status TEXT NOT NULL DEFAULT 'ACTIVO' CHECK (status IN ('ACTIVO', 'INACTIVO')),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

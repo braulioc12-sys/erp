@@ -36,6 +36,30 @@ PHOTO_MIME_TO_EXTENSION = {
     "image/heif": ".heif",
 }
 
+# Documentos escaneados del conductor (brevete, DNI, examen médico
+# ocupacional -- 29 sep, pedido de Braulio: "quiero que se pueda subir y
+# luego poder visualizar su brevete, DNI y examen medico ocupacional").
+# Mismo mecanismo que VEHICLE_DOCUMENT_TYPES en app/routes/flota.py, pero
+# simplificado (sin "applies_to"/"optional": los 3 documentos aplican a
+# todos los conductores por igual) -- cada tupla es
+# (key, columna, campo_del_formulario, etiqueta).
+DRIVER_DOCUMENT_TYPES = [
+    ("brevete", "license_filename", "license_file", "Brevete (licencia de conducir)"),
+    ("dni", "dni_filename", "dni_file", "DNI"),
+    ("examen-medico", "medical_exam_filename", "medical_exam_file", "Examen médico ocupacional"),
+]
+DRIVER_DOCUMENT_TYPES_BY_KEY = {key: t for t in DRIVER_DOCUMENT_TYPES for key in [t[0]]}
+
+ALLOWED_DRIVER_DOCUMENT_EXTENSIONS = {".png", ".jpg", ".jpeg", ".pdf", ".webp", ".heic", ".heif"}
+DRIVER_DOCUMENT_MIME_TO_EXTENSION = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/heic": ".heic",
+    "image/heif": ".heif",
+    "application/pdf": ".pdf",
+}
+
 DOCUMENT_ALERT_DAYS = 30
 # (columna de vencimiento, etiqueta para mostrar en el Panel)
 DRIVER_DOCUMENT_FIELDS = [
@@ -125,6 +149,25 @@ def _save_driver_photo(file_storage):
     return filename
 
 
+def _save_driver_document_file(file_storage):
+    """Igual que _save_vehicle_document_file() en app/routes/flota.py, pero
+    guardando con storage.save_driver_document(). Devuelve el nombre
+    guardado, o None si no se subió nada válido."""
+    if not file_storage or not file_storage.filename:
+        return None
+    ext = os.path.splitext(file_storage.filename)[1].lower()
+    if ext not in ALLOWED_DRIVER_DOCUMENT_EXTENSIONS:
+        ext = DRIVER_DOCUMENT_MIME_TO_EXTENSION.get((file_storage.mimetype or "").lower())
+    if not ext:
+        return None
+    raw_bytes = file_storage.read()
+    if not raw_bytes:
+        return None
+    filename = f"{uuid.uuid4().hex}{ext}"
+    storage.save_driver_document(filename, raw_bytes)
+    return filename
+
+
 @bp.route("")
 @permission_required("conductores", "view")
 def list_view():
@@ -159,7 +202,10 @@ def driver_detail(driver_id):
     # 22 sep, pedido de Braulio ("que usuario... etc"): quién y cuándo se
     # registró este conductor, según activity_log (ver app/audit.py).
     creator = get_creator_info("conductor", driver_id)
-    return render_template("conductores/detail.html", driver=driver, driver_id=driver_id, creator=creator)
+    return render_template(
+        "conductores/detail.html", driver=driver, driver_id=driver_id, creator=creator,
+        document_types=DRIVER_DOCUMENT_TYPES,
+    )
 
 
 @bp.route("/<int:driver_id>/foto")
@@ -171,6 +217,68 @@ def driver_photo(driver_id):
     if storage.using_s3():
         return redirect(storage.driver_photo_url(driver["photo_filename"]))
     return send_from_directory(storage.local_photos_dir(), driver["photo_filename"])
+
+
+@bp.route("/<int:driver_id>/documentos", methods=["POST"])
+@permission_required("conductores", "edit")
+def save_driver_documents(driver_id):
+    """29 sep, pedido de Braulio: subir/actualizar los documentos escaneados
+    del conductor (ver DRIVER_DOCUMENT_TYPES) -- Brevete, DNI y Examen
+    médico ocupacional. Solo se actualiza la columna de los documentos que
+    trajeron un archivo nuevo en este envío; el resto conserva el archivo
+    que ya tenía (mismo criterio que save_vehicle_documents() en
+    app/routes/flota.py)."""
+    if not validate_csrf():
+        abort(400)
+    driver = query_one("SELECT * FROM drivers WHERE id = ?", (driver_id,))
+    if driver is None:
+        abort(404)
+    updates = []
+    params = []
+    uploaded_labels = []
+    any_file_sent = False
+    for key, column, form_field, label in DRIVER_DOCUMENT_TYPES:
+        file_storage = request.files.get(form_field)
+        if file_storage and file_storage.filename:
+            any_file_sent = True
+        new_filename = _save_driver_document_file(file_storage)
+        if new_filename:
+            updates.append(f"{column} = ?")
+            params.append(new_filename)
+            uploaded_labels.append(label)
+    if updates:
+        params.append(driver_id)
+        execute(f"UPDATE drivers SET {', '.join(updates)} WHERE id = ?", tuple(params))
+        # 29 sep, registro de actividad (ver app/audit.py): un solo registro
+        # por envío del formulario (no uno por archivo), mismo criterio que
+        # save_vehicle_documents() en app/routes/flota.py.
+        log_activity(
+            "conductores", "SUBIR", f"Conductor {driver['name']}: documento(s) {', '.join(uploaded_labels)}",
+            entity_type="conductor", entity_id=driver_id,
+            entity_url=url_for("conductores.driver_detail", driver_id=driver_id),
+        )
+        flash("Documentos actualizados.", "success")
+    elif any_file_sent:
+        flash("No se pudo guardar el archivo: use PDF, JPG, PNG, WEBP o HEIC.", "error")
+    else:
+        flash("No se subió ningún archivo nuevo.", "error")
+    return redirect(url_for("conductores.driver_detail", driver_id=driver_id))
+
+
+@bp.route("/<int:driver_id>/documentos/<doc_key>")
+@permission_required("conductores", "view")
+def driver_document_file(driver_id, doc_key):
+    doc_type = DRIVER_DOCUMENT_TYPES_BY_KEY.get(doc_key)
+    if doc_type is None:
+        abort(404)
+    _, column, _, _ = doc_type
+    driver = query_one(f"SELECT {column} AS filename FROM drivers WHERE id = ?", (driver_id,))
+    if driver is None or not driver["filename"]:
+        abort(404)
+    filename = driver["filename"]
+    if storage.using_s3():
+        return redirect(storage.driver_document_url(filename))
+    return send_from_directory(storage.local_driver_documents_dir(), filename)
 
 
 @bp.route("/nuevo", methods=["GET", "POST"])

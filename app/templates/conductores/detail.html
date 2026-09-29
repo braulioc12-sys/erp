@@ -69,4 +69,36 @@
     <div class="detail-item"><div class="label">Escuela de conductores — vencimiento</div><div class="value">{{ driver.dds_expiry or '—' }}</div></div>
   </div>
 </div>
+
+<div class="panel">
+  <h2>Documentos escaneados</h2>
+  <p class="muted mt-0">Foto o PDF de cada documento del conductor: Brevete, DNI y Examen médico ocupacional.</p>
+  <div class="detail-grid" style="margin-bottom:12px;">
+    {% for key, column, form_field, label in document_types %}
+    <div class="detail-item">
+      <div class="label">{{ label }}</div>
+      <div class="value">
+        {% if driver[column] %}
+        <a href="{{ url_for('conductores.driver_document_file', driver_id=driver.id, doc_key=key) }}" target="_blank">Ver documento</a>
+        {% else %}—{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% if can(current_user.roles, 'conductores', 'edit') %}
+  <form method="post" action="{{ url_for('conductores.save_driver_documents', driver_id=driver.id) }}" enctype="multipart/form-data" class="form" style="max-width:520px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      {% for key, column, form_field, label in document_types %}
+      <label>{{ label }} (foto o PDF)
+        <input type="file" name="{{ form_field }}" accept=".png,.jpg,.jpeg,.pdf,.webp,.heic,.heif" class="js-scan-input">
+      </label>
+      {% endfor %}
+    </div>
+    <div class="btn-group">
+      <button type="submit" class="btn btn-secondary btn-sm">Guardar documentos</button>
+    </div>
+  </form>
+  {% endif %}
+</div>
 {% endblock %}
