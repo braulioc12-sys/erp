@@ -93,9 +93,24 @@ def _next_trip_code(issuer):
     acuerdo a empresa. Si es BRMS B-0001 y si es Harraso H-0001" — antes
     todos los viajes compartían un solo correlativo "V-0001" (ver
     next_code en app/helpers.py); ahora cada empresa operadora lleva el
-    suyo propio, que nunca se reinicia."""
+    suyo propio, que nunca se reinicia.
+
+    29 sep, bug encontrado en producción (Braulio, log de Render):
+    "psycopg2.errors.UniqueViolation: duplicate key value violates unique
+    constraint trips_code_key" al crear un viaje nuevo (o una vuelta).
+    Antes este correlativo se sacaba de COUNT(*) de viajes de esa empresa
+    -- eso se rompe apenas se borra un viaje que no sea el último (ahora
+    posible, ver delete_trip()/_trip_delete_block_reason()): el conteo baja
+    y se vuelve a generar un código que ya existe en un viaje que quedó
+    vivo. Ahora se toma el número más alto YA USADO en un código de esa
+    empresa (sin importar cuántos viajes queden) y se le suma 1 -- nunca
+    puede chocar con uno existente, y tampoco se reutiliza un código de un
+    viaje borrado."""
     prefix = "B" if issuer == "BRMS" else "H"
-    row = query_one("SELECT COUNT(*) as n FROM trips WHERE issuer = ?", (issuer,))
+    row = query_one(
+        "SELECT COALESCE(MAX(CAST(SUBSTR(code, 3) AS INTEGER)), 0) as n FROM trips WHERE issuer = ? AND code LIKE ?",
+        (issuer, f"{prefix}-%"),
+    )
     n = (row["n"] if row else 0) + 1
     return f"{prefix}-{n:04d}"
 
