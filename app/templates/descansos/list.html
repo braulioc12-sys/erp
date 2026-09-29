@@ -6,6 +6,11 @@
   <h1>Jornada laboral</h1>
   <div class="page-actions">
     {% if can(current_user.roles, 'descansos', 'edit') %}
+    {# 29 sep, pedido de Braulio: "creame un excel que se pueda usar e
+       implementar la opcion de importarlo para subir de manera masiva
+       descansos" -- mismo motor genérico de importación que ya usan
+       Flota/Conductores/Rutas (ver app/bulk_import.py). #}
+    <a href="{{ url_for('descansos.import_rests') }}" class="btn btn-secondary">Importar desde Excel</a>
     <a href="{{ url_for('descansos.new') }}" class="btn btn-primary">+ Registrar descanso</a>
     {% endif %}
   </div>

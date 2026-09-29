@@ -24,10 +24,11 @@ si un conductor descansó un día sin que nadie lo registre acá, el sistema
 no tiene forma de saberlo y seguirá contando ese día como trabajado."""
 import datetime as dt
 
-from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+from flask import Blueprint, Response, abort, flash, redirect, render_template, request, url_for
 
 from app.audit import log_activity
 from app.auth import permission_required, validate_csrf
+from app.bulk_import import DRIVER_REST_COLUMNS, DRIVER_REST_EXAMPLE, XLSX_MIME, build_import_template, read_import_rows
 from app.db import execute, query_all, query_one
 from app.helpers import today_str
 
@@ -312,3 +313,122 @@ def delete(rest_id):
     )
     flash("Descanso eliminado.", "success")
     return redirect(url_for("descansos.list_view", driver_id=rest["driver_id"]))
+
+
+# --- Importación masiva desde Excel (29 sep, pedido de Braulio: "creame un
+# excel que se pueda usar e implementar la opcion de importarlo para subir
+# de manera masiva descansos") -- mismo motor genérico que ya usan
+# Flota/Conductores/Rutas/Honorarios, ver app/bulk_import.py. ---
+
+@bp.route("/importar/plantilla")
+@permission_required("descansos", "edit")
+def import_template():
+    buffer = build_import_template("Jornada laboral — Descansos", DRIVER_REST_COLUMNS, DRIVER_REST_EXAMPLE)
+    return Response(
+        buffer.getvalue(),
+        mimetype=XLSX_MIME,
+        headers={"Content-Disposition": 'attachment; filename="plantilla_descansos.xlsx"'},
+    )
+
+
+def _find_driver_for_row(row):
+    """Busca el conductor de la fila primero por DNI (más preciso si hay
+    nombres parecidos) y, si no se dio o no coincide, por nombre exacto
+    (sin distinguir mayúsculas) -- mismo criterio que
+    HONORARIOS_TEMPLATE_COLUMNS en app/bulk_import.py. No se filtra por
+    conductores activos: un descanso histórico de alguien ya dado de baja
+    sigue siendo un dato válido para la bitácora."""
+    document_number = (row.get("driver_document") or "").strip()
+    if document_number:
+        driver = query_one("SELECT * FROM drivers WHERE document_number = ?", (document_number,))
+        if driver:
+            return driver
+    name = (row.get("driver_name") or "").strip()
+    if name:
+        return query_one("SELECT * FROM drivers WHERE lower(name) = lower(?)", (name,))
+    return None
+
+
+def _apply_driver_rest_import(rows, example_skips):
+    """Igual que los demás `_apply_..._import()`: NO repite la advertencia
+    de "descanso más corto de lo que tocaría" que sí tiene new() -- calcular
+    esa advertencia correctamente requeriría procesar las filas del archivo
+    en orden cronológico por conductor (no en el orden en que vengan en el
+    Excel) y no aporta nada a los datos guardados; el Panel/lista de Jornada
+    laboral ya recalculan el estado de cumplimiento solos con lo que quede
+    guardado, así que cualquier incumplimiento se sigue viendo igual
+    después de importar."""
+    created, errors = 0, []
+    skipped = [
+        {"row": r, "message": "Fila de ejemplo de la plantilla; se omitió automáticamente."}
+        for r in example_skips
+    ]
+    seen = set()
+    for row in rows:
+        n = row["_row_number"]
+        for warn in row["_warnings"]:
+            errors.append({"row": n, "message": warn})
+
+        driver = _find_driver_for_row(row)
+        if driver is None:
+            label = (row.get("driver_document") or "").strip() or (row.get("driver_name") or "").strip() or "(sin datos)"
+            errors.append({"row": n, "message": f"No se encontró ningún conductor con \"{label}\"; la fila no se importó."})
+            continue
+
+        start = row.get("start_date")
+        end = row.get("end_date")
+        if not start or not end:
+            errors.append({"row": n, "message": "Falta la fecha de inicio o de fin; la fila no se importó."})
+            continue
+        if end < start:
+            errors.append({"row": n, "message": "La fecha de fin no puede ser anterior a la de inicio; la fila no se importó."})
+            continue
+
+        dedup_key = (driver["id"], start, end)
+        if dedup_key in seen:
+            skipped.append({"row": n, "message": f"{driver['name']} ya tiene esta misma fila repetida dentro del archivo; ya se había importado antes."})
+            continue
+        existing = query_one(
+            "SELECT id FROM driver_rests WHERE driver_id = ? AND start_date = ? AND end_date = ?",
+            (driver["id"], start, end),
+        )
+        if existing:
+            skipped.append({"row": n, "message": f"{driver['name']} ya tiene un descanso registrado del {start} al {end}; no se duplicó."})
+            continue
+        seen.add(dedup_key)
+
+        days_count = (dt.datetime.strptime(end, "%Y-%m-%d").date() - dt.datetime.strptime(start, "%Y-%m-%d").date()).days + 1
+        notes = (row.get("notes") or "").strip()
+        rest_id = execute(
+            "INSERT INTO driver_rests (driver_id, start_date, end_date, days_count, notes) VALUES (?, ?, ?, ?, ?)",
+            (driver["id"], start, end, days_count, notes),
+        )
+        log_activity(
+            "descansos", "CREAR",
+            f"Descanso de {driver['name']}: {start} a {end} ({days_count} día(s)) — importado desde Excel",
+            entity_type="descanso", entity_id=rest_id,
+        )
+        created += 1
+    return {"created": created, "updated": 0, "skipped": skipped, "errors": errors}
+
+
+@bp.route("/importar", methods=["GET", "POST"])
+@permission_required("descansos", "edit")
+def import_rests():
+    if request.method == "POST":
+        if not validate_csrf():
+            abort(400)
+        rows, file_error, example_skips = read_import_rows(request.files.get("file"), DRIVER_REST_COLUMNS, DRIVER_REST_EXAMPLE)
+        if file_error:
+            flash(file_error, "error")
+            return redirect(url_for("descansos.import_rests"))
+        result = _apply_driver_rest_import(rows, example_skips)
+        return render_template(
+            "import_result.html", result=result,
+            back_url=url_for("descansos.list_view"), retry_url=url_for("descansos.import_rests"),
+        )
+    return render_template(
+        "import_form.html", title="Importar descansos", module_label="los descansos ya tomados",
+        template_url=url_for("descansos.import_template"), upload_url=url_for("descansos.import_rests"),
+        back_url=url_for("descansos.list_view"), columns=DRIVER_REST_COLUMNS,
+    )

@@ -541,3 +541,32 @@ HONORARIOS_TEMPLATE_EXAMPLE = {
     "default_amount": 1500,
     "default_concept": "Honorarios profesionales",
 }
+
+# 29 sep, pedido de Braulio ("creame un excel que se pueda usar e
+# implementar la opcion de importarlo para subir de manera masiva
+# descansos"): carga masiva de descansos ya tomados para Jornada laboral
+# (ver app/routes/descansos.py, _apply_driver_rest_import()). El conductor
+# se busca primero por DNI (más preciso si hay nombres parecidos) y, si no
+# se da o no coincide, por nombre exacto (sin distinguir mayúsculas) — igual
+# que HONORARIOS_TEMPLATE_COLUMNS más arriba. No trae columna de "días":
+# se calculan solas a partir de las fechas, igual que en el formulario
+# manual (ver new() en app/routes/descansos.py).
+DRIVER_REST_COLUMNS = [
+    ImportColumn("driver_name", "Conductor (Nombre)", kind="text", required=True, width=28,
+                 note="Debe coincidir con un conductor ya registrado en el Catálogo de Conductores."),
+    ImportColumn("driver_document", "Conductor (DNI)", kind="text", width=14,
+                 note="Opcional. Si se llena, se usa para encontrar al conductor en vez del nombre — más "
+                      "preciso si hay conductores con nombres parecidos."),
+    ImportColumn("start_date", "Fecha de inicio", kind="date", required=True, width=16),
+    ImportColumn("end_date", "Fecha de fin", kind="date", required=True, width=16,
+                 note="Los días de descanso se calculan solos (inicio y fin incluidos)."),
+    ImportColumn("notes", "Notas", kind="text", width=30),
+]
+
+DRIVER_REST_EXAMPLE = {
+    "driver_name": "Nombre de Ejemplo",
+    "driver_document": "00000000",
+    "start_date": "2026-09-01",
+    "end_date": "2026-09-02",
+    "notes": "Fila de ejemplo — bórrala o sobrescríbela",
+}
