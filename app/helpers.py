@@ -8,9 +8,31 @@ from app.db import query_all, query_one
 
 
 def next_code(prefix, table, code_column="code"):
-    """Genera un código correlativo tipo V-0001, F-0001, etc."""
-    row = query_one(f"SELECT COUNT(*) as n FROM {table}")
-    n = (row["n"] if row else 0) + 1
+    """Genera un código correlativo tipo V-0001, F-0001, etc.
+
+    29 sep, bug real en producción (Braulio: "al crear una factura con brms
+    salio este error" — psycopg2.errors.UniqueViolation: duplicate key
+    value violates unique constraint "invoices_number_key"). Antes esta
+    función contaba TODAS las filas de la tabla (SELECT COUNT(*)) para
+    decidir el siguiente número, lo cual se rompe apenas se borra cualquier
+    fila que no sea la última: el conteo baja, pero el número más alto que
+    ya se había usado sigue estando en otra fila, así que el "siguiente"
+    que se genera choca con uno que ya existe. Mismo bug (y mismo arreglo)
+    que _next_trip_code()/_next_liquidation_code() en
+    app/routes/viajes.py / app/routes/liquidaciones.py: en vez de contar
+    filas, se busca el número más alto YA USADO con este prefijo exacto
+    (MAX sobre la parte numérica del código, filtrando por "{prefix}-%" en
+    code_column) y se le suma 1 — así no importa si algo se borró en el
+    medio. SUBSTR/CAST(...AS INTEGER) funcionan igual en SQLite y en
+    Postgres, no hace falta traducción especial (ver _translate() en
+    app/db.py)."""
+    start = len(prefix) + 2  # posición (1-indexada) justo después de "prefix-"
+    row = query_one(
+        f"SELECT MAX(CAST(SUBSTR({code_column}, {start}) AS INTEGER)) as n "
+        f"FROM {table} WHERE {code_column} LIKE ?",
+        (f"{prefix}-%",),
+    )
+    n = (row["n"] if row and row["n"] is not None else 0) + 1
     return f"{prefix}-{n:04d}"
 
 

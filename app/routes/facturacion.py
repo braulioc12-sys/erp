@@ -72,8 +72,17 @@ logger = logging.getLogger(__name__)
 
 
 def _next_series_number(series):
-    row = query_one("SELECT COUNT(*) as n FROM invoices WHERE series = ?", (series,))
-    return (row["n"] if row else 0) + 1
+    """29 sep: mismo bug de conteo que next_code() en app/helpers.py (ver su
+    comentario) — acá no hay un UNIQUE en series_number que lo haga saltar
+    como error, así que un correlativo repetido pasaría silencioso (SUNAT sí
+    lo rechazaría al enviar el comprobante). Una factura sí se puede borrar
+    (ver facturacion.delete()/viajes.py al desvincular un viaje facturado),
+    así que el conteo puede bajar sin que el número más alto ya usado deje
+    de existir. MAX en vez de COUNT, igual que next_code()."""
+    row = query_one(
+        "SELECT MAX(series_number) as n FROM invoices WHERE series = ?", (series,)
+    )
+    return (row["n"] if row and row["n"] is not None else 0) + 1
 
 
 @bp.route("")
@@ -465,7 +474,7 @@ def from_image_create():
         else {"applies": False, "code": None, "percentage": None, "amount": None, "bank_account": None}
     )
 
-    number = next_code("F", "invoices")
+    number = next_code("F", "invoices", code_column="number")
     series = current_app.config["INVOICE_SERIES"]
     series_number = _next_series_number(series)
 
@@ -584,7 +593,7 @@ def new():
                 return redirect(url_for("facturacion.new", issuer=issuer, client_id=client_id))
 
         total = sum(t["rate"] for t in trips) + sum(line_total for _, _, _, line_total in manual_items)
-        number = next_code("F", "invoices")
+        number = next_code("F", "invoices", code_column="number")
         series = current_app.config["INVOICE_SERIES"]
         series_number = _next_series_number(series)
 

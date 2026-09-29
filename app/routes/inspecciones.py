@@ -185,7 +185,7 @@ def _save_detailed_inspection(trip_id, trip, vehicle):
 
     inspection_date = parse_date(request.form.get("inspection_date")) or today_str()
     odometer_km = parse_float(request.form.get("odometer_km"), None) if has_odometer else None
-    checklist_code = next_code("CL", "inspections")
+    checklist_code = next_code("CL", "inspections", code_column="checklist_code")
 
     inspection_id = execute(
         """INSERT INTO inspections (vehicle_id, trip_id, driver_id, type, inspection_date, notes,
