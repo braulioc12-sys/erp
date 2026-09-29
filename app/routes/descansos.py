@@ -291,7 +291,11 @@ def edit(rest_id):
 
 
 @bp.route("/<int:rest_id>/eliminar", methods=["POST"])
-@permission_required("descansos", "edit")
+# 29 sep, pedido de Braulio ("que solo el administrador pueda borrar...
+# jornada laboral"): antes bastaba con "edit" -- ahora requiere "delete",
+# que por defecto solo tiene Administrador (ver PERMISSIONS en
+# app/auth.py y el comentario en app/permissions_catalog.py).
+@permission_required("descansos", "delete")
 def delete(rest_id):
     if not validate_csrf():
         abort(400)

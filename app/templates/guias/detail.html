@@ -9,6 +9,15 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-primary">📤 Enviar a SUNAT</button>
     </form>
+    {# 29 sep, pedido de Braulio: borrado, solo para Administrador (permiso
+       "delete") -- una guía ya ACEPTADA por SUNAT no se puede borrar del
+       todo (ver _waybill_delete_block_reason() en app/routes/guias.py). #}
+    {% if waybill.sunat_status != 'ACEPTADO' and can(current_user.roles, 'guias', 'delete') %}
+    <form method="post" action="{{ url_for('guias.delete', waybill_id=waybill.id) }}" style="display:inline;" onsubmit="return confirm('¿Eliminar esta guía por completo? Esta acción no se puede deshacer.');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-danger">🗑 Eliminar</button>
+    </form>
+    {% endif %}
   </div>
 </div>
 

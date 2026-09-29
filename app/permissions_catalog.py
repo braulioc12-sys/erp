@@ -79,20 +79,29 @@ MODULE_LABELS = {
 PERMISSION_CATALOG = {
     "dashboard": [("view", "Ver")],
     "clientes": [("view", "Ver"), ("edit", "Crear y editar")],
-    "viajes": [("view", "Ver"), ("edit", "Crear y editar")],
-    "guias": [("view", "Ver"), ("edit", "Crear y editar")],
-    "inspecciones": [("view", "Ver"), ("edit", "Registrar")],
+    # 29 sep, pedido de Braulio ("que solo el administrador pueda borrar
+    # viajes, mantenimientos, facturas, jornada laboral, guías de remisión
+    # e inspecciones"): se agrega "delete" como acción PROPIA (distinta de
+    # "edit") en estos 6 módulos -- ningún rol de PERMISSIONS (app/auth.py)
+    # la tiene explícitamente, así que por defecto solo ADMIN puede borrar
+    # (su "*" le da cualquier acción, ver can()); queda igual disponible
+    # acá para poder dársela puntualmente a otro usuario desde Usuarios >
+    # Permisos específicos, si Braulio lo pide más adelante -- mismo
+    # patrón ya usado para "campo"/"inventario" en Neumáticos.
+    "viajes": [("view", "Ver"), ("edit", "Crear y editar"), ("delete", "Eliminar")],
+    "guias": [("view", "Ver"), ("edit", "Crear y editar"), ("delete", "Eliminar")],
+    "inspecciones": [("view", "Ver"), ("edit", "Registrar"), ("delete", "Eliminar")],
     "flota": [("view", "Ver"), ("edit", "Crear y editar")],
     "conductores": [("view", "Ver"), ("edit", "Crear y editar")],
     "rutas": [("view", "Ver"), ("edit", "Crear y editar")],
-    "mantenimiento": [("view", "Ver"), ("edit", "Crear y editar órdenes")],
+    "mantenimiento": [("view", "Ver"), ("edit", "Crear y editar órdenes"), ("delete", "Eliminar")],
     "neumaticos": [
         ("view", "Ver"),
         ("campo", "Operar en campo (inspección, montar, reemplazar, retirar, rotar)"),
         ("inventario", "Gestionar inventario (agregar/editar llantas en stock)"),
     ],
     "liquidaciones": [("view", "Ver"), ("edit", "Crear y editar")],
-    "facturacion": [("view", "Ver"), ("edit", "Crear y editar")],
+    "facturacion": [("view", "Ver"), ("edit", "Crear y editar"), ("delete", "Eliminar")],
     "cotizaciones": [("view", "Ver"), ("edit", "Crear y editar")],
     "inventarios": [("view", "Ver"), ("edit", "Crear y editar")],
     "usuarios": [("view", "Ver"), ("edit", "Crear y editar")],
@@ -101,6 +110,6 @@ PERMISSION_CATALOG = {
     "rrhh": [("view", "Ver")],
     "tarifario": [("view", "Ver"), ("edit", "Editar")],
     "pagos_personal": [("view", "Ver"), ("edit", "Editar y generar archivos")],
-    "descansos": [("view", "Ver"), ("edit", "Registrar y editar")],
+    "descansos": [("view", "Ver"), ("edit", "Registrar y editar"), ("delete", "Eliminar")],
     "actividad": [("view", "Ver")],
 }

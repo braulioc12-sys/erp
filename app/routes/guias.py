@@ -1066,6 +1066,45 @@ def send_sunat(waybill_id):
     return redirect(url_for("guias.detail", waybill_id=waybill_id))
 
 
+# 29 sep, pedido de Braulio ("que solo el administrador pueda borrar...
+# guias de remision"): antes no existía ninguna forma de borrar una guía.
+# Acción "delete" propia, que por defecto solo tiene Administrador (ver
+# PERMISSIONS en app/auth.py y el comentario en app/permissions_catalog.py).
+# Mismo criterio que Facturas (ver _invoice_delete_block_reason() en
+# app/routes/facturacion.py): una guía ya ACEPTADA por SUNAT no se puede
+# borrar del todo -- quedaría un comprobante electrónico vigente sin
+# registro local, y un hueco en la numeración V001.
+def _waybill_delete_block_reason(waybill):
+    if waybill["sunat_status"] == "ACEPTADO":
+        return (
+            "Esta guía ya fue aceptada por SUNAT — no se puede borrar (quedaría un comprobante "
+            "electrónico vigente sin registro local)."
+        )
+    return None
+
+
+@bp.route("/<int:waybill_id>/eliminar", methods=["POST"])
+@permission_required("guias", "delete")
+def delete(waybill_id):
+    if not validate_csrf():
+        abort(400)
+    waybill = query_one("SELECT * FROM waybills WHERE id = ?", (waybill_id,))
+    if waybill is None:
+        abort(404)
+    reason = _waybill_delete_block_reason(waybill)
+    if reason:
+        flash(reason, "error")
+        return redirect(url_for("guias.detail", waybill_id=waybill_id))
+    label = f"{waybill['series']}-{waybill['series_number']:06d}"
+    execute("DELETE FROM waybills WHERE id = ?", (waybill_id,))
+    log_activity(
+        "guias", "ELIMINAR", f"Guía {label}",
+        entity_type="guia", entity_id=waybill_id,
+    )
+    flash("Guía eliminada.", "success")
+    return redirect(url_for("guias.list_view"))
+
+
 @bp.route("/<int:waybill_id>/pdf-sunat")
 @permission_required("guias", "view")
 def view_sunat_pdf(waybill_id):

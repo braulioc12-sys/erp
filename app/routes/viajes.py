@@ -826,6 +826,113 @@ def change_status(trip_id):
     return redirect(url_for("viajes.detail", trip_id=trip_id))
 
 
+def _trip_delete_block_reason(trip_id):
+    """29 sep, pedido de Braulio ("que solo el administrador pueda borrar
+    viajes", confirmando que sí se puede borrar en cascada todo lo
+    relacionado): la única razón para NO poder borrar un viaje es que ya
+    tenga una factura o guía ACEPTADA por SUNAT -- esos comprobantes
+    electrónicos ya quedaron emitidos así, no pueden desaparecer del ERP
+    sin dejar un documento "fantasma" allá (mismo criterio que
+    _invoice_delete_block_reason() en app/routes/facturacion.py y
+    _waybill_delete_block_reason() en app/routes/guias.py). Cualquier otra
+    cosa asociada (inspecciones, liquidación, guía NO enviada, ítems de
+    factura NO aceptada) sí se borra en cascada junto con el viaje -- ver
+    delete_trip()."""
+    invoice = query_one(
+        """SELECT i.number FROM invoices i JOIN invoice_items ii ON ii.invoice_id = i.id
+           WHERE ii.trip_id = ? AND i.sunat_status = 'ACEPTADO' LIMIT 1""",
+        (trip_id,),
+    )
+    if invoice:
+        return (
+            f"Este viaje está facturado en la factura {invoice['number']}, ya aceptada por SUNAT — "
+            "no se puede borrar. Usa \"Cancelar\" en su lugar."
+        )
+    waybill = query_one(
+        "SELECT series, series_number FROM waybills WHERE trip_id = ? AND sunat_status = 'ACEPTADO' LIMIT 1",
+        (trip_id,),
+    )
+    if waybill:
+        return (
+            f"Este viaje tiene la guía {waybill['series']}-{waybill['series_number']:06d}, ya aceptada "
+            "por SUNAT — no se puede borrar. Usa \"Cancelar\" en su lugar."
+        )
+    return None
+
+
+@bp.route("/<int:trip_id>/eliminar", methods=["POST"])
+@permission_required("viajes", "delete")
+def delete_trip(trip_id):
+    """Acción "delete" propia, que por defecto solo tiene Administrador (ver
+    PERMISSIONS en app/auth.py y el comentario en app/permissions_catalog.py).
+    Borra el viaje y, en cascada, todo lo que depende únicamente de él
+    (inspecciones, liquidación con su combustible/pagos, gastos, guía de
+    remisión e ítems de factura) -- ver _trip_delete_block_reason() arriba
+    para la única excepción (documento ya aceptado por SUNAT)."""
+    if not validate_csrf():
+        abort(400)
+    trip = query_one("SELECT * FROM trips WHERE id = ?", (trip_id,))
+    if trip is None:
+        abort(404)
+    reason = _trip_delete_block_reason(trip_id)
+    if reason:
+        flash(reason, "error")
+        return redirect(url_for("viajes.detail", trip_id=trip_id))
+
+    # Inspecciones del viaje.
+    execute(
+        "DELETE FROM inspection_items WHERE inspection_id IN (SELECT id FROM inspections WHERE trip_id = ?)",
+        (trip_id,),
+    )
+    execute("DELETE FROM inspections WHERE trip_id = ?", (trip_id,))
+
+    # Liquidación del viaje (anticipos con su combustible/pagos) y gastos.
+    execute(
+        "DELETE FROM fuel_entries WHERE advance_id IN (SELECT id FROM expense_advances WHERE trip_id = ?)",
+        (trip_id,),
+    )
+    execute(
+        "DELETE FROM advance_payments WHERE advance_id IN (SELECT id FROM expense_advances WHERE trip_id = ?)",
+        (trip_id,),
+    )
+    execute("DELETE FROM expenses WHERE trip_id = ?", (trip_id,))
+    execute("DELETE FROM expense_advances WHERE trip_id = ?", (trip_id,))
+
+    # Guía de remisión del viaje (ya se confirmó arriba que no está
+    # aceptada por SUNAT).
+    execute("DELETE FROM waybills WHERE trip_id = ?", (trip_id,))
+
+    # Ítems de factura de este viaje -- ya se confirmó arriba que ninguna
+    # de esas facturas está aceptada por SUNAT. Si a alguna no le queda
+    # ningún ítem después de esto, se borra entera (una factura no puede
+    # quedar sin ítems -- mismo criterio que editar factura, ver edit() en
+    # app/routes/facturacion.py); si le quedan otros ítems (factura con
+    # varios viajes), se recalcula el total.
+    affected_invoice_ids = [
+        r["invoice_id"] for r in query_all(
+            "SELECT DISTINCT invoice_id FROM invoice_items WHERE trip_id = ?", (trip_id,)
+        )
+    ]
+    execute("DELETE FROM invoice_items WHERE trip_id = ?", (trip_id,))
+    for invoice_id in affected_invoice_ids:
+        remaining = query_all("SELECT amount FROM invoice_items WHERE invoice_id = ?", (invoice_id,))
+        if remaining:
+            new_total = sum(r["amount"] for r in remaining)
+            execute("UPDATE invoices SET amount = ? WHERE id = ?", (new_total, invoice_id))
+        else:
+            execute("DELETE FROM invoices WHERE id = ?", (invoice_id,))
+
+    execute("DELETE FROM trips WHERE id = ?", (trip_id,))
+    log_activity(
+        "viajes", "ELIMINAR",
+        f"Viaje {trip['code']}: eliminado junto con todo lo relacionado (inspecciones, liquidación, "
+        "guía e ítems de factura no aceptados por SUNAT)",
+        entity_type="viaje", entity_id=trip_id,
+    )
+    flash("Viaje eliminado, junto con todo lo relacionado.", "success")
+    return redirect(url_for("viajes.list_view"))
+
+
 # --- Guía de transportista (3 sep, pedido de Braulio) ---------------------
 #
 # Documento propio del transportista/tercero que hizo el viaje — distinto

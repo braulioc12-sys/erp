@@ -371,7 +371,12 @@ def new():
 
 
 @bp.route("/<int:record_id>/eliminar", methods=["POST"])
-@permission_required("mantenimiento", "edit")
+# 29 sep, pedido de Braulio ("que solo el administrador pueda borrar...
+# mantenimientos"): antes bastaba con "edit" (lo que también tienen
+# Mecánico y Administrador) -- ahora requiere "delete", que por defecto
+# solo tiene Administrador (ver PERMISSIONS en app/auth.py y el
+# comentario en app/permissions_catalog.py).
+@permission_required("mantenimiento", "delete")
 def delete(record_id):
     if not validate_csrf():
         abort(400)

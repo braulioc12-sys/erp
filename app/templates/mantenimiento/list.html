@@ -62,7 +62,7 @@
         <td class="wrap">{{ r.description or '—' }}</td>
         <td style="white-space:nowrap;">
           <a href="{{ url_for('mantenimiento.detail', record_id=r.id, readonly=1 if readonly else None) }}" class="btn btn-secondary btn-sm">Ver orden</a>
-          {% if can(current_user.roles, 'mantenimiento', 'edit') and not readonly %}
+          {% if can(current_user.roles, 'mantenimiento', 'delete') and not readonly %}
           <form method="post" action="{{ url_for('mantenimiento.delete', record_id=r.id) }}" onsubmit="return confirm('¿Eliminar este registro?');" style="display:inline;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="btn btn-danger btn-sm" type="submit">Eliminar</button>

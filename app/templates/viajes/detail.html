@@ -25,6 +25,18 @@
       {% endif %}
       {% endfor %}
     {% endif %}
+    {# 29 sep, pedido de Braulio: borrado, solo para Administrador (permiso
+       "delete") -- borra en cascada todo lo relacionado (inspecciones,
+       liquidación, guía e ítems de factura), salvo que ya tenga una
+       factura o guía ACEPTADA por SUNAT (ver _trip_delete_block_reason()
+       en app/routes/viajes.py), en cuyo caso el botón se muestra igual
+       pero el servidor lo bloquea con un mensaje claro. #}
+    {% if can(current_user.roles, 'viajes', 'delete') %}
+    <form method="post" action="{{ url_for('viajes.delete_trip', trip_id=trip.id) }}" style="display:inline;" onsubmit="return confirm('¿Eliminar este viaje POR COMPLETO, junto con su liquidación, inspecciones, guía y factura asociadas? Esta acción no se puede deshacer.');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-danger">🗑 Eliminar</button>
+    </form>
+    {% endif %}
   </div>
 </div>
 

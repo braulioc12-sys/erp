@@ -94,13 +94,17 @@
           <td>{{ r.days_count }}</td>
           <td class="wrap">{{ r.notes or '—' }}</td>
           <td>
-            {% if can(current_user.roles, 'descansos', 'edit') %}
+            {% if can(current_user.roles, 'descansos', 'edit') or can(current_user.roles, 'descansos', 'delete') %}
             <div class="btn-group">
+              {% if can(current_user.roles, 'descansos', 'edit') %}
               <a class="btn btn-secondary btn-sm" href="{{ url_for('descansos.edit', rest_id=r.id) }}">Editar</a>
+              {% endif %}
+              {% if can(current_user.roles, 'descansos', 'delete') %}
               <form method="post" action="{{ url_for('descansos.delete', rest_id=r.id) }}" onsubmit="return confirm('¿Eliminar este registro de descanso?');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button class="btn btn-danger btn-sm" type="submit">Eliminar</button>
               </form>
+              {% endif %}
             </div>
             {% endif %}
           </td>

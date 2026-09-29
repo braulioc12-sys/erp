@@ -357,6 +357,34 @@ def _group_detailed_items(items, vehicle_type):
     }
 
 
+@bp.route("/<int:inspection_id>/eliminar", methods=["POST"])
+# 29 sep, pedido de Braulio ("que solo el administrador pueda borrar...
+# inspecciones"): acción "delete" propia, que por defecto solo tiene
+# Administrador (ver PERMISSIONS en app/auth.py y el comentario en
+# app/permissions_catalog.py) -- antes de este pedido no existía ninguna
+# forma de borrar una inspección.
+@permission_required("inspecciones", "delete")
+def delete(inspection_id):
+    if not validate_csrf():
+        abort(400)
+    inspection = query_one(
+        """SELECT i.*, v.plate as vehicle_plate FROM inspections i
+           JOIN vehicles v ON v.id = i.vehicle_id WHERE i.id = ?""",
+        (inspection_id,),
+    )
+    if inspection is None:
+        abort(404)
+    label = inspection["checklist_code"] or f"del {inspection['inspection_date']}"
+    execute("DELETE FROM inspection_items WHERE inspection_id = ?", (inspection_id,))
+    execute("DELETE FROM inspections WHERE id = ?", (inspection_id,))
+    log_activity(
+        "inspecciones", "ELIMINAR", f"Inspección {label} ({inspection['vehicle_plate']})",
+        entity_type="inspeccion", entity_id=inspection_id,
+    )
+    flash("Inspección eliminada.", "success")
+    return redirect(url_for("inspecciones.list_view"))
+
+
 @bp.route("/<int:inspection_id>/imprimir")
 @permission_required("inspecciones", "view")
 def print_view(inspection_id):

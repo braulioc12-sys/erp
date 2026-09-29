@@ -5,6 +5,12 @@
   <h1>Inspección — {{ inspection.vehicle_plate }}</h1>
   <div class="page-actions">
     <a href="{{ url_for('inspecciones.print_view', inspection_id=inspection.id) }}" class="btn btn-secondary" target="_blank">🖨️ Imprimir / Descargar PDF</a>
+    {% if can(current_user.roles, 'inspecciones', 'delete') %}
+    <form method="post" action="{{ url_for('inspecciones.delete', inspection_id=inspection.id) }}" style="display:inline;" onsubmit="return confirm('¿Eliminar esta inspección?');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-danger">Eliminar</button>
+    </form>
+    {% endif %}
   </div>
 </div>
 

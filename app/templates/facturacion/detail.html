@@ -34,6 +34,17 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-primary">📤 Enviar a SUNAT</button>
     </form>
+    {# 29 sep, pedido de Braulio: borrado propio del "Anular" de arriba,
+       solo para Administrador (permiso "delete") -- una factura ya
+       ACEPTADA por SUNAT no se puede borrar del todo (ver
+       _invoice_delete_block_reason() en app/routes/facturacion.py), así
+       que el botón ni se muestra en ese caso. #}
+    {% if invoice.sunat_status != 'ACEPTADO' and can(current_user.roles, 'facturacion', 'delete') %}
+    <form method="post" action="{{ url_for('facturacion.delete', invoice_id=invoice.id) }}" style="display:inline;" onsubmit="return confirm('¿Eliminar esta factura por completo? Esta acción no se puede deshacer.');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-danger">🗑 Eliminar</button>
+    </form>
+    {% endif %}
   </div>
 </div>
 

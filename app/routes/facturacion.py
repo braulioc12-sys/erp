@@ -1173,6 +1173,55 @@ def send_sunat(invoice_id):
     return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
 
 
+# 29 sep, pedido de Braulio ("que solo el administrador pueda borrar...
+# facturas"): antes no existía ninguna forma de borrar una factura del
+# todo (solo Anular, que es un cambio de estado -- ver change_status()).
+# Acción "delete" propia, que por defecto solo tiene Administrador (ver
+# PERMISSIONS en app/auth.py y el comentario en app/permissions_catalog.py).
+# Braulio confirmó (29 sep) que una factura ya ACEPTADA por SUNAT NO se
+# debe poder borrar -- quedaría un comprobante electrónico real vigente
+# sin ningún registro local, y un hueco en la numeración F001 -- para esas
+# solo queda Anular, que ya existe.
+def _invoice_delete_block_reason(invoice):
+    if invoice["sunat_status"] == "ACEPTADO":
+        return (
+            "Esta factura ya fue aceptada por SUNAT — no se puede borrar del todo (quedaría un "
+            "comprobante electrónico vigente sin registro local). Usa \"Anular\" en su lugar."
+        )
+    return None
+
+
+@bp.route("/<int:invoice_id>/eliminar", methods=["POST"])
+@permission_required("facturacion", "delete")
+def delete(invoice_id):
+    if not validate_csrf():
+        abort(400)
+    invoice = query_one("SELECT * FROM invoices WHERE id = ?", (invoice_id,))
+    if invoice is None:
+        abort(404)
+    reason = _invoice_delete_block_reason(invoice)
+    if reason:
+        flash(reason, "error")
+        return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
+
+    # Los viajes facturados en esta factura vuelven a quedar disponibles
+    # para facturarse en otra (mismo criterio que al quitar un ítem desde
+    # editar factura -- ver edit()).
+    trip_ids = [r["trip_id"] for r in query_all(
+        "SELECT trip_id FROM invoice_items WHERE invoice_id = ? AND trip_id IS NOT NULL", (invoice_id,)
+    )]
+    execute("DELETE FROM invoice_items WHERE invoice_id = ?", (invoice_id,))
+    execute("DELETE FROM invoices WHERE id = ?", (invoice_id,))
+    for trip_id in trip_ids:
+        execute("UPDATE trips SET invoiced = 0 WHERE id = ?", (trip_id,))
+    log_activity(
+        "facturacion", "ELIMINAR", f"Factura {invoice['number']}",
+        entity_type="factura", entity_id=invoice_id,
+    )
+    flash("Factura eliminada.", "success")
+    return redirect(url_for("facturacion.list_view"))
+
+
 @bp.route("/<int:invoice_id>/pdf-sunat")
 @permission_required("facturacion", "view")
 def view_sunat_pdf(invoice_id):
