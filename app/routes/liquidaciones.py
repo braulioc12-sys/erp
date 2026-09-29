@@ -231,11 +231,18 @@ LIQUIDATION_CODE_PREFIXES = {"BRMS": "B", "HARRASO": "H"}
 
 
 def _next_liquidation_code(issuer):
+    """29 sep, mismo bug que se encontró en _next_trip_code() (ver
+    app/routes/viajes.py): contar liquidaciones (COUNT) en vez de mirar el
+    código más alto ya usado (MAX) puede generar un código duplicado si
+    alguna liquidación de en medio desapareció -- pasa cuando se borra un
+    viaje con liquidación propia (delete_trip() la borra en cascada). Se
+    corrige acá también, preventivamente, con el mismo criterio MAX+1."""
     prefix = LIQUIDATION_CODE_PREFIXES.get(issuer, "H")
     row = query_one(
-        """SELECT COUNT(*) as n FROM expense_advances a
-           JOIN trips t ON t.id = a.trip_id WHERE t.issuer = ?""",
-        (issuer,),
+        """SELECT COALESCE(MAX(CAST(SUBSTR(a.code, 3) AS INTEGER)), 0) as n
+           FROM expense_advances a JOIN trips t ON t.id = a.trip_id
+           WHERE t.issuer = ? AND a.code LIKE ?""",
+        (issuer, f"{prefix}-%"),
     )
     n = (row["n"] if row else 0) + 1
     return f"{prefix}-{n:04d}"
@@ -244,9 +251,19 @@ def _next_liquidation_code(issuer):
 @bp.route("/anticipo/<int:trip_id>", methods=["GET", "POST"])
 @permission_required("liquidaciones", "edit")
 def new_advance(trip_id):
+    display_trip_id = trip_id  # a dónde volver si algo bloquea -- ver abajo
     trip = query_one("SELECT * FROM trips WHERE id = ?", (trip_id,))
     if trip is None:
         abort(404)
+    # 29 sep, pedido de Braulio (ida/vuelta): "ambos igual estan siendo
+    # amarrados a la misma liquidacion" -- confirmó que la liquidación es
+    # UNA sola para el viaje redondo, anclada siempre al viaje de IDA. Los
+    # links de viajes/detail.html ya mandan directo el id de la ida
+    # (liquidacion_trip_id) sin importar desde qué pantalla se abrieron,
+    # pero esto también cubre entrar directo con la URL de una vuelta.
+    if trip["return_of_trip_id"]:
+        trip = query_one("SELECT * FROM trips WHERE id = ?", (trip["return_of_trip_id"],))
+        trip_id = trip["id"]
     # 4 sep, pedido de Braulio: "los viajes con terceros no deben registrar
     # liquidación, por lo tanto no tienen anticipo de viáticos, inspección
     # ni gastos de viaje" — el costo de un viaje subcontratado ya es el
@@ -256,7 +273,7 @@ def new_advance(trip_id):
     # se pueda crear entrando directo por la URL.
     if trip["ownership"] == "TERCERO":
         flash("Los viajes con terceros no registran liquidación (el costo es el flete acordado).", "error")
-        return redirect(url_for("viajes.detail", trip_id=trip_id))
+        return redirect(url_for("viajes.detail", trip_id=display_trip_id))
     existing = query_one("SELECT id FROM expense_advances WHERE trip_id = ?", (trip_id,))
     if existing:
         flash("Este viaje ya tiene una liquidación (anticipo) registrada.", "error")
@@ -968,6 +985,16 @@ def new_expense():
         # gasto para este viaje"), el viaje llega fijo por un campo oculto —
         # no se vuelve a preguntar (pedido de Braulio, 28 ago).
         trip_id = (request.form.get("trip_id") or "").strip() or None
+        # 29 sep, pedido de Braulio (ida/vuelta): la liquidación (y sus
+        # gastos) es UNA sola para el viaje redondo, anclada siempre al
+        # viaje de ida -- el link de viajes/detail.html ya manda directo
+        # el id de la ida, pero esto normaliza igual si el gasto llega con
+        # el id de una vuelta por cualquier otro camino (ej. el
+        # desplegable de viajes del formulario general de Liquidaciones).
+        if trip_id:
+            trip_for_anchor = query_one("SELECT return_of_trip_id FROM trips WHERE id = ?", (trip_id,))
+            if trip_for_anchor and trip_for_anchor["return_of_trip_id"]:
+                trip_id = trip_for_anchor["return_of_trip_id"]
         vehicle_id = request.form.get("vehicle_id") or None
         # Tipo de comprobante (10 sep, pedido de Braulio): se pide ANTES del
         # concepto en el formulario. "factura" fuerza la cuenta/documento del

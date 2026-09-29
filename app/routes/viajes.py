@@ -945,10 +945,24 @@ def detail(trip_id):
     )
     if trip is None:
         abort(404)
-    expenses = query_all("SELECT * FROM expenses WHERE trip_id = ? ORDER BY expense_date DESC", (trip_id,))
+    # 29 sep, pedido de Braulio (ida/vuelta): "ambos [ida y vuelta] igual
+    # estan siendo amarrados a la misma liquidacion" -- confirmó que
+    # quiere UNA sola liquidación (anticipo de viáticos + gastos) para el
+    # viaje redondo completo, a diferencia de factura/comisión (esas sí
+    # quedan separadas, cada una se factura aparte -- ver
+    # new_return_trip()). liquidacion_trip_id es el "ancla" de esa
+    # liquidación compartida: siempre el id del viaje de IDA, sin importar
+    # si se está viendo la pantalla de la ida o la de la vuelta -- así
+    # ambas pantallas leen/escriben el mismo anticipo y la misma lista de
+    # gastos (ver también los links de "Confirmar anticipo"/"Registrar
+    # gasto" en viajes/detail.html, que usan este mismo id).
+    liquidacion_trip_id = trip["return_of_trip_id"] or trip["id"]
+    expenses = query_all(
+        "SELECT * FROM expenses WHERE trip_id = ? ORDER BY expense_date DESC", (liquidacion_trip_id,)
+    )
     total_expenses = sum(e["amount"] for e in expenses)
     next_statuses = STATUS_FLOW.get(trip["status"], [])
-    advance = query_one("SELECT id, status FROM expense_advances WHERE trip_id = ?", (trip_id,))
+    advance = query_one("SELECT id, status FROM expense_advances WHERE trip_id = ?", (liquidacion_trip_id,))
     payment_term_labels = dict(PAYMENT_TERMS)
     cargo_type_labels = dict(CARGO_TYPES)
     # 15 sep, pedido de Braulio: si el viaje ya tiene una guía de
@@ -985,6 +999,7 @@ def detail(trip_id):
         payment_term_labels=payment_term_labels, cargo_type_labels=cargo_type_labels,
         existing_waybills=existing_waybills, creator=creator,
         outbound_trip=outbound_trip, return_trip=return_trip, conformidad_opcional=conformidad_opcional,
+        liquidacion_trip_id=liquidacion_trip_id,
     )
 
 

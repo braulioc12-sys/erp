@@ -155,16 +155,24 @@
   <a href="{{ url_for('inspecciones.new', trip_id=trip.id) }}" class="btn btn-secondary btn-sm">✅ Registrar inspección</a>
   {% endif %}
   {% if can(current_user.roles, 'liquidaciones', 'edit') %}
+    {# 29 sep, pedido de Braulio (ida/vuelta): "ambos igual estan siendo
+       amarrados a la misma liquidacion" -- la liquidación (anticipo +
+       gastos) es UNA sola para el viaje redondo, anclada siempre al viaje
+       de ida (liquidacion_trip_id, ver detail() en app/routes/viajes.py),
+       a diferencia de factura/comisión que sí van separadas por tramo. #}
     {% if advance %}
-    <a href="{{ url_for('liquidaciones.detail', advance_id=advance.id) }}" class="btn btn-secondary btn-sm">💵 Ver liquidación de este viaje</a>
+    <a href="{{ url_for('liquidaciones.detail', advance_id=advance.id) }}" class="btn btn-secondary btn-sm">💵 Ver liquidación {{ 'del viaje redondo' if outbound_trip or return_trip else 'de este viaje' }}</a>
     {% else %}
-    <a href="{{ url_for('liquidaciones.new_advance', trip_id=trip.id) }}" class="btn btn-secondary btn-sm">💵 Confirmar anticipo de viáticos</a>
+    <a href="{{ url_for('liquidaciones.new_advance', trip_id=liquidacion_trip_id) }}" class="btn btn-secondary btn-sm">💵 Confirmar anticipo de viáticos</a>
     {% endif %}
   {% endif %}
   {% endif %}
 </div>
 {% if trip.ownership == 'TERCERO' %}
 <p class="muted" style="margin-top:-8px; margin-bottom:16px;">Los viajes con terceros no registran liquidación (sin anticipo de viáticos, gastos de viaje ni inspección) — el costo de este viaje es el flete acordado.</p>
+{% endif %}
+{% if outbound_trip or return_trip %}
+<p class="muted" style="margin-top:-8px; margin-bottom:16px;">La liquidación (anticipo de viáticos y gastos) es una sola para todo el viaje redondo — compartida entre {{ 'este viaje y su ida' if outbound_trip else 'este viaje y su vuelta' }}. La factura y la comisión sí van separadas, cada tramo se factura aparte.</p>
 {% endif %}
 
 {# 15 sep, pedido de Braulio: "a la hora de crear o subir guia primero debe
@@ -320,7 +328,7 @@
 
 {% if trip.ownership != 'TERCERO' %}
 <div class="panel">
-  <h2>Gastos asociados a este viaje ({{ total_expenses|money }})</h2>
+  <h2>Gastos asociados a {{ 'este viaje redondo (ida + vuelta)' if outbound_trip or return_trip else 'este viaje' }} ({{ total_expenses|money }})</h2>
   <div class="table-wrap">
     <table>
       <thead><tr><th>Fecha</th><th>Tipo</th><th>Descripción</th><th class="text-right">Monto</th></tr></thead>
@@ -339,7 +347,10 @@
     </table>
   </div>
   {% if can(current_user.roles, 'liquidaciones', 'edit') %}
-  <p style="margin-top:12px;"><a href="{{ url_for('liquidaciones.new_expense', trip_id=trip.id) }}" class="btn btn-secondary btn-sm">+ Registrar gasto para este viaje</a></p>
+  {# 29 sep, ida/vuelta: liquidacion_trip_id siempre ancla al viaje de ida,
+     así el gasto se suma a la misma liquidación sin importar desde cuál
+     de las 2 pantallas se registre. #}
+  <p style="margin-top:12px;"><a href="{{ url_for('liquidaciones.new_expense', trip_id=liquidacion_trip_id) }}" class="btn btn-secondary btn-sm">+ Registrar gasto para este viaje</a></p>
   {% endif %}
 </div>
 {% endif %}
