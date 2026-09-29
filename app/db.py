@@ -724,16 +724,73 @@ def _apply_role_check_migration_postgres(conn):
     cur.execute(f"ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN {USER_ROLES!r})")
 
 
+# 29 sep, bug reportado por Braulio (Internal Server Error al editar un
+# usuario -- traceback en Render: UniqueViolation no, sino CheckViolation en
+# el INSERT INTO user_roles de _save_user_roles(), app/routes/usuarios.py).
+# Causa: el comentario original de más abajo ("user_roles es una tabla
+# NUEVA, no hace falta migrar ningún CHECK") era cierto el 3 sep, cuando la
+# tabla se creó -- pero USER_ROLES siguió creciendo después (RRHH se agregó
+# el 18 sep) y a "users" SÍ se le migra el CHECK en cada arranque
+# (_apply_role_check_migration_postgres arriba), mientras que a "user_roles"
+# nunca se le migró el suyo. Resultado: en cualquier base de Postgres/RDS
+# creada antes del 18 sep, el CHECK de user_roles.role se quedó con la lista
+# vieja (sin RRHH) para siempre, y asignarle el rol RRHH a alguien desde
+# Usuarios revienta con un 500 -- exactamente lo que le pasó a Braulio al
+# editar a Brenda. Mismo mecanismo que _apply_role_check_migration_postgres
+# (buscar el nombre real del CHECK por catálogo, no asumir el autogenerado,
+# porque si no el viejo seguiría conviviendo con el nuevo y bloqueando
+# igual). Seguro de repetir en cada arranque.
+def _apply_user_roles_check_migration_postgres(conn):
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT con.conname FROM pg_constraint con
+           JOIN pg_class rel ON rel.oid = con.conrelid
+           WHERE rel.relname = 'user_roles' AND con.contype = 'c'
+             AND pg_get_constraintdef(con.oid) ILIKE '%role%'"""
+    )
+    for (conname,) in cur.fetchall():
+        cur.execute(f'ALTER TABLE user_roles DROP CONSTRAINT "{conname}"')
+    cur.execute(f"ALTER TABLE user_roles ADD CONSTRAINT user_roles_role_check CHECK (role IN {USER_ROLES!r})")
+
+
+def _apply_user_roles_check_migration_sqlite(conn):
+    """Equivalente SQLite de _apply_user_roles_check_migration_postgres --
+    mismo mecanismo de recrear la tabla que _apply_role_check_migration_sqlite
+    (SQLite no soporta modificar un CHECK ya creado), pero más simple: a
+    diferencia de "users", ninguna otra tabla tiene una FOREIGN KEY que
+    apunte a "user_roles", así que no hace falta la maniobra de
+    PRAGMA foreign_keys/legacy_alter_table para evitar que SQLite reescriba
+    referencias de otras tablas."""
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='user_roles'").fetchone()
+    if not row or not row[0] or "RRHH" in row[0]:
+        return  # ya migrada, o todavía no existe (base nueva: schema.sql ya trae el CHECK actualizado)
+    conn.execute("ALTER TABLE user_roles RENAME TO user_roles_check_old")
+    conn.execute(
+        f"""CREATE TABLE user_roles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            role TEXT NOT NULL CHECK (role IN {USER_ROLES!r}),
+            UNIQUE (user_id, role)
+        )"""
+    )
+    conn.execute(
+        """INSERT INTO user_roles (id, user_id, role)
+           SELECT id, user_id, role FROM user_roles_check_old"""
+    )
+    conn.execute("DROP TABLE user_roles_check_old")
+
+
 # 3 sep, mismo día, ronda siguiente (pedido de Braulio: un usuario puede
-# tener más de 1 rol a la vez, ej. Almacén y Mecánico) — user_roles es una
-# tabla NUEVA (ver schema.sql), así que no hace falta migrar ningún CHECK
-# existente para crearla; lo único que hace falta es completarla sola para
-# los usuarios que ya existían ANTES de este cambio, tomando su users.role
-# de siempre como su único rol inicial, para que nadie quede sin roles (y
-# por lo tanto sin ningún permiso) apenas se despliegue esto. Idempotente:
-# el WHERE de abajo solo toca usuarios que todavía no tienen ninguna fila
-# en user_roles, así que un usuario al que ya se le asignaron roles a mano
-# nunca se pisa en un arranque posterior.
+# tener más de 1 rol a la vez, ej. Almacén y Mecánico) -- lo único que hace
+# falta al CREAR user_roles es completarla sola para los usuarios que ya
+# existían ANTES de este cambio, tomando su users.role de siempre como su
+# único rol inicial, para que nadie quede sin roles (y por lo tanto sin
+# ningún permiso) apenas se despliegue esto. Idempotente: el WHERE de abajo
+# solo toca usuarios que todavía no tienen ninguna fila en user_roles, así
+# que un usuario al que ya se le asignaron roles a mano nunca se pisa en un
+# arranque posterior. (29 sep: el CHECK de esta tabla si necesita migrarse
+# más adelante cuando USER_ROLES crece -- ver las dos funciones justo
+# arriba.)
 def _backfill_user_roles_sqlite(conn):
     conn.execute(
         """INSERT INTO user_roles (user_id, role)
@@ -1296,6 +1353,7 @@ def init_db(app):
             _apply_column_migrations_postgres(conn)
             cur.execute(fk_sql)
             _apply_role_check_migration_postgres(conn)
+            _apply_user_roles_check_migration_postgres(conn)
             _apply_invoice_items_trip_nullable_postgres(conn)
             _backfill_user_roles_postgres(conn)
             _ensure_combustible_concept_postgres(conn)
@@ -1314,6 +1372,7 @@ def init_db(app):
         conn.executescript(schema_sql)
         _apply_column_migrations_sqlite(conn)
         _apply_role_check_migration_sqlite(conn)
+        _apply_user_roles_check_migration_sqlite(conn)
         _apply_invoice_items_trip_nullable_sqlite(conn)
         _backfill_user_roles_sqlite(conn)
         _ensure_combustible_concept_sqlite(conn)
