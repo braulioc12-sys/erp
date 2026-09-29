@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 
 from flask import (
@@ -41,6 +42,15 @@ from app.ubigeo import (
 )
 
 bp = Blueprint("guias", __name__, url_prefix="/guias")
+
+# 28 sep, mismo bug real encontrado en Facturación (ver la nota grande junto
+# a `logger = logging.getLogger(...)` en app/routes/facturacion.py): el
+# "Enviar a SUNAT" de una guía tenía el mismo hueco -- solo se capturaba
+# `SunatOseError`, así que cualquier otro tipo de excepción se escapaba como
+# la página genérica "Internal Server Error", sin traceback visible para
+# Braulio. Mismo fix acá: un `except Exception` adicional en send_sunat()
+# más abajo.
+logger = logging.getLogger(__name__)
 
 # 20 sep, pedido de Braulio: guías de BRMS a Backus o Naviera Oriente van
 # enlazadas a un "número de pedido" que esos clientes mandan después de
@@ -1030,6 +1040,28 @@ def send_sunat(waybill_id):
             entity_url=url_for("guias.detail", waybill_id=waybill_id),
         )
         flash(f"No se pudo enviar la guía: {exc}", "error")
+    except Exception as exc:
+        # 28 sep, ver la nota junto a `logger = logging.getLogger(...)` al
+        # inicio de este archivo.
+        logger.exception(
+            "Error inesperado al enviar la guía #%s a SUNAT", waybill_id
+        )
+        execute(
+            "UPDATE waybills SET sunat_status='ERROR', sunat_message=?, sunat_sent_at=datetime('now') WHERE id=?",
+            (f"Error interno inesperado: {type(exc).__name__}: {exc}", waybill_id),
+        )
+        log_activity(
+            "guias", "ENVIAR",
+            f"Guía {waybill['series']}-{waybill['series_number']:06d}: error interno inesperado al "
+            f"enviar a SUNAT — {type(exc).__name__}: {exc}",
+            entity_type="guia", entity_id=waybill_id,
+            entity_url=url_for("guias.detail", waybill_id=waybill_id),
+        )
+        flash(
+            "No se pudo enviar la guía por un error interno inesperado (no fue un rechazo de "
+            f"SUNAT): {type(exc).__name__}: {exc} — copia este mensaje y mándamelo para revisarlo.",
+            "error",
+        )
 
     return redirect(url_for("guias.detail", waybill_id=waybill_id))
 

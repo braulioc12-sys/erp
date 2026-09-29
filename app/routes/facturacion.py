@@ -1,3 +1,4 @@
+import logging
 import uuid
 from itertools import zip_longest
 
@@ -49,6 +50,25 @@ from app.storage import (
 )
 
 bp = Blueprint("facturacion", __name__, url_prefix="/facturacion")
+
+# 28 sep, bug real en producción (Braulio, factura #14): "Enviar a SUNAT"
+# reventó con la página genérica "Internal Server Error" de Flask/Werkzeug
+# en vez de un flash claro. Causa: send_sunat() de abajo solo tenía
+# `except SunatOseError` -- cualquier otro tipo de excepción (un error de
+# red que urllib no envuelve como URLError/HTTPError, un dato inesperado en
+# la factura, un bug nuestro) se escapaba sin capturar y Flask no tiene
+# forma de mostrar algo útil para eso salvo la página genérica, que además
+# no deja ver el traceback real (Render solo se lo muestra a Braulio así,
+# nunca el log del servidor). Se agregó un segundo `except Exception` en
+# send_sunat() (ver más abajo) que: deja la factura en estado ERROR igual
+# que un SunatOseError, muestra un flash con el tipo/mensaje real del error
+# (para que Braulio lo pueda copiar y mandar directo, sin tener que ir a
+# buscar en los logs de Render), y además loguea el traceback completo acá
+# (logger.exception) por si hace falta revisarlo con más detalle. Mismo
+# patrón ya usado en este proyecto para no dejar que un error inesperado
+# tire abajo la request entera (ver app/audit.py, app/scheduler.py,
+# app/routes/integraciones.py).
+logger = logging.getLogger(__name__)
 
 
 def _next_series_number(series):
@@ -1119,6 +1139,36 @@ def send_sunat(invoice_id):
             entity_url=url_for("facturacion.detail", invoice_id=invoice_id),
         )
         flash(f"No se pudo enviar la factura: {exc}", "error")
+    except Exception as exc:
+        # 28 sep, ver la nota grande junto a `logger = logging.getLogger(...)`
+        # más arriba en este archivo: sin esto, cualquier excepción que no
+        # sea SunatOseError (un bug nuestro, una respuesta de red que
+        # urllib no envuelve como URLError/HTTPError, etc.) tiraba la página
+        # genérica "Internal Server Error" de Flask, sin dejar rastro visible
+        # para Braulio ni forma de saber qué pasó de verdad. Con esto: la
+        # factura queda en ERROR (igual que un SunatOseError), el flash
+        # muestra el tipo y mensaje reales del error para que Braulio lo
+        # pueda copiar y mandar directo, y el traceback completo queda en el
+        # log del servidor (logger.exception) por si hace falta más detalle.
+        logger.exception(
+            "Error inesperado al enviar la factura #%s a SUNAT", invoice_id
+        )
+        execute(
+            "UPDATE invoices SET sunat_status='ERROR', sunat_message=?, sunat_sent_at=datetime('now') WHERE id=?",
+            (f"Error interno inesperado: {type(exc).__name__}: {exc}", invoice_id),
+        )
+        log_activity(
+            "facturacion", "ENVIAR",
+            f"Factura {invoice['number']}: error interno inesperado al enviar a SUNAT — "
+            f"{type(exc).__name__}: {exc}",
+            entity_type="factura", entity_id=invoice_id,
+            entity_url=url_for("facturacion.detail", invoice_id=invoice_id),
+        )
+        flash(
+            "No se pudo enviar la factura por un error interno inesperado (no fue un rechazo de "
+            f"SUNAT): {type(exc).__name__}: {exc} — copia este mensaje y mándamelo para revisarlo.",
+            "error",
+        )
 
     return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
 
