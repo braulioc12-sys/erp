@@ -953,6 +953,50 @@ def _backfill_tefacturo_codigo_bien_servicio_postgres(conn):
         )
 
 
+# 30 sep, pedido de Braulio ("la F-0220 es la e001-349... no deberia ser
+# asi"): manual_create()/manual_zip() (ver app/routes/facturacion.py) le
+# asignaban a una factura cargada a mano un "number" F-XXXX inventado con
+# next_code() -- igual que a una factura NUEVA de verdad -- en vez de dejar
+# el "number" tal cual su serie-número real de SUNAT. Ya arreglado para las
+# cargas de ahora en adelante, pero las que Braulio ya cargó ANTES de este
+# arreglo se quedaron con el número inventado en la base de producción.
+# Este backfill las corrige una sola vez: corre en cada arranque (mismo
+# patrón que _backfill_tefacturo_codigo_bien_servicio_* de arriba) pero
+# solo toca filas manual_upload=1 cuyo number TODAVÍA tenga el patrón viejo
+# "F-%", así que nunca reprocesa una fila ya corregida ni toca una factura
+# NUEVA de verdad (manual_upload=0, cuyo "F-XXXX" sí es su número real de
+# Harris). Si el nuevo valor ya lo tiene otra factura (colisión rara entre
+# dos empresas con la misma serie-número, ver el chequeo agregado en
+# manual_create()/manual_zip()) se deja esa fila sin tocar en vez de romper
+# el UNIQUE de "number" -- revisar a mano sería el único caso así.
+def _backfill_manual_invoice_numbers_sqlite(conn):
+    rows = conn.execute(
+        "SELECT id, series, series_number FROM invoices WHERE manual_upload = 1 AND number LIKE 'F-%'"
+    ).fetchall()
+    for invoice_id, series, series_number in rows:
+        new_number = f"{series}-{series_number:06d}"
+        clash = conn.execute(
+            "SELECT id FROM invoices WHERE number = ? AND id != ?", (new_number, invoice_id)
+        ).fetchone()
+        if clash:
+            continue
+        conn.execute("UPDATE invoices SET number = ? WHERE id = ?", (new_number, invoice_id))
+
+
+def _backfill_manual_invoice_numbers_postgres(conn):
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, series, series_number FROM invoices WHERE manual_upload = 1 AND number LIKE 'F-%'"
+    )
+    rows = cur.fetchall()
+    for invoice_id, series, series_number in rows:
+        new_number = f"{series}-{series_number:06d}"
+        cur.execute("SELECT id FROM invoices WHERE number = %s AND id != %s", (new_number, invoice_id))
+        if cur.fetchone():
+            continue
+        cur.execute("UPDATE invoices SET number = %s WHERE id = %s", (new_number, invoice_id))
+
+
 def _fix_boleta_account_codes_postgres(conn):
     cur = conn.cursor()
     for name, (account_code, doc_code, label) in _BOLETA_ACCOUNT_FIXES.items():
@@ -1368,6 +1412,7 @@ def init_db(app):
             _seed_tarifario_postgres(conn)
             _seed_detraction_concepts_postgres(conn)
             _backfill_tefacturo_codigo_bien_servicio_postgres(conn)
+            _backfill_manual_invoice_numbers_postgres(conn)
             conn.commit()
         finally:
             conn.close()
@@ -1387,6 +1432,7 @@ def init_db(app):
         _seed_tarifario_sqlite(conn)
         _seed_detraction_concepts_sqlite(conn)
         _backfill_tefacturo_codigo_bien_servicio_sqlite(conn)
+        _backfill_manual_invoice_numbers_sqlite(conn)
         conn.commit()
         conn.close()
 

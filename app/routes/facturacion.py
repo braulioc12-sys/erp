@@ -105,21 +105,34 @@ def list_view():
     comentario en viajes.py. Antes esta lista mezclaba facturas de ambas
     empresas con una columna "Empresa"; ahora, al elegir la empresa acá, esa
     elección se lleva también a "Generar factura" (ver new() más abajo),
-    donde ya no hace falta volver a preguntarla."""
+    donde ya no hace falta volver a preguntarla.
+
+    30 sep, pedido de Braulio ("agregues aca una columna que se llame
+    numero sunat... y que tambien haya la opcion de buscar"): `q` busca por
+    cliente, por el número interno de Harris o por la serie-número real de
+    SUNAT — mismo patrón (LOWER() en ambos lados, "series || '-' ||
+    series_number" sin el cero-relleno que sí se muestra en pantalla, ver
+    facturacion/list.html) ya usado en guias.list_view()/clientes.list_view()
+    (patch 0066)."""
     issuer = request.args.get("issuer", "").strip().upper()
     if issuer not in ISSUER_CHOICES:
-        return render_template("facturacion/list.html", invoices=None, issuer=None, status="")
+        return render_template("facturacion/list.html", invoices=None, issuer=None, status="", q="")
 
     status = request.args.get("status", "")
+    q = request.args.get("q", "").strip()
     sql = """SELECT i.*, c.name as client_name FROM invoices i
               JOIN clients c ON c.id = i.client_id WHERE i.issuer = ?"""
     params = [issuer]
     if status:
         sql += " AND i.status = ?"
         params.append(status)
+    if q:
+        sql += """ AND (LOWER(c.name) LIKE LOWER(?) OR LOWER(i.number) LIKE LOWER(?)
+                    OR LOWER(i.series || '-' || i.series_number) LIKE LOWER(?))"""
+        params += [f"%{q}%"] * 3
     sql += " ORDER BY i.issue_date DESC, i.id DESC"
     invoices = query_all(sql, params)
-    return render_template("facturacion/list.html", invoices=invoices, status=status, issuer=issuer)
+    return render_template("facturacion/list.html", invoices=invoices, status=status, issuer=issuer, q=q)
 
 
 def _collect_manual_items():
@@ -527,7 +540,40 @@ def manual_create():
         )
         return _back_to_confirm()
 
-    number = next_code("F", "invoices", code_column="number")
+    # 30 sep, pedido de Braulio ("el nombre de la factura tiene que
+    # mantenerse con el del archivo (E001-00495) y no asignarle un nombre
+    # nuevo"): antes acá se llamaba a next_code("F", ...) igual que para una
+    # factura NUEVA de verdad (ver new() más abajo) -- eso le asignaba a una
+    # factura ya emitida por SUNAT un número interno "F-XXXX" inventado
+    # (ej. "F-0220" para lo que en realidad es "E001-000349"), Y de paso
+    # hacía avanzar el contador de next_code() para las facturas F-XXXX
+    # reales de Harris (que cuentan el MAX ya usado con ese prefijo -- ver
+    # su comentario en app/helpers.py), corriendo el próximo número real
+    # más adelante de lo que debía. Ahora el "number" de una factura cargada
+    # a mano ES literalmente su serie-número real de SUNAT, tal cual
+    # aparece en el archivo -- así no inventa un nombre nuevo y no le quita
+    # ningún número a la numeración de Harris.
+    #
+    # "number" tiene una restricción UNIQUE global (no separada por
+    # empresa, a diferencia de series+series_number de arriba, que sí lo
+    # está) -- coincidiría solo si OTRA empresa (Harraso vs BRMS) ya hubiera
+    # cargado a mano un comprobante con la misma serie-número exacta, algo
+    # posible en teoría (las series "F001"/"E001" son genéricas) aunque
+    # las dos empresas facturan real y por separado en SUNAT. Se revisa
+    # aparte (sin filtrar por empresa, a diferencia del chequeo de arriba)
+    # para avisar con un mensaje claro en vez de reventar con un error de
+    # base de datos.
+    number = f"{series}-{correlativo:06d}"
+    number_clash = query_one("SELECT id, issuer FROM invoices WHERE number = ?", (number,))
+    if number_clash:
+        flash(
+            f"Ya existe una factura con el número {number} cargada para "
+            f"{'BRMS' if number_clash['issuer'] == 'BRMS' else 'Harraso Transport'} — "
+            "si es la misma empresa, revisa si ya la habías cargado; si es la otra empresa, "
+            "avísanos porque este caso no está previsto.",
+            "error",
+        )
+        return _back_to_confirm()
     db = get_db()
     cur = db.execute(
         """INSERT INTO invoices (number, client_id, issue_date, due_date, amount, notes, series, series_number,
@@ -759,6 +805,27 @@ def manual_zip():
                     })
                     continue
 
+                # 30 sep, mismo arreglo que manual_create() (ver su
+                # comentario grande): el "number" de una factura cargada a
+                # mano ES su serie-número real de SUNAT tal cual, no un
+                # "F-XXXX" inventado con next_code() -- eso antes corría de
+                # más el contador de las facturas F-XXXX reales de Harris.
+                # Se revisa la colisión ANTES de crear cliente nuevo o subir
+                # los archivos a S3, para no dejar trabajo a medias si esta
+                # factura no se va a poder cargar.
+                number = f"{extracted['series']}-{extracted['correlativo']:06d}"
+                number_clash = query_one("SELECT id, issuer FROM invoices WHERE number = ?", (number,))
+                if number_clash:
+                    errors.append({
+                        "row": label,
+                        "message": (
+                            f"Ya existe una factura con el número {number} cargada para "
+                            f"{'BRMS' if number_clash['issuer'] == 'BRMS' else 'Harraso Transport'} "
+                            "— no se volvió a cargar."
+                        ),
+                    })
+                    continue
+
                 client_id = _match_client_by_ruc(extracted.get("customer_ruc")) or _match_client_by_name(
                     extracted.get("customer_name")
                 )
@@ -775,7 +842,6 @@ def manual_zip():
                 save_sunat_document(pdf_filename, pdf_bytes)
                 save_sunat_document(xml_filename, xml_bytes)
 
-                number = next_code("F", "invoices", code_column="number")
                 issue_date = parse_date(extracted.get("issue_date")) or today_str()
                 invoice_id = execute(
                     """INSERT INTO invoices (number, client_id, issue_date, amount, notes, series, series_number,
