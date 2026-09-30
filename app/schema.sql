@@ -289,12 +289,24 @@ CREATE TABLE IF NOT EXISTS trips (
     -- vehicle_type='CARRETA' en la consulta del formulario (ver
     -- _active_trailers() en app/routes/viajes.py).
     trailer_vehicle_id INTEGER REFERENCES vehicles(id),
-    cargo_type TEXT CHECK (cargo_type IN ('PLATAFORMA', 'CONTENEDOR', 'PARIHUELERO', 'FURGON', 'OTROS')),
+    -- 30 sep, pedido de Braulio ("mejor agregas en catalogos el tipo de
+    -- carga para poder editar o agregar otros sin tener que subir un nuevo
+    -- parche"): dejó de ser una lista fija con CHECK -- ahora es un
+    -- catálogo editable (catalog_items, categoría "cargo_type", ver
+    -- Catálogos → Tipos de carga y _cargo_types() en app/routes/viajes.py),
+    -- igual que vehicles.owner (categoría "vehicle_owner"). Se guarda el
+    -- nombre tal cual (ej. "Contenedor"), sin código aparte y sin CHECK acá
+    -- -- en una base ya desplegada, el CHECK viejo se elimina solo en cada
+    -- arranque (ver _apply_cargo_type_check_migration_* en app/db.py).
+    cargo_type TEXT,
     -- Código del contenedor + foto de evidencia de buen estado (10 sep,
-    -- pedido de Braulio) — solo aplican cuando cargo_type='CONTENEDOR' (se
+    -- pedido de Braulio) — solo aplican cuando cargo_type='Contenedor' (se
     -- limpian a NULL si el viaje no es de contenedor, ver new()/edit() en
-    -- app/routes/viajes.py). La foto se guarda con el mismo mecanismo que
-    -- la guía de transportista (ver app/storage.py).
+    -- app/routes/viajes.py). OJO: esta comparación depende del nombre
+    -- exacto "Contenedor" en el catálogo -- si se renombra desde Catálogos,
+    -- los viajes NUEVOS de ese tipo dejan de mostrar estos campos (los ya
+    -- creados no se ven afectados). La foto se guarda con el mismo
+    -- mecanismo que la guía de transportista (ver app/storage.py).
     container_code TEXT,
     container_photo_filename TEXT,
     -- Unidad propia (de Flota) vs. subcontratada a un tercero. Si es

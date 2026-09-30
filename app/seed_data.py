@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 from werkzeug.security import generate_password_hash
 
-from app.db import execute, get_db, query_all, query_one
+from app.db import DEFAULT_CARGO_TYPES, execute, get_db, query_all, query_one
 
 
 def _upsert_user(name, email, password, role):
@@ -52,6 +52,15 @@ DEFAULT_CATALOGS = {
         "Harraso Transport",
         "Tercero afiliado",
     ],
+    # Tipo de carga de un viaje (Catálogos → Tipos de carga) — 30 sep,
+    # pedido de Braulio: pasó de ser una lista fija en código (con
+    # "Isotanque" agregado ese mismo día) a un catálogo editable, para que
+    # pueda agregar o renombrar tipos él mismo sin necesitar un parche
+    # nuevo. Misma lista que DEFAULT_CARGO_TYPES en app/db.py (que además
+    # completa este catálogo en una base YA desplegada, ya que este
+    # diccionario solo se siembra en una base nueva y vacía) — se importa de
+    # ahí para no mantener dos copias.
+    "cargo_type": DEFAULT_CARGO_TYPES,
 }
 
 # Conceptos de gasto para el export de liquidación contable (ver

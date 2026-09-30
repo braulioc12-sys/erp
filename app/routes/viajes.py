@@ -36,13 +36,13 @@ STATUS_FLOW = {
 # empresa que opera el viaje.
 ISSUER_CHOICES = ("HARRASO", "BRMS")
 
-CARGO_TYPES = [
-    ("PLATAFORMA", "Plataforma"),
-    ("CONTENEDOR", "Contenedor"),
-    ("PARIHUELERO", "Parihuelero"),
-    ("FURGON", "Furgón"),
-    ("OTROS", "Otros"),
-]
+# 30 sep, pedido de Braulio: primero pidió agregar "Isotanque" a esta lista
+# fija; antes de aplicar ese parche, pidió ir más allá ("mejor agregas en
+# catalogos el tipo de carga para poder editar o agregar otros sin tener
+# que subir un nuevo parche") -- dejó de ser una lista fija en código, ver
+# _cargo_types() más abajo, que lee el catálogo editable en Catálogos →
+# Tipos de carga (mismo mecanismo que _vehicle_owners() en
+# app/routes/flota.py).
 
 # "Periodo de pago" de un viaje con terceros: lista cerrada de términos
 # comunes (pedido explícito de Braulio, en vez de texto libre) para poder
@@ -115,10 +115,27 @@ def _next_trip_code(issuer):
     return f"{prefix}-{n:04d}"
 
 
+def _cargo_types():
+    """Tipos de carga (Catálogos → Tipos de carga) -- catálogo editable
+    igual que _vehicle_owners() en app/routes/flota.py: se guarda el nombre
+    del catálogo tal cual (ej. "Contenedor"), no un código aparte, así que
+    agregar o editar un tipo de carga desde Catálogos no necesita ningún
+    cambio de código. Devuelve tuplas (nombre, nombre) para no tener que
+    tocar el `{% for value, label in cargo_types %}` de viajes/form.html."""
+    rows = query_all(
+        "SELECT name FROM catalog_items WHERE category = 'cargo_type' AND active = 1 ORDER BY sort_order, name"
+    )
+    return [(r["name"], r["name"]) for r in rows]
+
+
 def _parse_cargo_type(form):
-    value = (form.get("cargo_type") or "").strip().upper()
-    valid = {code for code, _ in CARGO_TYPES}
-    return value if value in valid else None
+    # 30 sep: ya no se valida contra una lista fija en código (ver
+    # _cargo_types() arriba) -- mismo criterio que vehicles.owner: cualquier
+    # texto no vacío se acepta tal cual, así un viaje que ya tenía un tipo
+    # de carga desactivado/renombrado en Catálogos se puede seguir editando
+    # sin perder ese dato (ver el <select> de viajes/form.html, que muestra
+    # el valor actual aunque ya no esté en el catálogo activo).
+    return (form.get("cargo_type") or "").strip() or None
 
 
 def _parse_container_code(form):
@@ -521,7 +538,11 @@ def new():
         # tipo de carga aunque el formulario los haya enviado (mismo
         # criterio que los campos de propia/tercero en
         # _ownership_and_third_party_fields).
-        if cargo_type == "CONTENEDOR":
+        # OJO: depende del nombre exacto "Contenedor" en el catálogo Tipos
+        # de carga -- si se renombra desde Catálogos, los viajes NUEVOS de
+        # ese tipo dejan de activar estos campos (ver el comentario largo
+        # junto a trips.cargo_type en schema.sql).
+        if cargo_type == "Contenedor":
             container_code = _parse_container_code(request.form)
             container_photo_filename = _save_container_photo_file(request.files.get("container_photo"))
         else:
@@ -550,7 +571,7 @@ def new():
                 "viajes/form.html", trip=request.form, mode="new",
                 clients=clients, vehicles=vehicles, trailers=trailers, drivers=drivers, routes=routes,
                 selected_route_id=request.form.get("route_id", ""),
-                cargo_types=CARGO_TYPES, payment_terms=PAYMENT_TERMS,
+                cargo_types=_cargo_types(), payment_terms=PAYMENT_TERMS,
                 open_maintenance_vehicle_ids=_vehicles_with_open_maintenance_orders(),
             )
 
@@ -615,7 +636,7 @@ def new():
     return render_template(
         "viajes/form.html", trip=None, mode="new",
         clients=clients, vehicles=vehicles, trailers=trailers, drivers=drivers, routes=routes, today=today_str(),
-        selected_route_id="", cargo_types=CARGO_TYPES, payment_terms=PAYMENT_TERMS,
+        selected_route_id="", cargo_types=_cargo_types(), payment_terms=PAYMENT_TERMS,
         preset_issuer=_parse_issuer(request.args), preset_ownership=_parse_ownership(request.args),
         open_maintenance_vehicle_ids=_vehicles_with_open_maintenance_orders(),
     )
@@ -652,7 +673,11 @@ def edit(trip_id):
         # sube una nueva, se conserva la anterior (mismo criterio que
         # save_waybill()/save_delivery_proof()); si el tipo de carga deja de
         # ser CONTENEDOR, se limpian ambos campos.
-        if cargo_type == "CONTENEDOR":
+        # OJO: depende del nombre exacto "Contenedor" en el catálogo Tipos
+        # de carga -- si se renombra desde Catálogos, los viajes NUEVOS de
+        # ese tipo dejan de activar estos campos (ver el comentario largo
+        # junto a trips.cargo_type en schema.sql).
+        if cargo_type == "Contenedor":
             container_code = _parse_container_code(request.form)
             new_container_photo = _save_container_photo_file(request.files.get("container_photo"))
             container_photo_filename = new_container_photo if new_container_photo else trip["container_photo_filename"]
@@ -695,7 +720,7 @@ def edit(trip_id):
                 "viajes/form.html", trip=trip, mode="edit", trip_id=trip_id,
                 clients=clients, vehicles=vehicles, trailers=trailers, drivers=drivers, routes=routes,
                 selected_route_id=request.form.get("route_id", ""),
-                cargo_types=CARGO_TYPES, payment_terms=PAYMENT_TERMS,
+                cargo_types=_cargo_types(), payment_terms=PAYMENT_TERMS,
                 open_maintenance_vehicle_ids=_vehicles_with_open_maintenance_orders(),
             )
         driver_commission = _resolve_commission(
@@ -755,7 +780,7 @@ def edit(trip_id):
         "viajes/form.html", trip=trip, mode="edit", trip_id=trip_id,
         clients=clients, vehicles=vehicles, trailers=trailers, drivers=drivers, routes=routes,
         selected_route_id=_selected_route_id_for_edit(trip),
-        cargo_types=CARGO_TYPES, payment_terms=PAYMENT_TERMS,
+        cargo_types=_cargo_types(), payment_terms=PAYMENT_TERMS,
         open_maintenance_vehicle_ids=_vehicles_with_open_maintenance_orders(),
     )
 
@@ -812,7 +837,11 @@ def new_return_trip(trip_id):
         driver2_id = (request.form.get("driver2_id") or None) if double_driver else None
         issuer = outbound["issuer"]  # heredado de la ida, no editable -- ver viajes/form.html modo "vuelta"
         cargo_type = _parse_cargo_type(request.form)
-        if cargo_type == "CONTENEDOR":
+        # OJO: depende del nombre exacto "Contenedor" en el catálogo Tipos
+        # de carga -- si se renombra desde Catálogos, los viajes NUEVOS de
+        # ese tipo dejan de activar estos campos (ver el comentario largo
+        # junto a trips.cargo_type en schema.sql).
+        if cargo_type == "Contenedor":
             container_code = _parse_container_code(request.form)
             container_photo_filename = _save_container_photo_file(request.files.get("container_photo"))
         else:
@@ -841,7 +870,7 @@ def new_return_trip(trip_id):
                 "viajes/form.html", trip=request.form, mode="vuelta", outbound_trip=outbound,
                 clients=clients, vehicles=vehicles, trailers=trailers, drivers=drivers, routes=routes,
                 selected_route_id=request.form.get("route_id", ""),
-                cargo_types=CARGO_TYPES, payment_terms=PAYMENT_TERMS,
+                cargo_types=_cargo_types(), payment_terms=PAYMENT_TERMS,
                 open_maintenance_vehicle_ids=_vehicles_with_open_maintenance_orders(),
             )
 
@@ -923,7 +952,7 @@ def new_return_trip(trip_id):
     return render_template(
         "viajes/form.html", trip=prefill, mode="vuelta", outbound_trip=outbound,
         clients=clients, vehicles=vehicles, trailers=trailers, drivers=drivers, routes=routes, today=today_str(),
-        selected_route_id=default_route_id, cargo_types=CARGO_TYPES, payment_terms=PAYMENT_TERMS,
+        selected_route_id=default_route_id, cargo_types=_cargo_types(), payment_terms=PAYMENT_TERMS,
         open_maintenance_vehicle_ids=_vehicles_with_open_maintenance_orders(),
     )
 
@@ -964,7 +993,10 @@ def detail(trip_id):
     next_statuses = STATUS_FLOW.get(trip["status"], [])
     advance = query_one("SELECT id, status FROM expense_advances WHERE trip_id = ?", (liquidacion_trip_id,))
     payment_term_labels = dict(PAYMENT_TERMS)
-    cargo_type_labels = dict(CARGO_TYPES)
+    # 30 sep: ya no hace falta un diccionario de etiquetas para el tipo de
+    # carga -- ahora que se guarda el nombre del catálogo tal cual (ver
+    # _cargo_types() arriba), trip.cargo_type YA ES la etiqueta a mostrar
+    # (ver viajes/detail.html).
     # 15 sep, pedido de Braulio: si el viaje ya tiene una guía de
     # transportista generada (módulo Guías), la pregunta de "¿la guía del
     # remitente ya figura con nuestros datos?" ya no aplica -- no se le
@@ -996,7 +1028,7 @@ def detail(trip_id):
     return render_template(
         "viajes/detail.html", trip=trip, expenses=expenses,
         total_expenses=total_expenses, next_statuses=next_statuses, advance=advance,
-        payment_term_labels=payment_term_labels, cargo_type_labels=cargo_type_labels,
+        payment_term_labels=payment_term_labels,
         existing_waybills=existing_waybills, creator=creator,
         outbound_trip=outbound_trip, return_trip=return_trip, conformidad_opcional=conformidad_opcional,
         liquidacion_trip_id=liquidacion_trip_id,

@@ -79,8 +79,8 @@
   <div class="detail-item"><div class="label">Cliente</div><div class="value">{{ trip.client_name }}</div></div>
   <div class="detail-item"><div class="label">Empresa que opera</div><div class="value">{{ 'BRMS' if trip.issuer == 'BRMS' else 'Harraso Transport' }}</div></div>
   <div class="detail-item"><div class="label">Ruta</div><div class="value">{{ trip.origin }} → {{ trip.destination }}</div></div>
-  <div class="detail-item"><div class="label">Tipo de carga</div><div class="value">{{ cargo_type_labels.get(trip.cargo_type, '—') }}</div></div>
-  {% if trip.cargo_type == 'CONTENEDOR' %}
+  <div class="detail-item"><div class="label">Tipo de carga</div><div class="value">{{ trip.cargo_type or '—' }}</div></div>
+  {% if trip.cargo_type == 'Contenedor' %}
   <div class="detail-item"><div class="label">Código de contenedor</div><div class="value">{{ trip.container_code or '—' }}</div></div>
   <div class="detail-item">
     <div class="label">Foto de evidencia</div>

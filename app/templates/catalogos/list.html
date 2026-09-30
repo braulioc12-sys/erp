@@ -56,25 +56,42 @@
 
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Nombre</th><th>Estado</th><th></th></tr></thead>
+      <thead><tr><th>Nombre</th><th>Estado</th><th style="width:220px;"></th></tr></thead>
       <tbody>
         {% for it in items %}
+        {% if can(current_user.roles, 'catalogos', 'edit') %}
+        {# 30 sep: mismo patrón que Conceptos de detracción (ver
+           catalogos/detraccion.html) -- un solo <form> por fila con DOS
+           botones: "Guardar" (edita el nombre) y "Desactivar"/"Reactivar"
+           (mismo formulario pero con `formaction` al toggle, que ignora
+           "name" -- así no hay riesgo de pisar un cambio a medio escribir
+           solo por togglear el estado). #}
+        <tr>
+          <form method="post" action="{{ url_for('catalogos.edit_item', item_id=it.id) }}" style="display:contents;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <td><input type="text" name="name" value="{{ it.name }}" style="width:100%; min-width:200px;"></td>
+            <td><span class="badge {{ 'badge-activo' if it.active else 'badge-inactivo' }}">{{ 'Activo' if it.active else 'Inactivo' }}</span></td>
+            <td>
+              <div class="btn-group">
+                <button class="btn btn-primary btn-sm" type="submit">Guardar</button>
+                <button class="btn btn-secondary btn-sm" type="submit" formaction="{{ url_for('catalogos.toggle_item', item_id=it.id) }}" formnovalidate>{{ 'Desactivar' if it.active else 'Reactivar' }}</button>
+              </div>
+            </td>
+          </form>
+        </tr>
+        {% else %}
         <tr>
           <td>{{ it.name }}</td>
           <td><span class="badge {{ 'badge-activo' if it.active else 'badge-inactivo' }}">{{ 'Activo' if it.active else 'Inactivo' }}</span></td>
-          <td>
-            <form method="post" action="{{ url_for('catalogos.toggle_item', item_id=it.id) }}">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button class="btn btn-secondary btn-sm" type="submit">{{ 'Desactivar' if it.active else 'Reactivar' }}</button>
-            </form>
-          </td>
+          <td></td>
         </tr>
+        {% endif %}
         {% else %}
         <tr><td colspan="3" class="table-empty">No hay conceptos todavía.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
-  <p class="muted" style="margin-top:12px; margin-bottom:0;">Desactivar un concepto lo quita de los formularios nuevos, pero no afecta los registros históricos que ya lo usan.</p>
+  <p class="muted" style="margin-top:12px; margin-bottom:0;">Desactivar un concepto lo quita de los formularios nuevos, pero no afecta los registros históricos que ya lo usan. Renombrarlo tampoco actualiza los registros históricos -- quedan con el nombre que tenían al momento de guardarse.</p>
 </div>
 {% endblock %}

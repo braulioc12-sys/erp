@@ -86,7 +86,7 @@ def local_delivery_proofs_dir():
 
 def local_container_photos_dir():
     """Igual que local_carrier_waybills_dir() pero para la foto de evidencia
-    del estado del contenedor (10 sep, solo cuando cargo_type='CONTENEDOR')
+    del estado del contenedor (10 sep, solo cuando cargo_type='Contenedor')
     — carpeta separada en disco."""
     return _local_dir("container_photos")
 

@@ -786,6 +786,202 @@ def _apply_user_roles_check_migration_sqlite(conn):
     conn.execute("DROP TABLE user_roles_check_old")
 
 
+# 30 sep, pedido de Braulio: primero pidió agregar 'Isotanque' a la lista
+# fija de tipo de carga (con CHECK) -- antes de aplicar ese parche, pidió
+# ir más allá: "mejor agregas en catalogos el tipo de carga para poder
+# editar o agregar otros sin tener que subir un nuevo parche". Esta función
+# reemplaza a la que antes AGREGABA 'ISOTANQUE' al CHECK -- ahora en vez de
+# reemplazar el CHECK por uno más largo, lo QUITA del todo (ver el
+# comentario largo junto a trips.cargo_type en schema.sql): el tipo de
+# carga pasa a validarse solo por catálogo (catalog_items, categoría
+# "cargo_type"), igual que vehicles.owner. Mismo mecanismo que
+# _apply_role_check_migration_postgres de arriba (buscar el nombre real del
+# CHECK por catálogo, en vez de asumir el autogenerado). Seguro de repetir
+# en cada arranque: si el CHECK ya no existe, el SELECT no encuentra nada y
+# no hace nada.
+def _apply_cargo_type_check_migration_postgres(conn):
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT con.conname FROM pg_constraint con
+           JOIN pg_class rel ON rel.oid = con.conrelid
+           WHERE rel.relname = 'trips' AND con.contype = 'c'
+             AND pg_get_constraintdef(con.oid) ILIKE '%cargo_type%'"""
+    )
+    for (conname,) in cur.fetchall():
+        cur.execute(f'ALTER TABLE trips DROP CONSTRAINT "{conname}"')
+
+
+# Equivalente SQLite -- a diferencia de "user_roles" (arriba), "trips" SÍ
+# tiene varias tablas con una FOREIGN KEY que apunta a ella (expenses,
+# invoice_items, waybills, expense_advances, etc.) y hasta una
+# auto-referencia propia (return_of_trip_id, el enlace ida→vuelta), así que
+# hace falta la misma maniobra que _apply_role_check_migration_sqlite
+# (PRAGMA legacy_alter_table=ON + foreign_keys=OFF durante el RENAME) para
+# que SQLite no reescriba esas referencias hacia el nombre temporal.
+#
+# OJO: incluye actual_start_at/actual_end_at -- dos columnas que hoy solo
+# existen vía COLUMN_MIGRATIONS (se agregaron después de que se escribió el
+# CREATE TABLE de trips en schema.sql, ver el comentario ahí) y NO aparecen
+# en su CREATE TABLE -- si se recreara la tabla sin incluirlas acá, una
+# base SQLite ya desplegada perdería en silencio la fecha real de
+# inicio/fin de cada viaje ya guardada.
+def _apply_cargo_type_check_migration_sqlite(conn):
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='trips'").fetchone()
+    if not row or not row[0] or "cargo_type TEXT CHECK" not in row[0]:
+        return  # ya migrada (el CHECK ya no está), o todavía no existe (base nueva: schema.sql ya la crea sin CHECK)
+    fk_was_on = conn.execute("PRAGMA foreign_keys").fetchone()[0]
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute("PRAGMA legacy_alter_table = ON")
+    try:
+        conn.execute("ALTER TABLE trips RENAME TO trips_cargo_type_check_old")
+        conn.execute(
+            """CREATE TABLE trips (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL UNIQUE,
+                client_id INTEGER NOT NULL REFERENCES clients(id),
+                vehicle_id INTEGER REFERENCES vehicles(id),
+                driver_id INTEGER REFERENCES drivers(id),
+                driver2_id INTEGER REFERENCES drivers(id),
+                return_of_trip_id INTEGER REFERENCES trips(id),
+                origin TEXT NOT NULL,
+                destination TEXT NOT NULL,
+                cargo_description TEXT,
+                cargo_weight_kg REAL,
+                scheduled_date TEXT NOT NULL,
+                delivered_date TEXT,
+                status TEXT NOT NULL DEFAULT 'PENDIENTE' CHECK (status IN ('PENDIENTE', 'EN_CURSO', 'ENTREGADO', 'CANCELADO')),
+                rate REAL NOT NULL DEFAULT 0,
+                driver_commission REAL NOT NULL DEFAULT 0,
+                double_driver INTEGER NOT NULL DEFAULT 0,
+                single_leg INTEGER NOT NULL DEFAULT 0,
+                notes TEXT,
+                invoiced INTEGER NOT NULL DEFAULT 0,
+                issuer TEXT NOT NULL DEFAULT 'HARRASO' CHECK (issuer IN ('HARRASO', 'BRMS')),
+                trailer_vehicle_id INTEGER REFERENCES vehicles(id),
+                cargo_type TEXT,
+                container_code TEXT,
+                container_photo_filename TEXT,
+                ownership TEXT NOT NULL DEFAULT 'PROPIA' CHECK (ownership IN ('PROPIA', 'TERCERO')),
+                third_party_name TEXT,
+                third_party_unit TEXT,
+                third_party_rate REAL,
+                third_party_payment_term TEXT CHECK (
+                    third_party_payment_term IN ('CONTADO', '15_DIAS', '30_DIAS', '45_DIAS', '60_DIAS')
+                ),
+                carrier_waybill_number TEXT,
+                carrier_waybill_filename TEXT,
+                shipper_waybill_shows_carrier TEXT,
+                shipper_waybill_number TEXT,
+                shipper_waybill_filename TEXT,
+                delivery_proof_filename TEXT,
+                client_order_number TEXT,
+                paid INTEGER NOT NULL DEFAULT 0,
+                created_by INTEGER REFERENCES users(id),
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                actual_start_at TEXT,
+                actual_end_at TEXT
+            )"""
+        )
+        conn.execute(
+            """INSERT INTO trips (
+                id, code, client_id, vehicle_id, driver_id, driver2_id, return_of_trip_id, origin, destination,
+                cargo_description, cargo_weight_kg, scheduled_date, delivered_date, status, rate, driver_commission,
+                double_driver, single_leg, notes, invoiced, issuer, trailer_vehicle_id, cargo_type, container_code,
+                container_photo_filename, ownership, third_party_name, third_party_unit, third_party_rate,
+                third_party_payment_term, carrier_waybill_number, carrier_waybill_filename,
+                shipper_waybill_shows_carrier, shipper_waybill_number, shipper_waybill_filename,
+                delivery_proof_filename, client_order_number, paid, created_by, created_at,
+                actual_start_at, actual_end_at
+            )
+            SELECT
+                id, code, client_id, vehicle_id, driver_id, driver2_id, return_of_trip_id, origin, destination,
+                cargo_description, cargo_weight_kg, scheduled_date, delivered_date, status, rate, driver_commission,
+                double_driver, single_leg, notes, invoiced, issuer, trailer_vehicle_id, cargo_type, container_code,
+                container_photo_filename, ownership, third_party_name, third_party_unit, third_party_rate,
+                third_party_payment_term, carrier_waybill_number, carrier_waybill_filename,
+                shipper_waybill_shows_carrier, shipper_waybill_number, shipper_waybill_filename,
+                delivery_proof_filename, client_order_number, paid, created_by, created_at,
+                actual_start_at, actual_end_at
+            FROM trips_cargo_type_check_old"""
+        )
+        conn.execute("DROP TABLE trips_cargo_type_check_old")
+    finally:
+        conn.execute("PRAGMA legacy_alter_table = OFF")
+        conn.execute(f"PRAGMA foreign_keys = {'ON' if fk_was_on else 'OFF'}")
+
+
+# Tipos de carga por defecto del catálogo "cargo_type" (mismos nombres que
+# tenía la lista fija CARGO_TYPES en app/routes/viajes.py antes de este
+# cambio, más "Isotanque" que Braulio pidió agregar el mismo día). Se usa
+# tanto para sembrar una base NUEVA (ver DEFAULT_CATALOGS en
+# app/seed_data.py) como para completar una base YA DESPLEGADA (la función
+# de abajo) -- una sola lista para no mantener dos copias.
+DEFAULT_CARGO_TYPES = ["Plataforma", "Contenedor", "Parihuelero", "Furgón", "Isotanque", "Otros"]
+
+# Mapa código viejo (como se guardaba con el CHECK fijo) -> nombre nuevo del
+# catálogo, para poder convertir los viajes ya guardados en una base
+# desplegada sin perder el dato ni dejarlos con un valor que ya no está en
+# ningún catálogo. Debe cubrir todos los códigos que el CHECK viejo permitía
+# (PLATAFORMA/CONTENEDOR/PARIHUELERO/FURGON/OTROS -- 'ISOTANQUE' nunca llegó
+# a desplegarse con el CHECK, pero se incluye por si acaso).
+_CARGO_TYPE_CODE_TO_NAME = {
+    "PLATAFORMA": "Plataforma",
+    "CONTENEDOR": "Contenedor",
+    "PARIHUELERO": "Parihuelero",
+    "FURGON": "Furgón",
+    "ISOTANQUE": "Isotanque",
+    "OTROS": "Otros",
+}
+
+
+def _backfill_cargo_type_catalog_sqlite(conn):
+    """Siembra el catálogo "cargo_type" (Catálogos → Tipos de carga) en una
+    base YA EXISTENTE -- _seed_catalogs() en app/seed_data.py solo corre en
+    una base nueva y vacía, así que sin esto Braulio abriría Catálogos y no
+    vería ningún tipo de carga ya cargado. Corre en cada arranque; INSERT OR
+    IGNORE (UNIQUE(category, name)) hace que sea seguro repetirlo, incluso
+    si Braulio ya agregó/renombró algo a mano desde Catálogos."""
+    max_order = conn.execute(
+        "SELECT COALESCE(MAX(sort_order), -1) FROM catalog_items WHERE category = 'cargo_type'"
+    ).fetchone()[0]
+    for i, name in enumerate(DEFAULT_CARGO_TYPES):
+        conn.execute(
+            "INSERT OR IGNORE INTO catalog_items (category, name, sort_order) VALUES (?, ?, ?)",
+            ("cargo_type", name, max_order + 1 + i),
+        )
+
+
+def _backfill_cargo_type_catalog_postgres(conn):
+    cur = conn.cursor()
+    cur.execute("SELECT COALESCE(MAX(sort_order), -1) FROM catalog_items WHERE category = 'cargo_type'")
+    max_order = cur.fetchone()[0]
+    for i, name in enumerate(DEFAULT_CARGO_TYPES):
+        cur.execute(
+            "INSERT INTO catalog_items (category, name, sort_order) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+            ("cargo_type", name, max_order + 1 + i),
+        )
+
+
+def _normalize_cargo_type_values_sqlite(conn):
+    """Los viajes que ya existían en una base desplegada con el CHECK viejo
+    tienen cargo_type en mayúsculas fijas (ej. "CONTENEDOR") -- una vez que
+    el CHECK se quita (_apply_cargo_type_check_migration_sqlite, arriba) y
+    el catálogo pasa a guardar el nombre "bonito" (ej. "Contenedor"), hay
+    que convertir esos viajes ya guardados al nuevo formato, si no quedarían
+    con un valor que ya no aparece seleccionado en ningún desplegable (ver
+    _cargo_types() en app/routes/viajes.py). Se corre en cada arranque: una
+    vez convertido un viaje, su valor deja de ser un código viejo, así que
+    repetir esto no le vuelve a tocar nada (es un no-op para esos)."""
+    for code, name in _CARGO_TYPE_CODE_TO_NAME.items():
+        conn.execute("UPDATE trips SET cargo_type = ? WHERE cargo_type = ?", (name, code))
+
+
+def _normalize_cargo_type_values_postgres(conn):
+    cur = conn.cursor()
+    for code, name in _CARGO_TYPE_CODE_TO_NAME.items():
+        cur.execute("UPDATE trips SET cargo_type = %s WHERE cargo_type = %s", (name, code))
+
+
 # 3 sep, mismo día, ronda siguiente (pedido de Braulio: un usuario puede
 # tener más de 1 rol a la vez, ej. Almacén y Mecánico) -- lo único que hace
 # falta al CREAR user_roles es completarla sola para los usuarios que ya
@@ -1404,6 +1600,9 @@ def init_db(app):
             cur.execute(fk_sql)
             _apply_role_check_migration_postgres(conn)
             _apply_user_roles_check_migration_postgres(conn)
+            _apply_cargo_type_check_migration_postgres(conn)
+            _backfill_cargo_type_catalog_postgres(conn)
+            _normalize_cargo_type_values_postgres(conn)
             _apply_invoice_items_trip_nullable_postgres(conn)
             _backfill_user_roles_postgres(conn)
             _ensure_combustible_concept_postgres(conn)
@@ -1424,6 +1623,9 @@ def init_db(app):
         _apply_column_migrations_sqlite(conn)
         _apply_role_check_migration_sqlite(conn)
         _apply_user_roles_check_migration_sqlite(conn)
+        _apply_cargo_type_check_migration_sqlite(conn)
+        _backfill_cargo_type_catalog_sqlite(conn)
+        _normalize_cargo_type_values_sqlite(conn)
         _apply_invoice_items_trip_nullable_sqlite(conn)
         _backfill_user_roles_sqlite(conn)
         _ensure_combustible_concept_sqlite(conn)

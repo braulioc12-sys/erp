@@ -52,6 +52,9 @@
     <label>Tipo de carga *
       <select name="cargo_type" id="trip-cargo-type" required>
         <option value="">-- Selecciona --</option>
+        {% if trip and trip.cargo_type and trip.cargo_type not in cargo_types|map('first')|list %}
+        <option value="{{ trip.cargo_type }}" selected>{{ trip.cargo_type }} (no está en el catálogo)</option>
+        {% endif %}
         {% for value, label in cargo_types %}
         <option value="{{ value }}" {{ 'selected' if trip and trip.cargo_type == value }}>{{ label }}</option>
         {% endfor %}
@@ -67,12 +70,16 @@
   <label>Tipo de carga *
     <select name="cargo_type" id="trip-cargo-type" required>
       <option value="">-- Selecciona --</option>
+      {% if trip and trip.cargo_type and trip.cargo_type not in cargo_types|map('first')|list %}
+      <option value="{{ trip.cargo_type }}" selected>{{ trip.cargo_type }} (no está en el catálogo)</option>
+      {% endif %}
       {% for value, label in cargo_types %}
       <option value="{{ value }}" {{ 'selected' if trip and trip.cargo_type == value }}>{{ label }}</option>
       {% endfor %}
     </select>
   </label>
   {% endif %}
+  <p class="muted" style="margin-top:-8px;">Los tipos de carga disponibles se administran en <a href="{{ url_for('catalogos.list_view', categoria='cargo_type') }}" target="_blank">Catálogos → Tipos de carga</a>.</p>
 
   <div id="trip-container-fields" style="display:none;">
     <div class="form-row">
@@ -166,11 +173,15 @@
   <label>Tipo de carga *
     <select name="cargo_type" id="trip-cargo-type" required>
       <option value="">-- Selecciona --</option>
+      {% if trip and trip.cargo_type and trip.cargo_type not in cargo_types|map('first')|list %}
+      <option value="{{ trip.cargo_type }}" selected>{{ trip.cargo_type }} (no está en el catálogo)</option>
+      {% endif %}
       {% for value, label in cargo_types %}
       <option value="{{ value }}" {{ 'selected' if trip and trip.cargo_type == value }}>{{ label }}</option>
       {% endfor %}
     </select>
   </label>
+  <p class="muted" style="margin-top:-8px;">Los tipos de carga disponibles se administran en <a href="{{ url_for('catalogos.list_view', categoria='cargo_type') }}" target="_blank">Catálogos → Tipos de carga</a>.</p>
 
   <div id="trip-container-fields" style="display:none;">
     <div class="form-row">
@@ -393,7 +404,7 @@
     var containerFields = document.getElementById('trip-container-fields');
     if (cargoTypeSelect && containerFields) {
       var toggleContainerFields = function () {
-        containerFields.style.display = cargoTypeSelect.value === 'CONTENEDOR' ? '' : 'none';
+        containerFields.style.display = cargoTypeSelect.value === 'Contenedor' ? '' : 'none';
       };
       cargoTypeSelect.addEventListener('change', toggleContainerFields);
       toggleContainerFields();

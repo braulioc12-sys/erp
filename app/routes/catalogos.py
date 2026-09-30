@@ -17,6 +17,12 @@ CATEGORIES = {
     "maintenance_type": "Conceptos de mantenimiento",
     "inspection_item": "Ítems de inspección",
     "vehicle_owner": "Propietarios de unidades",
+    # 30 sep, pedido de Braulio ("mejor agregas en catalogos el tipo de
+    # carga para poder editar o agregar otros sin tener que subir un nuevo
+    # parche"): tipo de carga de un viaje (Viajes → Generar/Editar viaje)
+    # dejó de ser una lista fija en código -- ver _cargo_types() en
+    # app/routes/viajes.py, que lee este mismo catálogo.
+    "cargo_type": "Tipos de carga",
 }
 
 
@@ -116,6 +122,54 @@ def add_item():
         )
         flash(f'"{name}" agregado.', "success")
     return redirect(url_for("catalogos.list_view", categoria=category))
+
+
+@bp.route("/<int:item_id>/editar", methods=["POST"])
+@permission_required("catalogos", "edit")
+def edit_item(item_id):
+    """30 sep, pedido de Braulio al pasar "tipo de carga" a este mecanismo
+    genérico ("para luego editar o agregar otros"): hasta acá, este
+    catálogo genérico solo dejaba Agregar y Activar/Desactivar (a
+    diferencia del catálogo aparte de Conceptos de detracción, que sí tenía
+    su propio "editar" -- ver detraccion_edit() más abajo). Ahora cualquier
+    categoría de este mecanismo genérico (Conceptos de mantenimiento,
+    Ítems de inspección, Propietarios de unidades, Tipos de carga) puede
+    renombrarse igual. OJO para quien use esto desde la pantalla: renombrar
+    un concepto NO actualiza los registros históricos que ya lo tenían
+    guardado con el nombre anterior (mismo criterio que Propietarios de
+    unidades) -- si el nombre viejo se usaba además como valor especial en
+    algún lado del código (ver el caso de "Contenedor" en
+    app/routes/viajes.py), renombrarlo puede dejar de activar ese
+    comportamiento especial en los viajes nuevos."""
+    if not validate_csrf():
+        abort(400)
+    item = query_one("SELECT * FROM catalog_items WHERE id = ?", (item_id,))
+    if item is None:
+        abort(404)
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("Escribe un nombre para el concepto.", "error")
+        return redirect(url_for("catalogos.list_view", categoria=item["category"]))
+
+    if name != item["name"]:
+        clash = query_one(
+            "SELECT id FROM catalog_items WHERE category = ? AND name = ? AND id != ?",
+            (item["category"], name, item_id),
+        )
+        if clash:
+            flash(f'Ya hay otro concepto con el nombre "{name}" en esta categoría.', "error")
+            return redirect(url_for("catalogos.list_view", categoria=item["category"]))
+
+    execute("UPDATE catalog_items SET name = ? WHERE id = ?", (name, item_id))
+    # 22 sep, registro de actividad (ver app/audit.py).
+    log_activity(
+        "catalogos", "EDITAR",
+        f"{CATEGORIES.get(item['category'], item['category'])}: {item['name']} → {name}"
+        if name != item["name"] else f"{CATEGORIES.get(item['category'], item['category'])}: {name}",
+        entity_type=f"catalogo_{item['category']}", entity_id=item_id,
+    )
+    flash(f'"{name}" actualizado.', "success")
+    return redirect(url_for("catalogos.list_view", categoria=item["category"]))
 
 
 @bp.route("/<int:item_id>/alternar", methods=["POST"])
