@@ -467,13 +467,15 @@ Render también se conecta directo a Bitbucket, así que si tu equipo ya usa Bit
    - **Name:** `erp-transporte` (o el nombre que prefieras; será parte de la URL pública).
    - **Runtime:** Python 3
    - **Build Command:** `pip install -r requirements.txt`
-   - **Start Command:** `gunicorn run:app`
+   - **Start Command:** `gunicorn run:app --timeout 120`
    - **Instance Type:** Free
 5. En **Environment Variables**, agrega:
    - `SECRET_KEY` → un valor largo y aleatorio (por ejemplo, genera uno con `python3 -c "import secrets; print(secrets.token_hex(32))"`)
    - `COMPANY_NAME` → el nombre de tu empresa
    - `SESSION_COOKIE_SECURE` → `1`
 6. Click en **Create Web Service**. Render construye y despliega automáticamente (toma 1-2 minutos). Al terminar te da una URL pública tipo `https://erp-transporte.onrender.com` — esa es la que compartes.
+
+   **Nota (30 sep):** si tu Web Service ya existe en Render desde antes de este cambio, el `Start Command` que hayas guardado en el dashboard (pestaña **Settings** del servicio) manda por encima del `Procfile` del repo — subir el `Procfile` actualizado por sí solo NO alcanza. Entra a Settings de tu servicio en Render y cambia el Start Command a `gunicorn run:app --timeout 120` a mano, luego guarda (eso ya dispara un redeploy).
 
 ### 3. Inicia sesión
 
