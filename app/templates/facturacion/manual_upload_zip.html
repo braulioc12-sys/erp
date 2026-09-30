@@ -6,12 +6,8 @@
 
 <div class="panel">
   <p class="mt-0">Sube un único archivo <strong>.zip</strong> con el PDF y el XML de cada factura que ya emitiste desde el portal de SUNAT. Harris arma sola cada factura (cliente, monto, fecha, serie-número) leyendo el XML — no hace falta ningún Excel ni escribir nada a mano.</p>
-  <p>Para que Harris reconozca qué PDF va con qué XML, ambos archivos de una misma factura deben llamarse igual dentro del zip (solo cambia la extensión), por ejemplo:</p>
-  <ul>
-    <li><code>F001-00123.pdf</code> y <code>F001-00123.xml</code></li>
-    <li><code>F001-00124.pdf</code> y <code>F001-00124.xml</code></li>
-  </ul>
-  <p class="muted">Si a alguna factura le falta el PDF o el XML dentro del zip, esa factura no se carga — se sube individual desde "Cargar factura ya emitida". Si el cliente del XML no existe todavía en Harris, se crea automáticamente con el nombre y RUC del comprobante.</p>
+  <p><strong>El PDF y el XML de una misma factura NO necesitan llamarse igual</strong> — Harris los relaciona leyendo el texto del PDF y buscando ahí la serie-número que trae el XML, sin importar el nombre del archivo. Puedes meter todos los PDF y todos los XML sueltos dentro del zip (o incluso otros .zip ya descargados de SUNAT, uno por factura — Harris también los abre solo).</p>
+  <p class="muted">Si a alguna factura le falta el PDF o el XML dentro del zip, o Harris no logra encontrar el PDF que corresponde a un XML, esa factura no se carga — se sube individual desde "Cargar factura ya emitida". Si el cliente del XML no existe todavía en Harris, se crea automáticamente con el nombre y RUC del comprobante.</p>
   <form method="post" action="{{ url_for('facturacion.manual_zip', issuer=issuer) }}" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="issuer" value="{{ issuer }}">

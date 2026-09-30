@@ -52,5 +52,9 @@
   {% if not created and not errors %}
   <p class="table-empty">El zip no tenía ninguna factura reconocible.</p>
   {% endif %}
+
+  {% if unmatched_pdfs %}
+  <p class="muted">Además, {{ unmatched_pdfs }} archivo(s) PDF del zip no se pudo(pudieron) relacionar con ninguna factura del XML — puede que sean de otro documento (ej. una nota de crédito) o que su texto no se haya podido leer.</p>
+  {% endif %}
 </div>
 {% endblock %}
