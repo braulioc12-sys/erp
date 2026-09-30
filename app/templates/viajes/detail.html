@@ -159,11 +159,30 @@
        amarrados a la misma liquidacion" -- la liquidación (anticipo +
        gastos) es UNA sola para el viaje redondo, anclada siempre al viaje
        de ida (liquidacion_trip_id, ver detail() en app/routes/viajes.py),
-       a diferencia de factura/comisión que sí van separadas por tramo. #}
+       a diferencia de factura/comisión que sí van separadas por tramo.
+
+       30 sep, pedido de Braulio: "cuando el viaje es doble conductor
+       tambien se debe poder registrar liquidacion del segundo conductor"
+       -- viaje doble conductor muestra un par de botones POR CONDUCTOR
+       (cada uno con su propia liquidación, independiente); un viaje normal
+       conserva el botón único de siempre. #}
+    {% if trip.double_driver %}
+    {% if advance %}
+    <a href="{{ url_for('liquidaciones.detail', advance_id=advance.id) }}" class="btn btn-secondary btn-sm">💵 Ver liquidación 1er conductor{% if anchor_driver_name %} ({{ anchor_driver_name }}){% endif %}</a>
+    {% else %}
+    <a href="{{ url_for('liquidaciones.new_advance', trip_id=liquidacion_trip_id, driver_slot=1) }}" class="btn btn-secondary btn-sm">💵 Anticipo 1er conductor{% if anchor_driver_name %} ({{ anchor_driver_name }}){% endif %}</a>
+    {% endif %}
+    {% if advance2 %}
+    <a href="{{ url_for('liquidaciones.detail', advance_id=advance2.id) }}" class="btn btn-secondary btn-sm">💵 Ver liquidación 2do conductor{% if anchor_driver2_name %} ({{ anchor_driver2_name }}){% endif %}</a>
+    {% else %}
+    <a href="{{ url_for('liquidaciones.new_advance', trip_id=liquidacion_trip_id, driver_slot=2) }}" class="btn btn-secondary btn-sm">💵 Anticipo 2do conductor{% if anchor_driver2_name %} ({{ anchor_driver2_name }}){% endif %}</a>
+    {% endif %}
+    {% else %}
     {% if advance %}
     <a href="{{ url_for('liquidaciones.detail', advance_id=advance.id) }}" class="btn btn-secondary btn-sm">💵 Ver liquidación {{ 'del viaje redondo' if outbound_trip or return_trip else 'de este viaje' }}</a>
     {% else %}
     <a href="{{ url_for('liquidaciones.new_advance', trip_id=liquidacion_trip_id) }}" class="btn btn-secondary btn-sm">💵 Confirmar anticipo de viáticos</a>
+    {% endif %}
     {% endif %}
   {% endif %}
   {% endif %}
@@ -352,9 +371,16 @@
      la liquidacion este cerrada no debe poder agregarse mas gastos" -- si
      ya hay una liquidación y está LIQUIDADA, no se muestra el link acá
      tampoco (el servidor bloquea igual si se entra por una URL vieja). #}
-  {% if can(current_user.roles, 'liquidaciones', 'edit') and (not advance or advance.status != 'LIQUIDADO') %}
+  {# 30 sep: con doble conductor puede haber DOS liquidaciones -- cerrar la
+     del 1er conductor no debe ocultar este link si la del 2do sigue
+     abierta (o todavía no se creó). Solo se oculta cuando YA NO queda
+     ninguna liquidación abierta para el viaje -- mismo criterio que
+     _blocking_closed_advance() en app/routes/liquidaciones.py. #}
+  {% set advance1_open = not advance or advance.status != 'LIQUIDADO' %}
+  {% set advance2_open = trip.double_driver and (not advance2 or advance2.status != 'LIQUIDADO') %}
+  {% if can(current_user.roles, 'liquidaciones', 'edit') and (advance1_open or advance2_open) %}
   <p style="margin-top:12px;"><a href="{{ url_for('liquidaciones.new_expense', trip_id=liquidacion_trip_id) }}" class="btn btn-secondary btn-sm">+ Registrar gasto para este viaje</a></p>
-  {% elif advance and advance.status == 'LIQUIDADO' %}
+  {% elif not advance1_open and not advance2_open %}
   <p class="muted" style="margin-top:12px;">La liquidación de este viaje ya está cerrada — no se pueden agregar más gastos.</p>
   {% endif %}
 </div>

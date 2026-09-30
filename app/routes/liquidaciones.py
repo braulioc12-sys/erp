@@ -226,10 +226,11 @@ def list_view():
         return render_template("liquidaciones/list.html", advances=None, issuer=None, whatsapp_pending_count=0)
 
     advances = query_all(
-        """SELECT a.*, t.code as trip_code, t.origin, t.destination,
+        """SELECT a.*, t.code as trip_code, t.origin, t.destination, d.name as driver_name,
                   (SELECT COALESCE(SUM(e.amount), 0) FROM expenses e WHERE e.trip_id = a.trip_id) as spent
            FROM expense_advances a
            JOIN trips t ON t.id = a.trip_id
+           LEFT JOIN drivers d ON d.id = a.driver_id
            WHERE t.issuer = ?
            ORDER BY a.given_date DESC, a.id DESC""",
         (issuer,),
@@ -269,9 +270,10 @@ def _next_liquidation_code(issuer):
     return f"{prefix}-{n:04d}"
 
 
-@bp.route("/anticipo/<int:trip_id>", methods=["GET", "POST"])
+@bp.route("/anticipo/<int:trip_id>", defaults={"driver_slot": 1}, methods=["GET", "POST"])
+@bp.route("/anticipo/<int:trip_id>/<int:driver_slot>", methods=["GET", "POST"])
 @permission_required("liquidaciones", "edit")
-def new_advance(trip_id):
+def new_advance(trip_id, driver_slot):
     display_trip_id = trip_id  # a dónde volver si algo bloquea -- ver abajo
     trip = query_one("SELECT * FROM trips WHERE id = ?", (trip_id,))
     if trip is None:
@@ -295,9 +297,38 @@ def new_advance(trip_id):
     if trip["ownership"] == "TERCERO":
         flash("Los viajes con terceros no registran liquidación (el costo es el flete acordado).", "error")
         return redirect(url_for("viajes.detail", trip_id=display_trip_id))
-    existing = query_one("SELECT id FROM expense_advances WHERE trip_id = ?", (trip_id,))
+    # 30 sep, pedido de Braulio: "cuando el viaje es doble conductor tambien
+    # se debe poder registrar liquidacion del segundo conductor" -- una
+    # liquidación aparte para el 2° conductor, independiente de la del 1°.
+    # driver_slot=1 (default, preserva las URLs/comportamiento de siempre)
+    # usa trip.driver_id; driver_slot=2 exige que el viaje sea doble
+    # conductor y tenga un driver2_id real.
+    if driver_slot not in (1, 2):
+        abort(404)
+    if driver_slot == 2:
+        if not trip["double_driver"] or not trip["driver2_id"]:
+            flash("Este viaje no tiene un segundo conductor asignado.", "error")
+            return redirect(url_for("viajes.detail", trip_id=display_trip_id))
+        driver_id = trip["driver2_id"]
+    else:
+        driver_id = trip["driver_id"]
+    driver = query_one("SELECT id, name FROM drivers WHERE id = ?", (driver_id,)) if driver_id else None
+
+    # Scoping por (trip_id, driver_id) -- ya no alcanza con mirar solo
+    # trip_id, porque ahora puede haber dos liquidaciones (una por
+    # conductor) sobre el mismo viaje. NULL-safe: si por algún motivo el
+    # viaje no tiene conductor asignado, se compara por "IS NULL" en vez de
+    # "= NULL" (que en SQL nunca es verdadero).
+    if driver_id is not None:
+        existing = query_one(
+            "SELECT id FROM expense_advances WHERE trip_id = ? AND driver_id = ?", (trip_id, driver_id)
+        )
+    else:
+        existing = query_one(
+            "SELECT id FROM expense_advances WHERE trip_id = ? AND driver_id IS NULL", (trip_id,)
+        )
     if existing:
-        flash("Este viaje ya tiene una liquidación (anticipo) registrada.", "error")
+        flash("Este viaje ya tiene una liquidación (anticipo) registrada para este conductor.", "error")
         return redirect(url_for("liquidaciones.detail", advance_id=existing["id"]))
 
     route = find_route(trip["origin"], trip["destination"])
@@ -308,14 +339,17 @@ def new_advance(trip_id):
         amount = parse_float(request.form.get("amount_given"))
         if amount <= 0:
             flash("Indica un monto válido.", "error")
-            return render_template("liquidaciones/advance_form.html", trip=trip, route=route, today=today_str())
+            return render_template(
+                "liquidaciones/advance_form.html", trip=trip, route=route, today=today_str(),
+                driver_slot=driver_slot, driver=driver,
+            )
 
         given_date = parse_date(request.form.get("given_date")) or today_str()
         notes = request.form.get("notes", "").strip()
         code = _next_liquidation_code(trip["issuer"])
         advance_id = execute(
-            """INSERT INTO expense_advances (trip_id, route_id, amount_given, given_date, notes, created_by, code)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO expense_advances (trip_id, route_id, amount_given, given_date, notes, created_by, code, driver_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 trip_id,
                 route["id"] if route else None,
@@ -324,6 +358,7 @@ def new_advance(trip_id):
                 notes,
                 None,
                 code,
+                driver_id,
             ),
         )
         # El monto inicial también queda como el primer registro en
@@ -336,17 +371,23 @@ def new_advance(trip_id):
             (advance_id, amount, given_date, notes),
         )
         # 22 sep, registro de actividad (ver app/audit.py): la liquidación
-        # nace acá (una por viaje) -- CREAR es el que alimenta el "Creado
-        # por" del detalle de la liquidación (get_creator_info).
+        # nace acá (una por viaje, o una por conductor si el viaje es doble
+        # conductor) -- CREAR es el que alimenta el "Creado por" del
+        # detalle de la liquidación (get_creator_info).
+        driver_suffix = f" ({driver['name']})" if driver else ""
         log_activity(
-            "liquidaciones", "CREAR", f"Liquidación {code} del viaje {trip['code']} — anticipo S/ {amount:.2f}",
+            "liquidaciones", "CREAR",
+            f"Liquidación {code} del viaje {trip['code']}{driver_suffix} — anticipo S/ {amount:.2f}",
             entity_type="anticipo", entity_id=advance_id,
             entity_url=url_for("liquidaciones.detail", advance_id=advance_id),
         )
         flash(f"Anticipo confirmado: {trip['code']} recibió S/ {amount:.2f}. Ya puedes registrar sus gastos.", "success")
         return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
 
-    return render_template("liquidaciones/advance_form.html", trip=trip, route=route, today=today_str())
+    return render_template(
+        "liquidaciones/advance_form.html", trip=trip, route=route, today=today_str(),
+        driver_slot=driver_slot, driver=driver,
+    )
 
 
 def _recalc_advance_total(advance_id):
@@ -550,11 +591,15 @@ def _recalc_fuel_actual_for_trip(trip_id):
     """Igual que _recalc_fuel_actual, pero a partir de un trip_id (usado
     desde new_expense/edit_expense/delete_expense, que conocen el viaje del
     gasto pero no directamente su liquidación) — no hace nada si ese viaje
-    todavía no tiene una liquidación (anticipo) creada."""
+    todavía no tiene ninguna liquidación (anticipo) creada. 30 sep: un viaje
+    doble conductor puede tener DOS liquidaciones (una por conductor) — el
+    combustible es del vehículo/viaje, no de un conductor en particular
+    (_fuel_rows ya suma los gastos de Combustible por trip_id, no por
+    liquidación), así que se recalcula en TODAS las liquidaciones de ese
+    viaje para que ninguna quede con un dato de combustible desactualizado."""
     if not trip_id:
         return
-    advance = query_one("SELECT id FROM expense_advances WHERE trip_id = ?", (trip_id,))
-    if advance:
+    for advance in query_all("SELECT id FROM expense_advances WHERE trip_id = ?", (trip_id,)):
         _recalc_fuel_actual(advance["id"])
 
 
@@ -562,14 +607,27 @@ def _recalc_fuel_actual_for_trip(trip_id):
 @permission_required("liquidaciones", "view")
 def detail(advance_id):
     advance = query_one(
-        """SELECT a.*, t.code as trip_code, t.origin, t.destination, t.status as trip_status
-           FROM expense_advances a JOIN trips t ON t.id = a.trip_id WHERE a.id = ?""",
+        """SELECT a.*, t.code as trip_code, t.origin, t.destination, t.status as trip_status,
+                  t.double_driver, t.driver_id as trip_driver_id, t.driver2_id as trip_driver2_id,
+                  d.name as driver_name
+           FROM expense_advances a
+           JOIN trips t ON t.id = a.trip_id
+           LEFT JOIN drivers d ON d.id = a.driver_id
+           WHERE a.id = ?""",
         (advance_id,),
     )
     if advance is None:
         abort(404)
+    # 30 sep, "una liquidación aparte para el 2do conductor": los gastos se
+    # asignan explícitamente a UNA liquidación (expense_advance_id) — acá se
+    # listan los de este viaje que todavía no están asignados a NINGUNA
+    # liquidación, más los que ya están asignados a ESTA, para que cerrar la
+    # liquidación del otro conductor nunca le "robe" ni le muestre gastos
+    # que no son suyos (ver también liquidate() más abajo).
     expenses = query_all(
-        "SELECT * FROM expenses WHERE trip_id = ? ORDER BY expense_date", (advance["trip_id"],)
+        "SELECT * FROM expenses WHERE trip_id = ? AND (expense_advance_id IS NULL OR expense_advance_id = ?) "
+        "ORDER BY expense_date",
+        (advance["trip_id"], advance_id),
     )
     payments = query_all(
         "SELECT * FROM advance_payments WHERE advance_id = ? ORDER BY payment_date, id", (advance_id,)
@@ -596,11 +654,33 @@ def detail(advance_id):
     # _liquidacion_anchor_trip_id), así que el viaje de vuelta, si ya se
     # creó, es el que tiene return_of_trip_id = advance.trip_id.
     return_trip = _paired_trip(advance["trip_id"])
+    # 30 sep: si el viaje es doble conductor, ¿ya existe (o se puede crear)
+    # la liquidación del OTRO conductor? Para poder navegar de una a otra
+    # desde el detalle, en vez de tener que volver al viaje.
+    sibling_advance = None
+    sibling_driver_id = None
+    sibling_driver_slot = None
+    if advance["double_driver"]:
+        sibling_driver_id = (
+            advance["trip_driver2_id"] if advance["driver_id"] == advance["trip_driver_id"]
+            else advance["trip_driver_id"]
+        )
+        sibling_driver_slot = 2 if sibling_driver_id == advance["trip_driver2_id"] else 1
+        if sibling_driver_id:
+            sibling_advance = query_one(
+                """SELECT a.id, a.code, d.name as driver_name FROM expense_advances a
+                   LEFT JOIN drivers d ON d.id = a.driver_id
+                   WHERE a.trip_id = ? AND a.driver_id = ?""",
+                (advance["trip_id"], sibling_driver_id),
+            )
+    receipt = query_one("SELECT * FROM advance_receipts WHERE advance_id = ? ORDER BY id DESC LIMIT 1", (advance_id,))
     return render_template(
         "liquidaciones/detail.html", advance=advance, expenses=expenses, spent=spent, difference=difference,
         payments=payments, offices=offices, office_labels={code: info["label"] for code, info in offices},
         route=route, today=today_str(), is_admin=("ADMIN" in g.user["roles"]),
         fuel_rows=_fuel_rows(advance), creator=creator, return_trip=return_trip,
+        sibling_advance=sibling_advance, sibling_driver_id=sibling_driver_id, sibling_driver_slot=sibling_driver_slot,
+        receipt=receipt,
         # 10 sep, 3ra ronda, pedido de Braulio: grifos registrados en el
         # catálogo, para elegir uno al agregar combustible acá — ver
         # app/routes/catalogos.py.
@@ -617,12 +697,23 @@ def print_view(advance_id):
     que inspecciones/print.html y cotizaciones/pdf.html, sin depender de
     ninguna librería de generación de PDF en el servidor."""
     advance = query_one(
+        # 30 sep: el nombre del conductor ya viene de a.driver_id (el
+        # conductor específico DE ESTA liquidación) en vez de siempre
+        # trips.driver_id/driver2_id -- antes una liquidación de doble
+        # conductor mostraba "Conductor 1 / Conductor 2" combinados porque
+        # era una sola fila para los dos; ahora que puede haber una
+        # liquidación por conductor, cada una imprime solo el suyo.
+        # driver2_name se conserva (viene del viaje, no de la liquidación)
+        # únicamente para anotar "viaje de doble conductor" cuando el otro
+        # conductor TODAVÍA no tiene su propia liquidación registrada (dato
+        # histórico de antes de este cambio) -- ver print.html.
         """SELECT a.*, t.code as trip_code, t.origin, t.destination, t.status as trip_status,
-                  t.issuer as trip_issuer, d.name as driver_name, d2.name as driver2_name,
+                  t.issuer as trip_issuer, t.double_driver, t.driver_id as trip_driver_id,
+                  t.driver2_id as trip_driver2_id, d.name as driver_name, d2.name as driver2_name,
                   v.plate as vehicle_plate
            FROM expense_advances a
            JOIN trips t ON t.id = a.trip_id
-           LEFT JOIN drivers d ON d.id = t.driver_id
+           LEFT JOIN drivers d ON d.id = a.driver_id
            LEFT JOIN drivers d2 ON d2.id = t.driver2_id
            LEFT JOIN vehicles v ON v.id = t.vehicle_id
            WHERE a.id = ?""",
@@ -631,7 +722,9 @@ def print_view(advance_id):
     if advance is None:
         abort(404)
     expenses = query_all(
-        "SELECT * FROM expenses WHERE trip_id = ? ORDER BY expense_date", (advance["trip_id"],)
+        "SELECT * FROM expenses WHERE trip_id = ? AND (expense_advance_id IS NULL OR expense_advance_id = ?) "
+        "ORDER BY expense_date",
+        (advance["trip_id"], advance_id),
     )
     payments = query_all(
         "SELECT * FROM advance_payments WHERE advance_id = ? ORDER BY payment_date, id", (advance_id,)
@@ -642,10 +735,20 @@ def print_view(advance_id):
     office_labels = {code: info["label"] for code, info in offices}
     return_trip = _paired_trip(advance["trip_id"])
     generated_at = datetime.now().strftime("%d/%m/%Y %H:%M")
+    # ¿El 2° conductor de este viaje ya tiene su PROPIA liquidación? Si es
+    # así, no hace falta anotar "(+ 2° conductor)" acá (se imprime aparte).
+    driver2_has_own_advance = False
+    if advance["double_driver"] and advance["trip_driver2_id"] and advance["driver_id"] != advance["trip_driver2_id"]:
+        driver2_has_own_advance = query_one(
+            "SELECT 1 FROM expense_advances WHERE trip_id = ? AND driver_id = ?",
+            (advance["trip_id"], advance["trip_driver2_id"]),
+        ) is not None
+    receipt = query_one("SELECT * FROM advance_receipts WHERE advance_id = ? ORDER BY id DESC LIMIT 1", (advance_id,))
     return render_template(
         "liquidaciones/print.html", advance=advance, expenses=expenses, spent=spent, difference=difference,
         payments=payments, office_labels=office_labels, fuel_rows=_fuel_rows(advance),
         return_trip=return_trip, generated_at=generated_at,
+        driver2_has_own_advance=driver2_has_own_advance, receipt=receipt,
     )
 
 
@@ -802,19 +905,54 @@ def liquidate(advance_id):
     # detalle, cuáles de los gastos ya registrados para este viaje entran en
     # la liquidación (pedido explícito de Braulio, 27 ago — antes entraban
     # todos automático). Se guarda como el vínculo expenses.expense_advance_id.
+    # 30 sep, "una liquidación aparte para el 2do conductor": se escoge SOLO
+    # entre los gastos todavía libres (expense_advance_id IS NULL) o ya
+    # asignados a ESTA liquidación -- nunca los de la liquidación del otro
+    # conductor sobre el mismo viaje, así cerrar una no le toca nada a la
+    # otra (ya esté abierta o ya cerrada).
     selected_ids = set(request.form.getlist("expense_ids", type=int))
     trip_expenses = query_all(
-        "SELECT id, amount FROM expenses WHERE trip_id = ?", (advance["trip_id"],)
+        "SELECT id, amount FROM expenses WHERE trip_id = ? AND (expense_advance_id IS NULL OR expense_advance_id = ?)",
+        (advance["trip_id"], advance_id),
     )
-    spent = 0.0
+    spent = sum(e["amount"] for e in trip_expenses if e["id"] in selected_ids)
+    difference = advance["amount_given"] - spent
+    # 30 sep, pedido de Braulio: "la liquidacion contiene un saldo a favor o
+    # en contra... deseas registrar un recibo ingreso / por devolver? luego
+    # que se seleccionen se registran este recibo se considera en la
+    # liquidacion y finalmente se cierra" -- y, respuesta explícita a la
+    # pregunta de qué pasa si se cancela: "no se cierra hasta que se
+    # registre el recibo". Con saldo (difference != 0) el recibo es
+    # OBLIGATORIO: si falta algún dato, se corta acá SIN cerrar la
+    # liquidación (ni tocar la asignación de gastos hecha arriba -- se
+    # vuelve a pedir todo junto si se reintenta).
+    receipt_type = None
+    receipt_number = ""
+    receipt_date = None
+    receipt_amount = None
+    receipt_notes = ""
+    if difference != 0:
+        receipt_type = "INGRESO" if difference > 0 else "DEVOLUCION"
+        receipt_number = request.form.get("receipt_number", "").strip()
+        receipt_date = parse_date(request.form.get("receipt_date")) or today_str()
+        receipt_amount = parse_float(request.form.get("receipt_amount"))
+        receipt_notes = request.form.get("receipt_notes", "").strip()
+        if not receipt_number or not receipt_amount or receipt_amount <= 0:
+            kind_label = "de ingreso" if receipt_type == "INGRESO" else "por devolver"
+            flash(
+                f"Esta liquidación tiene un saldo {'a favor' if difference > 0 else 'en contra'} "
+                f"de S/ {abs(difference):.2f} — hay que registrar el recibo {kind_label} "
+                "(número y monto) antes de poder cerrarla.",
+                "error",
+            )
+            return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
+
     for e in trip_expenses:
         included = e["id"] in selected_ids
         execute(
             "UPDATE expenses SET expense_advance_id = ? WHERE id = ?",
             (advance_id if included else None, e["id"]),
         )
-        if included:
-            spent += e["amount"]
 
     month = today_str()[:7]
     voucher_number = _next_voucher_number(office, month)
@@ -824,11 +962,21 @@ def liquidate(advance_id):
            liquidated_expenses_total = ?, office = ?, voucher_number = ? WHERE id = ?""",
         (spent, office, voucher_number, advance_id),
     )
+    receipt_note_suffix = ""
+    if receipt_type:
+        execute(
+            """INSERT INTO advance_receipts (advance_id, type, amount, receipt_number, receipt_date, notes, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (advance_id, receipt_type, receipt_amount, receipt_number, receipt_date, receipt_notes, g.user["id"]),
+        )
+        kind_label = "de ingreso" if receipt_type == "INGRESO" else "por devolver"
+        receipt_note_suffix = f" — recibo {kind_label} N° {receipt_number} por S/ {receipt_amount:.2f}"
     # 22 sep, registro de actividad: cierre de la liquidación -- pedido
     # explícito de Braulio ("genero guias, etc" incluye este tipo de cierre).
     log_activity(
         "liquidaciones", "ESTADO",
-        f"Liquidación {advance['code']} cerrada — oficina {office}, S/ {spent:.2f} en gastos asignados",
+        f"Liquidación {advance['code']} cerrada — oficina {office}, S/ {spent:.2f} en gastos asignados"
+        f"{receipt_note_suffix}",
         entity_type="anticipo", entity_id=advance_id,
         entity_url=url_for("liquidaciones.detail", advance_id=advance_id),
     )
@@ -1066,6 +1214,38 @@ def _expense_locked(expense):
     return bool(advance and advance["status"] == "LIQUIDADO")
 
 
+def _blocking_closed_advance(trip_id):
+    """Devuelve la liquidación LIQUIDADO de este viaje que debe bloquear el
+    registro de gastos nuevos, o None si se puede seguir agregando. Antes
+    (una liquidación por viaje) alcanzaba con mirar si existía CUALQUIER
+    liquidación cerrada de ese trip_id -- 30 sep, ahora que un viaje doble
+    conductor puede tener DOS liquidaciones independientes (una por
+    conductor), cerrar la del 1er conductor no debe bloquear que se sigan
+    registrando gastos para la del 2do, si esa sigue PENDIENTE. Solo
+    bloquea cuando ya no queda ninguna liquidación abierta para el viaje."""
+    open_advance = query_one(
+        "SELECT id FROM expense_advances WHERE trip_id = ? AND status = 'PENDIENTE' LIMIT 1", (trip_id,)
+    )
+    if open_advance:
+        return None
+    return query_one(
+        "SELECT id FROM expense_advances WHERE trip_id = ? AND status = 'LIQUIDADO' ORDER BY id DESC LIMIT 1",
+        (trip_id,),
+    )
+
+
+def _advance_for_redirect(trip_id):
+    """A qué liquidación de este viaje volver después de guardar/editar un
+    gasto. 30 sep: si el viaje tiene dos (doble conductor con liquidación
+    separada por conductor), se prefiere la que sigue PENDIENTE -- un gasto
+    recién guardado normalmente es para terminar de armar una liquidación
+    que todavía no se cerró, no la que ya está lista."""
+    return query_one(
+        "SELECT id FROM expense_advances WHERE trip_id = ? ORDER BY (status = 'PENDIENTE') DESC, id",
+        (trip_id,),
+    )
+
+
 def _resolve_fuel_station(concept):
     """Si el concepto elegido es "Combustible", exige haber elegido un
     grifo del catálogo (10 sep, 3ra ronda, pedido de Braulio: "dentro de
@@ -1097,10 +1277,7 @@ def new_expense():
     # este link (el POST de abajo repite el mismo chequeo por si el campo
     # oculto trip_id llega igual con el form ya abierto).
     if preselected_trip:
-        closed_advance = query_one(
-            "SELECT id FROM expense_advances WHERE trip_id = ? AND status = 'LIQUIDADO'",
-            (preselected_trip,),
-        )
+        closed_advance = _blocking_closed_advance(preselected_trip)
         if closed_advance:
             flash(
                 "Esta liquidación ya está cerrada — no se pueden agregar más gastos. "
@@ -1140,10 +1317,7 @@ def new_expense():
         # llegar acá con el link normal, esto cubre un form ya abierto
         # cuando alguien más cerró la liquidación, o una URL armada a mano.
         if trip_id:
-            closed_advance = query_one(
-                "SELECT id FROM expense_advances WHERE trip_id = ? AND status = 'LIQUIDADO'",
-                (trip_id,),
-            )
+            closed_advance = _blocking_closed_advance(trip_id)
             if closed_advance:
                 flash(
                     "Esta liquidación ya está cerrada — no se pueden agregar más gastos. "
@@ -1249,7 +1423,7 @@ def new_expense():
         )
         flash("Gasto registrado. Recuerda incluirlo en la liquidación del viaje cuando la cierres.", "success")
         if trip_id:
-            advance = query_one("SELECT id FROM expense_advances WHERE trip_id = ?", (trip_id,))
+            advance = _advance_for_redirect(trip_id)
             if advance:
                 return redirect(url_for("liquidaciones.detail", advance_id=advance["id"]))
             return redirect(url_for("viajes.detail", trip_id=trip_id))
@@ -1355,7 +1529,7 @@ def edit_expense(expense_id):
         )
         flash("Gasto actualizado.", "success")
         if trip_id:
-            advance = query_one("SELECT id FROM expense_advances WHERE trip_id = ?", (trip_id,))
+            advance = _advance_for_redirect(trip_id)
             if advance:
                 return redirect(url_for("liquidaciones.detail", advance_id=advance["id"]))
             return redirect(url_for("viajes.detail", trip_id=trip_id))
@@ -1651,7 +1825,7 @@ def whatsapp_review(draft_id):
         )
         flash("Gasto registrado a partir de la foto recibida por WhatsApp.", "success")
         if trip_id:
-            advance = query_one("SELECT id FROM expense_advances WHERE trip_id = ?", (trip_id,))
+            advance = _advance_for_redirect(trip_id)
             if advance:
                 return redirect(url_for("liquidaciones.detail", advance_id=advance["id"]))
             return redirect(url_for("viajes.detail", trip_id=trip_id))

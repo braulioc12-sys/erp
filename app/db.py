@@ -580,6 +580,15 @@ COLUMN_MIGRATIONS = [
     # (CREATE TABLE invoices) y su uso en app/routes/facturacion.py
     # (manual_create()/manual_zip()) y facturacion/detail.html.
     ("invoices", "manual_upload", "INTEGER NOT NULL DEFAULT 0"),
+    # 30 sep, pedido de Braulio ("cuando el viaje es doble conductor tambien
+    # se debe poder registrar liquidacion del segundo conductor"): ver el
+    # comentario largo junto a esta columna en schema.sql (CREATE TABLE
+    # expense_advances). Sin "REFERENCES" aquí a propósito -- mismo motivo
+    # que driver2_id/tire_inventory_id más arriba: la FK la agrega el paso
+    # dedicado de init_db() (Postgres) una vez que la columna ya existe. Se
+    # completa sola para liquidaciones ya existentes vía
+    # _backfill_advance_driver_id_* (más abajo).
+    ("expense_advances", "driver_id", "INTEGER"),
 ]
 
 
@@ -1193,6 +1202,34 @@ def _backfill_manual_invoice_numbers_postgres(conn):
         cur.execute("UPDATE invoices SET number = %s WHERE id = %s", (new_number, invoice_id))
 
 
+# 30 sep, pedido de Braulio: liquidación separada para el 2° conductor de un
+# viaje doble conductor (ver el comentario largo junto a
+# expense_advances.driver_id en schema.sql). Antes de este cambio, TODA
+# liquidación pertenecía implícitamente al conductor principal del viaje
+# (trips.driver_id) -- así que, para no perder esa identidad en una base ya
+# desplegada, esta función completa driver_id con exactamente ese mismo
+# valor para cada liquidación que todavía no lo tenga. Corre en cada
+# arranque; el WHERE (driver_id IS NULL) hace que sea un no-op para
+# cualquier liquidación ya migrada, incluida una liquidación NUEVA del 2°
+# conductor (que ya nace con su propio driver_id puesto por new_advance() y
+# nunca pasa por acá).
+def _backfill_advance_driver_id_sqlite(conn):
+    conn.execute(
+        """UPDATE expense_advances
+           SET driver_id = (SELECT t.driver_id FROM trips t WHERE t.id = expense_advances.trip_id)
+           WHERE driver_id IS NULL"""
+    )
+
+
+def _backfill_advance_driver_id_postgres(conn):
+    cur = conn.cursor()
+    cur.execute(
+        """UPDATE expense_advances
+           SET driver_id = (SELECT t.driver_id FROM trips t WHERE t.id = expense_advances.trip_id)
+           WHERE driver_id IS NULL"""
+    )
+
+
 def _fix_boleta_account_codes_postgres(conn):
     cur = conn.cursor()
     for name, (account_code, doc_code, label) in _BOLETA_ACCOUNT_FIXES.items():
@@ -1612,6 +1649,7 @@ def init_db(app):
             _seed_detraction_concepts_postgres(conn)
             _backfill_tefacturo_codigo_bien_servicio_postgres(conn)
             _backfill_manual_invoice_numbers_postgres(conn)
+            _backfill_advance_driver_id_postgres(conn)
             conn.commit()
         finally:
             conn.close()
@@ -1635,6 +1673,7 @@ def init_db(app):
         _seed_detraction_concepts_sqlite(conn)
         _backfill_tefacturo_codigo_bien_servicio_sqlite(conn)
         _backfill_manual_invoice_numbers_sqlite(conn)
+        _backfill_advance_driver_id_sqlite(conn)
         conn.commit()
         conn.close()
 

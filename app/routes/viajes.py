@@ -455,6 +455,23 @@ def _return_trip_of(trip_id):
     )
 
 
+def _advance_for_driver(trip_id, driver_id):
+    """30 sep, pedido de Braulio: "cuando el viaje es doble conductor
+    tambien se debe poder registrar liquidacion del segundo conductor" --
+    ahora un mismo trip_id puede tener hasta dos liquidaciones (una por
+    conductor, ver expense_advances.driver_id en schema.sql), así que ya no
+    alcanza con mirar solo trip_id (ver detail() más abajo). NULL-safe: si
+    el viaje no tiene ese conductor asignado, compara por "IS NULL" (en SQL
+    "= NULL" nunca es verdadero)."""
+    if driver_id is not None:
+        return query_one(
+            "SELECT id, status FROM expense_advances WHERE trip_id = ? AND driver_id = ?", (trip_id, driver_id)
+        )
+    return query_one(
+        "SELECT id, status FROM expense_advances WHERE trip_id = ? AND driver_id IS NULL", (trip_id,)
+    )
+
+
 def _ownership_and_third_party_fields(form):
     """Resuelve, a partir del formulario, los campos de unidad propia vs.
     tercero (3 sep, pedido de Braulio). Devuelve un dict listo para pasar
@@ -991,7 +1008,27 @@ def detail(trip_id):
     )
     total_expenses = sum(e["amount"] for e in expenses)
     next_statuses = STATUS_FLOW.get(trip["status"], [])
-    advance = query_one("SELECT id, status FROM expense_advances WHERE trip_id = ?", (liquidacion_trip_id,))
+    # 30 sep, pedido de Braulio: "cuando el viaje es doble conductor tambien
+    # se debe poder registrar liquidacion del segundo conductor" -- de acá
+    # en más un viaje puede tener DOS liquidaciones (una por conductor), así
+    # que hace falta el driver_id/driver2_id del viaje ANCLA (la ida, si se
+    # está viendo la vuelta -- ver el comentario de liquidacion_trip_id
+    # arriba) para saber cuál liquidación corresponde a cuál conductor, en
+    # vez de los driver_id/driver2_id de ESTE trip (que podrían ser
+    # distintos si se está viendo la pantalla de la vuelta).
+    anchor_trip_info = query_one(
+        """SELECT t.driver_id, t.driver2_id, t.double_driver,
+                  d.name as driver_name, d2.name as driver2_name
+           FROM trips t
+           LEFT JOIN drivers d ON d.id = t.driver_id
+           LEFT JOIN drivers d2 ON d2.id = t.driver2_id
+           WHERE t.id = ?""",
+        (liquidacion_trip_id,),
+    )
+    advance = _advance_for_driver(liquidacion_trip_id, anchor_trip_info["driver_id"])
+    advance2 = None
+    if anchor_trip_info["double_driver"] and anchor_trip_info["driver2_id"]:
+        advance2 = _advance_for_driver(liquidacion_trip_id, anchor_trip_info["driver2_id"])
     payment_term_labels = dict(PAYMENT_TERMS)
     # 30 sep: ya no hace falta un diccionario de etiquetas para el tipo de
     # carga -- ahora que se guarda el nombre del catálogo tal cual (ver
@@ -1027,7 +1064,8 @@ def detail(trip_id):
     conformidad_opcional = bool(trip["return_of_trip_id"]) and trip["issuer"] == "HARRASO"
     return render_template(
         "viajes/detail.html", trip=trip, expenses=expenses,
-        total_expenses=total_expenses, next_statuses=next_statuses, advance=advance,
+        total_expenses=total_expenses, next_statuses=next_statuses, advance=advance, advance2=advance2,
+        anchor_driver_name=anchor_trip_info["driver_name"], anchor_driver2_name=anchor_trip_info["driver2_name"],
         payment_term_labels=payment_term_labels,
         existing_waybills=existing_waybills, creator=creator,
         outbound_trip=outbound_trip, return_trip=return_trip, conformidad_opcional=conformidad_opcional,

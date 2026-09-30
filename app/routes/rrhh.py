@@ -23,7 +23,7 @@ from flask import Blueprint, Response, render_template, request
 
 from app.accounting import office_choices
 from app.auth import permission_required
-from app.db import query_all
+from app.db import query_all, query_one
 from app.helpers import today_str
 from app.routes.viajes import ISSUER_CHOICES
 
@@ -39,22 +39,27 @@ READY_FOR_RRHH_SQL = (
 
 def _ready_advances(month, driver_id, office, issuer, q):
     """Liquidaciones listas para RRHH en el periodo (mes) y filtros pedidos.
-    El filtro de conductor mira solo al conductor PRINCIPAL del viaje
-    (trips.driver_id) — una liquidación es una sola por viaje, no se separa
-    por conductor como sí pasa con las comisiones (ver
-    viajes._commissions_by_driver); en un viaje de doble conductor el
-    segundo conductor se sigue mostrando junto al primero en cada fila."""
+
+    30 sep, pedido de Braulio (liquidación separada del 2° conductor de un
+    viaje doble conductor -- ver expense_advances.driver_id en schema.sql):
+    el filtro/agrupación de conductor ahora mira al conductor DE LA PROPIA
+    liquidación (a.driver_id), no siempre al principal del viaje
+    (trips.driver_id) como antes -- así, si el 2° conductor ya tiene su
+    propia liquidación cerrada, aparece en SU PROPIO panel en vez de
+    mezclarse en el del 1°. d2/driver2_name se conservan solo para anotar
+    "(+ 2° conductor)" en build_rrhh_workbook() cuando ese 2° conductor
+    TODAVÍA no tiene su propia liquidación (dato de antes de este cambio)."""
     sql = f"""SELECT a.*, t.code as trip_code, t.origin, t.destination, t.issuer,
-                     t.double_driver, d.id as driver_id, d.name as driver_name,
-                     d2.name as driver2_name
+                     t.double_driver, t.driver2_id as trip_driver2_id,
+                     d.name as driver_name, d2.name as driver2_name
               FROM expense_advances a
               JOIN trips t ON t.id = a.trip_id
-              LEFT JOIN drivers d ON d.id = t.driver_id
+              LEFT JOIN drivers d ON d.id = a.driver_id
               LEFT JOIN drivers d2 ON d2.id = t.driver2_id
               WHERE {READY_FOR_RRHH_SQL} AND strftime('%Y-%m', a.liquidated_at) = ?"""
     params = [month]
     if driver_id:
-        sql += " AND t.driver_id = ?"
+        sql += " AND a.driver_id = ?"
         params.append(driver_id)
     if office:
         sql += " AND a.office = ?"
@@ -69,7 +74,31 @@ def _ready_advances(month, driver_id, office, issuer, q):
         like = f"%{q}%"
         params.extend([like, like])
     sql += " ORDER BY d.name IS NULL, d.name, a.liquidated_at, a.id"
-    return query_all(sql, params)
+    rows = query_all(sql, params)
+    # 30 sep: se convierte a dict (en vez de dejar los Row de sqlite3/
+    # psycopg2, que no admiten agregar una clave nueva) para poder sumarle
+    # "driver2_has_own_advance" -- lo usan tanto rrhh/list.html como
+    # build_rrhh_workbook() para no anotar "(+ 2° conductor)" cuando ese 2°
+    # conductor ya tiene su PROPIA liquidación (ver esa función).
+    result = []
+    for r in rows:
+        row = dict(r)
+        row["driver2_has_own_advance"] = _driver2_has_own_advance(row)
+        result.append(row)
+    return result
+
+
+def _driver2_has_own_advance(row):
+    """30 sep: ¿el 2° conductor de este viaje YA tiene su propia
+    liquidación (esté o no lista para RRHH todavía)? Si es así,
+    build_rrhh_workbook() no debe anotar "(+ 2° conductor)" en la fila del
+    1° -- el 2° ya aparece (o va a aparecer) en su propio panel."""
+    if not row["double_driver"] or not row["trip_driver2_id"] or row["trip_driver2_id"] == row["driver_id"]:
+        return False
+    return query_one(
+        "SELECT 1 FROM expense_advances WHERE trip_id = ? AND driver_id = ?",
+        (row["trip_id"], row["trip_driver2_id"]),
+    ) is not None
 
 
 def _group_by_driver(advances):

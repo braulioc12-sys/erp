@@ -310,7 +310,13 @@ def build_rrhh_workbook(drivers, company_name, month):
 
         for a in d["advances"]:
             trip_label = a["trip_code"]
-            if a["double_driver"] and a["driver2_name"]:
+            # 30 sep: si el 2° conductor de este viaje YA tiene su PROPIA
+            # liquidación (separada, ver expense_advances.driver_id), no se
+            # anota acá -- va a aparecer solo, en su propio panel. La
+            # anotación "(+ 2° conductor)" queda solo para liquidaciones de
+            # antes de este cambio, cuando una sola liquidación cubría a
+            # los dos conductores del viaje.
+            if a["double_driver"] and a["driver2_name"] and not a.get("driver2_has_own_advance"):
                 trip_label = f"{trip_label} (+ {a['driver2_name']})"
             fuel_label = "Sin exceso"
             if a["fuel_excess"] and a["fuel_excess"] > 0:

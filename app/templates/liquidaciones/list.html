@@ -31,12 +31,13 @@
 
 <div class="table-wrap">
   <table>
-    <thead><tr><th>Código</th><th>Viaje</th><th>Ruta</th><th class="text-right">Entregado</th><th class="text-right">Gastado</th><th>Estado</th><th>Oficina</th><th>Voucher</th><th>RRHH</th></tr></thead>
+    <thead><tr><th>Código</th><th>Viaje</th><th>Conductor</th><th>Ruta</th><th class="text-right">Entregado</th><th class="text-right">Gastado</th><th>Estado</th><th>Oficina</th><th>Voucher</th><th>RRHH</th></tr></thead>
     <tbody>
       {% for a in advances %}
       <tr onclick="window.location='{{ url_for('liquidaciones.detail', advance_id=a.id) }}'" style="cursor:pointer;">
         <td><a href="{{ url_for('liquidaciones.detail', advance_id=a.id) }}">{{ a.code or '—' }}</a></td>
         <td><a href="{{ url_for('liquidaciones.detail', advance_id=a.id) }}">{{ a.trip_code }}</a></td>
+        <td>{{ a.driver_name or '—' }}</td>
         <td>{{ a.origin }} → {{ a.destination }}</td>
         <td class="text-right">{{ a.amount_given|money }}</td>
         <td class="text-right">{{ a.spent|money }}</td>
@@ -60,7 +61,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="9" class="table-empty">No hay liquidaciones registradas todavía.</td></tr>
+      <tr><td colspan="10" class="table-empty">No hay liquidaciones registradas todavía.</td></tr>
       {% endfor %}
     </tbody>
   </table>

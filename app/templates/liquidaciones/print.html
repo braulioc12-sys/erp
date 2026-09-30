@@ -105,7 +105,7 @@
     </div>
     <div class="meta-item"><div class="label">Ruta</div><div class="value">{{ advance.origin }} → {{ advance.destination }}</div></div>
     <div class="meta-item"><div class="label">Unidad</div><div class="value">{{ advance.vehicle_plate or '—' }}</div></div>
-    <div class="meta-item"><div class="label">Conductor(es)</div><div class="value">{{ advance.driver_name or '—' }}{% if advance.driver2_name %} / {{ advance.driver2_name }}{% endif %}</div></div>
+    <div class="meta-item"><div class="label">Conductor</div><div class="value">{{ advance.driver_name or '—' }}{% if advance.double_driver and advance.driver2_name and not driver2_has_own_advance %} / {{ advance.driver2_name }}{% endif %}</div></div>
     <div class="meta-item"><div class="label">Fecha de anticipo</div><div class="value">{{ advance.given_date or '—' }}</div></div>
     {% if advance.status == 'LIQUIDADO' %}
     <div class="meta-item"><div class="label">Cerrada el</div><div class="value">{{ advance.liquidated_at }}</div></div>
@@ -187,6 +187,13 @@
       <div class="value" style="color:{{ 'var(--success)' if difference >= 0 else 'var(--danger)' }};">{{ (difference if difference >= 0 else -difference)|money }}</div>
     </div>
   </div>
+
+  {% if receipt %}
+  <div class="notes-box">
+    {{ 'Recibo de ingreso' if receipt.type == 'INGRESO' else 'Recibo por devolver' }} N° {{ receipt.receipt_number }}
+    del {{ receipt.receipt_date }} — {{ receipt.amount|money }}{% if receipt.notes %} ({{ receipt.notes }}){% endif %}
+  </div>
+  {% endif %}
 
   {% if advance.notes %}
   <h2>Notas del anticipo</h2>

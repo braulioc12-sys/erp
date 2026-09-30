@@ -1,7 +1,10 @@
 {% extends 'base.html' %}
 {% block title %}Confirmar anticipo de viáticos{% endblock %}
 {% block content %}
-<div class="page-header"><h1>Confirmar anticipo de viáticos — Viaje {{ trip.code }}</h1></div>
+<div class="page-header"><h1>Confirmar anticipo de viáticos — Viaje {{ trip.code }}{% if driver %} ({{ driver.name }}){% endif %}</h1></div>
+{% if trip.double_driver %}
+<p class="muted mt-0">{% if driver_slot == 2 %}Anticipo del <strong>2° conductor</strong>{% else %}Anticipo del <strong>1° conductor</strong>{% endif %}{% if driver %} — {{ driver.name }}{% endif %}. Este viaje es de doble conductor: cada conductor tiene su propia liquidación, independiente de la del otro.</p>
+{% endif %}
 <p class="muted mt-0">Ruta: {{ trip.origin }} → {{ trip.destination }}.
   {% if route %}Monto sugerido según la ruta: <strong>{{ route.default_expense_amount|money }}</strong>.
   {% else %}Esta ruta no tiene un monto predeterminado — puedes <a href="{{ url_for('rutas.list_view') }}" target="_blank">configurarlo en Rutas</a>.{% endif %}

@@ -965,7 +965,19 @@ CREATE TABLE IF NOT EXISTS expense_advances (
     rrhh_approved_by_name TEXT,
     rrhh_approved_by_user_id INTEGER REFERENCES users(id),
     created_by INTEGER REFERENCES users(id),
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    -- 30 sep, pedido de Braulio: "cuando el viaje es doble conductor tambien
+    -- se debe poder registrar liquidacion del segundo conductor" -- hasta
+    -- acá una liquidación era una sola por viaje (trips.driver_id/driver2_id
+    -- decidían quién salía en pantalla, ver print_view()); de ahora en más
+    -- cada liquidación pertenece a UN conductor específico (el 1° o el 2°
+    -- de un viaje doble conductor), permitiendo dos anticipos/liquidaciones
+    -- independientes sobre el mismo trip_id. En una base ya desplegada esta
+    -- columna llega vía COLUMN_MIGRATIONS y se completa sola con el
+    -- conductor principal del viaje para no perder identidad de las
+    -- liquidaciones ya existentes -- ver _backfill_advance_driver_id_* en
+    -- app/db.py.
+    driver_id INTEGER REFERENCES drivers(id)
 );
 
 -- Catálogo de grifos (10 sep, 3ra ronda, pedido de Braulio: "dentro de
@@ -1025,6 +1037,33 @@ CREATE TABLE IF NOT EXISTS advance_payments (
     amount REAL NOT NULL,
     payment_date TEXT NOT NULL,
     notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Recibo físico registrado al cerrar una liquidación con saldo (30 sep,
+-- pedido de Braulio: "a la hora de presionar el boton liquidar que salga un
+-- nuevo anuncio que diga la liquidacion contiene un saldo a favor o en
+-- contra. Si es a favor... deseas registrar un recibo ingreso? y si sale en
+-- contra... deseas registrar un recibo por devolver?"). Es OBLIGATORIO
+-- registrarlo para poder cerrar una liquidación cuya diferencia
+-- (amount_given - gastado) no sea cero -- Braulio: "no se cierra hasta que
+-- se registre el recibo" -- ver liquidate() en app/routes/liquidaciones.py.
+-- type: 'INGRESO' cuando el saldo es a favor de la empresa (el conductor
+-- debe devolver dinero -- recibo de ingreso de caja), 'DEVOLUCION' cuando es
+-- en contra (la empresa le debe al conductor -- recibo de lo que se le
+-- devuelve). Datos pedidos por Braulio: número de recibo físico, fecha,
+-- monto (prellenado con el saldo pero editable) y nota libre -- el nombre
+-- del conductor no se duplica acá, se toma de expense_advances.driver_id.
+-- Una liquidación con saldo cero no genera fila acá (no hace falta recibo).
+CREATE TABLE IF NOT EXISTS advance_receipts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    advance_id INTEGER NOT NULL REFERENCES expense_advances(id),
+    type TEXT NOT NULL CHECK (type IN ('INGRESO', 'DEVOLUCION')),
+    amount REAL NOT NULL,
+    receipt_number TEXT NOT NULL,
+    receipt_date TEXT NOT NULL,
+    notes TEXT,
+    created_by INTEGER REFERENCES users(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

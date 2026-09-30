@@ -73,7 +73,7 @@
         {% for a in d.advances %}
         <tr>
           <td>{{ a.code or '—' }}</td>
-          <td>{{ a.trip_code }}{% if a.double_driver and a.driver2_name %} <span class="muted">(+ {{ a.driver2_name }})</span>{% endif %}</td>
+          <td>{{ a.trip_code }}{% if a.double_driver and a.driver2_name and not a.driver2_has_own_advance %} <span class="muted">(+ {{ a.driver2_name }})</span>{% endif %}</td>
           <td>{{ a.origin }} → {{ a.destination }}</td>
           <td>{{ 'BRMS' if a.issuer == 'BRMS' else 'Harraso Transport' }}</td>
           <td>{{ a.office or '—' }}</td>

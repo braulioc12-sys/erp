@@ -42,6 +42,24 @@
       {% endif %}
     </div>
   </div>
+  {# 30 sep, pedido de Braulio: "en las liquidaciones debe figurar el nombre
+     del conductor" -- viene de expense_advances.driver_id (el conductor
+     específico de ESTA liquidación, no siempre el 1° del viaje). Si el
+     viaje es doble conductor, se enlaza a la liquidación del otro
+     conductor (si ya existe) o al formulario para crearla. #}
+  <div class="detail-item">
+    <div class="label">Conductor</div>
+    <div class="value">
+      {{ advance.driver_name or '—' }}
+      {% if advance.double_driver %}
+        {% if sibling_advance %}
+        · <a href="{{ url_for('liquidaciones.detail', advance_id=sibling_advance.id) }}">Ver liquidación del {{ '2do' if sibling_driver_slot == 2 else '1er' }} conductor ({{ sibling_advance.driver_name or '—' }})</a>
+        {% elif sibling_driver_id and can(current_user.roles, 'liquidaciones', 'edit') %}
+        · <a href="{{ url_for('liquidaciones.new_advance', trip_id=advance.trip_id, driver_slot=sibling_driver_slot) }}">Registrar liquidación del {{ '2do' if sibling_driver_slot == 2 else '1er' }} conductor</a>
+        {% endif %}
+      {% endif %}
+    </div>
+  </div>
   <div class="detail-item"><div class="label">Ruta</div><div class="value">{{ advance.origin }} → {{ advance.destination }}</div></div>
   <div class="detail-item"><div class="label">Total entregado ({{ payments|length }} anticipo{{ 's' if payments|length != 1 }})</div><div class="value">{{ advance.amount_given|money }}</div></div>
   <div class="detail-item"><div class="label">Gastado hasta ahora ({{ 'todos los gastos de ida + vuelta' if return_trip else 'todos los gastos del viaje' }})</div><div class="value">{{ spent|money }}</div></div>
@@ -144,7 +162,7 @@
         <tr>
           <td>
             {% if can_liquidate %}
-            <input type="checkbox" name="expense_ids" value="{{ e.id }}" form="liquidar-form" {{ 'checked' if not e.expense_advance_id or e.expense_advance_id == advance.id }}>
+            <input type="checkbox" name="expense_ids" value="{{ e.id }}" data-amount="{{ e.amount }}" class="liquidar-expense-check" form="liquidar-form" {{ 'checked' if not e.expense_advance_id or e.expense_advance_id == advance.id }}>
             {% else %}
             {{ '✓' if e.expense_advance_id == advance.id else '—' }}
             {% endif %}
@@ -347,6 +365,9 @@
     Oficina: <strong>{{ office_labels.get(advance.office, advance.office or '—') }}</strong> ·
     Voucher: <strong>{{ '%02d'|format(advance.voucher_number) if advance.voucher_number else '—' }}</strong>.
     Aparece en <a href="{{ url_for('liquidaciones.resumen_view', month=advance.liquidated_at[:7], office=advance.office) }}">Liquidaciones → Resumen contable</a>.</p>
+  {% if receipt %}
+  <p class="mt-0">{{ 'Recibo de ingreso' if receipt.type == 'INGRESO' else 'Recibo por devolver' }} registrado: N° <strong>{{ receipt.receipt_number }}</strong>, {{ receipt.receipt_date }}, <strong>{{ receipt.amount|money }}</strong>{% if receipt.notes %} — {{ receipt.notes }}{% endif %}.</p>
+  {% endif %}
   {% if has_excess and not advance.rrhh_approved_at %}
   <p class="mt-0" style="color:var(--danger);">Tiene exceso de combustible — pendiente del "Ajuste" de un Administrador (ver "Consumo de combustible" arriba) antes de poder enviarse a RRHH.</p>
   {% elif advance.rrhh_approved_at %}
@@ -383,7 +404,20 @@
 <div class="panel">
   <h2>Liquidar</h2>
   <p class="muted mt-0">Elige la oficina y presiona "Liquidar" para cerrar esta liquidación con los gastos marcados arriba — después ya no se puede editar.</p>
-  <form id="liquidar-form" method="post" action="{{ url_for('liquidaciones.liquidate', advance_id=advance.id) }}" onsubmit="return confirm('¿Cerrar esta liquidación con los gastos marcados?');" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+
+  {# 30 sep, pedido de Braulio: "a la hora de presionar el boton liquidar
+     que salga un nuevo anuncio que diga la liquidacion contiene un saldo a
+     favor o en contra... deseas registrar un recibo ingreso / por
+     devolver?" y, sobre qué pasa si no se registra: "no se cierra hasta
+     que se registre el recibo" -- el recibo es obligatorio mientras el
+     saldo no sea cero (liquidate() lo vuelve a exigir en el servidor, esto
+     es solo para no hacer ir y volver a quien está liquidando). El bloque
+     de abajo arranca mostrado/oculto según el saldo YA CALCULADO con los
+     checkboxes tal como están marcados ahora mismo; el script recalcula en
+     vivo si se destilda algún gasto. #}
+  <div id="liquidar-saldo-notice" class="mt-0" style="padding:10px 14px; border-radius:8px; margin-bottom:12px; font-weight:600;"></div>
+
+  <form id="liquidar-form" method="post" action="{{ url_for('liquidaciones.liquidate', advance_id=advance.id) }}" onsubmit="return confirm(window.liquidarConfirmMessage ? window.liquidarConfirmMessage() : '¿Cerrar esta liquidación con los gastos marcados?');" style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label style="margin:0;">Oficina donde se liquida *
       <select name="office" required>
@@ -393,8 +427,80 @@
         {% endfor %}
       </select>
     </label>
+
+    <div id="liquidar-receipt-fields" style="display:none; gap:8px; align-items:flex-end; flex-wrap:wrap;">
+      <label style="margin:0;">N° de recibo *
+        <input type="text" name="receipt_number" id="receipt-number">
+      </label>
+      <label style="margin:0;">Fecha del recibo *
+        <input type="date" name="receipt_date" id="receipt-date" value="{{ today }}">
+      </label>
+      <label style="margin:0;">Monto (S/) *
+        <input type="number" step="0.01" min="0.01" name="receipt_amount" id="receipt-amount" value="{{ '%.2f'|format(difference if difference >= 0 else -difference) }}">
+      </label>
+      <label style="margin:0;">Nota
+        <input type="text" name="receipt_notes" id="receipt-notes" placeholder="Observación libre (opcional)">
+      </label>
+    </div>
+
     <button type="submit" class="btn btn-primary" style="font-size:1rem; padding:14px 26px;">Liquidar</button>
   </form>
 </div>
+<script>
+  (function () {
+    var amountGiven = {{ advance.amount_given|float }};
+    var noticeEl = document.getElementById('liquidar-saldo-notice');
+    var fieldsEl = document.getElementById('liquidar-receipt-fields');
+    var amountInput = document.getElementById('receipt-amount');
+    var numberInput = document.getElementById('receipt-number');
+    var dateInput = document.getElementById('receipt-date');
+    var checks = document.querySelectorAll('.liquidar-expense-check');
+    var amountTouched = false;
+    amountInput.addEventListener('input', function () { amountTouched = true; });
+
+    function currentDifference() {
+      var spent = 0;
+      checks.forEach(function (c) { if (c.checked) spent += parseFloat(c.dataset.amount) || 0; });
+      return amountGiven - spent;
+    }
+
+    function refresh() {
+      var diff = currentDifference();
+      var abs = Math.abs(diff).toFixed(2);
+      if (Math.abs(diff) < 0.005) {
+        noticeEl.style.display = 'none';
+        fieldsEl.style.display = 'none';
+        numberInput.required = false;
+        amountInput.required = false;
+        dateInput.required = false;
+      } else {
+        var favor = diff > 0;
+        noticeEl.style.display = 'block';
+        noticeEl.style.background = favor ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)';
+        noticeEl.style.color = favor ? 'var(--success)' : 'var(--danger)';
+        noticeEl.textContent = 'Esta liquidación contiene un saldo ' + (favor ? 'a favor' : 'en contra') +
+          ' de S/ ' + abs + ' — hay que registrar un recibo ' + (favor ? 'de ingreso' : 'por devolver') +
+          ' para poder cerrarla.';
+        fieldsEl.style.display = 'flex';
+        numberInput.required = true;
+        amountInput.required = true;
+        dateInput.required = true;
+        if (!amountTouched) amountInput.value = abs;
+      }
+    }
+
+    checks.forEach(function (c) { c.addEventListener('change', refresh); });
+    refresh();
+
+    window.liquidarConfirmMessage = function () {
+      var diff = currentDifference();
+      if (Math.abs(diff) < 0.005) return '¿Cerrar esta liquidación con los gastos marcados?';
+      var favor = diff > 0;
+      return 'La liquidación contiene un saldo ' + (favor ? 'a favor' : 'en contra') + ' de S/ ' +
+        Math.abs(diff).toFixed(2) + '. Se registrará el recibo ' + (favor ? 'de ingreso' : 'por devolver') +
+        ' indicado y se cerrará. ¿Continuar?';
+    };
+  })();
+</script>
 {% endif %}
 {% endblock %}
