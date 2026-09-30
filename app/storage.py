@@ -261,12 +261,25 @@ def _presigned_url(prefix, filename, as_attachment=False, download_name=None):
     Flask para el modo disco local (ver send_from_directory() en
     facturacion.py/guias.py). `download_name`, si se pasa, es el nombre
     con el que se descarga el archivo (ej. "F001-000009.xml") en vez del
-    nombre interno con el uuid.hex."""
+    nombre interno con el uuid.hex.
+
+    30 sep, pedido de Braulio ("que el nombre del archivo sea la factura +
+    su extension"): antes, cuando as_attachment=False (ej. "Ver PDF" de una
+    factura, que se abre en una pestaña en vez de descargarse), el
+    `download_name` se ignoraba del todo -- el disposition quedaba en
+    "inline" sin ningún nombre, así que si el usuario le hacía "Guardar
+    como" desde ahí, el navegador sugería el nombre feo de la URL firmada
+    de S3 en vez de "F001-000009.pdf". Ahora el nombre bonito se manda
+    también en modo "inline" (confirmado con una prueba directa: Flask ya
+    hace esto mismo en disco local con send_from_directory(download_name=),
+    sin necesidad de as_attachment=True) — sigue abriéndose en el navegador
+    igual que antes, solo cambia el nombre sugerido al guardarlo."""
     content_type, _ = mimetypes.guess_type(filename)
+    name = download_name or filename
     if as_attachment:
-        disposition = f'attachment; filename="{download_name or filename}"'
+        disposition = f'attachment; filename="{name}"'
     else:
-        disposition = "inline"
+        disposition = f'inline; filename="{name}"'
     return _s3_client().generate_presigned_url(
         "get_object",
         Params={

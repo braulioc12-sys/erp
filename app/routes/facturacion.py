@@ -1879,13 +1879,25 @@ def delete(invoice_id):
 def view_sunat_pdf(invoice_id):
     """Sirve el PDF real que devolvió tefacturo.pe al emitir esta factura
     (7 sep, segunda ronda) — mismo patrón que las demás descargas de
-    archivos del sistema (disco local o redirect a URL firmada en S3)."""
-    invoice = query_one("SELECT sunat_pdf_filename FROM invoices WHERE id = ?", (invoice_id,))
+    archivos del sistema (disco local o redirect a URL firmada en S3).
+
+    30 sep, pedido de Braulio ("cuando se cree el archivo y se descargue,
+    tanto el pdf como el xml que el nombre del archivo sea la factura + su
+    extension"): mismo nombre de serie/número real que ya usa
+    view_sunat_xml() de abajo (ej. "F001-000009.pdf") en vez del nombre
+    interno con el uuid — sigue abriéndose en una pestaña nueva como
+    siempre, solo cambia el nombre sugerido si el usuario lo guarda."""
+    invoice = query_one(
+        "SELECT sunat_pdf_filename, series, series_number FROM invoices WHERE id = ?", (invoice_id,)
+    )
     if invoice is None or not invoice["sunat_pdf_filename"]:
         abort(404)
+    download_name = f"{invoice['series']}-{invoice['series_number']:06d}.pdf"
     if using_s3():
-        return redirect(sunat_document_url(invoice["sunat_pdf_filename"]))
-    return send_from_directory(local_sunat_documents_dir(), invoice["sunat_pdf_filename"])
+        return redirect(sunat_document_url(invoice["sunat_pdf_filename"], download_name=download_name))
+    return send_from_directory(
+        local_sunat_documents_dir(), invoice["sunat_pdf_filename"], download_name=download_name
+    )
 
 
 @bp.route("/<int:invoice_id>/xml-sunat")
