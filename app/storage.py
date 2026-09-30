@@ -18,11 +18,34 @@ sección "Base de datos persistente en AWS (RDS + S3)"):
   de llamar aquí).
 
 boto3 solo se importa (import perezoso) cuando el modo S3 está realmente
-activo, para no exigir esa dependencia en desarrollo local."""
+activo, para no exigir esa dependencia en desarrollo local.
+
+30 sep, segundo WORKER TIMEOUT real en producción (después de arreglar el
+de extract_pdf_text -- ver app/integrations/pdf_text.py): con el timeout de
+gunicorn ya subido a 120s, "Cargar factura ya emitida (SUNAT)" en zip (ver
+manual_zip() en app/routes/facturacion.py) volvió a colgarse, esta vez a
+mitad de un put_object() a S3 -- el traceback de Render mostró el corte
+justo adentro del handshake TLS (ssl_wrap_socket/load_verify_locations) al
+conectar con S3. La causa: _s3_client() armaba un boto3.client() NUEVO en
+CADA llamada (cada PDF y cada XML subido), así que cada archivo del zip
+pagaba una conexión TCP+TLS nueva a S3 en vez de reutilizar una ya abierta
+-- con varias facturas reales en un mismo zip (2 archivos por factura) eso
+se acumula rápido y puede superar hasta un timeout ya generoso. Ahora
+_s3_client() cachea el cliente a nivel de módulo (se arma una sola vez por
+proceso worker y se reutiliza en todas las llamadas siguientes, dejando que
+botocore reutilice sus conexiones HTTP con keep-alive) -- gunicorn (ver
+Procfile) usa workers de tipo sync, un solo request a la vez por proceso,
+así que no hace falta más que un lock simple para que la primera vez que
+dos requests coincidan justo al arrancar un worker no arme el cliente dos
+veces por accidente."""
 import mimetypes
 import os
+import threading
 
 from flask import current_app
+
+_s3_client_cache = None
+_s3_client_lock = threading.Lock()
 
 
 def using_s3():
@@ -164,37 +187,50 @@ def _s3_key(filename, prefix):
 
 
 def _s3_client():
-    import boto3
+    # 30 sep: cacheado a nivel de módulo -- ver el comentario grande al
+    # inicio del archivo. Antes se armaba un boto3.client() (con su propia
+    # conexión TCP+TLS a S3) en cada llamada; ahora se arma una sola vez por
+    # proceso worker y se reutiliza, para que subir varios archivos seguidos
+    # (ej. el zip de "Cargar factura ya emitida") no pague una conexión
+    # nueva por cada uno.
+    global _s3_client_cache
+    if _s3_client_cache is not None:
+        return _s3_client_cache
+    with _s3_client_lock:
+        if _s3_client_cache is None:
+            import boto3
 
-    # boto3 puede tomar las credenciales (AWS_ACCESS_KEY_ID /
-    # AWS_SECRET_ACCESS_KEY) y la región (AWS_DEFAULT_REGION) directo de las
-    # variables de entorno estándar, pero NO recorta espacios ni saltos de
-    # línea de esos valores — en producción real (31 ago) esto causó
-    # "SignatureDoesNotMatch" persistente, resuelto leyendo y limpiando
-    # (`strip()`) las variables acá mismo en vez de dejar que boto3 las tome
-    # "tal cual".
-    #
-    # Además, para `generate_presigned_url()` específicamente (no para
-    # put_object ni otras llamadas normales), boto3 puede terminar armando
-    # la URL contra el endpoint "global" de S3 (que se valida como si fuera
-    # us-east-1) en vez del endpoint regional real del bucket, aunque la
-    # región pasada a `region_name` sea la correcta — visto en producción
-    # real (31 ago) como "AuthorizationQueryParametersError: ... the region
-    # 'us-east-2' is wrong; expecting 'us-east-1'" con un bucket confirmado
-    # en us-east-2 (Ohio) desde la propia consola de AWS. Pasar
-    # `endpoint_url` explícito con la región fuerza el host correcto sin
-    # depender de esa resolución interna.
-    access_key = (os.environ.get("AWS_ACCESS_KEY_ID") or "").strip()
-    secret_key = (os.environ.get("AWS_SECRET_ACCESS_KEY") or "").strip()
-    region = (os.environ.get("AWS_DEFAULT_REGION") or "").strip()
-    kwargs = {}
-    if access_key and secret_key:
-        kwargs["aws_access_key_id"] = access_key
-        kwargs["aws_secret_access_key"] = secret_key
-    if region:
-        kwargs["region_name"] = region
-        kwargs["endpoint_url"] = f"https://s3.{region}.amazonaws.com"
-    return boto3.client("s3", **kwargs)
+            # boto3 puede tomar las credenciales (AWS_ACCESS_KEY_ID /
+            # AWS_SECRET_ACCESS_KEY) y la región (AWS_DEFAULT_REGION) directo
+            # de las variables de entorno estándar, pero NO recorta espacios
+            # ni saltos de línea de esos valores — en producción real (31
+            # ago) esto causó "SignatureDoesNotMatch" persistente, resuelto
+            # leyendo y limpiando (`strip()`) las variables acá mismo en vez
+            # de dejar que boto3 las tome "tal cual".
+            #
+            # Además, para `generate_presigned_url()` específicamente (no
+            # para put_object ni otras llamadas normales), boto3 puede
+            # terminar armando la URL contra el endpoint "global" de S3 (que
+            # se valida como si fuera us-east-1) en vez del endpoint
+            # regional real del bucket, aunque la región pasada a
+            # `region_name` sea la correcta — visto en producción real (31
+            # ago) como "AuthorizationQueryParametersError: ... the region
+            # 'us-east-2' is wrong; expecting 'us-east-1'" con un bucket
+            # confirmado en us-east-2 (Ohio) desde la propia consola de AWS.
+            # Pasar `endpoint_url` explícito con la región fuerza el host
+            # correcto sin depender de esa resolución interna.
+            access_key = (os.environ.get("AWS_ACCESS_KEY_ID") or "").strip()
+            secret_key = (os.environ.get("AWS_SECRET_ACCESS_KEY") or "").strip()
+            region = (os.environ.get("AWS_DEFAULT_REGION") or "").strip()
+            kwargs = {}
+            if access_key and secret_key:
+                kwargs["aws_access_key_id"] = access_key
+                kwargs["aws_secret_access_key"] = secret_key
+            if region:
+                kwargs["region_name"] = region
+                kwargs["endpoint_url"] = f"https://s3.{region}.amazonaws.com"
+            _s3_client_cache = boto3.client("s3", **kwargs)
+        return _s3_client_cache
 
 
 def _put_object(prefix, filename, raw_bytes):
