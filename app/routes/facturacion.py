@@ -1,5 +1,8 @@
+import io
 import logging
+import os
 import uuid
+import zipfile
 from itertools import zip_longest
 
 from flask import (
@@ -41,6 +44,7 @@ from app.integrations.sunat_ose import (
     parse_ose_response,
 )
 from app.integrations.sunat_ruc import get_company_for_ruc
+from app.integrations.sunat_xml import SunatXmlError, parse_invoice_xml
 from app.routes.viajes import ISSUER_CHOICES
 from app.storage import (
     local_sunat_documents_dir,
@@ -50,6 +54,12 @@ from app.storage import (
 )
 
 bp = Blueprint("facturacion", __name__, url_prefix="/facturacion")
+
+# 30 sep, "Cargar factura ya emitida (SUNAT)" -- ver manual_upload() y
+# manual_zip() más abajo: extensiones válidas para el PDF/XML del
+# comprobante que Braulio ya descargó del portal de SUNAT.
+ALLOWED_MANUAL_PDF_EXTENSIONS = {".pdf"}
+ALLOWED_MANUAL_XML_EXTENSIONS = {".xml"}
 
 # 28 sep, bug real en producción (Braulio, factura #14): "Enviar a SUNAT"
 # reventó con la página genérica "Internal Server Error" de Flask/Werkzeug
@@ -263,6 +273,461 @@ def _match_client_by_name(name):
     if len(partial) == 1:
         return partial[0]["id"]
     return None
+
+
+def _match_client_by_ruc(ruc):
+    """30 sep, "Cargar factura ya emitida (SUNAT)": a diferencia de
+    _match_client_by_name() (que calza por nombre porque es lo único que la
+    IA lee de un screenshot), acá el XML del comprobante SÍ trae el RUC del
+    cliente -- un dato mucho más confiable que el nombre para encontrar (o
+    descartar) un cliente ya registrado, así que se intenta primero."""
+    if not ruc:
+        return None
+    row = query_one("SELECT id FROM clients WHERE active = 1 AND ruc = ?", (ruc,))
+    return row["id"] if row else None
+
+
+def _save_manual_document_file(file_storage, allowed_extensions):
+    """Guarda el PDF/XML de una factura cargada manualmente (ver
+    manual_extract() más abajo) con storage.save_sunat_document() -- mismo
+    mecanismo/carpeta que ya usa send_sunat() para el PDF/XML que devuelve
+    tefacturo.pe (así ambos casos se sirven/descargan igual desde
+    view_sunat_pdf()/view_sunat_xml()). Devuelve (nombre_guardado,
+    raw_bytes), o (None, None) si no se subió nada o la extensión no es
+    válida -- se devuelven también los bytes ya leídos (en vez de nada más
+    el nombre) para poder parsear el XML enseguida sin tener que releerlo
+    de storage (que en modo S3 no lo tendría en disco local)."""
+    if not file_storage or not file_storage.filename:
+        return None, None
+    ext = os.path.splitext(file_storage.filename)[1].lower()
+    if ext not in allowed_extensions:
+        return None, None
+    raw_bytes = file_storage.read()
+    if not raw_bytes:
+        return None, None
+    filename = f"{uuid.uuid4().hex}{ext}"
+    save_sunat_document(filename, raw_bytes)
+    return filename, raw_bytes
+
+
+@bp.route("/cargar-manual")
+@permission_required("facturacion", "edit")
+def manual_upload():
+    """30 sep, pedido de Braulio ("quiero subir de manera manual, o en un
+    zip todas las facturas que antes he emitido como BRMS desde el portal
+    sunat. quiero poder descargarlas tambien desde harris"): primera
+    pantalla para cargar UNA factura que ya se emitió de verdad, directo
+    desde el portal de SUNAT (fuera de este ERP y de la integración con
+    tefacturo.pe) -- ver manual_extract()/manual_confirm()/manual_create()
+    más abajo para el resto del flujo, y manual_zip() para cargar varias a
+    la vez con un .zip. Mismo patrón obligatorio de elegir empresa antes
+    (ver el comentario en new()) que el resto de Facturación."""
+    issuer = request.args.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        flash("Elige primero la empresa (Harraso o BRMS) para cargar la factura.", "error")
+        return redirect(url_for("facturacion.list_view"))
+    return render_template("facturacion/manual_upload.html", issuer=issuer)
+
+
+@bp.route("/cargar-manual/extraer", methods=["POST"])
+@permission_required("facturacion", "edit")
+def manual_extract():
+    """Guarda el/los archivo(s) subidos (ya, acá mismo -- a diferencia de
+    "Facturar desde imagen", que solo pasa datos de texto entre pantallas,
+    acá hay que pasar también un PDF/XML reales entre esta pantalla y la de
+    confirmación, y un <input type=file> nunca se puede precargar por
+    seguridad del navegador -- así que se guardan de una vez con
+    storage.save_sunat_document() y de ahí en adelante solo viaja el NOMBRE
+    ya guardado). Si el XML viene y se puede leer (ver
+    app/integrations/sunat_xml.py), se usa para precargar cliente, serie,
+    número, fecha y monto en la pantalla de confirmación -- si no viene, o
+    no se pudo leer, esos campos quedan en blanco para llenarlos a mano
+    (pero el PDF ya subido NO se pierde)."""
+    if not validate_csrf():
+        abort(400)
+    issuer = request.form.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        flash("Elige primero la empresa (Harraso o BRMS) para cargar la factura.", "error")
+        return redirect(url_for("facturacion.list_view"))
+
+    xml_file_storage = request.files.get("xml")
+    xml_was_attempted = bool(xml_file_storage and xml_file_storage.filename)
+
+    pdf_filename, _pdf_bytes = _save_manual_document_file(request.files.get("pdf"), ALLOWED_MANUAL_PDF_EXTENSIONS)
+    if not pdf_filename:
+        flash("Sube el PDF de la factura (formato .pdf) para poder cargarla.", "error")
+        return redirect(url_for("facturacion.manual_upload", issuer=issuer))
+    xml_filename, xml_bytes = _save_manual_document_file(xml_file_storage, ALLOWED_MANUAL_XML_EXTENSIONS)
+
+    extracted = {}
+    if xml_was_attempted and not xml_filename:
+        flash("El archivo XML no tiene extensión .xml válida — se ignoró (el PDF sí se guardó).", "error")
+    elif xml_bytes:
+        try:
+            extracted = parse_invoice_xml(xml_bytes)
+        except SunatXmlError as exc:
+            flash(f"No se pudo leer el XML: {exc} — completa los datos a mano.", "error")
+            extracted = {}
+
+    client_id = _match_client_by_ruc(extracted.get("customer_ruc")) or _match_client_by_name(
+        extracted.get("customer_name")
+    )
+    return redirect(
+        url_for(
+            "facturacion.manual_confirm",
+            issuer=issuer,
+            pdf_filename=pdf_filename,
+            xml_filename=xml_filename or "",
+            client_id=client_id or "",
+            customer_name=extracted.get("customer_name") or "",
+            customer_ruc=extracted.get("customer_ruc") or "",
+            series=extracted.get("series") or "",
+            correlativo=extracted.get("correlativo") or "",
+            issue_date=parse_date(extracted.get("issue_date")) or "",
+            monto=extracted.get("total_amount") if extracted.get("total_amount") is not None else "",
+        )
+    )
+
+
+@bp.route("/cargar-manual/confirmar")
+@permission_required("facturacion", "edit")
+def manual_confirm():
+    issuer = request.args.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        flash("Elige primero la empresa (Harraso o BRMS) para cargar la factura.", "error")
+        return redirect(url_for("facturacion.list_view"))
+    clients = query_all("SELECT * FROM clients WHERE active = 1 ORDER BY name")
+    return render_template(
+        "facturacion/manual_upload_confirm.html",
+        issuer=issuer, clients=clients,
+        pdf_filename=request.args.get("pdf_filename", ""),
+        xml_filename=request.args.get("xml_filename", ""),
+        client_id=request.args.get("client_id", type=int),
+        customer_name=request.args.get("customer_name", ""),
+        customer_ruc=request.args.get("customer_ruc", ""),
+        series=request.args.get("series", "") or current_app.config["INVOICE_SERIES"],
+        correlativo=request.args.get("correlativo", ""),
+        issue_date=request.args.get("issue_date") or today_str(),
+        monto=request.args.get("monto", ""),
+        today=today_str(),
+    )
+
+
+@bp.route("/cargar-manual/cliente-nuevo", methods=["POST"])
+@permission_required("facturacion", "edit")
+def manual_new_client():
+    """Igual que from_image_new_client() más arriba, pero para volver a la
+    pantalla de confirmación de "Cargar factura ya emitida" sin perder lo ya
+    extraído/subido -- viaja todo como campos ocultos en el mini-formulario
+    de facturacion/manual_upload_confirm.html."""
+    if not validate_csrf():
+        abort(400)
+    issuer = request.form.get("issuer", "").strip().upper()
+    carry = {
+        "pdf_filename": request.form.get("pdf_filename", ""),
+        "xml_filename": request.form.get("xml_filename", ""),
+        "series": request.form.get("series", ""),
+        "correlativo": request.form.get("correlativo", ""),
+        "issue_date": request.form.get("issue_date", ""),
+        "monto": request.form.get("monto", ""),
+    }
+    if issuer not in ISSUER_CHOICES:
+        flash("Elige primero la empresa (Harraso o BRMS) para cargar la factura.", "error")
+        return redirect(url_for("facturacion.list_view"))
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("El nombre del cliente nuevo es obligatorio.", "error")
+        return redirect(url_for("facturacion.manual_confirm", issuer=issuer, **carry))
+    client_id = execute(
+        "INSERT INTO clients (name, ruc, phone, email, address) VALUES (?, ?, ?, ?, ?)",
+        (
+            name,
+            request.form.get("ruc", "").strip(),
+            request.form.get("phone", "").strip(),
+            request.form.get("email", "").strip(),
+            request.form.get("address", "").strip(),
+        ),
+    )
+    flash(f"Cliente '{name}' creado — ya puedes usarlo para esta factura.", "success")
+    return redirect(url_for("facturacion.manual_confirm", issuer=issuer, client_id=client_id, **carry))
+
+
+@bp.route("/cargar-manual/crear", methods=["POST"])
+@permission_required("facturacion", "edit")
+def manual_create():
+    """Crea de verdad el registro de una factura que Braulio YA emitió
+    directo desde el portal de SUNAT (fuera de este ERP): a diferencia de
+    new()/from_image_create() (que arman un comprobante nuevo y lo mandan a
+    SUNAT vía tefacturo.pe), acá el comprobante YA existe y ya fue aceptado
+    -- se guarda con sunat_status='ACEPTADO' directo (nunca 'NO_ENVIADA') y
+    el PDF/XML ya subidos quedan enlazados exactamente igual que si
+    "Enviar a SUNAT" los hubiera descargado (ver send_sunat() más abajo) --
+    así facturacion/detail.html los muestra para descargar sin ningún
+    cambio de plantilla, y el botón "Enviar a SUNAT" no aparece (ya está
+    aceptada). serie/número se toman tal cual los escribió/confirmó Braulio
+    (el correlativo REAL del comprobante ya emitido, no uno generado por
+    next_code()/_next_series_number() -- esos siguen sirviendo para la
+    PRÓXIMA factura nueva gracias al MAX() en vez de COUNT(*), ver el
+    comentario en _next_series_number())."""
+    if not validate_csrf():
+        abort(400)
+    issuer = request.form.get("issuer", "").strip().upper()
+    pdf_filename = request.form.get("pdf_filename", "").strip()
+    xml_filename = request.form.get("xml_filename", "").strip()
+
+    def _back_to_confirm():
+        return redirect(
+            url_for(
+                "facturacion.manual_confirm", issuer=issuer, pdf_filename=pdf_filename, xml_filename=xml_filename,
+                client_id=request.form.get("client_id", ""), series=request.form.get("series", ""),
+                correlativo=request.form.get("correlativo", ""), issue_date=request.form.get("issue_date", ""),
+                monto=request.form.get("monto", ""),
+            )
+        )
+
+    if issuer not in ISSUER_CHOICES:
+        flash("Elige primero la empresa (Harraso o BRMS) para cargar la factura.", "error")
+        return redirect(url_for("facturacion.list_view"))
+    if not pdf_filename:
+        flash("Falta el PDF de la factura — vuelve a empezar la carga.", "error")
+        return redirect(url_for("facturacion.manual_upload", issuer=issuer))
+
+    client_id = request.form.get("client_id")
+    series = request.form.get("series", "").strip().upper()
+    correlativo_raw = request.form.get("correlativo", "").strip()
+    issue_date = parse_date(request.form.get("issue_date")) or today_str()
+    due_date = parse_date(request.form.get("due_date"))
+    monto = parse_float(request.form.get("monto"), None)
+
+    if not client_id:
+        flash("Selecciona o crea el cliente antes de guardar la factura.", "error")
+        return _back_to_confirm()
+    if not series or not correlativo_raw:
+        flash("Completa la serie y el número del comprobante (ej. F001-123).", "error")
+        return _back_to_confirm()
+    try:
+        correlativo = int(correlativo_raw)
+    except ValueError:
+        flash("El número del comprobante debe ser numérico (ej. 123 para F001-123).", "error")
+        return _back_to_confirm()
+    if not monto or monto <= 0:
+        flash("Ingresa un monto válido.", "error")
+        return _back_to_confirm()
+
+    existing = query_one(
+        "SELECT id, number FROM invoices WHERE issuer = ? AND series = ? AND series_number = ?",
+        (issuer, series, correlativo),
+    )
+    if existing:
+        flash(
+            f"Ya existe una factura con {series}-{correlativo:06d} (Factura {existing['number']}) — "
+            "revisa si ya la habías cargado.",
+            "error",
+        )
+        return _back_to_confirm()
+
+    number = next_code("F", "invoices", code_column="number")
+    db = get_db()
+    cur = db.execute(
+        """INSERT INTO invoices (number, client_id, issue_date, due_date, amount, notes, series, series_number,
+           issuer, sunat_status, sunat_message, sunat_pdf_filename, sunat_xml_filename, sunat_sent_at, manual_upload)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACEPTADO', ?, ?, ?, datetime('now'), 1)""",
+        (
+            number, client_id, issue_date, due_date, monto, request.form.get("notes", "").strip(),
+            series, correlativo, issuer,
+            "Factura cargada manualmente — emitida directamente desde el portal de SUNAT (fuera de Harris).",
+            pdf_filename, xml_filename or None,
+        ),
+    )
+    invoice_id = cur.lastrowid
+    db.execute(
+        "INSERT INTO invoice_items (invoice_id, trip_id, description, amount, quantity) VALUES (?, NULL, ?, ?, 1)",
+        (invoice_id, "Factura cargada manualmente (emitida desde el portal SUNAT)", monto),
+    )
+    # sunat_pdf_url/sunat_xml_url: mismo criterio que send_sunat() -- ruta
+    # interna que sirve el archivo (view_sunat_pdf/view_sunat_xml ya resuelven
+    # disco local vs S3 solos), recién ahora que ya existe invoice_id.
+    db.execute(
+        "UPDATE invoices SET sunat_pdf_url = ?, sunat_xml_url = ? WHERE id = ?",
+        (
+            url_for("facturacion.view_sunat_pdf", invoice_id=invoice_id),
+            url_for("facturacion.view_sunat_xml", invoice_id=invoice_id) if xml_filename else None,
+            invoice_id,
+        ),
+    )
+    db.commit()
+
+    client_row = query_one("SELECT name FROM clients WHERE id = ?", (client_id,))
+    log_activity(
+        "facturacion", "CREAR",
+        f"Factura {number} ({series}-{correlativo:06d}) — {client_row['name'] if client_row else ''} — "
+        f"S/{monto:.2f} (cargada manualmente desde SUNAT)",
+        entity_type="factura", entity_id=invoice_id,
+        entity_url=url_for("facturacion.detail", invoice_id=invoice_id),
+    )
+    flash(f"Factura {number} ({series}-{correlativo:06d}) cargada por S/{monto:.2f}.", "success")
+    return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
+
+
+@bp.route("/cargar-manual/zip", methods=["GET", "POST"])
+@permission_required("facturacion", "edit")
+def manual_zip():
+    """30 sep, pedido de Braulio ("o en un zip todas las facturas..."):
+    carga MUCHAS facturas ya emitidas de una sola vez. A diferencia de la
+    carga individual (manual_upload()/manual_confirm()), acá no hay pantalla
+    de revisión por factura -- se necesita el XML de cada una (el PDF solo
+    no alcanza para saber cliente/monto/serie-número de forma confiable) y
+    los datos se toman tal cual vienen ahí; el resultado (creadas/omitidas)
+    se muestra al final para que Braulio revise qué faltó. Cada factura
+    dentro del .zip debe tener su PDF y su XML con el mismo nombre de
+    archivo (solo cambia la extensión) -- así se identifica qué archivos
+    pertenecen a la misma factura."""
+    issuer = request.args.get("issuer", "").strip().upper() or request.form.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        flash("Elige primero la empresa (Harraso o BRMS) para cargar facturas.", "error")
+        return redirect(url_for("facturacion.list_view"))
+
+    if request.method == "POST":
+        if not validate_csrf():
+            abort(400)
+        file_storage = request.files.get("zip")
+        if not file_storage or not file_storage.filename:
+            flash("Sube un archivo .zip con las facturas (PDF + XML de cada una).", "error")
+            return redirect(url_for("facturacion.manual_zip", issuer=issuer))
+        raw_bytes = file_storage.read()
+        if not raw_bytes or not zipfile.is_zipfile(io.BytesIO(raw_bytes)):
+            flash("El archivo subido no es un .zip válido.", "error")
+            return redirect(url_for("facturacion.manual_zip", issuer=issuer))
+
+        created, errors = [], []
+        company = company_info_for_issuer(issuer, current_app.config)
+        with zipfile.ZipFile(io.BytesIO(raw_bytes)) as zf:
+            # Agrupa las entradas del zip por nombre de archivo sin
+            # extensión (ignorando carpetas y archivos basura de sistema
+            # como __MACOSX/.DS_Store) -- cada grupo con un .pdf y un .xml
+            # es una factura.
+            groups = {}
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                base = os.path.basename(info.filename)
+                if not base or base.startswith(".") or "__MACOSX" in info.filename:
+                    continue
+                stem, ext = os.path.splitext(base)
+                groups.setdefault(stem, {})[ext.lower()] = info.filename
+
+            if not groups:
+                flash("El .zip está vacío o no tiene archivos reconocibles.", "error")
+                return redirect(url_for("facturacion.manual_zip", issuer=issuer))
+
+            for stem in sorted(groups):
+                files = groups[stem]
+                if ".xml" not in files:
+                    errors.append({"row": stem, "message": "Falta el archivo .xml — súbela individual desde \"Subir factura ya emitida\"."})
+                    continue
+                if ".pdf" not in files:
+                    errors.append({"row": stem, "message": "Falta el archivo .pdf — súbela individual desde \"Subir factura ya emitida\"."})
+                    continue
+                try:
+                    xml_bytes = zf.read(files[".xml"])
+                    extracted = parse_invoice_xml(xml_bytes)
+                except SunatXmlError as exc:
+                    errors.append({"row": stem, "message": f"No se pudo leer el XML: {exc}"})
+                    continue
+                except Exception as exc:
+                    errors.append({"row": stem, "message": f"No se pudo leer el archivo dentro del zip: {exc}"})
+                    continue
+
+                if (
+                    company.get("ruc")
+                    and extracted.get("supplier_ruc")
+                    and extracted["supplier_ruc"] != company["ruc"]
+                ):
+                    errors.append({
+                        "row": stem,
+                        "message": (
+                            f"El RUC emisor del XML ({extracted['supplier_ruc']}) no es el de "
+                            f"{company['name']} ({company['ruc']}) — revisa que estés en la empresa correcta."
+                        ),
+                    })
+                    continue
+
+                existing = query_one(
+                    "SELECT number FROM invoices WHERE issuer = ? AND series = ? AND series_number = ?",
+                    (issuer, extracted["series"], extracted["correlativo"]),
+                )
+                if existing:
+                    errors.append({
+                        "row": stem,
+                        "message": f"Ya existe como Factura {existing['number']} — no se volvió a cargar.",
+                    })
+                    continue
+
+                client_id = _match_client_by_ruc(extracted.get("customer_ruc")) or _match_client_by_name(
+                    extracted.get("customer_name")
+                )
+                new_client = False
+                if not client_id:
+                    client_id = execute(
+                        "INSERT INTO clients (name, ruc) VALUES (?, ?)",
+                        (extracted["customer_name"], extracted.get("customer_ruc") or ""),
+                    )
+                    new_client = True
+
+                pdf_bytes = zf.read(files[".pdf"])
+                pdf_filename = f"{uuid.uuid4().hex}.pdf"
+                xml_filename = f"{uuid.uuid4().hex}.xml"
+                save_sunat_document(pdf_filename, pdf_bytes)
+                save_sunat_document(xml_filename, xml_bytes)
+
+                number = next_code("F", "invoices", code_column="number")
+                issue_date = parse_date(extracted.get("issue_date")) or today_str()
+                invoice_id = execute(
+                    """INSERT INTO invoices (number, client_id, issue_date, amount, notes, series, series_number,
+                       issuer, sunat_status, sunat_message, sunat_pdf_filename, sunat_xml_filename, sunat_sent_at,
+                       manual_upload)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACEPTADO', ?, ?, ?, datetime('now'), 1)""",
+                    (
+                        number, client_id, issue_date, extracted["total_amount"], "",
+                        extracted["series"], extracted["correlativo"], issuer,
+                        "Factura cargada manualmente — emitida directamente desde el portal de SUNAT "
+                        "(fuera de Harris), importada desde un .zip.",
+                        pdf_filename, xml_filename,
+                    ),
+                )
+                execute(
+                    "INSERT INTO invoice_items (invoice_id, trip_id, description, amount, quantity) VALUES (?, NULL, ?, ?, 1)",
+                    (invoice_id, "Factura cargada manualmente (emitida desde el portal SUNAT)", extracted["total_amount"]),
+                )
+                execute(
+                    "UPDATE invoices SET sunat_pdf_url = ?, sunat_xml_url = ? WHERE id = ?",
+                    (
+                        url_for("facturacion.view_sunat_pdf", invoice_id=invoice_id),
+                        url_for("facturacion.view_sunat_xml", invoice_id=invoice_id),
+                        invoice_id,
+                    ),
+                )
+                client_row = query_one("SELECT name FROM clients WHERE id = ?", (client_id,))
+                log_activity(
+                    "facturacion", "CREAR",
+                    f"Factura {number} ({extracted['series']}-{extracted['correlativo']:06d}) — "
+                    f"{client_row['name'] if client_row else ''} — S/{extracted['total_amount']:.2f} "
+                    "(cargada manualmente desde SUNAT, importada desde .zip)",
+                    entity_type="factura", entity_id=invoice_id,
+                    entity_url=url_for("facturacion.detail", invoice_id=invoice_id),
+                )
+                created.append({
+                    "invoice_id": invoice_id, "number": number,
+                    "series": extracted["series"], "correlativo": extracted["correlativo"],
+                    "client_name": client_row["name"] if client_row else "",
+                    "amount": extracted["total_amount"], "new_client": new_client,
+                })
+
+        return render_template(
+            "facturacion/manual_upload_zip_result.html", issuer=issuer, created=created, errors=errors,
+        )
+
+    return render_template("facturacion/manual_upload_zip.html", issuer=issuer)
 
 
 @bp.route("/desde-imagen")

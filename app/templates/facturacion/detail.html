@@ -30,10 +30,18 @@
       <button type="submit" class="btn btn-danger">Anular</button>
     </form>
     {% endif %}
+    {# 30 sep, "Cargar factura ya emitida (SUNAT)": una factura cargada a
+       mano (ver manual_upload()/manual_zip() en app/routes/facturacion.py)
+       ya se emitió de verdad directo en el portal de SUNAT -- NO existe en
+       tefacturo.pe, así que "Enviar a SUNAT" no se ofrece para ella (send_sunat()
+       intentaría emitir un comprobante nuevo con esa misma serie-número, que
+       SUNAT rechazaría por duplicado). #}
+    {% if not invoice.manual_upload %}
     <form method="post" action="{{ url_for('facturacion.send_sunat', invoice_id=invoice.id) }}" style="display:inline;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-primary">📤 Enviar a SUNAT</button>
     </form>
+    {% endif %}
     {# 29 sep, pedido de Braulio: borrado propio del "Anular" de arriba,
        solo para Administrador (permiso "delete") -- una factura ya
        ACEPTADA por SUNAT no se puede borrar del todo (ver

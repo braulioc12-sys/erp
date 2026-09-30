@@ -1208,6 +1208,17 @@ CREATE TABLE IF NOT EXISTS invoices (
     sunat_xml_filename TEXT,
     sunat_cdr_url TEXT,
     sunat_sent_at TEXT,
+    -- 30 sep, pedido de Braulio ("quiero subir de manera manual, o en un
+    -- zip todas las facturas que antes he emitido como BRMS desde el
+    -- portal sunat"): distingue una factura cargada a mano (ya emitida de
+    -- verdad, fuera de este ERP, directo en el portal de SUNAT) de una
+    -- generada y enviada normalmente vía tefacturo.pe -- aunque ambas
+    -- queden con sunat_status='ACEPTADO', SOLO estas últimas se pueden
+    -- (re)enviar a tefacturo.pe: una manual no existe en tefacturo.pe, así
+    -- que "Enviar a SUNAT" no debe ofrecerse para ella (ver
+    -- app/routes/facturacion.py -> manual_create()/manual_zip() y
+    -- facturacion/detail.html).
+    manual_upload INTEGER NOT NULL DEFAULT 0,
     -- Detracción (SPOT) — 9 sep, Braulio compartió una factura real ya
     -- emitida (fuera de este ERP) que incluye el bloque "Concepto de
     -- Detracción": el servicio de transporte de bienes por vía terrestre

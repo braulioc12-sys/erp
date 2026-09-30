@@ -574,6 +574,12 @@ COLUMN_MIGRATIONS = [
     # ida y vuelta... debemos tener 2 pantallas"): ver el comentario largo
     # junto a esta columna en schema.sql (CREATE TABLE trips).
     ("trips", "return_of_trip_id", "INTEGER"),
+    # 30 sep, pedido de Braulio ("quiero subir de manera manual, o en un
+    # zip todas las facturas que antes he emitido como BRMS desde el portal
+    # sunat"): ver el comentario largo junto a esta columna en schema.sql
+    # (CREATE TABLE invoices) y su uso en app/routes/facturacion.py
+    # (manual_create()/manual_zip()) y facturacion/detail.html.
+    ("invoices", "manual_upload", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 

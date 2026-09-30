@@ -1,0 +1,113 @@
+{% extends 'base.html' %}
+{% block title %}Confirmar factura cargada{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Confirmar factura — {{ 'BRMS' if issuer == 'BRMS' else 'Harraso Transport' }}</h1></div>
+<p class="company-switch"><a href="{{ url_for('facturacion.manual_upload', issuer=issuer) }}">↺ Subir otra factura</a></p>
+
+<div class="panel">
+  <p class="mt-0">
+    {% if xml_filename %}Esto es lo que se leyó del XML — revisa y corrige lo que haga falta antes de guardar.{% else %}No se subió (o no se pudo leer) un XML — completa los datos a mano.{% endif %}
+    El PDF ya quedó guardado; se enlaza a la factura al guardar acá abajo.
+  </p>
+  <form method="post" action="{{ url_for('facturacion.manual_create') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="issuer" value="{{ issuer }}">
+    <input type="hidden" name="pdf_filename" value="{{ pdf_filename }}">
+    <input type="hidden" name="xml_filename" value="{{ xml_filename }}">
+
+    <label>Cliente {% if not client_id and customer_name %}<span class="muted">— no se encontró un cliente exacto para "{{ customer_name }}"{{ ' (RUC ' ~ customer_ruc ~ ')' if customer_ruc }}, elige uno o créalo abajo</span>{% endif %}
+      <select name="client_id" required>
+        <option value="">-- Selecciona un cliente --</option>
+        {% for c in clients %}
+        <option value="{{ c.id }}" {{ 'selected' if client_id == c.id }}>{{ c.name }}{{ ' — ' ~ c.ruc if c.ruc }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <p class="mt-0" style="margin-bottom:0;">
+      <button type="button" class="btn btn-secondary" id="btn-toggle-new-client" style="font-size:0.9em;">+ Registrar cliente nuevo</button>
+    </p>
+
+    <div class="form-row">
+      <label>Serie
+        <input type="text" name="series" value="{{ series }}" required style="text-transform:uppercase;">
+      </label>
+      <label>Número (correlativo)
+        <input type="number" name="correlativo" value="{{ correlativo }}" required min="1">
+      </label>
+    </div>
+    <p class="muted" style="margin-top:-8px;">Tal como aparece en el comprobante real (ej. F001-00123 → serie "F001", número "123").</p>
+
+    <div class="form-row">
+      <label>Monto (S/, incluye IGV)
+        <input type="number" step="0.01" name="monto" value="{{ monto }}" required>
+      </label>
+      <label>Fecha de emisión
+        <input type="date" name="issue_date" value="{{ issue_date }}">
+      </label>
+    </div>
+
+    <label>Fecha de vencimiento (opcional)
+      <input type="date" name="due_date" value="">
+    </label>
+    <label>Notas (opcional)
+      <textarea name="notes" rows="2"></textarea>
+    </label>
+
+    <div class="btn-group" style="margin-top:12px;">
+      <button type="submit" class="btn btn-primary">Guardar factura</button>
+    </div>
+  </form>
+
+  <form method="post" action="{{ url_for('facturacion.manual_new_client') }}" id="new-client-form" style="display:none; margin-top:12px; padding-top:12px; border-top:1px solid var(--border, #e2e5eb);">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="issuer" value="{{ issuer }}">
+    <input type="hidden" name="pdf_filename" value="{{ pdf_filename }}">
+    <input type="hidden" name="xml_filename" value="{{ xml_filename }}">
+    <input type="hidden" name="series" value="{{ series }}">
+    <input type="hidden" name="correlativo" value="{{ correlativo }}">
+    <input type="hidden" name="issue_date" value="{{ issue_date }}">
+    <input type="hidden" name="monto" value="{{ monto }}">
+    <div class="form-row">
+      <label>Nombre / Razón social *
+        <input type="text" name="name" value="{{ customer_name }}" required>
+      </label>
+      <label>RUC
+        <input type="text" name="ruc" value="{{ customer_ruc }}">
+      </label>
+    </div>
+    <div class="form-row">
+      <label>Dirección
+        <input type="text" name="address">
+      </label>
+      <label>Teléfono
+        <input type="text" name="phone">
+      </label>
+      <label>Correo
+        <input type="email" name="email">
+      </label>
+    </div>
+    <div class="btn-group">
+      <button type="submit" class="btn btn-primary">Crear cliente y continuar</button>
+      <button type="button" class="btn btn-secondary" id="btn-cancel-new-client">Cancelar</button>
+    </div>
+  </form>
+</div>
+
+<script>
+(function () {
+  var toggleBtn = document.getElementById('btn-toggle-new-client');
+  var cancelBtn = document.getElementById('btn-cancel-new-client');
+  var newClientForm = document.getElementById('new-client-form');
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', function () {
+      newClientForm.style.display = newClientForm.style.display === 'none' ? 'block' : 'none';
+    });
+  }
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', function () {
+      newClientForm.style.display = 'none';
+    });
+  }
+})();
+</script>
+{% endblock %}

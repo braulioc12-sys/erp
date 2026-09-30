@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+{% block title %}Resultado de la carga{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Resultado de la carga — {{ 'BRMS' if issuer == 'BRMS' else 'Harraso Transport' }}</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('facturacion.list_view', issuer=issuer) }}" class="btn btn-secondary">← Volver a Facturación</a>
+    <a href="{{ url_for('facturacion.manual_zip', issuer=issuer) }}" class="btn btn-secondary">Cargar otro zip</a>
+  </div>
+</div>
+
+<div class="panel" style="max-width:920px;">
+  <div class="tag-list" style="margin-bottom: 14px;">
+    <span class="badge badge-activo">{{ created|length }} cargada(s)</span>
+    {% if errors %}<span class="badge badge-vencida">{{ errors|length }} no cargada(s)</span>{% endif %}
+  </div>
+
+  {% if created %}
+  <h2>Facturas cargadas</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>N°</th><th>Serie-número</th><th>Cliente</th><th class="text-right">Monto</th><th></th></tr></thead>
+      <tbody>
+        {% for c in created %}
+        <tr>
+          <td>{{ c.number }}</td>
+          <td>{{ c.series }}-{{ '%06d'|format(c.correlativo) }}</td>
+          <td>{{ c.client_name }}{% if c.new_client %} <span class="muted">(cliente nuevo)</span>{% endif %}</td>
+          <td class="text-right">{{ c.amount|money }}</td>
+          <td><a href="{{ url_for('facturacion.detail', invoice_id=c.invoice_id) }}">Ver →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if errors %}
+  <h2>No se cargaron</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Archivo</th><th>Motivo</th></tr></thead>
+      <tbody>
+        {% for e in errors %}
+        <tr><td>{{ e.row }}</td><td class="wrap">{{ e.message }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if not created and not errors %}
+  <p class="table-empty">El zip no tenía ninguna factura reconocible.</p>
+  {% endif %}
+</div>
+{% endblock %}

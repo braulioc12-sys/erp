@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+{% block title %}Cargar factura ya emitida{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Cargar factura ya emitida (SUNAT) — {{ 'BRMS' if issuer == 'BRMS' else 'Harraso Transport' }}</h1></div>
+<p class="company-switch"><a href="{{ url_for('facturacion.list_view', issuer=issuer) }}">↺ Volver a Facturación</a></p>
+
+<div class="panel">
+  <p class="mt-0">Para una factura que ya emitiste directamente desde el portal de SUNAT (fuera de Harris) y quieres tener registrada acá, con su PDF y XML listos para descargar. Sube el PDF (obligatorio) y, si lo tienes, el XML del comprobante — con el XML, Harris completa solo el cliente, la serie-número, la fecha y el monto; sin él, los llenas a mano en la siguiente pantalla.</p>
+  <form method="post" action="{{ url_for('facturacion.manual_extract') }}" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="issuer" value="{{ issuer }}">
+    <div class="form-row">
+      <label>PDF de la factura *
+        <input type="file" name="pdf" accept="application/pdf,.pdf" required>
+      </label>
+      <label>XML de la factura (opcional, recomendado)
+        <input type="file" name="xml" accept="text/xml,.xml">
+      </label>
+    </div>
+    <div class="btn-group" style="margin-top:12px;">
+      <button type="submit" class="btn btn-primary">Continuar</button>
+      <a href="{{ url_for('facturacion.manual_zip', issuer=issuer) }}" class="btn btn-secondary">¿Son varias? Súbelas en un .zip →</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
