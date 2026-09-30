@@ -598,7 +598,21 @@ def _iter_zip_leaf_files(raw_bytes, _depth=0, _seen_total=None):
             base = os.path.basename(info.filename)
             if not base or base.startswith(".") or "__MACOSX" in info.filename:
                 continue
-            data = zf.read(info.filename)
+            try:
+                data = zf.read(info.filename)
+            except RuntimeError as exc:
+                # 30 sep, tras un 500 real en producción: zf.read() de un
+                # archivo protegido con contraseña dentro del zip lanza
+                # RuntimeError (no zipfile.BadZipFile) -- sin este chequeo,
+                # eso se colaba crudo hasta tirar abajo toda la carga.
+                raise ValueError(
+                    f"El archivo \"{base}\" dentro del zip está protegido con contraseña — quítale la "
+                    "contraseña (o exclúyelo del zip) y vuelve a subirlo."
+                ) from exc
+            except NotImplementedError as exc:
+                raise ValueError(
+                    f"El archivo \"{base}\" dentro del zip usa un método de compresión no soportado."
+                ) from exc
             _seen_total[0] += len(data)
             if _seen_total[0] > _MANUAL_ZIP_MAX_TOTAL_BYTES:
                 raise ValueError(
@@ -643,170 +657,187 @@ def manual_zip():
     if request.method == "POST":
         if not validate_csrf():
             abort(400)
-        file_storage = request.files.get("zip")
-        if not file_storage or not file_storage.filename:
-            flash("Sube un archivo .zip con las facturas (PDF + XML de cada una).", "error")
-            return redirect(url_for("facturacion.manual_zip", issuer=issuer))
-        raw_bytes = file_storage.read()
-        if not raw_bytes or not zipfile.is_zipfile(io.BytesIO(raw_bytes)):
-            flash("El archivo subido no es un .zip válido.", "error")
-            return redirect(url_for("facturacion.manual_zip", issuer=issuer))
-
         try:
-            leaves = _iter_zip_leaf_files(raw_bytes)
-        except zipfile.BadZipFile:
-            flash("El .zip tiene un archivo comprimido dentro que no se pudo abrir.", "error")
-            return redirect(url_for("facturacion.manual_zip", issuer=issuer))
-        except ValueError as exc:
-            flash(str(exc), "error")
-            return redirect(url_for("facturacion.manual_zip", issuer=issuer))
-        if not leaves:
-            flash("El .zip está vacío o no tiene archivos reconocibles.", "error")
-            return redirect(url_for("facturacion.manual_zip", issuer=issuer))
+            file_storage = request.files.get("zip")
+            if not file_storage or not file_storage.filename:
+                flash("Sube un archivo .zip con las facturas (PDF + XML de cada una).", "error")
+                return redirect(url_for("facturacion.manual_zip", issuer=issuer))
+            raw_bytes = file_storage.read()
+            if not raw_bytes or not zipfile.is_zipfile(io.BytesIO(raw_bytes)):
+                flash("El archivo subido no es un .zip válido.", "error")
+                return redirect(url_for("facturacion.manual_zip", issuer=issuer))
 
-        # Junta primero TODO el XML que se pueda leer como comprobante --
-        # un .xml que no lo sea (ej. la Constancia de Recepción/CDR que
-        # también entrega SUNAT junto al comprobante) simplemente no entra
-        # a la lista, sin reportarse como error: no es una factura que
-        # Braulio esperaba cargar. Guarda también los bytes originales
-        # (para save_sunat_document() más abajo) y el nombre (solo para
-        # mostrarlo en el resultado si hiciera falta).
-        xml_candidates = []
-        pdf_candidates = []
-        for filename, data in leaves:
-            ext = os.path.splitext(filename)[1].lower()
-            if ext == ".xml":
-                try:
-                    extracted = parse_invoice_xml(data)
-                except SunatXmlError:
+            try:
+                leaves = _iter_zip_leaf_files(raw_bytes)
+            except zipfile.BadZipFile:
+                flash("El .zip tiene un archivo comprimido dentro que no se pudo abrir.", "error")
+                return redirect(url_for("facturacion.manual_zip", issuer=issuer))
+            except ValueError as exc:
+                flash(str(exc), "error")
+                return redirect(url_for("facturacion.manual_zip", issuer=issuer))
+            if not leaves:
+                flash("El .zip está vacío o no tiene archivos reconocibles.", "error")
+                return redirect(url_for("facturacion.manual_zip", issuer=issuer))
+
+            # Junta primero TODO el XML que se pueda leer como comprobante --
+            # un .xml que no lo sea (ej. la Constancia de Recepción/CDR que
+            # también entrega SUNAT junto al comprobante) simplemente no entra
+            # a la lista, sin reportarse como error: no es una factura que
+            # Braulio esperaba cargar. Guarda también los bytes originales
+            # (para save_sunat_document() más abajo) y el nombre (solo para
+            # mostrarlo en el resultado si hiciera falta).
+            xml_candidates = []
+            pdf_candidates = []
+            for filename, data in leaves:
+                ext = os.path.splitext(filename)[1].lower()
+                if ext == ".xml":
+                    try:
+                        extracted = parse_invoice_xml(data)
+                    except SunatXmlError:
+                        continue
+                    xml_candidates.append({"filename": filename, "bytes": data, "extracted": extracted})
+                elif ext == ".pdf":
+                    pdf_candidates.append({"filename": filename, "bytes": data, "text": extract_pdf_text(data)})
+
+            if not xml_candidates:
+                flash(
+                    "No se encontró ningún XML de comprobante reconocible dentro del .zip "
+                    "(¿subiste el XML de cada factura, no solo el CDR?).",
+                    "error",
+                )
+                return redirect(url_for("facturacion.manual_zip", issuer=issuer))
+
+            created, errors = [], []
+            used_pdfs = set()
+            company = company_info_for_issuer(issuer, current_app.config)
+            for cand in xml_candidates:
+                extracted = cand["extracted"]
+                xml_bytes = cand["bytes"]
+                label = f"{extracted['series']}-{extracted['correlativo']:06d}"
+
+                pdf_match = None
+                for idx, pdf in enumerate(pdf_candidates):
+                    if idx in used_pdfs:
+                        continue
+                    if pdf_text_matches_invoice(pdf["text"], extracted["series"], extracted["correlativo"]):
+                        pdf_match = idx
+                        break
+                if pdf_match is None:
+                    errors.append({
+                        "row": label,
+                        "message": (
+                            f"No se encontró, entre los PDF del zip, uno que mencione \"{label}\" — "
+                            "súbela individual desde \"Cargar factura ya emitida\"."
+                        ),
+                    })
                     continue
-                xml_candidates.append({"filename": filename, "bytes": data, "extracted": extracted})
-            elif ext == ".pdf":
-                pdf_candidates.append({"filename": filename, "bytes": data, "text": extract_pdf_text(data)})
+                pdf_bytes = pdf_candidates[pdf_match]["bytes"]
+                used_pdfs.add(pdf_match)
 
-        if not xml_candidates:
+                if (
+                    company.get("ruc")
+                    and extracted.get("supplier_ruc")
+                    and extracted["supplier_ruc"] != company["ruc"]
+                ):
+                    errors.append({
+                        "row": label,
+                        "message": (
+                            f"El RUC emisor del XML ({extracted['supplier_ruc']}) no es el de "
+                            f"{company['name']} ({company['ruc']}) — revisa que estés en la empresa correcta."
+                        ),
+                    })
+                    continue
+
+                existing = query_one(
+                    "SELECT number FROM invoices WHERE issuer = ? AND series = ? AND series_number = ?",
+                    (issuer, extracted["series"], extracted["correlativo"]),
+                )
+                if existing:
+                    errors.append({
+                        "row": label,
+                        "message": f"Ya existe como Factura {existing['number']} — no se volvió a cargar.",
+                    })
+                    continue
+
+                client_id = _match_client_by_ruc(extracted.get("customer_ruc")) or _match_client_by_name(
+                    extracted.get("customer_name")
+                )
+                new_client = False
+                if not client_id:
+                    client_id = execute(
+                        "INSERT INTO clients (name, ruc) VALUES (?, ?)",
+                        (extracted["customer_name"], extracted.get("customer_ruc") or ""),
+                    )
+                    new_client = True
+
+                pdf_filename = f"{uuid.uuid4().hex}.pdf"
+                xml_filename = f"{uuid.uuid4().hex}.xml"
+                save_sunat_document(pdf_filename, pdf_bytes)
+                save_sunat_document(xml_filename, xml_bytes)
+
+                number = next_code("F", "invoices", code_column="number")
+                issue_date = parse_date(extracted.get("issue_date")) or today_str()
+                invoice_id = execute(
+                    """INSERT INTO invoices (number, client_id, issue_date, amount, notes, series, series_number,
+                       issuer, sunat_status, sunat_message, sunat_pdf_filename, sunat_xml_filename, sunat_sent_at,
+                       manual_upload)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACEPTADO', ?, ?, ?, datetime('now'), 1)""",
+                    (
+                        number, client_id, issue_date, extracted["total_amount"], "",
+                        extracted["series"], extracted["correlativo"], issuer,
+                        "Factura cargada manualmente — emitida directamente desde el portal de SUNAT "
+                        "(fuera de Harris), importada desde un .zip.",
+                        pdf_filename, xml_filename,
+                    ),
+                )
+                execute(
+                    "INSERT INTO invoice_items (invoice_id, trip_id, description, amount, quantity) VALUES (?, NULL, ?, ?, 1)",
+                    (invoice_id, "Factura cargada manualmente (emitida desde el portal SUNAT)", extracted["total_amount"]),
+                )
+                execute(
+                    "UPDATE invoices SET sunat_pdf_url = ?, sunat_xml_url = ? WHERE id = ?",
+                    (
+                        url_for("facturacion.view_sunat_pdf", invoice_id=invoice_id),
+                        url_for("facturacion.view_sunat_xml", invoice_id=invoice_id),
+                        invoice_id,
+                    ),
+                )
+                client_row = query_one("SELECT name FROM clients WHERE id = ?", (client_id,))
+                log_activity(
+                    "facturacion", "CREAR",
+                    f"Factura {number} ({label}) — {client_row['name'] if client_row else ''} — "
+                    f"S/{extracted['total_amount']:.2f} (cargada manualmente desde SUNAT, importada desde .zip)",
+                    entity_type="factura", entity_id=invoice_id,
+                    entity_url=url_for("facturacion.detail", invoice_id=invoice_id),
+                )
+                created.append({
+                    "invoice_id": invoice_id, "number": number,
+                    "series": extracted["series"], "correlativo": extracted["correlativo"],
+                    "client_name": client_row["name"] if client_row else "",
+                    "amount": extracted["total_amount"], "new_client": new_client,
+                })
+
+            unmatched_pdfs = len(pdf_candidates) - len(used_pdfs)
+            return render_template(
+                "facturacion/manual_upload_zip_result.html", issuer=issuer, created=created, errors=errors,
+                unmatched_pdfs=unmatched_pdfs,
+            )
+        except Exception as exc:
+            # 30 sep, tras un 500 real en producción ("Error handling request
+            # /facturacion/cargar-manual/zip", sin más detalle en el log de Render):
+            # mismo patrón ya usado en este proyecto para no dejar que un error
+            # inesperado (un archivo del zip con algo que ningún caso de arriba
+            # anticipó) tire abajo la carga completa con un 500 crudo -- ver el
+            # comentario grande junto a "logger = logging.getLogger(...)" al inicio
+            # de este archivo. El flash muestra el tipo/mensaje real del error para
+            # que Braulio lo pueda copiar y mandar directo.
+            logger.exception("Error inesperado al cargar facturas por zip (issuer=%s)", issuer)
             flash(
-                "No se encontró ningún XML de comprobante reconocible dentro del .zip "
-                "(¿subiste el XML de cada factura, no solo el CDR?).",
+                f"Ocurrió un error inesperado al procesar el zip: {type(exc).__name__}: {exc} "
+                "— copia este mensaje y avísame si el problema sigue.",
                 "error",
             )
             return redirect(url_for("facturacion.manual_zip", issuer=issuer))
-
-        created, errors = [], []
-        used_pdfs = set()
-        company = company_info_for_issuer(issuer, current_app.config)
-        for cand in xml_candidates:
-            extracted = cand["extracted"]
-            xml_bytes = cand["bytes"]
-            label = f"{extracted['series']}-{extracted['correlativo']:06d}"
-
-            pdf_match = None
-            for idx, pdf in enumerate(pdf_candidates):
-                if idx in used_pdfs:
-                    continue
-                if pdf_text_matches_invoice(pdf["text"], extracted["series"], extracted["correlativo"]):
-                    pdf_match = idx
-                    break
-            if pdf_match is None:
-                errors.append({
-                    "row": label,
-                    "message": (
-                        f"No se encontró, entre los PDF del zip, uno que mencione \"{label}\" — "
-                        "súbela individual desde \"Cargar factura ya emitida\"."
-                    ),
-                })
-                continue
-            pdf_bytes = pdf_candidates[pdf_match]["bytes"]
-            used_pdfs.add(pdf_match)
-
-            if (
-                company.get("ruc")
-                and extracted.get("supplier_ruc")
-                and extracted["supplier_ruc"] != company["ruc"]
-            ):
-                errors.append({
-                    "row": label,
-                    "message": (
-                        f"El RUC emisor del XML ({extracted['supplier_ruc']}) no es el de "
-                        f"{company['name']} ({company['ruc']}) — revisa que estés en la empresa correcta."
-                    ),
-                })
-                continue
-
-            existing = query_one(
-                "SELECT number FROM invoices WHERE issuer = ? AND series = ? AND series_number = ?",
-                (issuer, extracted["series"], extracted["correlativo"]),
-            )
-            if existing:
-                errors.append({
-                    "row": label,
-                    "message": f"Ya existe como Factura {existing['number']} — no se volvió a cargar.",
-                })
-                continue
-
-            client_id = _match_client_by_ruc(extracted.get("customer_ruc")) or _match_client_by_name(
-                extracted.get("customer_name")
-            )
-            new_client = False
-            if not client_id:
-                client_id = execute(
-                    "INSERT INTO clients (name, ruc) VALUES (?, ?)",
-                    (extracted["customer_name"], extracted.get("customer_ruc") or ""),
-                )
-                new_client = True
-
-            pdf_filename = f"{uuid.uuid4().hex}.pdf"
-            xml_filename = f"{uuid.uuid4().hex}.xml"
-            save_sunat_document(pdf_filename, pdf_bytes)
-            save_sunat_document(xml_filename, xml_bytes)
-
-            number = next_code("F", "invoices", code_column="number")
-            issue_date = parse_date(extracted.get("issue_date")) or today_str()
-            invoice_id = execute(
-                """INSERT INTO invoices (number, client_id, issue_date, amount, notes, series, series_number,
-                   issuer, sunat_status, sunat_message, sunat_pdf_filename, sunat_xml_filename, sunat_sent_at,
-                   manual_upload)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACEPTADO', ?, ?, ?, datetime('now'), 1)""",
-                (
-                    number, client_id, issue_date, extracted["total_amount"], "",
-                    extracted["series"], extracted["correlativo"], issuer,
-                    "Factura cargada manualmente — emitida directamente desde el portal de SUNAT "
-                    "(fuera de Harris), importada desde un .zip.",
-                    pdf_filename, xml_filename,
-                ),
-            )
-            execute(
-                "INSERT INTO invoice_items (invoice_id, trip_id, description, amount, quantity) VALUES (?, NULL, ?, ?, 1)",
-                (invoice_id, "Factura cargada manualmente (emitida desde el portal SUNAT)", extracted["total_amount"]),
-            )
-            execute(
-                "UPDATE invoices SET sunat_pdf_url = ?, sunat_xml_url = ? WHERE id = ?",
-                (
-                    url_for("facturacion.view_sunat_pdf", invoice_id=invoice_id),
-                    url_for("facturacion.view_sunat_xml", invoice_id=invoice_id),
-                    invoice_id,
-                ),
-            )
-            client_row = query_one("SELECT name FROM clients WHERE id = ?", (client_id,))
-            log_activity(
-                "facturacion", "CREAR",
-                f"Factura {number} ({label}) — {client_row['name'] if client_row else ''} — "
-                f"S/{extracted['total_amount']:.2f} (cargada manualmente desde SUNAT, importada desde .zip)",
-                entity_type="factura", entity_id=invoice_id,
-                entity_url=url_for("facturacion.detail", invoice_id=invoice_id),
-            )
-            created.append({
-                "invoice_id": invoice_id, "number": number,
-                "series": extracted["series"], "correlativo": extracted["correlativo"],
-                "client_name": client_row["name"] if client_row else "",
-                "amount": extracted["total_amount"], "new_client": new_client,
-            })
-
-        unmatched_pdfs = len(pdf_candidates) - len(used_pdfs)
-        return render_template(
-            "facturacion/manual_upload_zip_result.html", issuer=issuer, created=created, errors=errors,
-            unmatched_pdfs=unmatched_pdfs,
-        )
 
     return render_template("facturacion/manual_upload_zip.html", issuer=issuer)
 

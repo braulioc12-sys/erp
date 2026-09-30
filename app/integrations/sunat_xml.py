@@ -45,7 +45,29 @@ def parse_invoice_xml(raw_bytes):
     ("YYYY-MM-DD" o None), supplier_ruc/supplier_name (empresa que emitió --
     para confirmar que corresponde a Harraso o BRMS), customer_ruc/
     customer_name (cliente) y total_amount (float). Lanza SunatXmlError si
-    el XML no se puede leer o le falta algún dato imprescindible."""
+    el XML no se puede leer o le falta algún dato imprescindible.
+
+    30 sep, tras un 500 real en producción al cargar un .zip de facturas
+    (Render solo mostró "Error handling request", sin traceback visible):
+    TODO el cuerpo de esta función corre envuelto en un try/except Exception
+    -- un XML real puede venir en una codificación rara (ISO-8859-1 en vez
+    de UTF-8, con tildes/ñ), truncado, o con una estructura que ET nunca
+    esperó, y cualquiera de esos casos puede escaparse como una excepción
+    de Python que NO es xml.etree.ElementTree.ParseError (ej.
+    UnicodeDecodeError). Antes, eso se colaba sin capturar hasta manual_zip()
+    (que si solo atrapaba SunatXmlError, dejaba pasar cualquier otra) y
+    tiraba abajo la carga completa del zip con un 500 crudo. Ahora CUALQUIER
+    problema al leer un XML se convierte en SunatXmlError, que manual_zip()
+    y manual_extract() ya saben manejar sin reventar."""
+    try:
+        return _parse_invoice_xml(raw_bytes)
+    except SunatXmlError:
+        raise
+    except Exception as exc:
+        raise SunatXmlError(f"No se pudo leer el XML ({type(exc).__name__}): {exc}") from exc
+
+
+def _parse_invoice_xml(raw_bytes):
     try:
         root = ET.fromstring(raw_bytes)
     except ET.ParseError as exc:
