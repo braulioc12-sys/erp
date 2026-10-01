@@ -103,25 +103,36 @@ para no perder el rastro; ver también README):
   subcontratado y/o pagador distinto del destinatario, revisa si el PDF de
   SUNAT sale con esos datos correctos o vacíos, y avísame — si hace falta,
   hay que preguntarle a Jorge el nombre real de estos campos.**
-- **`referencias` / "documento relacionado" (1 oct) — CONFIRMADO en parte,
-  el resto ASUMIDO a pedido expreso de Braulio:** Braulio mandó una captura
-  de la propia documentación de tefacturo.pe (JSON de ejemplo con
-  "detalleGuia"/"conductores") que confirma el campo real: va a nivel raíz
-  como `referencias.documentoReferenciaList`, una lista de
+- **`referencias` / "documento relacionado" (1 oct) — CONFIRMADO, los dos
+  rondas:** Braulio mandó primero una captura de la propia documentación de
+  tefacturo.pe (JSON de ejemplo con "detalleGuia"/"conductores") que
+  confirmó el campo real: va a nivel raíz como
+  `referencias.documentoReferenciaList`, una lista de
   `{serie, numero, tipoDocumento, emisor}` (`emisor` es el RUC de quien
   emitió ese documento) más `referencias.adicionalList` (vacío en el
-  ejemplo). El ejemplo solo confirma `tipoDocumento="FACTURA"` tal cual.
-  Braulio pidió asumir, por el mismo patrón, `"BOLETA"` para Boleta y
-  `"GUIA_REMISION_REMITENTE"` para la guía de remisión del remitente (el
-  caso real que motivó todo esto, la guía V001-4286) — ver el diccionario
-  `RELATED_DOCUMENT_TIPO_DOCUMENTO` más abajo. Si SUNAT rechaza la guía por
-  este dato (o lo acepta pero el PDF no muestra bien el tipo), hay que
-  confirmar el texto real con soporte de tefacturo.pe y corregir ese
-  diccionario. El bloque `referencias` solo se arma si la guía tiene tipo +
-  serie + número + RUC del emisor completos (`waybills.related_document_*`)
-  Y el tipo tiene una entrada en ese diccionario — si falta cualquiera, se
-  omite la clave entera (mismo criterio que `subcontratado` arriba y que
-  `detraccion` en `build_invoice_payload`).
+  ejemplo). Esa captura solo traía `tipoDocumento="FACTURA"` confirmado tal
+  cual -- para "Boleta" y la guía de remisión del remitente (el caso real
+  que motivó todo esto, la guía V001-4286) se asumió `"BOLETA"` y
+  `"GUIA_REMISION_REMITENTE"` por el mismo patrón, a pedido expreso de
+  Braulio y a sabiendas del riesgo. tefacturo.pe rechazó la primera guía
+  real enviada con el segundo valor (400, "Cannot deserialize value of type
+  `org.invoice2u.api.TipoDocumento` from String GUIA_REMISION_REMITENTE") —
+  pero el mensaje de error trae el enum COMPLETO y real del lado de
+  tefacturo.pe:
+  `[CONSTANCIA_DEPOSITO_DETRACCION, NOTADEBITO, BOLETA,
+  TICKETMAQUINAREGISTRADORA, NOTACREDITO, GUIA_REMISION_TRANSPORTISTA,
+  GUIAEMISIONREMITENTE, FACTURA, RETENCION]`. El valor real para "guía de
+  remisión del remitente" es `GUIAEMISIONREMITENTE` (sin guiones bajos
+  entre GUIA/EMISION/REMITENTE -- no confundir con
+  `GUIA_REMISION_TRANSPORTISTA`, que sí los lleva y es un tipo de documento
+  distinto). Con este enum ya los 3 valores que usa este sistema
+  (`FACTURA`, `BOLETA`, `GUIAEMISIONREMITENTE`) quedan 100% CONFIRMADOS —
+  ver el diccionario `RELATED_DOCUMENT_TIPO_DOCUMENTO` más abajo. El bloque
+  `referencias` solo se arma si la guía tiene tipo + serie + número + RUC
+  del emisor completos (`waybills.related_document_*`) Y el tipo tiene una
+  entrada en ese diccionario — si falta cualquiera, se omite la clave
+  entera (mismo criterio que `subcontratado` arriba y que `detraccion` en
+  `build_invoice_payload`).
 - **Ubigeo de partida/llegada**: SUNAT exige el código INEI de 6 dígitos
   del distrito de origen/destino en la guía — el ERP no tiene un catálogo
   de ubigeos, así que se pide como campo de texto manual en el formulario
@@ -811,18 +822,25 @@ def build_invoice_payload(invoice, items, client, company):
 
 
 # 1 oct -- ver la nota larga "referencias / documento relacionado" en el
-# docstring de build_waybill_payload() (la que empieza con "CONFIRMADO en
-# parte, el resto ASUMIDO"). "FACTURA" viene confirmado tal cual en el
-# ejemplo real de tefacturo.pe que compartió Braulio; "BOLETA" y
-# "GUIA_REMISION_REMITENTE" son una apuesta razonada por el mismo patrón,
-# sin confirmar -- si tefacturo.pe rechaza una guía por este motivo, corregir
-# acá (no hay código para "OTRO": sin un tipo real de SUNAT detrás, no hay
-# nada razonable que mandar, así que esa guía simplemente no manda
-# "referencias").
+# docstring de build_waybill_payload() (la que empieza con "CONFIRMADO, los
+# dos rondas"). Los 3 valores de acá abajo son el enum REAL de
+# org.invoice2u.api.TipoDocumento del lado de tefacturo.pe, confirmado por
+# el mensaje de error 400 de un envío real rechazado el 1 oct (traía el
+# enum completo). GUIAEMISIONREMITENTE es tal cual lo manda tefacturo.pe
+# (SIN guiones bajos entre GUIA/EMISION/REMITENTE -- probablemente un typo
+# de ellos mismos, pero es el valor real) -- no confundir con
+# GUIA_REMISION_TRANSPORTISTA (con guiones, y es un tipo de documento
+# distinto, no usado acá). No hay código para "OTRO": sin un tipo real de
+# SUNAT detrás, no hay nada razonable que mandar, así que esa guía
+# simplemente no manda "referencias". El enum completo que devolvió
+# tefacturo.pe también trae CONSTANCIA_DEPOSITO_DETRACCION, NOTADEBITO,
+# TICKETMAQUINAREGISTRADORA, NOTACREDITO y RETENCION -- no usados por este
+# sistema todavía (RELATED_DOCUMENT_TYPES en app/routes/guias.py no tiene
+# un tipo para ellos).
 RELATED_DOCUMENT_TIPO_DOCUMENTO = {
-    "FACTURA": "FACTURA",                          # confirmado
-    "BOLETA": "BOLETA",                            # asumido, sin confirmar
-    "GUIA_REMITENTE": "GUIA_REMISION_REMITENTE",   # asumido, sin confirmar
+    "FACTURA": "FACTURA",                           # confirmado
+    "BOLETA": "BOLETA",                             # confirmado
+    "GUIA_REMITENTE": "GUIAEMISIONREMITENTE",       # confirmado (1 oct, enum real vía error 400)
 }
 
 

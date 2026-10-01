@@ -160,11 +160,15 @@
      (captura de su documentación) -- serie/número quedan separados y se
      agrega el RUC del emisor del documento, porque así lo pide
      referencias.documentoReferenciaList (ver build_waybill_payload() en
-     app/integrations/sunat_ose.py). Con tipo="Factura" SÍ se manda a SUNAT
-     (confirmado); con "Guía de remisión del remitente" o "Boleta" también
-     se manda, pero con el texto de tipoDocumento ASUMIDO (no confirmado por
-     tefacturo.pe) -- si SUNAT rechaza la guía por este dato, revisar el
-     catálogo RELATED_DOCUMENT_TIPO_DOCUMENTO ahí mismo. #}
+     app/integrations/sunat_ose.py).
+
+     1 oct, 2da ACTUALIZACIÓN (mismo día): el primer envío real con "Guía de
+     remisión del remitente" fue rechazado por SUNAT (400) porque el texto
+     asumido para ese tipo estaba mal -- el propio error trajo el catálogo
+     real completo y ya se corrigió (ver RELATED_DOCUMENT_TIPO_DOCUMENTO en
+     sunat_ose.py). Los 3 tipos que ofrece este selector (Factura, Boleta,
+     Guía de remisión del remitente) ya están confirmados y SÍ se mandan a
+     SUNAT. "Otro" nunca se manda (no hay un tipo real de SUNAT detrás). #}
   {% set current_related_type = form_values.related_document_type if form_values else (waybill.related_document_type if waybill else (trip.shipper_waybill_number and 'GUIA_REMITENTE' or '')) %}
   <div class="form-row">
     <label>Documento relacionado

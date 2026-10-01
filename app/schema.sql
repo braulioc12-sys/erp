@@ -1412,16 +1412,21 @@ CREATE TABLE IF NOT EXISTS waybills (
     -- abajo). Por eso related_document_number se separa en serie/número acá
     -- (antes era un solo campo de texto libre tipo "F001-000123" -- se creó
     -- recién el 17 sep y se conectó al formulario recién el 1 oct, así que
-    -- no hay datos reales que migrar). tipoDocumento="FACTURA" viene
-    -- confirmado tal cual en ese ejemplo real; "GUIA_REMISION_REMITENTE" y
-    -- "BOLETA" se ASUMEN por el mismo patrón (pedido expreso de Braulio,
-    -- a sabiendas de que tefacturo.pe podría rechazar la guía si el texto
-    -- real es otro) -- ver el catálogo RELATED_DOCUMENT_TIPO_DOCUMENTO en
-    -- build_waybill_payload() (app/integrations/sunat_ose.py). Si falta la
-    -- serie, el número o el RUC del emisor, o el tipo es GUIA_REMITENTE/
-    -- BOLETA/OTRO sin ninguno confirmado aparte de los dos asumidos, el
-    -- bloque "referencias" simplemente no se manda (se emite la guía igual,
-    -- solo sin ese dato) -- mismo criterio que la detracción en `invoices`.
+    -- no hay datos reales que migrar).
+    --
+    -- 1 oct, 2da ACTUALIZACIÓN (mismo día) -- esa captura solo confirmaba
+    -- tipoDocumento="FACTURA" tal cual; "GUIA_REMISION_REMITENTE" se había
+    -- asumido por el mismo patrón y tefacturo.pe la rechazó (400) en el
+    -- primer envío real -- pero su propio mensaje de error trae el enum
+    -- COMPLETO y real (ver el catálogo RELATED_DOCUMENT_TIPO_DOCUMENTO en
+    -- build_waybill_payload(), app/integrations/sunat_ose.py): el valor
+    -- correcto es "GUIAEMISIONREMITENTE" (sin guiones bajos -- un typo del
+    -- lado de tefacturo.pe, pero es el valor real). Con eso, FACTURA/
+    -- BOLETA/GUIA_REMITENTE quedan 100% CONFIRMADOS. Si falta la serie, el
+    -- número o el RUC del emisor, o el tipo es OTRO (sin un tipo real de
+    -- SUNAT detrás), el bloque "referencias" simplemente no se manda (se
+    -- emite la guía igual, solo sin ese dato) -- mismo criterio que la
+    -- detracción en `invoices`.
     related_document_type TEXT,
     related_document_series TEXT,
     related_document_number TEXT,
