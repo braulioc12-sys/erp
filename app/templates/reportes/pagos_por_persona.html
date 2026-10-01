@@ -1,0 +1,50 @@
+{% extends 'base.html' %}
+{% block title %}Pagos por persona{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Pagos por persona</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('reportes.pagos_por_persona_export', from_period=from_period, to_period=to_period, staff_id=staff_id) }}" class="btn btn-secondary">⬇ Exportar a Excel</a>
+    <a href="{{ url_for('reportes.centro') }}" class="btn btn-secondary">← Centro de reportes</a>
+  </div>
+</div>
+<p class="muted mt-0">Total pagado (planilla + honorarios) por persona, en el rango de periodos elegido.</p>
+
+<form class="filters" method="get">
+  <label>Desde (periodo)
+    <input type="month" name="from_period" value="{{ from_period }}">
+  </label>
+  <label>Hasta (periodo)
+    <input type="month" name="to_period" value="{{ to_period }}">
+  </label>
+  <label>Persona
+    <select name="staff_id">
+      <option value="">Todas</option>
+      {% for s in staff %}
+      <option value="{{ s.id }}" {{ 'selected' if staff_id == s.id }}>{{ s.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button class="btn btn-secondary" type="submit">Filtrar</button>
+  <div class="muted" style="margin-left:auto;">Total: <strong>{{ total_general|money }}</strong></div>
+</form>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Persona</th><th class="text-right">Planilla</th><th class="text-right">Honorarios</th><th class="text-right">Total</th><th class="text-right">N° de pagos</th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r.staff_name }}</td>
+        <td class="text-right">{{ (r.total_planilla or 0)|money }}</td>
+        <td class="text-right">{{ (r.total_honorarios or 0)|money }}</td>
+        <td class="text-right">{{ (r.total_general or 0)|money }}</td>
+        <td class="text-right">{{ r.payment_count }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="table-empty">No hay pagos con estos filtros.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

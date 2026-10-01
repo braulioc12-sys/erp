@@ -1,0 +1,247 @@
+{% extends 'base.html' %}
+{% block title %}Reportes{% endblock %}
+{% block extra_head %}
+<!-- 30 sep, Módulo de Reportes (pedido de Braulio: dashboard con gráficos):
+     Chart.js vía CDN, mismo criterio ya usado para Leaflet en Integraciones
+     (librería externa cargada solo en esta pantalla, sin API key). Sin
+     atributo integrity a propósito, mismo motivo que integraciones/index.html:
+     este sandbox de desarrollo tiene bloqueada la salida a jsdelivr.net, así
+     que no se pudo calcular el hash real del archivo servido ahora mismo —
+     un SRI equivocado rompe la carga en silencio en vez de ser una mejora
+     de seguridad. -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  /* Paleta validada con el skill de dataviz (scripts/validate_palette.js,
+     modo light contra el fondo blanco de esta app — ver la nota en
+     app/routes/reportes.py). Un solo color por serie (gráficos de una sola
+     serie: ingresos, top clientes, mantenimiento — "una serie -> un color",
+     nunca un color distinto por barra sin motivo) + los 4 colores de
+     ESTADO que ya usa el resto de la app para viajes (ver .badge-* en
+     app/static/css/style.css), reservados para eso y solo para eso. */
+  .reportes-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px; margin-top: 16px; }
+  .reportes-chart-card h3 { margin: 0 0 2px 0; font-size: 15px; }
+  .reportes-chart-card .muted { margin-bottom: 10px; }
+  .reportes-chart-card canvas { max-height: 260px; }
+  .status-stack { display: flex; width: 100%; height: 28px; border-radius: 6px; overflow: hidden; background: var(--border); }
+  .status-stack > div { display: flex; align-items: center; justify-content: center; color: #fff; font-size: 12px; font-weight: 600; }
+  .status-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; }
+  .status-legend-item { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+  .status-legend-swatch { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+  .reportes-table-toggle { font-size: 12.5px; margin-top: 8px; display: inline-block; }
+  .reportes-mini-table { display: none; margin-top: 10px; width: 100%; font-size: 12.5px; }
+  .reportes-mini-table.shown { display: table; }
+  .reportes-mini-table th, .reportes-mini-table td { padding: 4px 8px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Reportes</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('reportes.centro') }}" class="btn btn-primary">📂 Centro de reportes</a>
+  </div>
+</div>
+<p class="muted mt-0">Vista general del negocio. Cada tarjeta y gráfico solo se muestra si tienes acceso al área correspondiente.</p>
+
+{% if not (invoices_kpi or trips_kpi or maintenance_kpi) %}
+<div class="panel">
+  <p class="muted" style="margin:0;">No tienes acceso a ninguna de las áreas que alimentan este panel todavía. Entra al <a href="{{ url_for('reportes.centro') }}">Centro de reportes</a> para ver los reportes según tu rol.</p>
+</div>
+{% endif %}
+
+<div class="stat-grid">
+  {% if invoices_kpi %}
+  <div class="stat-card">
+    <div class="stat-label">Por cobrar</div>
+    <div class="stat-value">{{ invoices_kpi.total|money }}</div>
+    <div class="stat-sub">{{ invoices_kpi.count }} factura(s) pendiente(s)/vencida(s)</div>
+  </div>
+  {% endif %}
+  {% if trips_kpi %}
+  <div class="stat-card">
+    <div class="stat-label">Viajes este mes</div>
+    <div class="stat-value">{{ trips_kpi.count }}</div>
+    <div class="stat-sub">Todos los estados</div>
+  </div>
+  {% endif %}
+  {% if maintenance_kpi %}
+  <div class="stat-card">
+    <div class="stat-label">Mantenimiento este mes</div>
+    <div class="stat-value">{{ maintenance_kpi.total_month|money }}</div>
+    <div class="stat-sub">Costo total registrado</div>
+  </div>
+  {% endif %}
+</div>
+
+<div class="reportes-charts">
+  {% if revenue_chart %}
+  <div class="panel reportes-chart-card">
+    <h3>Ingresos por mes</h3>
+    <p class="muted">Facturación emitida (no anulada), últimos 6 meses.</p>
+    <canvas id="chart-revenue" height="260"></canvas>
+    <a href="javascript:void(0)" class="reportes-table-toggle" onclick="reportesToggleTable('table-revenue', this)">Ver como tabla</a>
+    <table class="table reportes-mini-table" id="table-revenue">
+      <thead><tr><th>Mes</th><th class="text-right">Monto</th></tr></thead>
+      <tbody>
+        {% for label in revenue_chart.labels %}
+        <tr><td>{{ label }}</td><td class="text-right">{{ revenue_chart.data[loop.index0]|money }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if top_clients_chart %}
+  <div class="panel reportes-chart-card">
+    <h3>Top clientes por facturación</h3>
+    <p class="muted">Últimos 6 meses, no anuladas.</p>
+    {% if top_clients_chart.labels %}
+    <canvas id="chart-top-clients" height="260"></canvas>
+    <a href="javascript:void(0)" class="reportes-table-toggle" onclick="reportesToggleTable('table-top-clients', this)">Ver como tabla</a>
+    <table class="table reportes-mini-table" id="table-top-clients">
+      <thead><tr><th>Cliente</th><th class="text-right">Monto</th></tr></thead>
+      <tbody>
+        {% for label in top_clients_chart.labels %}
+        <tr><td>{{ label }}</td><td class="text-right">{{ top_clients_chart.data[loop.index0]|money }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No hay facturas en este periodo.</p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if trip_status_chart %}
+  <div class="panel reportes-chart-card">
+    <h3>Estado de viajes este mes</h3>
+    <p class="muted">Total: {{ trips_kpi.count }} viaje(s).</p>
+    {% if trip_status_chart.labels %}
+    {% set status_colors = {'Pendiente': '#b45309', 'En curso': '#1737a6', 'Entregado': '#0f9d58', 'Cancelado': '#c0392b'} %}
+    <div class="status-stack">
+      {% for label in trip_status_chart.labels %}
+      {% set pct = (trip_status_chart.data[loop.index0] / trips_kpi.count * 100) if trips_kpi.count else 0 %}
+      <div style="width: {{ pct }}%; background: {{ status_colors.get(label, '#667085') }};" title="{{ label }}: {{ trip_status_chart.data[loop.index0] }}">
+        {% if pct >= 12 %}{{ trip_status_chart.data[loop.index0] }}{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    <div class="status-legend">
+      {% for label in trip_status_chart.labels %}
+      <div class="status-legend-item">
+        <span class="status-legend-swatch" style="background: {{ status_colors.get(label, '#667085') }};"></span>
+        {{ label }} ({{ trip_status_chart.data[loop.index0] }})
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="muted">No hay viajes registrados este mes.</p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if maintenance_chart %}
+  <div class="panel reportes-chart-card">
+    <h3>Costos de mantenimiento por mes</h3>
+    <p class="muted">Todas las unidades, últimos 6 meses.</p>
+    <canvas id="chart-maintenance" height="260"></canvas>
+    <a href="javascript:void(0)" class="reportes-table-toggle" onclick="reportesToggleTable('table-maintenance', this)">Ver como tabla</a>
+    <table class="table reportes-mini-table" id="table-maintenance">
+      <thead><tr><th>Mes</th><th class="text-right">Costo</th></tr></thead>
+      <tbody>
+        {% for label in maintenance_chart.labels %}
+        <tr><td>{{ label }}</td><td class="text-right">{{ maintenance_chart.data[loop.index0]|money }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+  // 30 sep: un solo color por serie (slot 1 de la paleta validada, ver
+  // arriba) en cada gráfico — ninguno de estos es "identidad" (varias
+  // series a distinguir), son magnitud en el tiempo o un ranking, así que
+  // NO llevan un color distinto por barra/punto (ver dataviz skill,
+  // anti-patrones: "una serie -> un color").
+  const REPORTES_SLOT1 = '#2a78d6';
+
+  function reportesToggleTable(id, link) {
+    const table = document.getElementById(id);
+    const shown = table.classList.toggle('shown');
+    link.textContent = shown ? 'Ocultar tabla' : 'Ver como tabla';
+  }
+
+  if (window.Chart) {
+    Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+    Chart.defaults.color = '#667085';
+
+    {% if revenue_chart %}
+    new Chart(document.getElementById('chart-revenue'), {
+      type: 'line',
+      data: {
+        labels: {{ revenue_chart.labels|tojson }},
+        datasets: [{
+          label: 'Ingresos',
+          data: {{ revenue_chart.data|tojson }},
+          borderColor: REPORTES_SLOT1,
+          backgroundColor: REPORTES_SLOT1 + '1a',
+          borderWidth: 2,
+          pointRadius: 4,
+          pointBackgroundColor: REPORTES_SLOT1,
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+          fill: true,
+          tension: 0.2,
+        }],
+      },
+      options: {
+        plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+        interaction: { mode: 'index', intersect: false },
+        scales: { y: { beginAtZero: true, grid: { color: '#e2e5ea' } }, x: { grid: { display: false } } },
+      },
+    });
+    {% endif %}
+
+    {% if top_clients_chart and top_clients_chart.labels %}
+    new Chart(document.getElementById('chart-top-clients'), {
+      type: 'bar',
+      data: {
+        labels: {{ top_clients_chart.labels|tojson }},
+        datasets: [{
+          label: 'Facturado',
+          data: {{ top_clients_chart.data|tojson }},
+          backgroundColor: REPORTES_SLOT1,
+          borderRadius: 4,
+          maxBarThickness: 24,
+        }],
+      },
+      options: {
+        indexAxis: 'y',
+        plugins: { legend: { display: false }, tooltip: { mode: 'nearest', intersect: true } },
+        scales: { x: { beginAtZero: true, grid: { color: '#e2e5ea' } }, y: { grid: { display: false } } },
+      },
+    });
+    {% endif %}
+
+    {% if maintenance_chart %}
+    new Chart(document.getElementById('chart-maintenance'), {
+      type: 'bar',
+      data: {
+        labels: {{ maintenance_chart.labels|tojson }},
+        datasets: [{
+          label: 'Costo',
+          data: {{ maintenance_chart.data|tojson }},
+          backgroundColor: REPORTES_SLOT1,
+          borderRadius: 4,
+          maxBarThickness: 24,
+        }],
+      },
+      options: {
+        plugins: { legend: { display: false }, tooltip: { mode: 'nearest', intersect: true } },
+        scales: { y: { beginAtZero: true, grid: { color: '#e2e5ea' } }, x: { grid: { display: false } } },
+      },
+    });
+    {% endif %}
+  }
+</script>
+{% endblock %}

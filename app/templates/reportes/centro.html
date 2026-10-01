@@ -1,0 +1,58 @@
+{% extends 'base.html' %}
+{% block title %}Centro de reportes{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Centro de reportes</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('reportes.index') }}" class="btn btn-secondary">📊 Ver dashboard</a>
+  </div>
+</div>
+<p class="muted mt-0">Todos los reportes del sistema en un solo lugar, agrupados por área. Cada tarjeta solo aparece si tienes acceso a esa área.</p>
+
+{% macro report_card(url, icon, title, description) -%}
+<a href="{{ url }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
+  <h3 style="margin-top:0;">{{ icon }} {{ title }}</h3>
+  <p class="muted" style="margin-bottom:0;">{{ description }}</p>
+</a>
+{%- endmacro %}
+
+<h2 style="margin-top:24px;">🚚 Operación / Viajes</h2>
+<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:16px; margin-top:8px;">
+  {% if can(current_user.roles, 'reportes', 'view') and can(current_user.roles, 'viajes', 'view') %}
+  {{ report_card(url_for('reportes.viajes_por_cliente'), '🆕', 'Viajes por cliente', 'Cantidad y monto de viajes por cliente en un rango de fechas.') }}
+  {{ report_card(url_for('viajes.commissions_report'), '📄', 'Comisiones por conductor', 'Comisiones ganadas por cada conductor en un mes.') }}
+  {% endif %}
+  {% if can(current_user.roles, 'integraciones', 'view') %}
+  {{ report_card(url_for('integraciones.daily_report'), '📄', 'Reporte diario GPS', 'Horas y kilómetros recorridos por unidad, por día.') }}
+  {% endif %}
+</div>
+
+<h2 style="margin-top:24px;">💰 Finanzas / Facturación</h2>
+<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:16px; margin-top:8px;">
+  {% if can(current_user.roles, 'facturacion', 'view') %}
+  {{ report_card(url_for('reportes.cuentas_por_cobrar'), '🆕', 'Cuentas por cobrar', 'Facturas pendientes y vencidas por cliente, con días de atraso.') }}
+  {% endif %}
+  {% if can(current_user.roles, 'liquidaciones', 'view') %}
+  {{ report_card(url_for('liquidaciones.resumen_view'), '📄', 'Resumen contable', 'Resumen de liquidaciones por mes y oficina.') }}
+  {{ report_card(url_for('liquidaciones.historial'), '📄', 'Historial de gastos', 'Todos los gastos registrados, con filtros por concepto y fecha.') }}
+  {% endif %}
+</div>
+
+<h2 style="margin-top:24px;">🔧 Flota / Mantenimiento</h2>
+<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:16px; margin-top:8px;">
+  {% if can(current_user.roles, 'mantenimiento', 'view') %}
+  {{ report_card(url_for('reportes.costos_mantenimiento'), '🆕', 'Costos de mantenimiento por unidad', 'Gasto total y cantidad de mantenimientos por vehículo.') }}
+  {% endif %}
+</div>
+
+<h2 style="margin-top:24px;">👥 RRHH / Personal</h2>
+<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:16px; margin-top:8px;">
+  {% if can(current_user.roles, 'pagos_personal', 'view') %}
+  {{ report_card(url_for('reportes.pagos_por_persona'), '🆕', 'Pagos por persona', 'Total pagado (planilla + honorarios) por persona en un periodo.') }}
+  {{ report_card(url_for('pagos_personal.export_excel'), '📄', 'Export de pagos personal', 'Todos los comprobantes de pago del periodo, con datos bancarios.') }}
+  {% endif %}
+  {% if can(current_user.roles, 'rrhh', 'view') %}
+  {{ report_card(url_for('rrhh.list_view'), '📄', 'Viajes de conductor (RRHH)', 'Viajes con liquidación cerrada, listos para RRHH.') }}
+  {% endif %}
+</div>
+{% endblock %}

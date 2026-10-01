@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% block title %}Viajes por cliente{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Viajes por cliente</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('reportes.viajes_por_cliente_export', from_date=from_date, to_date=to_date, issuer=issuer) }}" class="btn btn-secondary">⬇ Exportar a Excel</a>
+    <a href="{{ url_for('reportes.centro') }}" class="btn btn-secondary">← Centro de reportes</a>
+  </div>
+</div>
+<p class="muted mt-0">Cantidad de viajes y monto total (tarifa) por cliente, en el rango de fechas elegido. No incluye viajes cancelados.</p>
+
+<form class="filters" method="get">
+  <label>Desde
+    <input type="date" name="from_date" value="{{ from_date }}">
+  </label>
+  <label>Hasta
+    <input type="date" name="to_date" value="{{ to_date }}">
+  </label>
+  <label>Empresa
+    <select name="issuer">
+      <option value="" {{ 'selected' if not issuer }}>Ambas</option>
+      <option value="HARRASO" {{ 'selected' if issuer == 'HARRASO' }}>Harraso Transport</option>
+      <option value="BRMS" {{ 'selected' if issuer == 'BRMS' }}>BRMS</option>
+    </select>
+  </label>
+  <button class="btn btn-secondary" type="submit">Filtrar</button>
+  <div class="muted" style="margin-left:auto;">{{ total_trips }} viaje(s) · Total: <strong>{{ total_amount|money }}</strong></div>
+</form>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Cliente</th><th class="text-right">N° de viajes</th><th class="text-right">Monto total</th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r.client_name }}</td>
+        <td class="text-right">{{ r.trip_count }}</td>
+        <td class="text-right">{{ (r.total_rate or 0)|money }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" class="table-empty">No hay viajes con estos filtros.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

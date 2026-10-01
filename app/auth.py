@@ -67,6 +67,12 @@ PERMISSIONS = {
         # específicos), igual que cualquier otro módulo nuevo sin entrada
         # explícita en PERMISSIONS de un rol no-ADMIN.
         "actividad": set(),
+        # 30 sep: Módulo de Reportes (ver app/routes/reportes.py) — Operador
+        # queda reducido (como el resto de sus accesos desde el 3 sep) sin
+        # este módulo; cada sección de Reportes de todos modos se filtra
+        # además por el permiso del área correspondiente (Liquidaciones,
+        # Facturación, etc.), así que esto es solo la puerta de entrada.
+        "reportes": set(),
     },
     # Programa unidades/conductores y da seguimiento a los viajes del día a
     # día — sin acceso a montos de Facturación/Liquidaciones/Cotizaciones ni
@@ -98,6 +104,11 @@ PERMISSIONS = {
         # (RRHH) queda en RRHH/Admin.
         "descansos": {"view"},
         "actividad": set(),
+        # 30 sep: Reportes — Despachador ve el módulo (reporte de "Viajes
+        # por cliente" le sirve para operación), aunque las secciones de
+        # Finanzas/RRHH del dashboard queden ocultas por sus propios
+        # permisos (liquidaciones/facturacion/rrhh en set() arriba).
+        "reportes": {"view"},
     },
     # Solo el módulo de Inventarios (repuestos, proveedores, compras) — la
     # AUTORIZACIÓN de una orden de compra sigue siendo exclusiva de
@@ -126,6 +137,10 @@ PERMISSIONS = {
         "pagos_personal": set(),
         "descansos": set(),
         "actividad": set(),
+        # 30 sep: Reportes — Almacén no tiene ninguna de las secciones
+        # actuales del módulo (ninguna toca Inventarios todavía), se deja
+        # sin acceso como el resto de sus módulos ajenos a Inventarios.
+        "reportes": set(),
     },
     # Documentos con montos: Liquidaciones, Facturación, Cotizaciones. Ve
     # Viajes/Clientes (para ubicar a qué viaje o cliente corresponde cada
@@ -166,6 +181,11 @@ PERMISSIONS = {
         # 22 sep: Descansos laborales — no es un tema de Contabilidad.
         "descansos": set(),
         "actividad": set(),
+        # 30 sep: Reportes — Contabilidad es el consumidor natural del
+        # módulo (Finanzas/RRHH del dashboard, Cuentas por cobrar, y todo
+        # lo centralizado de Liquidaciones/Facturación/Pagos personal que
+        # ya podía ver antes en sus propios módulos).
+        "reportes": {"view"},
     },
     # Solo el módulo de Mantenimiento (órdenes, trabajos) y ver Neumáticos.
     "MECANICO": {
@@ -191,6 +211,11 @@ PERMISSIONS = {
         "pagos_personal": set(),
         "descansos": set(),
         "actividad": set(),
+        # 30 sep: Reportes — Mecánico ve el módulo por "Costos de
+        # mantenimiento por unidad" (su área); el resto del dashboard queda
+        # oculto por los permisos de cada sección (liquidaciones/facturacion
+        # en set() arriba).
+        "reportes": {"view"},
     },
     # 18 sep, 5ta ronda (pedido de Braulio: "en el menu de usuarios tambien
     # hay que poner rol RRHH, el cual tenga acceso a RRHH, pagos personal,
@@ -223,6 +248,11 @@ PERMISSIONS = {
         # criterio que conductores/liquidaciones/pagos_personal arriba.
         "descansos": {"view", "edit"},
         "actividad": set(),
+        # 30 sep: Reportes — RRHH ve el módulo por "Pagos por persona" y lo
+        # centralizado de RRHH/Pagos personal; Finanzas/Flota del dashboard
+        # quedan ocultas por sus propios permisos (facturacion/liquidaciones
+        # ya cubierto arriba, mantenimiento en set()).
+        "reportes": {"view"},
     },
 }
 

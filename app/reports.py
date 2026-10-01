@@ -681,3 +681,259 @@ def build_staff_payments_workbook(payments, company_name, period, payment_type_l
     buffer.seek(0)
     return buffer
 
+
+# ---------------------------------------------------------------------------
+# 30 sep: Módulo de Reportes (ver app/routes/reportes.py) — 4 reportes
+# nuevos, uno por área de negocio pedida por Braulio. Mismo patrón de
+# estilo que los reportes de arriba (título, subtítulo con filtros,
+# encabezado con fondo COLOR_PRIMARY, fila de total en COLOR_TOTAL_FILL).
+# ---------------------------------------------------------------------------
+
+TRIPS_BY_CLIENT_COLUMNS = ["Cliente", "N° de viajes", "Monto total"]
+TRIPS_BY_CLIENT_COLUMN_WIDTHS = [42, 16, 18]
+
+
+def _report_header(ws, title_text, subtitle_text, columns, widths):
+    """Arma el título/subtítulo/encabezado de columna, iguales en los 4
+    reportes nuevos de Reportes — factoriza lo que en los reportes de
+    arriba (build_expenses_workbook, etc.) se repite igual en cada función,
+    para no repetirlo 4 veces más acá. Devuelve la fila donde empiezan los
+    datos."""
+    last_col_letter = get_column_letter(len(columns))
+    ws.merge_cells(f"A1:{last_col_letter}1")
+    ws["A1"] = title_text
+    ws["A1"].font = Font(bold=True, size=14, color=COLOR_PRIMARY)
+
+    ws.merge_cells(f"A2:{last_col_letter}2")
+    generated = datetime.now().strftime("%d/%m/%Y %H:%M")
+    ws["A2"] = f"Generado el {generated}  ·  {subtitle_text}"
+    ws["A2"].font = Font(italic=True, size=10, color=COLOR_GRAY)
+
+    header_row = 4
+    for idx, title in enumerate(columns, start=1):
+        cell = ws.cell(row=header_row, column=idx, value=title)
+        cell.font = Font(bold=True, color=COLOR_HEADER_TEXT)
+        cell.fill = PatternFill("solid", fgColor=COLOR_PRIMARY)
+        cell.alignment = Alignment(
+            horizontal="right" if ("monto" in title.lower() or "total" in title.lower() or "costo" in title.lower()) else "left",
+            vertical="center",
+        )
+        cell.border = _thin_border("all")
+    ws.freeze_panes = f"A{header_row + 1}"
+
+    for idx, width in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(idx)].width = width
+    ws.sheet_view.showGridLines = False
+    return header_row + 1
+
+
+def build_trips_by_client_workbook(rows, company_name, filter_description):
+    """Reporte nuevo "Viajes por cliente" (Operación) — cantidad de viajes y
+    monto total (tarifa) por cliente, en el rango de fechas/empresa elegido."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Viajes por cliente"
+    row = _report_header(
+        ws, f"{company_name} — Viajes por cliente", filter_description,
+        TRIPS_BY_CLIENT_COLUMNS, TRIPS_BY_CLIENT_COLUMN_WIDTHS,
+    )
+
+    total_trips = 0
+    total_amount = 0.0
+    for r in rows:
+        ws.cell(row=row, column=1, value=r["client_name"])
+        ws.cell(row=row, column=2, value=r["trip_count"]).alignment = Alignment(horizontal="right")
+        amount_cell = ws.cell(row=row, column=3, value=float(r["total_rate"] or 0))
+        amount_cell.number_format = CURRENCY_FORMAT
+        amount_cell.alignment = Alignment(horizontal="right")
+        for col in range(1, len(TRIPS_BY_CLIENT_COLUMNS) + 1):
+            ws.cell(row=row, column=col).border = _thin_border("bottom")
+        total_trips += r["trip_count"]
+        total_amount += r["total_rate"] or 0
+        row += 1
+
+    if not rows:
+        ws.cell(row=row, column=1, value="No hay viajes con estos filtros.").font = Font(italic=True, color=COLOR_GRAY)
+        row += 1
+
+    row += 1
+    ws.merge_cells(f"A{row}:B{row}")
+    total_label = ws.cell(row=row, column=1, value=f"TOTAL ({total_trips} viaje(s))")
+    total_label.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
+    total_label.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
+    total_label.alignment = Alignment(horizontal="right", vertical="center")
+    total_cell = ws.cell(row=row, column=3, value=total_amount)
+    total_cell.number_format = CURRENCY_FORMAT
+    total_cell.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
+    total_cell.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
+    total_cell.alignment = Alignment(horizontal="right", vertical="center")
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+
+ACCOUNTS_RECEIVABLE_COLUMNS = ["Cliente", "N° factura", "Emisión", "Vencimiento", "Estado", "Días de atraso", "Monto"]
+ACCOUNTS_RECEIVABLE_COLUMN_WIDTHS = [32, 16, 14, 14, 12, 16, 16]
+ACCOUNTS_RECEIVABLE_STATUS_LABELS = {"PENDIENTE": "Pendiente", "VENCIDA": "Vencida"}
+
+
+def build_accounts_receivable_workbook(rows, company_name, filter_description):
+    """Reporte nuevo "Cuentas por cobrar" (Finanzas) — facturas pendientes o
+    vencidas por cliente, con días de atraso calculados sobre due_date.
+    `rows` ya trae "days_overdue" calculado (ver
+    _accounts_receivable_rows en app/routes/reportes.py)."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Cuentas por cobrar"
+    row = _report_header(
+        ws, f"{company_name} — Cuentas por cobrar", filter_description,
+        ACCOUNTS_RECEIVABLE_COLUMNS, ACCOUNTS_RECEIVABLE_COLUMN_WIDTHS,
+    )
+
+    total = 0.0
+    for r in rows:
+        ws.cell(row=row, column=1, value=r["client_name"])
+        ws.cell(row=row, column=2, value=r["number"])
+        ws.cell(row=row, column=3, value=r["issue_date"] or "—")
+        ws.cell(row=row, column=4, value=r["due_date"] or "—")
+        ws.cell(row=row, column=5, value=ACCOUNTS_RECEIVABLE_STATUS_LABELS.get(r["status"], r["status"]))
+        days = r.get("days_overdue")
+        days_cell = ws.cell(row=row, column=6, value=(days if days and days > 0 else 0))
+        days_cell.alignment = Alignment(horizontal="right")
+        amount_cell = ws.cell(row=row, column=7, value=float(r["amount"] or 0))
+        amount_cell.number_format = CURRENCY_FORMAT
+        amount_cell.alignment = Alignment(horizontal="right")
+        for col in range(1, len(ACCOUNTS_RECEIVABLE_COLUMNS) + 1):
+            ws.cell(row=row, column=col).border = _thin_border("bottom")
+        total += r["amount"] or 0
+        row += 1
+
+    if not rows:
+        ws.cell(row=row, column=1, value="No hay cuentas por cobrar con estos filtros.").font = Font(italic=True, color=COLOR_GRAY)
+        row += 1
+
+    row += 1
+    ws.merge_cells(f"A{row}:F{row}")
+    total_label = ws.cell(row=row, column=1, value=f"TOTAL ({len(rows)} factura(s))")
+    total_label.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
+    total_label.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
+    total_label.alignment = Alignment(horizontal="right", vertical="center")
+    total_cell = ws.cell(row=row, column=7, value=total)
+    total_cell.number_format = CURRENCY_FORMAT
+    total_cell.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
+    total_cell.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
+    total_cell.alignment = Alignment(horizontal="right", vertical="center")
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+
+MAINTENANCE_COSTS_COLUMNS = ["Unidad", "N° de mantenimientos", "Costo total"]
+MAINTENANCE_COSTS_COLUMN_WIDTHS = [16, 22, 18]
+
+
+def build_maintenance_costs_workbook(rows, company_name, filter_description):
+    """Reporte nuevo "Costos de mantenimiento por unidad" (Flota) — gasto
+    total y cantidad de mantenimientos por vehículo en el rango elegido."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Costos de mantenimiento"
+    row = _report_header(
+        ws, f"{company_name} — Costos de mantenimiento por unidad", filter_description,
+        MAINTENANCE_COSTS_COLUMNS, MAINTENANCE_COSTS_COLUMN_WIDTHS,
+    )
+
+    total_records = 0
+    total_cost = 0.0
+    for r in rows:
+        ws.cell(row=row, column=1, value=r["plate"])
+        ws.cell(row=row, column=2, value=r["record_count"]).alignment = Alignment(horizontal="right")
+        cost_cell = ws.cell(row=row, column=3, value=float(r["total_cost"] or 0))
+        cost_cell.number_format = CURRENCY_FORMAT
+        cost_cell.alignment = Alignment(horizontal="right")
+        for col in range(1, len(MAINTENANCE_COSTS_COLUMNS) + 1):
+            ws.cell(row=row, column=col).border = _thin_border("bottom")
+        total_records += r["record_count"]
+        total_cost += r["total_cost"] or 0
+        row += 1
+
+    if not rows:
+        ws.cell(row=row, column=1, value="No hay mantenimientos con estos filtros.").font = Font(italic=True, color=COLOR_GRAY)
+        row += 1
+
+    row += 1
+    ws.merge_cells(f"A{row}:B{row}")
+    total_label = ws.cell(row=row, column=1, value=f"TOTAL ({total_records} registro(s))")
+    total_label.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
+    total_label.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
+    total_label.alignment = Alignment(horizontal="right", vertical="center")
+    total_cell = ws.cell(row=row, column=3, value=total_cost)
+    total_cell.number_format = CURRENCY_FORMAT
+    total_cell.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
+    total_cell.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
+    total_cell.alignment = Alignment(horizontal="right", vertical="center")
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+
+STAFF_PAYMENTS_BY_PERSON_COLUMNS = ["Persona", "Total planilla", "Total honorarios", "Total general", "N° de pagos"]
+STAFF_PAYMENTS_BY_PERSON_COLUMN_WIDTHS = [32, 18, 18, 18, 14]
+
+
+def build_staff_payments_by_person_workbook(rows, company_name, filter_description):
+    """Reporte nuevo "Pagos por persona" (RRHH) — total pagado (planilla +
+    honorarios, desglosado) por persona en el periodo elegido. Distinto del
+    export de app/routes/pagos_personal.py (build_staff_payments_workbook,
+    ya existente): ese lista cada comprobante con sus datos bancarios; este
+    agrupa por persona para ver de un vistazo cuánto se le pagó en total."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Pagos por persona"
+    row = _report_header(
+        ws, f"{company_name} — Pagos por persona", filter_description,
+        STAFF_PAYMENTS_BY_PERSON_COLUMNS, STAFF_PAYMENTS_BY_PERSON_COLUMN_WIDTHS,
+    )
+
+    total_general = 0.0
+    total_payments = 0
+    for r in rows:
+        ws.cell(row=row, column=1, value=r["staff_name"])
+        for col, key in ((2, "total_planilla"), (3, "total_honorarios"), (4, "total_general")):
+            cell = ws.cell(row=row, column=col, value=float(r[key] or 0))
+            cell.number_format = CURRENCY_FORMAT
+            cell.alignment = Alignment(horizontal="right")
+        ws.cell(row=row, column=5, value=r["payment_count"]).alignment = Alignment(horizontal="right")
+        for col in range(1, len(STAFF_PAYMENTS_BY_PERSON_COLUMNS) + 1):
+            ws.cell(row=row, column=col).border = _thin_border("bottom")
+        total_general += r["total_general"] or 0
+        total_payments += r["payment_count"]
+        row += 1
+
+    if not rows:
+        ws.cell(row=row, column=1, value="No hay pagos con estos filtros.").font = Font(italic=True, color=COLOR_GRAY)
+        row += 1
+
+    row += 1
+    ws.merge_cells(f"A{row}:C{row}")
+    total_label = ws.cell(row=row, column=1, value=f"TOTAL ({total_payments} pago(s))")
+    total_label.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
+    total_label.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
+    total_label.alignment = Alignment(horizontal="right", vertical="center")
+    total_cell = ws.cell(row=row, column=4, value=total_general)
+    total_cell.number_format = CURRENCY_FORMAT
+    total_cell.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
+    total_cell.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
+    total_cell.alignment = Alignment(horizontal="right", vertical="center")
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer
+

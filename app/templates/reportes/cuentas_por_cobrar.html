@@ -1,0 +1,57 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Cuentas por cobrar{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Cuentas por cobrar</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('reportes.cuentas_por_cobrar_export', client_id=client_id, issuer=issuer, only_overdue='1' if only_overdue else '') }}" class="btn btn-secondary">⬇ Exportar a Excel</a>
+    <a href="{{ url_for('reportes.centro') }}" class="btn btn-secondary">← Centro de reportes</a>
+  </div>
+</div>
+<p class="muted mt-0">Facturas pendientes o vencidas, con los días de atraso calculados sobre la fecha de vencimiento.</p>
+
+<form class="filters" method="get">
+  <label>Cliente
+    <select name="client_id">
+      <option value="">Todos</option>
+      {% for c in clients %}
+      <option value="{{ c.id }}" {{ 'selected' if client_id == c.id }}>{{ c.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Empresa
+    <select name="issuer">
+      <option value="" {{ 'selected' if not issuer }}>Ambas</option>
+      <option value="HARRASO" {{ 'selected' if issuer == 'HARRASO' }}>Harraso Transport</option>
+      <option value="BRMS" {{ 'selected' if issuer == 'BRMS' }}>BRMS</option>
+    </select>
+  </label>
+  <label style="flex-direction:row; align-items:center; gap:6px;">
+    <input type="checkbox" name="only_overdue" value="1" {{ 'checked' if only_overdue }}> Solo vencidas
+  </label>
+  <button class="btn btn-secondary" type="submit">Filtrar</button>
+  <div class="muted" style="margin-left:auto;">{{ rows|length }} factura(s) · Total: <strong>{{ total|money }}</strong></div>
+</form>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Cliente</th><th>N° factura</th><th>Emisión</th><th>Vencimiento</th><th>Estado</th><th class="text-right">Días de atraso</th><th class="text-right">Monto</th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r.client_name }}</td>
+        <td>{{ r.number }}</td>
+        <td>{{ r.issue_date or '—' }}</td>
+        <td>{{ r.due_date or '—' }}</td>
+        <td>{{ m.badge(r.status) }}</td>
+        <td class="text-right">{{ r.days_overdue if r.days_overdue and r.days_overdue > 0 else '—' }}</td>
+        <td class="text-right">{{ (r.amount or 0)|money }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="table-empty">No hay cuentas por cobrar con estos filtros.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
