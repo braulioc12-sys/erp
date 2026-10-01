@@ -6,9 +6,9 @@
   <h1>Orden de mantenimiento — {{ record.vehicle_plate }}{% if readonly %} <span class="muted" style="font-size:0.6em;">(solo lectura)</span>{% endif %}</h1>
   <div class="page-actions">
     {% if readonly %}
-    <a href="{{ url_for('mantenimiento.list_view', vehicle_id=record.vehicle_id, readonly=1) }}" class="btn btn-secondary">← Volver al historial</a>
+    <a href="{{ url_for('mantenimiento.list_view', vehicle_id=record.vehicle_id, readonly=1, issuer=record.vehicle_issuer) }}" class="btn btn-secondary">← Volver al historial</a>
     {% else %}
-    <a href="{{ url_for('mantenimiento.list_view') }}" class="btn btn-secondary">← Volver a Mantenimiento</a>
+    <a href="{{ url_for('mantenimiento.list_view', issuer=record.vehicle_issuer) }}" class="btn btn-secondary">← Volver a Mantenimiento</a>
     {% endif %}
   </div>
 </div>

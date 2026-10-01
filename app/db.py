@@ -589,6 +589,20 @@ COLUMN_MIGRATIONS = [
     # completa sola para liquidaciones ya existentes vía
     # _backfill_advance_driver_id_* (más abajo).
     ("expense_advances", "driver_id", "INTEGER"),
+    # 30 sep, pedido de Braulio ("los reportes tienen que estar separados
+    # como empresa, asi mismo el modulo de mantenimiento tambien debe estar
+    # separado por empresa"): empresa dueña/operadora de la unidad en este
+    # momento (HARRASO/BRMS), igual que trips.issuer/invoices.issuer/etc.
+    # Sin CHECK (igual que esas columnas, se valida en Python contra
+    # ISSUER_CHOICES). A diferencia de "owner" (catálogo libre de texto que
+    # no equivale a empresa), este campo es el que gatilla el selector
+    # obligatorio de empresa en Flota/Mantenimiento/Neumáticos/Reportes. Es
+    # mutable a propósito -- Braulio: "una unidad puede estar este mes como
+    # harraso pero el siguiente como brms" -- se reasigna editando la unidad
+    # en Flota, sin historial. Default 'HARRASO' para que las unidades ya
+    # existentes sigan siendo visibles bajo alguna empresa en vez de
+    # desaparecer de ambas hasta que se reasignen manualmente.
+    ("vehicles", "issuer", "TEXT NOT NULL DEFAULT 'HARRASO'"),
 ]
 
 

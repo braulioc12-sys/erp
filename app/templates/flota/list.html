@@ -1,22 +1,30 @@
 {% extends 'base.html' %}
 {% import 'partials/macros.html' as m %}
+{% import 'partials/company_gate.html' as cg %}
 {% block title %}Flota{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>Flota{% if show_inactive %} — Inactivas{% endif %}</h1>
+  <h1>Flota{% if issuer %} — {{ 'BRMS' if issuer == 'BRMS' else 'Harraso Transport' }}{% endif %}{% if show_inactive %} — Inactivas{% endif %}</h1>
+  {% if issuer %}
   <div class="page-actions">
     {% if show_inactive %}
-    <a href="{{ url_for('flota.list_view') }}" class="btn btn-secondary">← Ver activas</a>
+    <a href="{{ url_for('flota.list_view', issuer=issuer) }}" class="btn btn-secondary">← Ver activas</a>
     {% elif inactive_count %}
-    <a href="{{ url_for('flota.list_view', ver='inactivas') }}" class="btn btn-secondary">Ver inactivas ({{ inactive_count }})</a>
+    <a href="{{ url_for('flota.list_view', issuer=issuer, ver='inactivas') }}" class="btn btn-secondary">Ver inactivas ({{ inactive_count }})</a>
     {% endif %}
     {% if can(current_user.roles, 'flota', 'edit') %}
-    <a href="{{ url_for('flota.import_vehicles') }}" class="btn btn-secondary">Importar desde Excel</a>
-    <a href="{{ url_for('flota.import_oil_changes') }}" class="btn btn-secondary">Importar cambios de aceite</a>
-    <a href="{{ url_for('flota.new_vehicle') }}" class="btn btn-primary">+ Nueva unidad</a>
+    <a href="{{ url_for('flota.import_vehicles', issuer=issuer) }}" class="btn btn-secondary">Importar desde Excel</a>
+    <a href="{{ url_for('flota.import_oil_changes', issuer=issuer) }}" class="btn btn-secondary">Importar cambios de aceite</a>
+    <a href="{{ url_for('flota.new_vehicle', issuer=issuer) }}" class="btn btn-primary">+ Nueva unidad</a>
     {% endif %}
   </div>
+  {% endif %}
 </div>
+
+{% if not issuer %}
+{{ cg.company_gate('flota.list_view', 'para ver sus unidades') }}
+{% else %}
+<p class="company-switch"><a href="{{ url_for('flota.list_view') }}">↺ Cambiar de empresa</a></p>
 {% if show_inactive %}
 <p class="muted mt-0">Unidades marcadas como inactivas — normalmente porque tienen viajes en su historial y "Eliminar" no las borra de verdad, para no perder ese historial. Para reactivar una, entra a "Editar" y cambia su Estado a Activo.</p>
 {% else %}
@@ -24,6 +32,7 @@
 {% endif %}
 
 <form class="filters" method="get">
+  <input type="hidden" name="issuer" value="{{ issuer }}">
   {% if show_inactive %}<input type="hidden" name="ver" value="inactivas">{% endif %}
   <label>Tipo
     <select name="vehicle_type">
@@ -53,7 +62,7 @@
 
 <div class="table-wrap">
   <table id="vehicleTable">
-    <thead><tr><th>#</th><th>Placa</th><th>Marca / Modelo</th><th>Tipo</th><th>Estado</th><th>SOAT vence</th><th>Rev. técnica vence</th><th></th></tr></thead>
+    <thead><tr><th>#</th><th>Placa</th><th>Marca / Modelo</th><th>Tipo</th><th>Empresa</th><th>Estado</th><th>SOAT vence</th><th>Rev. técnica vence</th><th></th></tr></thead>
     <tbody>
       {% for v in vehicles %}
       <tr onclick="window.location='{{ url_for('flota.vehicle_detail', vehicle_id=v.id) }}'" style="cursor:pointer;" data-plate="{{ v.plate|lower }}">
@@ -65,13 +74,14 @@
           {% elif v.vehicle_type == 'CARRETA' %}Carreta
           {% else %}Camión{% endif %}
         </td>
+        <td>{{ 'BRMS' if v.issuer == 'BRMS' else 'Harraso Transport' }}</td>
         <td>{{ m.badge(v.status) }}</td>
         <td>{{ v.soat_expiry or '—' }}</td>
         <td>{{ v.technical_review_expiry or '—' }}</td>
         <td onclick="event.stopPropagation();">
           <div class="btn-group">
             {% if can(current_user.roles, 'flota', 'edit') %}
-            <a class="btn btn-secondary btn-sm" href="{{ url_for('flota.edit_vehicle', vehicle_id=v.id) }}">Editar</a>
+            <a class="btn btn-secondary btn-sm" href="{{ url_for('flota.edit_vehicle', vehicle_id=v.id, issuer=issuer) }}">Editar</a>
             <form method="post" action="{{ url_for('flota.delete_vehicle', vehicle_id=v.id) }}" onsubmit="return confirm('¿Eliminar esta unidad?');">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-danger btn-sm" type="submit">Eliminar</button>
@@ -81,7 +91,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="8" class="table-empty">{% if show_inactive %}No hay unidades inactivas.{% else %}No hay unidades registradas.{% endif %}</td></tr>
+      <tr><td colspan="9" class="table-empty">{% if show_inactive %}No hay unidades inactivas.{% else %}No hay unidades registradas.{% endif %}</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -101,4 +111,5 @@ function filterVehicles() {
   document.getElementById('vehicleSearchEmpty').style.display = (visible === 0 && rows.length > 0) ? '' : 'none';
 }
 </script>
+{% endif %}
 {% endblock %}

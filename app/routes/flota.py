@@ -31,6 +31,12 @@ from app.bulk_import import (
 )
 from app.db import execute, get_db, query_all, query_one
 from app.helpers import parse_date, parse_float, today_str
+# 30 sep, pedido de Braulio ("los reportes tienen que estar separados como
+# empresa, asi mismo el modulo de mantenimiento tambien debe estar separado
+# por empresa"): mismo selector obligatorio de empresa que ya usan
+# Viajes/Liquidaciones/Facturación -- ver vehicles.issuer en app/db.py y el
+# macro company_gate en app/templates/partials/company_gate.html.
+from app.routes.viajes import ISSUER_CHOICES
 
 bp = Blueprint("flota", __name__, url_prefix="/flota")
 
@@ -145,14 +151,26 @@ def list_view():
     filtros que viajes/list.html). Si se elige un Estado explícito, ese
     filtro manda sobre el criterio activas/inactivas de arriba (si no,
     ?ver=inactivas seguiría "peleando" con, por ejemplo, status=ACTIVO y
-    nunca mostraría nada)."""
+    nunca mostraría nada).
+
+    30 sep, pedido de Braulio ("los reportes tienen que estar separados como
+    empresa, asi mismo el modulo de mantenimiento tambien debe estar
+    separado por empresa"): selector obligatorio de empresa, mismo patrón
+    que viajes.list_view() -- sin ?issuer=HARRASO|BRMS en la URL no se
+    consulta ni se muestra ninguna unidad."""
+    issuer = request.args.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        return render_template(
+            "flota/list.html", vehicles=None, issuer=None, show_inactive=False, inactive_count=0,
+            vehicle_type_filter="", status_filter="", model_filter="",
+        )
     show_inactive = request.args.get("ver") == "inactivas"
     vehicle_type = request.args.get("vehicle_type", "").strip().upper()
     status = request.args.get("status", "").strip().upper()
     model = request.args.get("model", "").strip()
 
-    conditions = []
-    params = []
+    conditions = ["issuer = ?"]
+    params = [issuer]
     if status in ("ACTIVO", "MANTENIMIENTO", "INACTIVO"):
         conditions.append("status = ?")
         params.append(status)
@@ -172,10 +190,13 @@ def list_view():
     vehicles = query_all(
         f"SELECT * FROM vehicles WHERE {' AND '.join(conditions)} ORDER BY plate", tuple(params)
     )
-    inactive_count = query_one("SELECT COUNT(*) n FROM vehicles WHERE status = 'INACTIVO'")["n"]
+    inactive_count = query_one(
+        "SELECT COUNT(*) n FROM vehicles WHERE status = 'INACTIVO' AND issuer = ?", (issuer,)
+    )["n"]
     return render_template(
         "flota/list.html",
         vehicles=vehicles,
+        issuer=issuer,
         show_inactive=show_inactive,
         inactive_count=inactive_count,
         vehicle_type_filter=vehicle_type,
@@ -287,25 +308,36 @@ def vehicle_document_file(vehicle_id, doc_key):
 @bp.route("/nuevo", methods=["GET", "POST"])
 @permission_required("flota", "edit")
 def new_vehicle():
+    # 30 sep: la unidad se crea ya asignada a la empresa desde la que se
+    # llegó a este formulario (?issuer=... en el link "+ Nueva unidad" de
+    # flota/list.html), igual que viajes.new() con _parse_issuer().
+    issuer = request.form.get("issuer") or request.args.get("issuer", "")
+    issuer = issuer.strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        issuer = "HARRASO"
     if request.method == "POST":
         if not validate_csrf():
             abort(400)
         plate = request.form.get("plate", "").strip().upper()
         if not plate:
             flash("La placa es obligatoria.", "error")
-            return render_template("flota/vehicle_form.html", vehicle=request.form, mode="new", owners=_vehicle_owners())
+            return render_template(
+                "flota/vehicle_form.html", vehicle=request.form, mode="new", owners=_vehicle_owners(), issuer=issuer
+            )
         existing = query_one("SELECT id FROM vehicles WHERE plate = ?", (plate,))
         if existing:
             flash("Ya existe una unidad con esa placa.", "error")
-            return render_template("flota/vehicle_form.html", vehicle=request.form, mode="new", owners=_vehicle_owners())
+            return render_template(
+                "flota/vehicle_form.html", vehicle=request.form, mode="new", owners=_vehicle_owners(), issuer=issuer
+            )
         brand = request.form.get("brand", "").strip()
         model = request.form.get("model", "").strip()
         vehicle_id = execute(
             """INSERT INTO vehicles (plate, brand, model, capacity_kg, status, vehicle_type, notes,
                soat_expiry, technical_review_expiry, current_km, current_km_updated_at, gps_external_id, owner,
                last_oil_change_km, last_oil_change_date, last_oil_change_workshop, last_oil_change_oil,
-               gps_km_error)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               gps_km_error, issuer)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 plate,
                 brand,
@@ -325,6 +357,7 @@ def new_vehicle():
                 request.form.get("last_oil_change_workshop", "").strip() or None,
                 request.form.get("last_oil_change_oil", "").strip() or None,
                 1 if request.form.get("gps_km_error") else 0,
+                issuer,
             ),
         )
         # 22 sep, registro de actividad (ver app/audit.py).
@@ -334,8 +367,8 @@ def new_vehicle():
             entity_url=url_for("flota.vehicle_detail", vehicle_id=vehicle_id),
         )
         flash("Unidad registrada.", "success")
-        return redirect(url_for("flota.list_view"))
-    return render_template("flota/vehicle_form.html", vehicle=None, mode="new", owners=_vehicle_owners())
+        return redirect(url_for("flota.list_view", issuer=issuer))
+    return render_template("flota/vehicle_form.html", vehicle=None, mode="new", owners=_vehicle_owners(), issuer=issuer)
 
 
 @bp.route("/<int:vehicle_id>/editar", methods=["GET", "POST"])
@@ -344,12 +377,27 @@ def edit_vehicle(vehicle_id):
     vehicle = query_one("SELECT * FROM vehicles WHERE id = ?", (vehicle_id,))
     if vehicle is None:
         abort(404)
+    # 30 sep: `issuer` acá es la empresa desde la que se llegó a este
+    # formulario (para poder volver a esa lista al guardar), no un filtro de
+    # seguridad -- esta pantalla se llega por id, igual que el resto de
+    # formularios de edición de un registro puntual (mismo criterio que
+    # viajes/liquidaciones/facturación). El campo "Empresa" del formulario
+    # (más abajo, nuevo_issuer) es aparte y sí puede reasignar la unidad --
+    # Braulio: "una unidad puede estar este mes como harraso pero el
+    # siguiente como brms".
+    return_issuer = request.form.get("issuer") or request.args.get("issuer", "")
+    return_issuer = return_issuer.strip().upper()
+    if return_issuer not in ISSUER_CHOICES:
+        return_issuer = vehicle["issuer"]
     if request.method == "POST":
         if not validate_csrf():
             abort(400)
         new_km = parse_float(request.form.get("current_km"), None)
         km_changed = new_km is not None and new_km != vehicle["current_km"]
         new_status = request.form.get("status", "ACTIVO")
+        new_issuer = request.form.get("vehicle_issuer", "").strip().upper()
+        if new_issuer not in ISSUER_CHOICES:
+            new_issuer = vehicle["issuer"]
         # 15 sep, pedido de Braulio: "disponible para programar" solo tiene
         # sentido mientras la unidad está en mantenimiento -- si acá (Flota
         # -> Editar unidad, que Despachador también puede usar) se le
@@ -369,7 +417,7 @@ def edit_vehicle(vehicle_id):
                soat_expiry=?, technical_review_expiry=?,
                current_km=?, current_km_updated_at=?, gps_external_id=?, owner=?,
                last_oil_change_km=?, last_oil_change_date=?, last_oil_change_workshop=?, last_oil_change_oil=?,
-               available_for_scheduling=?, gps_km_error=?
+               available_for_scheduling=?, gps_km_error=?, issuer=?
                WHERE id=?""",
             (
                 plate,
@@ -391,6 +439,7 @@ def edit_vehicle(vehicle_id):
                 request.form.get("last_oil_change_oil", "").strip() or None,
                 available_for_scheduling,
                 gps_km_error,
+                new_issuer,
                 vehicle_id,
             ),
         )
@@ -405,6 +454,16 @@ def edit_vehicle(vehicle_id):
                 entity_type="vehiculo", entity_id=vehicle_id,
                 entity_url=url_for("flota.vehicle_detail", vehicle_id=vehicle_id),
             )
+        elif new_issuer != vehicle["issuer"]:
+            # 30 sep: reasignación de empresa de la unidad (ver comentario de
+            # new_issuer más arriba) -- registro aparte para que quede
+            # trazable en el historial de actividad igual que un cambio de
+            # estado.
+            log_activity(
+                "flota", "EMPRESA", f"Vehículo {plate}: {vehicle['issuer']} → {new_issuer}",
+                entity_type="vehiculo", entity_id=vehicle_id,
+                entity_url=url_for("flota.vehicle_detail", vehicle_id=vehicle_id),
+            )
         else:
             log_activity(
                 "flota", "EDITAR", f"Vehículo {plate} ({brand} {model})".strip(),
@@ -412,9 +471,10 @@ def edit_vehicle(vehicle_id):
                 entity_url=url_for("flota.vehicle_detail", vehicle_id=vehicle_id),
             )
         flash("Unidad actualizada.", "success")
-        return redirect(url_for("flota.list_view"))
+        return redirect(url_for("flota.list_view", issuer=return_issuer))
     return render_template(
-        "flota/vehicle_form.html", vehicle=vehicle, mode="edit", vehicle_id=vehicle_id, owners=_vehicle_owners()
+        "flota/vehicle_form.html", vehicle=vehicle, mode="edit", vehicle_id=vehicle_id, owners=_vehicle_owners(),
+        issuer=return_issuer,
     )
 
 
@@ -456,7 +516,7 @@ def _vehicle_has_history(vehicle_id):
 def delete_vehicle(vehicle_id):
     if not validate_csrf():
         abort(400)
-    vehicle = query_one("SELECT plate, brand, model FROM vehicles WHERE id = ?", (vehicle_id,))
+    vehicle = query_one("SELECT plate, brand, model, issuer FROM vehicles WHERE id = ?", (vehicle_id,))
     if vehicle is None:
         abort(404)
     if _vehicle_has_history(vehicle_id):
@@ -495,7 +555,7 @@ def delete_vehicle(vehicle_id):
             entity_type="vehiculo", entity_id=vehicle_id,
         )
         flash("Unidad eliminada.", "success")
-    return redirect(url_for("flota.list_view"))
+    return redirect(url_for("flota.list_view", issuer=vehicle["issuer"]))
 
 
 # --- Importación masiva desde Excel (30 ago, pedido de Braulio) ---
@@ -511,7 +571,7 @@ def import_template():
     )
 
 
-def _apply_vehicle_import(rows, example_skips):
+def _apply_vehicle_import(rows, example_skips, issuer):
     created, updated, errors = 0, 0, []
     skipped = [
         {"row": r, "message": "Fila de ejemplo de la plantilla; se omitió automáticamente."}
@@ -549,8 +609,9 @@ def _apply_vehicle_import(rows, example_skips):
         seen_plates.add(plate)
         execute(
             """INSERT INTO vehicles (plate, brand, model, capacity_kg, status, vehicle_type, notes,
-               soat_expiry, technical_review_expiry, current_km, current_km_updated_at, gps_external_id, owner)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               soat_expiry, technical_review_expiry, current_km, current_km_updated_at, gps_external_id, owner,
+               issuer)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 plate,
                 row.get("brand") or "",
@@ -565,6 +626,13 @@ def _apply_vehicle_import(rows, example_skips):
                 today_str() if row.get("current_km") is not None else None,
                 gps_external_id,
                 row.get("owner") or None,
+                # 30 sep: las unidades NUEVAS creadas por esta importación
+                # quedan en la empresa desde la que se llegó al formulario de
+                # importación (?issuer=... threadeado desde flota/list.html);
+                # las filas que solo actualizan una unidad existente (rama de
+                # arriba, por gps_external_id) no tocan su empresa -- esta
+                # importación nunca reasigna de empresa una unidad ya creada.
+                issuer,
             ),
         )
         created += 1
@@ -574,14 +642,22 @@ def _apply_vehicle_import(rows, example_skips):
 @bp.route("/importar", methods=["GET", "POST"])
 @permission_required("flota", "edit")
 def import_vehicles():
+    # 30 sep: el formulario de import_form.html no tiene `action` (envía el
+    # POST a su propia URL, query string incluida -- comportamiento estándar
+    # del navegador), así que request.values trae `issuer` tanto en el GET
+    # como en el POST sin necesidad de un campo oculto en esa plantilla
+    # compartida con otros módulos.
+    issuer = request.values.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        issuer = "HARRASO"
     if request.method == "POST":
         if not validate_csrf():
             abort(400)
         rows, file_error, example_skips = read_import_rows(request.files.get("file"), VEHICLE_COLUMNS, VEHICLE_EXAMPLE)
         if file_error:
             flash(file_error, "error")
-            return redirect(url_for("flota.import_vehicles"))
-        result = _apply_vehicle_import(rows, example_skips)
+            return redirect(url_for("flota.import_vehicles", issuer=issuer))
+        result = _apply_vehicle_import(rows, example_skips, issuer)
         # 22 sep, registro de actividad (ver app/audit.py): UN solo registro
         # por archivo importado (no uno por fila/unidad) con el resumen del
         # resultado -- evita inundar el historial cuando el archivo trae
@@ -594,12 +670,12 @@ def import_vehicles():
         )
         return render_template(
             "import_result.html", result=result,
-            back_url=url_for("flota.list_view"), retry_url=url_for("flota.import_vehicles"),
+            back_url=url_for("flota.list_view", issuer=issuer), retry_url=url_for("flota.import_vehicles", issuer=issuer),
         )
     return render_template(
         "import_form.html", title="Importar unidades", module_label="las unidades de Flota",
-        template_url=url_for("flota.import_template"), upload_url=url_for("flota.import_vehicles"),
-        back_url=url_for("flota.list_view"), columns=VEHICLE_COLUMNS,
+        template_url=url_for("flota.import_template"), upload_url=url_for("flota.import_vehicles", issuer=issuer),
+        back_url=url_for("flota.list_view", issuer=issuer), columns=VEHICLE_COLUMNS,
     )
 
 
@@ -669,6 +745,12 @@ def _apply_oil_change_import(rows, example_skips):
 @bp.route("/importar-aceite", methods=["GET", "POST"])
 @permission_required("flota", "edit")
 def import_oil_changes():
+    # 30 sep: esta importación no crea unidades (solo actualiza datos de
+    # aceite de unidades existentes, ver comentario arriba), así que `issuer`
+    # acá es solo para volver a la lista correcta -- no se usa en ningún INSERT.
+    issuer = request.values.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        issuer = "HARRASO"
     if request.method == "POST":
         if not validate_csrf():
             abort(400)
@@ -677,7 +759,7 @@ def import_oil_changes():
         )
         if file_error:
             flash(file_error, "error")
-            return redirect(url_for("flota.import_oil_changes"))
+            return redirect(url_for("flota.import_oil_changes", issuer=issuer))
         result = _apply_oil_change_import(rows, example_skips)
         # 22 sep, registro de actividad (ver app/audit.py): mismo criterio
         # que import_vehicles() -- un solo registro por archivo, no uno por
@@ -690,11 +772,11 @@ def import_oil_changes():
         )
         return render_template(
             "import_result.html", result=result,
-            back_url=url_for("flota.list_view"), retry_url=url_for("flota.import_oil_changes"),
+            back_url=url_for("flota.list_view", issuer=issuer), retry_url=url_for("flota.import_oil_changes", issuer=issuer),
         )
     return render_template(
         "import_form.html", title="Importar últimos cambios de aceite",
         module_label="los últimos cambios de aceite de Flota",
-        template_url=url_for("flota.import_oil_changes_template"), upload_url=url_for("flota.import_oil_changes"),
-        back_url=url_for("flota.list_view"), columns=OIL_CHANGE_COLUMNS,
+        template_url=url_for("flota.import_oil_changes_template"), upload_url=url_for("flota.import_oil_changes", issuer=issuer),
+        back_url=url_for("flota.list_view", issuer=issuer), columns=OIL_CHANGE_COLUMNS,
     )

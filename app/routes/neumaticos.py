@@ -26,6 +26,12 @@ from app.tire_positions import (
     get_position_label,
     get_positions,
 )
+# 30 sep, pedido de Braulio ("los reportes tienen que estar separados como
+# empresa, asi mismo el modulo de mantenimiento tambien debe estar separado
+# por empresa" -- Q2: "Mantenimiento + Flota + Neumáticos"): mismo selector
+# obligatorio de empresa que ya usan Viajes/Liquidaciones/Facturación/Flota/
+# Mantenimiento -- ver vehicles.issuer en app/db.py.
+from app.routes.viajes import ISSUER_CHOICES
 
 bp = Blueprint("neumaticos", __name__, url_prefix="/neumaticos")
 
@@ -353,7 +359,16 @@ def tire_alerts():
 @bp.route("")
 @permission_required("neumaticos", "view")
 def list_view():
-    vehicles = query_all("SELECT * FROM vehicles ORDER BY plate")
+    """30 sep, pedido de Braulio: selector obligatorio de empresa, mismo
+    patrón que flota.list_view()/mantenimiento.list_view() -- sin
+    ?issuer=HARRASO|BRMS en la URL no se consulta ni se muestra ninguna
+    unidad. El inventario de llantas (inventory_list y afines, más abajo) NO
+    se separa por empresa -- es un stock físico compartido que se mueve de
+    una unidad a otra sin importar a qué empresa pertenezca cada una."""
+    issuer = request.args.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        return render_template("neumaticos/list.html", summary=None, issuer=None)
+    vehicles = query_all("SELECT * FROM vehicles WHERE issuer = ? ORDER BY plate", (issuer,))
     summary = []
     for v in vehicles:
         positions = get_positions(v["vehicle_type"])
@@ -377,7 +392,7 @@ def list_view():
                 "worst_badge": worst_badge,
             }
         )
-    return render_template("neumaticos/list.html", summary=summary)
+    return render_template("neumaticos/list.html", summary=summary, issuer=issuer)
 
 
 @bp.route("/inventario")

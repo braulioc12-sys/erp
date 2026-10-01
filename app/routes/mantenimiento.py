@@ -8,6 +8,11 @@ from app.db import execute, get_db, get_setting, query_all, query_one
 from app.helpers import parse_date, parse_float, today_str
 from app.routes.inventarios import get_catalog_items
 from app.seed_data import DEFAULT_JOB_TYPES, MECHANIC_TYPES, labor_cost_setting_key
+# 30 sep, pedido de Braulio ("los reportes tienen que estar separados como
+# empresa, asi mismo el modulo de mantenimiento tambien debe estar separado
+# por empresa"): mismo selector obligatorio de empresa que ya usan
+# Viajes/Liquidaciones/Facturación/Flota -- ver vehicles.issuer en app/db.py.
+from app.routes.viajes import ISSUER_CHOICES
 
 bp = Blueprint("mantenimiento", __name__, url_prefix="/mantenimiento")
 
@@ -203,6 +208,16 @@ def _insert_selected_materials(db, record_id, selected_materials):
 @bp.route("")
 @permission_required("mantenimiento", "view")
 def list_view():
+    """30 sep, pedido de Braulio ("el modulo de mantenimiento tambien debe
+    estar separado por empresa"): selector obligatorio de empresa, mismo
+    patrón que flota.list_view()/viajes.list_view() -- sin ?issuer=... en la
+    URL no se consulta ni se muestra ninguna orden."""
+    issuer = request.args.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        return render_template(
+            "mantenimiento/list.html", records=None, issuer=None, jobs_by_record={}, status_by_record={},
+            order_status_labels=ORDER_STATUS_LABELS, vehicle_id=None, filtered_vehicle=None, readonly=False,
+        )
     vehicle_id = request.args.get("vehicle_id", type=int)
     # 18 sep, pedido de Braulio: entrando desde "Historial y costos por
     # unidad" (mantenimiento.by_vehicle) el listado de órdenes debe quedar
@@ -213,8 +228,8 @@ def list_view():
     # parámetro explícito (?readonly=1) y no de si vehicle_id está presente.
     readonly = request.args.get("readonly") == "1"
     sql = """SELECT m.*, v.plate as vehicle_plate FROM maintenance_records m
-              JOIN vehicles v ON v.id = m.vehicle_id WHERE 1=1"""
-    params = []
+              JOIN vehicles v ON v.id = m.vehicle_id WHERE v.issuer = ?"""
+    params = [issuer]
     if vehicle_id:
         sql += " AND m.vehicle_id = ?"
         params.append(vehicle_id)
@@ -248,7 +263,7 @@ def list_view():
         if vehicle_id else None
     )
     return render_template(
-        "mantenimiento/list.html", records=records, jobs_by_record=jobs_by_record,
+        "mantenimiento/list.html", records=records, issuer=issuer, jobs_by_record=jobs_by_record,
         status_by_record=status_by_record, order_status_labels=ORDER_STATUS_LABELS,
         vehicle_id=vehicle_id, filtered_vehicle=filtered_vehicle, readonly=readonly,
     )
@@ -257,7 +272,17 @@ def list_view():
 @bp.route("/nuevo", methods=["GET", "POST"])
 @permission_required("mantenimiento", "edit")
 def new():
-    vehicles = query_all("SELECT id, plate, current_km, current_km_updated_at FROM vehicles ORDER BY plate")
+    # 30 sep: la unidad a elegir se limita a las de la empresa desde la que
+    # se llegó a este formulario (?issuer=... threadeado desde
+    # mantenimiento/list.html) -- request.values porque form.html reenvía el
+    # POST a su propia URL sin `action` (query string incluida), igual que
+    # flota.import_vehicles().
+    issuer = request.values.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        issuer = "HARRASO"
+    vehicles = query_all(
+        "SELECT id, plate, current_km, current_km_updated_at FROM vehicles WHERE issuer = ? ORDER BY plate", (issuer,)
+    )
     # 2 sep, pedido de Braulio: al elegir la unidad en el formulario, el
     # cuadro de "Kilometraje Odómetro" se auto-llena con el último dato del
     # GPS (JS, ver form.html) — este mapa se lo entrega listo por id de
@@ -284,6 +309,10 @@ def new():
         errors = []
         if not vehicle_id:
             errors.append("Selecciona una unidad.")
+        elif not query_one("SELECT id FROM vehicles WHERE id = ? AND issuer = ?", (vehicle_id, issuer)):
+            # 30 sep: defensa contra manipular el <select> (o el form) para
+            # mandar una unidad que no pertenece a la empresa elegida acá.
+            errors.append("La unidad seleccionada no pertenece a la empresa elegida.")
 
         if errors:
             for e in errors:
@@ -291,7 +320,7 @@ def new():
             return render_template(
                 "mantenimiento/form.html", record=request.form, vehicles=vehicles, vehicles_km=vehicles_km,
                 job_types=job_types, materials=materials, labor_costs=labor_costs,
-                mechanic_types=MECHANIC_TYPES, mechanics=mechanics, today=today_str(),
+                mechanic_types=MECHANIC_TYPES, mechanics=mechanics, today=today_str(), issuer=issuer,
             )
 
         selected_jobs = [j for j in job_types if j["id"] in job_ids]
@@ -361,12 +390,12 @@ def new():
             )
 
         flash("Mantenimiento registrado.", "success")
-        return redirect(url_for("mantenimiento.list_view"))
+        return redirect(url_for("mantenimiento.list_view", issuer=issuer))
 
     return render_template(
         "mantenimiento/form.html", record=None, vehicles=vehicles, vehicles_km=vehicles_km,
         job_types=job_types, materials=materials, labor_costs=labor_costs,
-        mechanic_types=MECHANIC_TYPES, mechanics=mechanics, today=today_str(),
+        mechanic_types=MECHANIC_TYPES, mechanics=mechanics, today=today_str(), issuer=issuer,
     )
 
 
@@ -380,6 +409,14 @@ def new():
 def delete(record_id):
     if not validate_csrf():
         abort(400)
+    # 30 sep: solo para volver a la lista de la empresa correcta (threadeado
+    # como ?issuer=... en el action del form de mantenimiento/list.html) --
+    # url_for() omite el parámetro si queda en None, cayendo de vuelta en el
+    # selector de empresa (mismo truco que ?readonly=1 if readonly else None
+    # más abajo en ese mismo template).
+    issuer = request.args.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        issuer = None
     # 22 sep, registro de actividad: la etiqueta se arma ANTES de borrar
     # (después ya no habría de dónde sacar la placa de la unidad -- ver
     # _order_label()), pero se registra recién después de que el borrado ya
@@ -393,7 +430,7 @@ def delete(record_id):
         entity_type="orden_mantenimiento", entity_id=record_id,
     )
     flash("Registro de mantenimiento eliminado.", "success")
-    return redirect(url_for("mantenimiento.list_view"))
+    return redirect(url_for("mantenimiento.list_view", issuer=issuer))
 
 
 # --- Detalle de una orden: marcar trabajos terminados/pendientes y asignar mecánico ---
@@ -410,7 +447,8 @@ def detail(record_id):
     # la casilla al registrar el ingreso a mantenimiento).
     record = query_one(
         """SELECT m.*, v.plate as vehicle_plate, v.status as vehicle_status,
-                  v.available_for_scheduling as vehicle_available_for_scheduling
+                  v.available_for_scheduling as vehicle_available_for_scheduling,
+                  v.issuer as vehicle_issuer
            FROM maintenance_records m
            JOIN vehicles v ON v.id = m.vehicle_id WHERE m.id = ?""",
         (record_id,),
@@ -933,6 +971,12 @@ def mechanics_toggle(mechanic_id):
 @bp.route("/por-unidad")
 @permission_required("mantenimiento", "view")
 def by_vehicle():
+    """30 sep, pedido de Braulio: mismo selector obligatorio de empresa que
+    list_view() -- "Historial y costos por unidad" es, en el fondo, otro
+    listado de unidades (de Mantenimiento), así que también queda gateado."""
+    issuer = request.args.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        return render_template("mantenimiento/by_vehicle.html", summary=None, issuer=None)
     summary = query_all(
         """SELECT v.id, v.plate, v.current_km, v.current_km_updated_at, v.status, v.available_for_scheduling,
                   v.gps_km_error, MAX(vl.odometer_km) AS gps_odometer_km,
@@ -942,10 +986,12 @@ def by_vehicle():
            FROM vehicles v
            LEFT JOIN maintenance_records m ON m.vehicle_id = v.id
            LEFT JOIN vehicle_locations vl ON vl.vehicle_id = v.id
+           WHERE v.issuer = ?
            GROUP BY v.id
-           ORDER BY v.plate"""
+           ORDER BY v.plate""",
+        (issuer,),
     )
-    return render_template("mantenimiento/by_vehicle.html", summary=summary)
+    return render_template("mantenimiento/by_vehicle.html", summary=summary, issuer=issuer)
 
 
 @bp.route("/unidad/<int:vehicle_id>/ingresar-mantenimiento", methods=["POST"])

@@ -57,6 +57,7 @@ ACTION_LABELS = {
     "GENERAR": "Generó",
     "ENVIAR": "Envió",
     "ESTADO": "Cambió estado",
+    "EMPRESA": "Reasignó empresa",
     "DESACTIVAR": "Desactivó",
     "REACTIVAR": "Reactivó",
     "APROBAR": "Aprobó",

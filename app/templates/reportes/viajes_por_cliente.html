@@ -1,28 +1,30 @@
 {% extends 'base.html' %}
+{% import 'partials/company_gate.html' as cg %}
 {% block title %}Viajes por cliente{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>Viajes por cliente</h1>
+  <h1>Viajes por cliente{% if issuer %} — {{ 'BRMS' if issuer == 'BRMS' else 'Harraso Transport' }}{% endif %}</h1>
+  {% if issuer %}
   <div class="page-actions">
     <a href="{{ url_for('reportes.viajes_por_cliente_export', from_date=from_date, to_date=to_date, issuer=issuer) }}" class="btn btn-secondary">⬇ Exportar a Excel</a>
     <a href="{{ url_for('reportes.centro') }}" class="btn btn-secondary">← Centro de reportes</a>
   </div>
+  {% endif %}
 </div>
+
+{% if not issuer %}
+{{ cg.company_gate('reportes.viajes_por_cliente', 'para ver viajes por cliente') }}
+{% else %}
+<p class="company-switch"><a href="{{ url_for('reportes.viajes_por_cliente') }}">↺ Cambiar de empresa</a></p>
 <p class="muted mt-0">Cantidad de viajes y monto total (tarifa) por cliente, en el rango de fechas elegido. No incluye viajes cancelados.</p>
 
 <form class="filters" method="get">
+  <input type="hidden" name="issuer" value="{{ issuer }}">
   <label>Desde
     <input type="date" name="from_date" value="{{ from_date }}">
   </label>
   <label>Hasta
     <input type="date" name="to_date" value="{{ to_date }}">
-  </label>
-  <label>Empresa
-    <select name="issuer">
-      <option value="" {{ 'selected' if not issuer }}>Ambas</option>
-      <option value="HARRASO" {{ 'selected' if issuer == 'HARRASO' }}>Harraso Transport</option>
-      <option value="BRMS" {{ 'selected' if issuer == 'BRMS' }}>BRMS</option>
-    </select>
   </label>
   <button class="btn btn-secondary" type="submit">Filtrar</button>
   <div class="muted" style="margin-left:auto;">{{ total_trips }} viaje(s) · Total: <strong>{{ total_amount|money }}</strong></div>
@@ -44,4 +46,5 @@
     </tbody>
   </table>
 </div>
+{% endif %}
 {% endblock %}

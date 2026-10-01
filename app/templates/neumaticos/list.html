@@ -1,13 +1,22 @@
 {% extends 'base.html' %}
 {% import 'partials/macros.html' as m %}
+{% import 'partials/company_gate.html' as cg %}
 {% block title %}Neumáticos{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>Neumáticos por unidad</h1>
+  <h1>Neumáticos por unidad{% if issuer %} — {{ 'BRMS' if issuer == 'BRMS' else 'Harraso Transport' }}{% endif %}</h1>
   <div class="page-actions">
+    {# 30 sep: el inventario de llantas es un stock físico compartido entre
+       ambas empresas (no se separa por empresa, ver comentario en
+       neumaticos.list_view()), así que este link no lleva issuer. #}
     <a href="{{ url_for('neumaticos.inventory_list') }}" class="btn btn-secondary">Inventario de llantas</a>
   </div>
 </div>
+
+{% if not issuer %}
+{{ cg.company_gate('neumaticos.list_view', 'para ver sus neumáticos') }}
+{% else %}
+<p class="company-switch"><a href="{{ url_for('neumaticos.list_view') }}">↺ Cambiar de empresa</a></p>
 <p class="muted mt-0">Elige una unidad para ver su diagrama de posiciones y controlar la vida útil de cada llanta.</p>
 
 <div class="table-wrap">
@@ -34,4 +43,5 @@
     </tbody>
   </table>
 </div>
+{% endif %}
 {% endblock %}

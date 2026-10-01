@@ -1,16 +1,25 @@
 {% extends 'base.html' %}
+{% import 'partials/company_gate.html' as cg %}
 {% block title %}Costos de mantenimiento{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>Costos de mantenimiento por unidad</h1>
+  <h1>Costos de mantenimiento por unidad{% if issuer %} — {{ 'BRMS' if issuer == 'BRMS' else 'Harraso Transport' }}{% endif %}</h1>
+  {% if issuer %}
   <div class="page-actions">
-    <a href="{{ url_for('reportes.costos_mantenimiento_export', from_date=from_date, to_date=to_date, vehicle_id=vehicle_id) }}" class="btn btn-secondary">⬇ Exportar a Excel</a>
+    <a href="{{ url_for('reportes.costos_mantenimiento_export', from_date=from_date, to_date=to_date, vehicle_id=vehicle_id, issuer=issuer) }}" class="btn btn-secondary">⬇ Exportar a Excel</a>
     <a href="{{ url_for('reportes.centro') }}" class="btn btn-secondary">← Centro de reportes</a>
   </div>
+  {% endif %}
 </div>
+
+{% if not issuer %}
+{{ cg.company_gate('reportes.costos_mantenimiento', 'para ver sus costos de mantenimiento') }}
+{% else %}
+<p class="company-switch"><a href="{{ url_for('reportes.costos_mantenimiento') }}">↺ Cambiar de empresa</a></p>
 <p class="muted mt-0">Gasto total y cantidad de mantenimientos por vehículo, en el rango de fechas elegido.</p>
 
 <form class="filters" method="get">
+  <input type="hidden" name="issuer" value="{{ issuer }}">
   <label>Desde
     <input type="date" name="from_date" value="{{ from_date }}">
   </label>
@@ -45,4 +54,5 @@
     </tbody>
   </table>
 </div>
+{% endif %}
 {% endblock %}

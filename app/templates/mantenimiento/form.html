@@ -1,9 +1,14 @@
 {% extends 'base.html' %}
 {% block title %}Registrar mantenimiento{% endblock %}
 {% block content %}
-<div class="page-header"><h1>Registrar mantenimiento</h1></div>
+<div class="page-header"><h1>Registrar mantenimiento{% if issuer %} — {{ 'BRMS' if issuer == 'BRMS' else 'Harraso Transport' }}{% endif %}</h1></div>
 <form class="form panel" method="post">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {# 30 sep: la lista de unidades (`vehicles`) ya viene filtrada por esta
+     empresa desde mantenimiento.new() -- este campo oculto solo repite el
+     ?issuer=... de la URL en el POST, para que la ruta pueda re-validar que
+     la unidad elegida siga perteneciendo a esta empresa. #}
+  <input type="hidden" name="issuer" value="{{ issuer }}">
 
   <div class="form-row">
     <label>Unidad *
@@ -239,7 +244,7 @@
 
   <div class="btn-group">
     <button type="submit" class="btn btn-primary">Guardar</button>
-    <a href="{{ url_for('mantenimiento.list_view') }}" class="btn btn-secondary">Cancelar</a>
+    <a href="{{ url_for('mantenimiento.list_view', issuer=issuer) }}" class="btn btn-secondary">Cancelar</a>
   </div>
 </form>
 {% endblock %}

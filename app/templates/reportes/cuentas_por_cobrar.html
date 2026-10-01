@@ -1,30 +1,32 @@
 {% extends 'base.html' %}
 {% import 'partials/macros.html' as m %}
+{% import 'partials/company_gate.html' as cg %}
 {% block title %}Cuentas por cobrar{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>Cuentas por cobrar</h1>
+  <h1>Cuentas por cobrar{% if issuer %} — {{ 'BRMS' if issuer == 'BRMS' else 'Harraso Transport' }}{% endif %}</h1>
+  {% if issuer %}
   <div class="page-actions">
     <a href="{{ url_for('reportes.cuentas_por_cobrar_export', client_id=client_id, issuer=issuer, only_overdue='1' if only_overdue else '') }}" class="btn btn-secondary">⬇ Exportar a Excel</a>
     <a href="{{ url_for('reportes.centro') }}" class="btn btn-secondary">← Centro de reportes</a>
   </div>
+  {% endif %}
 </div>
+
+{% if not issuer %}
+{{ cg.company_gate('reportes.cuentas_por_cobrar', 'para ver sus cuentas por cobrar') }}
+{% else %}
+<p class="company-switch"><a href="{{ url_for('reportes.cuentas_por_cobrar') }}">↺ Cambiar de empresa</a></p>
 <p class="muted mt-0">Facturas pendientes o vencidas, con los días de atraso calculados sobre la fecha de vencimiento.</p>
 
 <form class="filters" method="get">
+  <input type="hidden" name="issuer" value="{{ issuer }}">
   <label>Cliente
     <select name="client_id">
       <option value="">Todos</option>
       {% for c in clients %}
       <option value="{{ c.id }}" {{ 'selected' if client_id == c.id }}>{{ c.name }}</option>
       {% endfor %}
-    </select>
-  </label>
-  <label>Empresa
-    <select name="issuer">
-      <option value="" {{ 'selected' if not issuer }}>Ambas</option>
-      <option value="HARRASO" {{ 'selected' if issuer == 'HARRASO' }}>Harraso Transport</option>
-      <option value="BRMS" {{ 'selected' if issuer == 'BRMS' }}>BRMS</option>
     </select>
   </label>
   <label style="flex-direction:row; align-items:center; gap:6px;">
@@ -54,4 +56,5 @@
     </tbody>
   </table>
 </div>
+{% endif %}
 {% endblock %}

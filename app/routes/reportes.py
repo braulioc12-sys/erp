@@ -29,6 +29,15 @@ from flask import Blueprint, Response, current_app, flash, redirect, render_temp
 from app.auth import can, permission_required
 from app.db import query_all, query_one
 from app.helpers import parse_date, today_str
+# 30 sep, pedido de Braulio ("los reportes tienen que estar separados como
+# empresa"): "Viajes por cliente", "Cuentas por cobrar" y "Costos de
+# mantenimiento por unidad" pasan de un filtro OPCIONAL de empresa (con
+# "Ambas empresas" por defecto) a un selector OBLIGATORIO -- mismo patrón
+# (company_gate) que ya usan Viajes/Liquidaciones/Facturación/Flota/
+# Mantenimiento/Neumáticos. El dashboard (index(), arriba) y "Pagos por
+# persona" (más abajo) NO se tocan -- Braulio los dejó explícitamente fuera
+# de este alcance.
+from app.routes.viajes import ISSUER_CHOICES
 
 bp = Blueprint("reportes", __name__, url_prefix="/reportes")
 
@@ -199,6 +208,15 @@ def viajes_por_cliente():
     redirect_resp = _require_section("viajes")
     if redirect_resp:
         return redirect_resp
+    # 30 sep: selector obligatorio de empresa (ya no existe la opción "Ambas
+    # empresas") -- sin ?issuer=HARRASO|BRMS en la URL solo se muestra el
+    # selector, mismo patrón que viajes.list_view()/flota.list_view().
+    issuer = request.args.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        return render_template(
+            "reportes/viajes_por_cliente.html", rows=None, issuer=None, from_date="",
+            to_date="", total_trips=0, total_amount=0,
+        )
     rows, from_date, to_date, issuer = _trips_by_client_rows(request.args)
     total_trips = sum(r["trip_count"] for r in rows)
     total_amount = sum(r["total_rate"] or 0 for r in rows)
@@ -214,12 +232,19 @@ def viajes_por_cliente_export():
     redirect_resp = _require_section("viajes")
     if redirect_resp:
         return redirect_resp
+    # 30 sep: el botón "Exportar a Excel" de la pantalla gateada arriba
+    # siempre manda ?issuer=... -- esto es solo defensa contra un link
+    # armado a mano sin empresa.
+    issuer = request.args.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        flash("Elige una empresa para exportar este reporte.", "error")
+        return redirect(url_for("reportes.viajes_por_cliente"))
     from app.reports import build_trips_by_client_workbook
 
     rows, from_date, to_date, issuer = _trips_by_client_rows(request.args)
     parts = []
     parts.append(f"Periodo: {from_date or 'inicio'} a {to_date or 'hoy'}" if (from_date or to_date) else "Todas las fechas")
-    parts.append(f"Empresa: {'BRMS' if issuer == 'BRMS' else 'Harraso Transport'}" if issuer in ("HARRASO", "BRMS") else "Ambas empresas")
+    parts.append(f"Empresa: {'BRMS' if issuer == 'BRMS' else 'Harraso Transport'}")
     buffer = build_trips_by_client_workbook(
         rows, company_name=current_app.config["COMPANY_NAME"], filter_description="  ·  ".join(parts),
     )
@@ -278,6 +303,13 @@ def cuentas_por_cobrar():
     redirect_resp = _require_section("facturacion")
     if redirect_resp:
         return redirect_resp
+    # 30 sep: selector obligatorio de empresa (ya no existe "Ambas empresas").
+    issuer = request.args.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        return render_template(
+            "reportes/cuentas_por_cobrar.html", rows=None, clients=[], client_id=None,
+            issuer=None, only_overdue=False, total=0,
+        )
     rows, client_id, issuer, only_overdue = _accounts_receivable_rows(request.args)
     clients = query_all(
         """SELECT DISTINCT c.id, c.name FROM clients c JOIN invoices i ON i.client_id = c.id
@@ -296,12 +328,16 @@ def cuentas_por_cobrar_export():
     redirect_resp = _require_section("facturacion")
     if redirect_resp:
         return redirect_resp
+    issuer = request.args.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        flash("Elige una empresa para exportar este reporte.", "error")
+        return redirect(url_for("reportes.cuentas_por_cobrar"))
     from app.reports import build_accounts_receivable_workbook
 
     rows, client_id, issuer, only_overdue = _accounts_receivable_rows(request.args)
     parts = []
     parts.append("Solo vencidas" if only_overdue else "Pendientes y vencidas")
-    parts.append(f"Empresa: {'BRMS' if issuer == 'BRMS' else 'Harraso Transport'}" if issuer in ("HARRASO", "BRMS") else "Ambas empresas")
+    parts.append(f"Empresa: {'BRMS' if issuer == 'BRMS' else 'Harraso Transport'}")
     buffer = build_accounts_receivable_workbook(
         rows, company_name=current_app.config["COMPANY_NAME"], filter_description="  ·  ".join(parts),
     )
@@ -317,15 +353,19 @@ def cuentas_por_cobrar_export():
 # ---------------------------------------------------------------------------
 
 
-def _maintenance_costs_rows(args):
+def _maintenance_costs_rows(args, issuer):
     from_date = parse_date(args.get("from_date", ""))
     to_date = parse_date(args.get("to_date", ""))
     vehicle_id = args.get("vehicle_id", type=int)
 
+    # 30 sep: "v.issuer = ?" acá (no solo en el <select> de unidades) para
+    # que, si alguien arma a mano una URL con vehicle_id de la OTRA empresa,
+    # la fila simplemente no aparezca -- mismo criterio que
+    # mantenimiento.new() valida el vehicle_id posteado.
     sql = """SELECT v.id as vehicle_id, v.plate, COUNT(*) as record_count, SUM(m.cost) as total_cost
               FROM maintenance_records m JOIN vehicles v ON v.id = m.vehicle_id
-              WHERE 1=1"""
-    params = []
+              WHERE v.issuer = ?"""
+    params = [issuer]
     if from_date:
         sql += " AND m.maintenance_date >= ?"
         params.append(from_date)
@@ -346,12 +386,22 @@ def costos_mantenimiento():
     redirect_resp = _require_section("mantenimiento")
     if redirect_resp:
         return redirect_resp
-    rows, from_date, to_date, vehicle_id = _maintenance_costs_rows(request.args)
-    vehicles = query_all("SELECT id, plate FROM vehicles ORDER BY plate")
+    # 30 sep: selector obligatorio de empresa, ahora que vehicles.issuer
+    # existe (ver flota.list_view()/mantenimiento.list_view()) -- este
+    # reporte es, en el fondo, un reporte de Mantenimiento, así que queda
+    # gateado igual que ese módulo.
+    issuer = request.args.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        return render_template(
+            "reportes/costos_mantenimiento.html", rows=None, vehicles=[], vehicle_id=None, issuer=None,
+            from_date="", to_date="", total_cost=0, total_records=0,
+        )
+    rows, from_date, to_date, vehicle_id = _maintenance_costs_rows(request.args, issuer)
+    vehicles = query_all("SELECT id, plate FROM vehicles WHERE issuer = ? ORDER BY plate", (issuer,))
     total_cost = sum(r["total_cost"] or 0 for r in rows)
     total_records = sum(r["record_count"] for r in rows)
     return render_template(
-        "reportes/costos_mantenimiento.html", rows=rows, vehicles=vehicles, vehicle_id=vehicle_id,
+        "reportes/costos_mantenimiento.html", rows=rows, vehicles=vehicles, vehicle_id=vehicle_id, issuer=issuer,
         from_date=from_date or "", to_date=to_date or "", total_cost=total_cost, total_records=total_records,
     )
 
@@ -362,11 +412,16 @@ def costos_mantenimiento_export():
     redirect_resp = _require_section("mantenimiento")
     if redirect_resp:
         return redirect_resp
+    issuer = request.args.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        flash("Elige una empresa para exportar este reporte.", "error")
+        return redirect(url_for("reportes.costos_mantenimiento"))
     from app.reports import build_maintenance_costs_workbook
 
-    rows, from_date, to_date, vehicle_id = _maintenance_costs_rows(request.args)
+    rows, from_date, to_date, vehicle_id = _maintenance_costs_rows(request.args, issuer)
     parts = []
     parts.append(f"Periodo: {from_date or 'inicio'} a {to_date or 'hoy'}" if (from_date or to_date) else "Todas las fechas")
+    parts.append(f"Empresa: {'BRMS' if issuer == 'BRMS' else 'Harraso Transport'}")
     buffer = build_maintenance_costs_workbook(
         rows, company_name=current_app.config["COMPANY_NAME"], filter_description="  ·  ".join(parts),
     )
