@@ -30,19 +30,23 @@ que reemplaza al primer intento del mismo día basado en un PDF suelto de
 - Emitir factura: PUT /factura-api/invoice2u/integracion/factura/{ruc} —
   URI reconfirmada tal cual por el correo del 21 sep de arriba.
 - Emitir guía de remisión (TRANSPORTISTA): POST
-  /guiatransportista-api/invoice2u/integracion/guiaremision/transportista/{ruc}.
-  21 sep, CORREGIDO contra el mismo correo de soporte: la URI real es
-  ".../guiaremision/transportista/{ruc}" (SIN guión, una sola palabra) —
-  la versión anterior de este archivo (desde el patch 0032, 14 sep) usaba
-  ".../guia-remision/transportista/{ruc}" (CON guión), un nombre que nunca
-  se confirmó contra un 201/200 real de este endpoint específico (el 201
-  Created del patch 0032 fue sobre la ESTRUCTURA del payload, sin que
-  quedara registrado ahí el path exacto de la URL usada). Con el guión de
-  más, cualquier guía transportista real habría estado fallando con 404
-  ("ruta no encontrada") en vez de llegar siquiera a validarse — si
-  Braulio mandó guías transportista reales y quedaron ACEPTADAS antes de
-  este fix, avisar para revisar qué URI se usó de verdad en ese momento
-  (por si el servidor de tefacturo.pe acepta ambas variantes).
+  /guiatransportista-api/invoice2u/integracion/guia-remision/transportista/{ruc}
+  (CON guión en "guia-remision"). Hubo un vaivén con este guión:
+  * 8-9 sep (patch 0032): CON guión, confirmado contra un 400 real del
+    servidor (llegó a procesar el payload completo y lo rechazó por un
+    campo puntual -- ver la "Segunda corrección" más abajo).
+  * 21 sep: se quitó el guión ("guiaremision", una sola palabra),
+    basándose en un correo de soporte de tefacturo.pe que decía que esa
+    era la URI real -- pero nunca se vio un 201/200 real con esa versión
+    para confirmarlo.
+  * 1 oct: REVERTIDO de vuelta a CON guión. Una guía real de BRMS con la
+    URL sin guión devolvió 404 ("ruta no encontrada", ni ACEPTADA ni
+    RECHAZADA -- un error antes de que SUNAT viera nada). Braulio le
+    mandó ese error exacto por WhatsApp a Juan Carlos (soporte técnico de
+    tefacturo.pe/Close2u), que confirmó viendo la URL tal cual: "falta un
+    guion en /guia-remision/ esta junto". Si esto vuelve a fallar con 404,
+    pedirle a tefacturo.pe la URI completa por escrito (no de memoria) —
+    ya van dos versiones contradictorias de su lado.
   tefacturo.pe también documenta un endpoint de guía REMITENTE
   (guiaremitente-api/.../guia-remision/{ruc}) — no se implementó aquí a
   propósito: la guía remitente la debe emitir el DUEÑO de la carga (el
@@ -317,13 +321,28 @@ class TefacturoClient:
 
     def emit_guia_transportista(self, payload):
         self._require_configured()
-        # 21 sep: "guiaremision" SIN guión -- corregido contra el correo de
-        # soporte técnico de tefacturo.pe, ver la nota grande al inicio del
-        # archivo. Antes decía "guia-remision" (con guión), nunca confirmado
-        # contra un 201/200 real de este endpoint específico.
+        # 1 oct, REVERTIDO el cambio del 21 sep: ese día se quitó el guión
+        # de "guia-remision" basándose en un correo de soporte de
+        # tefacturo.pe que decía que la URI real era sin guión -- pero
+        # nunca se vio un 201/200 real con esa versión. Hoy, al mandar una
+        # guía real de BRMS con la URL SIN guión, el servidor devolvió 404
+        # ("ruta no encontrada" -- no una ACEPTADA/RECHAZADA de SUNAT, un
+        # error antes de siquiera procesar nada). Braulio le mandó ese
+        # error exacto a Juan Carlos (soporte técnico de tefacturo.pe/
+        # Close2u, el mismo contacto de siempre) por WhatsApp, y confirmó
+        # viendo la URL tal cual: "falta un guion en /guia-remision/ esta
+        # junto" -- es decir, la URI real SÍ lleva el guión, al revés de lo
+        # que decía el correo del 21 sep. Se vuelve a "guia-remision" (con
+        # guión), que es además lo que ya traía la primera versión de este
+        # archivo (8-9 sep, confirmada contra un 400 real del servidor que
+        # sí llegó a procesar el payload completo -- ver el comentario
+        # grande al inicio del archivo). Si esto vuelve a fallar, pedirle a
+        # Juan Carlos la URI completa exacta por escrito en vez de que la
+        # dicte de memoria -- ya van dos versiones contradictorias de su
+        # lado.
         return self._request(
             "POST",
-            f"/guiatransportista-api/invoice2u/integracion/guiaremision/transportista/{self.ruc}",
+            f"/guiatransportista-api/invoice2u/integracion/guia-remision/transportista/{self.ruc}",
             payload,
         )
 
