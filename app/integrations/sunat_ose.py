@@ -783,8 +783,31 @@ def build_invoice_payload(invoice, items, client, company):
     # por factura, ver invoices.due_date) -- se manda una sola cuota por el
     # total de la factura, cubre el caso real de Braulio; si en el futuro
     # hace falta dividir en varias cuotas, hay que rediseñar esto.
+    # 1 oct, bug real (Harraso, factura F-0020 a crédito con detracción y
+    # varios ítems): tefacturo.pe rechazó el envío con 400 ("El total de
+    # las cuotas es mayor al importe total"). Causa: `total_con_igv` sumaba
+    # directo invoice_items.amount (el monto YA CON IGV que guarda este
+    # sistema, redondeado por ítem) — pero detalleDocumento manda cada
+    # ítem SIN IGV, redondeado individualmente por _split_igv() (ver más
+    # arriba), y tefacturo.pe arma su propio "importe total" a partir de
+    # ESOS valores sin IGV (sumando el subtotal y recién ahí aplicando el
+    # 18% una sola vez) — NO volviendo a sumar nuestros montos originales
+    # con IGV. Con varios ítems, el redondeo individual de cada
+    # valorVentaUnitarioItem puede perder un centavo o dos frente a sumar
+    # los montos originales directo, así que nuestra cuota (basada en los
+    # montos originales) terminaba por encima del total que tefacturo.pe
+    # calculaba por su cuenta. Se corrige recalculando el total de la
+    # MISMA forma que tefacturo.pe (subtotal sin IGV de `detalle` -> +18%
+    # una sola vez sobre ese subtotal), para que nunca quede por encima de
+    # lo que ellos mismos calculan. BRMS (igv_exonerado) no se ve afectada:
+    # sus valorVentaUnitarioItem ya son el monto total, sin redondeo de
+    # por medio.
     if forma_pago == "CREDITO":
-        total_con_igv = sum(float(it["amount"]) for it in items)
+        subtotal_sin_igv = sum(d["valorVentaUnitarioItem"] for d in detalle)
+        if igv_exonerado:
+            total_con_igv = round(subtotal_sin_igv, 2)
+        else:
+            total_con_igv = round(subtotal_sin_igv * (1 + IGV_RATE), 2)
         payload["cuotas"] = [
             {
                 "monto": f"{total_con_igv:.2f}",
