@@ -42,6 +42,13 @@
       <button type="submit" class="btn btn-primary">📤 Enviar a SUNAT</button>
     </form>
     {% endif %}
+    {# 1 oct, feature "Notas de crédito": solo tiene sentido una vez que
+       SUNAT ACEPTÓ el comprobante real -- ver new_credit_note() en
+       app/routes/facturacion.py. Completamente separado del botón "Anular"
+       de arriba (que sigue intacto, a pedido expreso de Braulio). #}
+    {% if invoice.sunat_status == 'ACEPTADO' and can(current_user.roles, 'facturacion', 'edit') %}
+    <a href="{{ url_for('facturacion.new_credit_note', invoice_id=invoice.id) }}" class="btn btn-secondary">🧾 Emitir nota de crédito</a>
+    {% endif %}
     {# 29 sep, pedido de Braulio: borrado propio del "Anular" de arriba,
        solo para Administrador (permiso "delete") -- una factura ya
        ACEPTADA por SUNAT no se puede borrar del todo (ver
@@ -247,5 +254,29 @@
 </div>
 {% if invoice.notes %}
 <div class="panel"><h2>Notas</h2><p class="mt-0">{{ invoice.notes }}</p></div>
+{% endif %}
+
+{# 1 oct, feature "Notas de crédito": solo aparece el panel cuando ya
+   existe al menos una -- mismo criterio que el panel de "Guías de remisión
+   generadas" en viajes/detail.html. #}
+{% if credit_notes %}
+<div class="panel">
+  <h2 class="mt-0">Notas de crédito emitidas</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>N°</th><th>Motivo</th><th class="text-right">Monto</th><th>Estado SUNAT</th></tr></thead>
+      <tbody>
+        {% for cn in credit_notes %}
+        <tr>
+          <td><a href="{{ url_for('facturacion.credit_note_detail', credit_note_id=cn.id) }}">{{ cn.number }}</a></td>
+          <td>{{ credit_note_reason_labels.get(cn.reason_code, cn.reason_code) }}</td>
+          <td class="text-right">{{ cn.amount|invoice_money(cn.currency) }}</td>
+          <td>{{ m.badge(cn.sunat_status) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
 {% endif %}
 {% endblock %}

@@ -1,0 +1,119 @@
+{% extends 'base.html' %}
+{% block title %}Nueva nota de crédito — Factura {{ invoice.number }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Emitir nota de crédito — Factura {{ invoice.number }}</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('facturacion.detail', invoice_id=invoice.id) }}" class="btn btn-secondary">← Volver a la factura</a>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="detail-grid">
+    <div class="detail-item"><div class="label">Cliente</div><div class="value">{{ invoice.client_name }} ({{ invoice.client_ruc or 'sin RUC' }})</div></div>
+    <div class="detail-item"><div class="label">Factura original</div><div class="value">{{ invoice.series }}-{{ '%06d'|format(invoice.series_number) }}</div></div>
+    <div class="detail-item"><div class="label">Monto total de la factura</div><div class="value">{{ invoice.amount|invoice_money(invoice.currency) }}</div></div>
+    <div class="detail-item"><div class="label">Disponible para acreditar</div><div class="value">{{ available|invoice_money(invoice.currency) }}</div></div>
+  </div>
+  {% if available < invoice.amount %}
+  <p class="mt-0 muted">Ya existen notas de crédito previas para esta factura (no rechazadas) por un total de {{ (invoice.amount - available)|invoice_money(invoice.currency) }}.</p>
+  {% endif %}
+</div>
+
+<form method="post" class="panel">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <label>Motivo
+    <select name="reason_code" id="reason-code">
+      <option value="">-- Elige un motivo --</option>
+      {% for code, label in reasons %}
+      <option value="{{ code }}" {{ 'data-full="1"' if code in full_reasons }}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <div class="form-row">
+    <label>Fecha de emisión
+      <input type="date" name="issue_date" value="{{ today }}">
+    </label>
+    <label>Glosa / explicación (se imprime en el PDF)
+      <input type="text" name="reason_note" maxlength="200" placeholder="Ej. Devolución parcial acordada con el cliente">
+    </label>
+  </div>
+
+  <div id="full-reason-note" class="mt-0" style="display:none;">
+    <p class="muted">Este motivo anula el 100% de la factura — se incluirán automáticamente todos sus ítems, sin poder editar montos.</p>
+  </div>
+
+  <div id="item-picker">
+    <h3>Ítems a acreditar</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th></th><th>Viaje</th><th>Descripción</th><th class="text-right">Monto original</th><th class="text-right">Monto a acreditar</th></tr></thead>
+        <tbody>
+          {% for it in items %}
+          <tr>
+            <td><input type="checkbox" name="item_{{ it.id }}" class="cn-item-check" data-amount="{{ it.amount }}" style="width:auto;"></td>
+            <td>{% if it.trip_id %}{{ it.trip_code }}{% else %}<span class="muted">— (ítem adicional)</span>{% endif %}</td>
+            <td class="wrap">{{ it.description }}</td>
+            <td class="text-right">{{ it.amount|invoice_money(invoice.currency) }}</td>
+            <td class="text-right">
+              <input type="number" name="amount_{{ it.id }}" class="cn-item-amount" step="0.01" min="0" max="{{ it.amount }}" value="{{ it.amount }}" style="width:120px;">
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="form-row" style="margin-top:12px;">
+      <label>Línea adicional sin ítem de origen (opcional — ej. descuento global)
+        <input type="text" name="extra_description" maxlength="200" placeholder="Descripción">
+      </label>
+      <label>Monto
+        <input type="number" name="extra_amount" step="0.01" min="0" style="width:120px;">
+      </label>
+    </div>
+  </div>
+
+  <p class="muted mt-0">
+    Esta nota de crédito solo se crea en el sistema — para que surta efecto ante SUNAT hay que enviarla desde su
+    pantalla de detalle, igual que una factura.
+  </p>
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Crear nota de crédito</button>
+  </div>
+</form>
+
+<script>
+  (function () {
+    var reasonSelect = document.getElementById('reason-code');
+    var fullNote = document.getElementById('full-reason-note');
+    var itemPicker = document.getElementById('item-picker');
+    var checks = document.querySelectorAll('.cn-item-check');
+
+    function isFullReason() {
+      var opt = reasonSelect.options[reasonSelect.selectedIndex];
+      return !!(opt && opt.getAttribute('data-full'));
+    }
+
+    function refresh() {
+      var full = isFullReason();
+      fullNote.style.display = full ? '' : 'none';
+      itemPicker.style.display = full ? 'none' : '';
+    }
+
+    reasonSelect.addEventListener('change', refresh);
+    refresh();
+
+    // Marcar el ítem automáticamente cuando se edita su monto a mano, y
+    // que el campo de monto se bloquee en el original si el ítem no está
+    // marcado (evita mandar un monto editado de un ítem no seleccionado).
+    checks.forEach(function (chk) {
+      var row = chk.closest('tr');
+      var amountInput = row.querySelector('.cn-item-amount');
+      amountInput.addEventListener('input', function () { chk.checked = true; });
+    });
+  })();
+</script>
+{% endblock %}

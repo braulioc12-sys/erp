@@ -40,6 +40,7 @@ from app.integrations.sunat_ose import (
     IGV_RATE,
     SunatOseError,
     build_client_from_config,
+    build_credit_note_payload,
     build_invoice_payload,
     is_duplicate_comprobante_error,
     parse_ose_response,
@@ -95,6 +96,56 @@ def _next_series_number(series):
         "SELECT MAX(series_number) as n FROM invoices WHERE series = ?", (series,)
     )
     return (row["n"] if row and row["n"] is not None else 0) + 1
+
+
+# 1 oct, nueva feature "Notas de crédito" (pedido de Braulio: "Hay que
+# incluir en facturacion la emision de notas de credito"). Estos 7 valores
+# son los únicos que confirma la documentación real de tefacturo.pe
+# (https://api.tefacturo.pe/doc/integracion/docs/api/nota-credito/,
+# verificada con dos fetches independientes) -- ver la nota larga en
+# app/schema.sql junto a credit_notes.reason_code, y build_credit_note_payload()
+# en app/integrations/sunat_ose.py para el payload real que arma cada uno.
+CREDIT_NOTE_REASONS = [
+    ("ANULACION_OPERACION", "Anulación total de la operación"),
+    ("ANULACION_ERROR_RUC", "Anulación por error en el RUC del cliente"),
+    ("CORRECCION_DESCRIPCION", "Corrección por error en la descripción"),
+    ("DESCUENTO_GLOBAL", "Descuento global"),
+    ("DESCUENTO_ITEM", "Descuento por ítem"),
+    ("DEVOLUCION_TOTAL", "Devolución total"),
+    ("DEVOLUCION_ITEM", "Devolución por ítem"),
+]
+CREDIT_NOTE_REASON_LABELS = dict(CREDIT_NOTE_REASONS)
+# Motivos que son, por definición, una anulación del 100% de la factura --
+# new_credit_note() de más abajo los trata distinto: fuerza incluir todos
+# los ítems originales por su monto completo y no deja editar montos
+# parciales (mezclar "anulación total" con un monto recortado a mano no
+# tendría sentido ante SUNAT).
+CREDIT_NOTE_FULL_REASONS = {"ANULACION_OPERACION", "ANULACION_ERROR_RUC"}
+
+
+def _next_credit_note_series_number(series):
+    """Mismo patrón MAX (no COUNT) que _next_series_number() de arriba --
+    ver su comentario: una nota de crédito también se puede borrar/quedar
+    mal creada, así que contar filas en vez de buscar el máximo ya usado
+    repetiría un correlativo."""
+    row = query_one(
+        "SELECT MAX(series_number) as n FROM credit_notes WHERE series = ?", (series,)
+    )
+    return (row["n"] if row and row["n"] is not None else 0) + 1
+
+
+def _credit_note_available_amount(invoice):
+    """Cuánto de esta factura todavía se puede acreditar: su monto total
+    menos lo que ya cubren notas de crédito existentes para ella que no
+    fueron RECHAZADAS por SUNAT (una rechazada nunca llegó a existir ante
+    SUNAT de verdad, así que no "gasta" nada del saldo disponible)."""
+    row = query_one(
+        "SELECT COALESCE(SUM(amount), 0) as used FROM credit_notes "
+        "WHERE invoice_id = ? AND sunat_status != 'RECHAZADO'",
+        (invoice["id"],),
+    )
+    used = row["used"] if row and row["used"] is not None else 0
+    return round(invoice["amount"] - used, 2)
 
 
 @bp.route("")
@@ -1433,12 +1484,18 @@ def detail(invoice_id):
     detraction_tefacturo_code = (
         get_detraction_tefacturo_code(invoice["detraction_code"]) if invoice["detraction_applies"] else None
     )
+    # 1 oct, feature "Notas de crédito": panel "Notas de crédito emitidas"
+    # más abajo en el template, solo visible cuando ya existe alguna.
+    credit_notes = query_all(
+        "SELECT * FROM credit_notes WHERE invoice_id = ? ORDER BY id DESC", (invoice_id,)
+    )
     return render_template(
         "facturacion/detail.html", invoice=invoice, items=items,
         default_detraction_account=company.get("bank_nacion_detraction_account", ""),
         detraction_goods_catalog=get_detraction_goods_catalog(),
         detraction_goods_codes=get_detraction_goods_codes(),
         creator=creator, detraction_tefacturo_code=detraction_tefacturo_code,
+        credit_notes=credit_notes, credit_note_reason_labels=CREDIT_NOTE_REASON_LABELS,
     )
 
 
@@ -1960,6 +2017,358 @@ def view_sunat_xml(invoice_id):
     return send_from_directory(
         local_sunat_documents_dir(),
         invoice["sunat_xml_filename"],
+        as_attachment=True,
+        download_name=download_name,
+    )
+
+
+# ============================================================================
+# Notas de crédito (1 oct, pedido de Braulio: "Hay que incluir en
+# facturacion la emision de notas de credito"). Corrigen/anulan ante SUNAT
+# una factura YA ACEPTADA -- el botón "Anular" de más arriba (change_status())
+# NO se toca para nada: sigue siendo la forma de anular localmente una
+# factura que nunca llegó a enviarse a SUNAT (o que SUNAT rechazó), a pedido
+# expreso de Braulio de dejar ambos flujos completamente separados. Ver la
+# nota larga en app/schema.sql junto a CREATE TABLE credit_notes para el
+# resto del contexto, y build_credit_note_payload() en
+# app/integrations/sunat_ose.py para el payload real.
+# ============================================================================
+
+
+@bp.route("/<int:invoice_id>/notas-credito/nueva", methods=["GET", "POST"])
+@permission_required("facturacion", "edit")
+def new_credit_note(invoice_id):
+    """Solo se ofrece para una factura que SUNAT ya ACEPTÓ -- no tendría
+    sentido "corregir ante SUNAT" algo que SUNAT nunca llegó a aceptar (para
+    esos casos sigue estando "Anular", que no se toca para nada por esta
+    feature)."""
+    invoice = query_one(
+        """SELECT i.*, c.name as client_name, c.ruc as client_ruc FROM invoices i
+           JOIN clients c ON c.id = i.client_id WHERE i.id = ?""",
+        (invoice_id,),
+    )
+    if invoice is None:
+        abort(404)
+    if invoice["sunat_status"] != "ACEPTADO":
+        flash(
+            "Solo se puede emitir una nota de crédito de una factura ya ACEPTADA por SUNAT. "
+            "Si esta factura nunca se envió (o fue rechazada), usa \"Anular\" en su lugar.",
+            "error",
+        )
+        return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
+
+    items = query_all(
+        """SELECT ii.*, t.code as trip_code FROM invoice_items ii
+           LEFT JOIN trips t ON t.id = ii.trip_id WHERE ii.invoice_id = ?""",
+        (invoice_id,),
+    )
+    available = _credit_note_available_amount(invoice)
+
+    if request.method == "POST":
+        if not validate_csrf():
+            abort(400)
+        reason_code = request.form.get("reason_code")
+        if reason_code not in CREDIT_NOTE_REASON_LABELS:
+            flash("Elige un motivo válido.", "error")
+            return redirect(url_for("facturacion.new_credit_note", invoice_id=invoice_id))
+        reason_note = (request.form.get("reason_note") or "").strip()
+        issue_date = parse_date(request.form.get("issue_date")) or today_str()
+        is_full = reason_code in CREDIT_NOTE_FULL_REASONS
+
+        cn_items = []
+        if is_full:
+            # Anulación total (ANULACION_OPERACION/ANULACION_ERROR_RUC):
+            # todos los ítems de la factura original, por su monto completo
+            # -- no se ofrecen montos parciales para estos dos motivos (ver
+            # CREDIT_NOTE_FULL_REASONS más arriba).
+            for it in items:
+                cn_items.append({
+                    "invoice_item_id": it["id"],
+                    "description": it["description"],
+                    "quantity": it["quantity"],
+                    "amount": it["amount"],
+                })
+        else:
+            # Parcial (pedido explícito de Braulio: "También parciales (por
+            # ítem o monto)"): se eligen ítems por checkbox, cada uno con su
+            # monto editable (recortado al monto original del ítem, para no
+            # poder acreditar más de lo que ese ítem vale en la factura), más
+            # una línea libre opcional para montos sin ítem de origen (ej.
+            # un descuento global).
+            for it in items:
+                if request.form.get(f"item_{it['id']}"):
+                    amount = parse_float(request.form.get(f"amount_{it['id']}"), default=it["amount"])
+                    amount = min(amount, it["amount"])
+                    if amount > 0:
+                        cn_items.append({
+                            "invoice_item_id": it["id"],
+                            "description": it["description"],
+                            "quantity": it["quantity"],
+                            "amount": round(amount, 2),
+                        })
+            extra_desc = (request.form.get("extra_description") or "").strip()
+            extra_amount = parse_float(request.form.get("extra_amount"), default=0.0)
+            if extra_desc and extra_amount > 0:
+                cn_items.append({
+                    "invoice_item_id": None,
+                    "description": extra_desc,
+                    "quantity": 1,
+                    "amount": round(extra_amount, 2),
+                })
+
+        total = round(sum(it["amount"] for it in cn_items), 2)
+        if not cn_items or total <= 0:
+            flash(
+                "Esta nota de crédito no tiene ítems ni monto -- elige al menos un ítem o completa "
+                "el monto adicional.",
+                "error",
+            )
+            return redirect(url_for("facturacion.new_credit_note", invoice_id=invoice_id))
+        if total > available + 0.01:
+            flash(
+                f"El monto de la nota de crédito ({total:.2f}) supera lo disponible para acreditar de "
+                f"esta factura ({available:.2f}, considerando notas de crédito previas).",
+                "error",
+            )
+            return redirect(url_for("facturacion.new_credit_note", invoice_id=invoice_id))
+        if not invoice["client_ruc"]:
+            flash(
+                f"El cliente '{invoice['client_name']}' no tiene RUC registrado -- una nota de "
+                "crédito electrónica requiere el RUC del cliente.",
+                "error",
+            )
+            return redirect(url_for("facturacion.new_credit_note", invoice_id=invoice_id))
+
+        series = current_app.config["CREDIT_NOTE_SERIES"]
+        series_number = _next_credit_note_series_number(series)
+        number = next_code("NC", "credit_notes", code_column="number")
+        credit_note_id = execute(
+            """INSERT INTO credit_notes
+               (number, invoice_id, issue_date, reason_code, reason_note, amount, currency,
+                issuer, series, series_number)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                number, invoice_id, issue_date, reason_code, reason_note, total,
+                invoice["currency"], invoice["issuer"], series, series_number,
+            ),
+        )
+        for it in cn_items:
+            execute(
+                """INSERT INTO credit_note_items (credit_note_id, invoice_item_id, description, quantity, amount)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (credit_note_id, it["invoice_item_id"], it["description"], it["quantity"], it["amount"]),
+            )
+        log_activity(
+            "facturacion", "CREAR_NC", f"Nota de crédito {number} de la factura {invoice['number']}",
+            entity_type="nota_credito", entity_id=credit_note_id,
+            entity_url=url_for("facturacion.credit_note_detail", credit_note_id=credit_note_id),
+        )
+        flash(f"Nota de crédito {number} creada. Ahora puedes enviarla a SUNAT.", "success")
+        return redirect(url_for("facturacion.credit_note_detail", credit_note_id=credit_note_id))
+
+    return render_template(
+        "facturacion/credit_note_new.html", invoice=invoice, items=items,
+        available=available, reasons=CREDIT_NOTE_REASONS, full_reasons=CREDIT_NOTE_FULL_REASONS,
+        today=today_str(),
+    )
+
+
+@bp.route("/notas-credito/<int:credit_note_id>")
+@permission_required("facturacion", "view")
+def credit_note_detail(credit_note_id):
+    credit_note = query_one(
+        """SELECT cn.*, i.number as invoice_number, i.id as invoice_id,
+               c.name as client_name, c.ruc as client_ruc
+           FROM credit_notes cn
+           JOIN invoices i ON i.id = cn.invoice_id
+           JOIN clients c ON c.id = i.client_id
+           WHERE cn.id = ?""",
+        (credit_note_id,),
+    )
+    if credit_note is None:
+        abort(404)
+    items = query_all(
+        "SELECT * FROM credit_note_items WHERE credit_note_id = ?", (credit_note_id,)
+    )
+    return render_template(
+        "facturacion/credit_note_detail.html", credit_note=credit_note, items=items,
+        reason_label=CREDIT_NOTE_REASON_LABELS.get(credit_note["reason_code"], credit_note["reason_code"]),
+    )
+
+
+@bp.route("/notas-credito/<int:credit_note_id>/enviar-sunat", methods=["POST"])
+@permission_required("facturacion", "edit")
+def send_credit_note_sunat(credit_note_id):
+    """Mismo patrón que send_sunat() de más arriba (para la factura) --
+    incluyendo el doble `except` (SunatOseError + Exception genérica) por el
+    mismo motivo real de producción documentado en el comentario grande
+    junto a `logger = logging.getLogger(...)` al inicio de este archivo."""
+    if not validate_csrf():
+        abort(400)
+    credit_note = query_one("SELECT * FROM credit_notes WHERE id = ?", (credit_note_id,))
+    if credit_note is None:
+        abort(404)
+    invoice = query_one("SELECT * FROM invoices WHERE id = ?", (credit_note["invoice_id"],))
+    client_row = query_one("SELECT * FROM clients WHERE id = ?", (invoice["client_id"],))
+    items = query_all("SELECT * FROM credit_note_items WHERE credit_note_id = ?", (credit_note_id,))
+
+    ose_client = build_client_from_config(current_app.config, credit_note["issuer"])
+    company = company_info_for_issuer(credit_note["issuer"], current_app.config)
+
+    try:
+        if not company["ruc"]:
+            raise SunatOseError(
+                f"Falta configurar el RUC de {company['name']} (variable de entorno "
+                f"{'BRMS_RUC' if credit_note['issuer'] == 'BRMS' else 'COMPANY_RUC'}) antes de "
+                "poder emitir notas de crédito electrónicas a su nombre."
+            )
+        payload = build_credit_note_payload(credit_note, items, invoice, client_row, company)
+        ya_existia = False
+        try:
+            response = ose_client.emit_nota_credito(payload)
+            result = parse_ose_response(response)
+        except SunatOseError as emit_exc:
+            if is_duplicate_comprobante_error(emit_exc):
+                ya_existia = True
+                result = {
+                    "accepted": True,
+                    "message": credit_note["sunat_message"]
+                    or "Aceptado por SUNAT (comprobante ya registrado en un envío anterior).",
+                    "xml_url": credit_note["sunat_xml_url"],
+                    "cdr_url": credit_note["sunat_cdr_url"],
+                }
+            else:
+                raise
+
+        pdf_filename = credit_note["sunat_pdf_filename"]
+        pdf_url = credit_note["sunat_pdf_url"]
+        xml_filename = credit_note["sunat_xml_filename"]
+        xml_url = credit_note["sunat_xml_url"]
+        if result["accepted"]:
+            # "07" = Nota de Crédito Electrónica en el Catálogo No. 01 de
+            # SUNAT (el mismo catálogo ya usado en este archivo para "01"
+            # factura/"03" boleta -- este código SÍ es un estándar público
+            # de SUNAT, no una suposición propia de tefacturo.pe como las
+            # que este proyecto evita: la documentación de tefacturo.pe para
+            # consultarPdf/consultarXml no da un ejemplo específico por tipo
+            # de comprobante, pero el parámetro es justamente ese código de
+            # Catálogo 01 en los otros dos usos ya confirmados de este mismo
+            # archivo).
+            try:
+                pdf_bytes = ose_client.get_pdf_bytes("07", credit_note["series"], credit_note["series_number"])
+                pdf_filename = f"nota-credito-{credit_note_id}-{uuid.uuid4().hex}.pdf"
+                save_sunat_document(pdf_filename, pdf_bytes)
+                pdf_url = url_for("facturacion.view_credit_note_pdf", credit_note_id=credit_note_id)
+            except SunatOseError as pdf_exc:
+                flash(f"La nota de crédito se aceptó, pero no se pudo descargar su PDF: {pdf_exc}", "error")
+            try:
+                xml_bytes = ose_client.get_xml_bytes("07", credit_note["series"], credit_note["series_number"])
+                xml_filename = f"nota-credito-{credit_note_id}-{uuid.uuid4().hex}.xml"
+                save_sunat_document(xml_filename, xml_bytes)
+                xml_url = url_for("facturacion.view_credit_note_xml", credit_note_id=credit_note_id)
+            except SunatOseError as xml_exc:
+                flash(f"La nota de crédito se aceptó, pero no se pudo descargar su XML: {xml_exc}", "error")
+
+        execute(
+            """UPDATE credit_notes SET sunat_status=?, sunat_message=?, sunat_pdf_url=?, sunat_pdf_filename=?,
+               sunat_xml_url=?, sunat_xml_filename=?, sunat_cdr_url=?, sunat_sent_at=datetime('now') WHERE id=?""",
+            (
+                "ACEPTADO" if result["accepted"] else "RECHAZADO",
+                result["message"],
+                pdf_url,
+                pdf_filename,
+                xml_url,
+                xml_filename,
+                result["cdr_url"],
+                credit_note_id,
+            ),
+        )
+        log_activity(
+            "facturacion", "ENVIAR_NC",
+            f"Nota de crédito {credit_note['number']} enviada a SUNAT — "
+            f"{'ACEPTADO' if result['accepted'] else 'RECHAZADO'}",
+            entity_type="nota_credito", entity_id=credit_note_id,
+            entity_url=url_for("facturacion.credit_note_detail", credit_note_id=credit_note_id),
+        )
+        if result["accepted"]:
+            if ya_existia:
+                flash("Esta nota de crédito ya estaba aceptada por SUNAT.", "success")
+            else:
+                flash("Nota de crédito enviada y aceptada por SUNAT.", "success")
+        else:
+            flash(f"SUNAT/tefacturo.pe rechazó la nota de crédito: {result['message']}", "error")
+    except SunatOseError as exc:
+        execute(
+            "UPDATE credit_notes SET sunat_status='ERROR', sunat_message=?, sunat_sent_at=datetime('now') WHERE id=?",
+            (str(exc), credit_note_id),
+        )
+        log_activity(
+            "facturacion", "ENVIAR_NC",
+            f"Nota de crédito {credit_note['number']}: error al enviar a SUNAT — {exc}",
+            entity_type="nota_credito", entity_id=credit_note_id,
+            entity_url=url_for("facturacion.credit_note_detail", credit_note_id=credit_note_id),
+        )
+        flash(f"No se pudo enviar la nota de crédito: {exc}", "error")
+    except Exception as exc:
+        logger.exception(
+            "Error inesperado al enviar la nota de crédito #%s a SUNAT", credit_note_id
+        )
+        execute(
+            "UPDATE credit_notes SET sunat_status='ERROR', sunat_message=?, sunat_sent_at=datetime('now') WHERE id=?",
+            (f"Error interno inesperado: {type(exc).__name__}: {exc}", credit_note_id),
+        )
+        log_activity(
+            "facturacion", "ENVIAR_NC",
+            f"Nota de crédito {credit_note['number']}: error interno inesperado al enviar a SUNAT — "
+            f"{type(exc).__name__}: {exc}",
+            entity_type="nota_credito", entity_id=credit_note_id,
+            entity_url=url_for("facturacion.credit_note_detail", credit_note_id=credit_note_id),
+        )
+        flash(
+            "No se pudo enviar la nota de crédito por un error interno inesperado (no fue un rechazo de "
+            f"SUNAT): {type(exc).__name__}: {exc} — copia este mensaje y mándamelo para revisarlo.",
+            "error",
+        )
+
+    return redirect(url_for("facturacion.credit_note_detail", credit_note_id=credit_note_id))
+
+
+@bp.route("/notas-credito/<int:credit_note_id>/pdf-sunat")
+@permission_required("facturacion", "view")
+def view_credit_note_pdf(credit_note_id):
+    """Mismo patrón que view_sunat_pdf() de más arriba (para la factura)."""
+    credit_note = query_one(
+        "SELECT sunat_pdf_filename, series, series_number FROM credit_notes WHERE id = ?",
+        (credit_note_id,),
+    )
+    if credit_note is None or not credit_note["sunat_pdf_filename"]:
+        abort(404)
+    download_name = f"{credit_note['series']}-{credit_note['series_number']:06d}.pdf"
+    if using_s3():
+        return redirect(sunat_document_url(credit_note["sunat_pdf_filename"], download_name=download_name))
+    return send_from_directory(
+        local_sunat_documents_dir(), credit_note["sunat_pdf_filename"], download_name=download_name
+    )
+
+
+@bp.route("/notas-credito/<int:credit_note_id>/xml-sunat")
+@permission_required("facturacion", "view")
+def view_credit_note_xml(credit_note_id):
+    """Mismo patrón que view_sunat_xml() de más arriba (para la factura)."""
+    credit_note = query_one(
+        "SELECT sunat_xml_filename, series, series_number FROM credit_notes WHERE id = ?",
+        (credit_note_id,),
+    )
+    if credit_note is None or not credit_note["sunat_xml_filename"]:
+        abort(404)
+    download_name = f"{credit_note['series']}-{credit_note['series_number']:06d}.xml"
+    if using_s3():
+        return redirect(
+            sunat_document_url(credit_note["sunat_xml_filename"], as_attachment=True, download_name=download_name)
+        )
+    return send_from_directory(
+        local_sunat_documents_dir(),
+        credit_note["sunat_xml_filename"],
         as_attachment=True,
         download_name=download_name,
     )

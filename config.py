@@ -178,6 +178,18 @@ class Config:
     # en app/routes/guias.py.
     WAYBILL_SERIES = os.environ.get("WAYBILL_SERIES", "V001")
     HARRASO_WAYBILL_SERIES = os.environ.get("HARRASO_WAYBILL_SERIES", "V002")
+    # 1 oct, pedido de Braulio ("hay que incluir en facturacion la emision
+    # de notas de credito"): serie propia de las notas de crédito, distinta
+    # de INVOICE_SERIES -- "FC01" sigue la misma convención de SUNAT que ya
+    # usa este sistema para facturas ("F001") y guías ("V001"/"V002": la
+    # letra indica el tipo de comprobante, acá "FC" = nota de crédito de
+    # FACTURA). A diferencia de WAYBILL_SERIES, no hace falta separar por
+    # empresa todavía -- es una serie nueva, sin ninguna nota de crédito
+    # previa (de este sistema o de antes) que pueda chocar, a diferencia de
+    # lo que pasó con las guías de Harraso de 2023 (ver WAYBILL_SERIES
+    # arriba). Si hiciera falta separarla por empresa más adelante, mismo
+    # patrón que HARRASO_WAYBILL_SERIES.
+    CREDIT_NOTE_SERIES = os.environ.get("CREDIT_NOTE_SERIES", "FC01")
     # Número inicial de Cotizaciones (1 sep) — Braulio pidió seguir la
     # numeración real de sus cotizaciones anteriores (la última que mandó
     # como referencia fue la N° 111), así que el módulo arranca en 112.

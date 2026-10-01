@@ -1336,6 +1336,74 @@ CREATE TABLE IF NOT EXISTS invoice_items (
     quantity REAL NOT NULL DEFAULT 1
 );
 
+-- Notas de crédito electrónicas -- 1 oct, pedido de Braulio ("hay que
+-- incluir en facturacion la emision de notas de credito"). Corrigen o
+-- anulan (total o parcialmente) una factura YA ACEPTADA por SUNAT -- es la
+-- única forma correcta de anular un comprobante electrónico real ante
+-- SUNAT. El botón "Anular" de invoices.status (change_status() en
+-- app/routes/facturacion.py) sigue existiendo tal cual, sin relación con
+-- esta tabla -- a pedido expreso de Braulio, para una factura que nunca se
+-- envió a SUNAT (nada que corregir ante SUNAT) ese botón local sigue
+-- alcanzando; para una ya ACEPTADA, hace falta una nota de crédito real,
+-- que es justo lo que agrega esta tabla.
+--
+-- CONFIRMADO contra la documentación real de tefacturo.pe
+-- (https://api.tefacturo.pe/doc/integracion/docs/api/nota-credito/, 1 oct)
+-- -- ver la nota larga junto a build_credit_note_payload() en
+-- app/integrations/sunat_ose.py para el payload completo tal como lo
+-- documenta tefacturo.pe.
+CREATE TABLE IF NOT EXISTS credit_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    number TEXT NOT NULL UNIQUE,
+    invoice_id INTEGER NOT NULL REFERENCES invoices(id),
+    issue_date TEXT NOT NULL,
+    -- Motivo SUNAT de la nota de crédito ("motivo"/"datosDocumento.motivo"
+    -- en el payload real) -- estos 7 valores son los que documenta
+    -- tefacturo.pe. El Catálogo 09 oficial de SUNAT trae más códigos
+    -- (bonificación, otros conceptos, ajustes de operaciones de
+    -- exportación/IVAP) que tefacturo.pe no documenta -- no se agregan acá
+    -- por no poder confirmar el valor exacto de cadena que tefacturo.pe
+    -- espera para ellos (mismo criterio conservador de siempre con campos
+    -- de SUNAT: mejor no ofrecerlo que adivinar mal).
+    reason_code TEXT NOT NULL CHECK (reason_code IN (
+        'ANULACION_OPERACION', 'ANULACION_ERROR_RUC', 'CORRECCION_DESCRIPCION',
+        'DESCUENTO_GLOBAL', 'DESCUENTO_ITEM', 'DEVOLUCION_TOTAL', 'DEVOLUCION_ITEM'
+    )),
+    -- "glosa" en el payload real -- texto libre explicando el motivo,
+    -- impreso en el PDF de la nota de crédito.
+    reason_note TEXT,
+    -- Monto TOTAL de la nota (mismo criterio que invoices.amount: ya
+    -- incluye IGV cuando corresponde -- ver build_credit_note_payload).
+    amount REAL NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'SOLES' CHECK (currency IN ('SOLES', 'DOLARES')),
+    issuer TEXT NOT NULL DEFAULT 'HARRASO' CHECK (issuer IN ('HARRASO', 'BRMS')),
+    series TEXT NOT NULL DEFAULT 'FC01',
+    series_number INTEGER NOT NULL DEFAULT 0,
+    sunat_status TEXT NOT NULL DEFAULT 'NO_ENVIADA' CHECK (sunat_status IN ('NO_ENVIADA', 'ACEPTADO', 'RECHAZADO', 'ERROR')),
+    sunat_message TEXT,
+    sunat_pdf_url TEXT,
+    sunat_pdf_filename TEXT,
+    sunat_xml_url TEXT,
+    sunat_xml_filename TEXT,
+    sunat_cdr_url TEXT,
+    sunat_sent_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS credit_note_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    credit_note_id INTEGER NOT NULL REFERENCES credit_notes(id),
+    -- Ítem original de la factura que esta línea corrige/anula. Opcional:
+    -- una anulación total (ANULACION_OPERACION/ANULACION_ERROR_RUC) copia
+    -- todos los ítems de la factura, cada uno con su invoice_item_id; un
+    -- descuento global (DESCUENTO_GLOBAL) es una sola línea libre, sin
+    -- ítem de origen (NULL).
+    invoice_item_id INTEGER REFERENCES invoice_items(id),
+    description TEXT NOT NULL,
+    quantity REAL NOT NULL DEFAULT 1,
+    amount REAL NOT NULL DEFAULT 0
+);
+
 -- Guías de remisión electrónicas — modalidad "Transportista" (la empresa
 -- de transporte traslada carga de un cliente y debe sustentar el traslado
 -- ante SUNAT). Una guía se genera a partir de un viaje.

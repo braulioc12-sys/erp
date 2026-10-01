@@ -376,6 +376,19 @@ class TefacturoClient:
             payload,
         )
 
+    def emit_nota_credito(self, payload):
+        # 1 oct -- nueva función, feature de Notas de Crédito. Endpoint
+        # confirmado contra la documentación real de tefacturo.pe
+        # (https://api.tefacturo.pe/doc/integracion/docs/api/nota-credito/,
+        # verificada dos veces con fetches independientes): PUT al mismo
+        # patrón que factura/guía (api-prefijo propio + ruc en la ruta).
+        self._require_configured()
+        return self._request(
+            "PUT",
+            f"/notacredito-api/invoice2u/integracion/nota-credito/{self.ruc}",
+            payload,
+        )
+
     def get_pdf_bytes(self, tipo_comprobante, serie, numero):
         """Descarga el PDF de un comprobante ya emitido y devuelve sus
         bytes (decodificados de base64). tipo_comprobante: '01' = factura,
@@ -863,6 +876,162 @@ def build_invoice_payload(invoice, items, client, company):
     return payload
 
 
+def build_credit_note_payload(credit_note, items, invoice, client, company):
+    """Arma el JSON de una NOTA DE CRÉDITO en el formato real de
+    tefacturo.pe -- CONFIRMADO contra su documentación real (1 oct, Braulio
+    compartió https://api.tefacturo.pe/doc/integracion/docs/api/nota-credito/):
+
+        PUT /notacredito-api/invoice2u/integracion/nota-credito/{ruc}
+
+    La documentación trae este JSON de ejemplo completo:
+
+        {
+          "close2u": {"tipoIntegracion": "OFFLINE", "tipoPlantilla": "01",
+                      "tipoRegistro": "PRECIOS_SIN_IGV"},
+          "comprobanteAjustado": {"serie": "FFA5", "numero": 1,
+                      "tipoComprobante": "01", "tipoDocumento": "FACTURA",
+                      "fechaEmision": "2025-04-16"},
+          "datosDocumento": {"serie": "FFC5", "numero": 6, "moneda": "PEN",
+                      "fechaEmision": "2025-04-17", "horaEmision": "01:13:07",
+                      "motivo": "ANULACION_OPERACION", "glosa": "Anulación"},
+          "detalleDocumento": [{"codigoProducto": "ABC123",
+                      "descripcion": "PRODUCTO GRAVADO A",
+                      "tipoAfectacion": "GRAVADO_OPERACION_ONEROSA",
+                      "unidadMedida": "UNIDAD_BIENES", "cantidad": 1,
+                      "valorVentaUnitarioItem": 100}],
+          "emisor": {"correo": "...", "nombreComercial": "...",
+                      "nombreLegal": "...", "numeroDocumentoIdentidad": "...",
+                      "tipoDocumentoIdentidad": "RUC"},
+          "receptor": {"correo": "...", "correoCopia": "...",
+                      "domicilioFiscal": {"departamento": null, "direccion": "...",
+                      "ubigeo": "150101"}, "nombreComercial": "...",
+                      "nombreLegal": "...", "numeroDocumentoIdentidad": "...",
+                      "tipoDocumentoIdentidad": "RUC"},
+          "informacionAdicional": {"tipoOperacion": "VENTA_INTERNA", "coVendedor": "..."},
+          "motivo": "ANULACION_OPERACION"
+        }
+
+    Decisiones tomadas a partir de esto:
+    - `comprobanteAjustado` referencia la FACTURA ORIGINAL que esta nota
+      corrige/anula (serie/numero/fechaEmision de `invoices`). Este sistema
+      únicamente emite Factura (nunca Boleta) -- ver RELATED_DOCUMENT_TIPO_DOCUMENTO
+      más abajo para el mismo criterio en guías -- así que
+      tipoComprobante/tipoDocumento quedan fijos en "01"/"FACTURA".
+    - `motivo` aparece DOS VECES en el ejemplo real (dentro de
+      `datosDocumento` y suelto a nivel raíz) -- se manda en ambos lugares
+      tal cual, sin asumir que sea un error de la documentación (mismo
+      criterio que `cuotas`/`detraccion`, que también van sueltos a nivel
+      raíz en build_invoice_payload).
+    - `detalleDocumento` sigue la MISMA estructura que build_invoice_payload
+      (la propia documentación lo dice: "Line items follow the same
+      structure as invoices") -- se reutiliza la misma lógica de IGV/
+      exoneración (_split_igv/igv_exonerado) ítem por ítem, a partir de
+      `credit_note_items` en vez de `invoice_items`.
+    - `unidadMedida`/`cantidad`: el ejemplo de la documentación usa un
+      producto físico genérico ("UNIDAD_BIENES", cantidad 1 numérica) --
+      como este sistema solo corrige facturas de SERVICIO de transporte, se
+      usa "UNIDAD_SERVICIOS" (el valor ya confirmado para facturas, vía el
+      enum real devuelto por un 400 de SUNAT -- ver build_invoice_payload)
+      en vez de copiar literalmente el ejemplo genérico. `cantidad` y
+      `numero` (en `comprobanteAjustado`) SÍ se mandan como número, tal cual
+      el ejemplo (a diferencia de build_invoice_payload, que manda
+      `cantidad` como string "1" -- ahí nunca se confirmó si el tipo
+      importa; acá se sigue el ejemplo real al pie de la letra por ser
+      nuevo). `horaEmision` SÍ se manda con la hora real (el ejemplo trae
+      una hora concreta, no null como `horaEmision` en build_invoice_payload)
+      -- más fiel al único ejemplo real que tenemos para este endpoint.
+    - NO se incluye ningún bloque `detraccion`: la documentación de nota de
+      crédito no lo menciona en ningún lado, y una nota de crédito no es un
+      cobro nuevo (es la anulación/corrección de uno ya hecho) -- no hay
+      ninguna pista de que aplique acá. Si tefacturo.pe la rechaza por esto,
+      revisar con soporte.
+
+    credit_note: fila de `credit_notes`. items: filas de
+    `credit_note_items`. invoice: fila de `invoices` (la factura original).
+    client/company: igual que build_invoice_payload."""
+    if not client["ruc"]:
+        raise SunatOseError(
+            f"El cliente '{client['name']}' no tiene RUC registrado; una nota de "
+            "crédito electrónica requiere el RUC del cliente."
+        )
+    if not items:
+        raise SunatOseError("Esta nota de crédito no tiene ítems -- no se puede enviar a SUNAT.")
+
+    igv_exonerado = bool(company.get("igv_exonerado"))
+
+    detalle = []
+    for it in items:
+        monto = float(it["amount"])
+        if igv_exonerado:
+            valor_venta = round(monto, 2)
+            tipo_afectacion = "EXONERADO_OPERACION_ONEROSA"
+        else:
+            valor_venta, _igv = _split_igv(monto)
+            tipo_afectacion = "GRAVADO_OPERACION_ONEROSA"
+        codigo_producto = (
+            f"ITEM-{it['invoice_item_id']}" if it["invoice_item_id"] else f"CN-ITEM-{it['id']}"
+        )
+        detalle.append(
+            {
+                "codigoProducto": codigo_producto,
+                "descripcion": it["description"] or "Servicio de transporte de carga",
+                "tipoAfectacion": tipo_afectacion,
+                "unidadMedida": "UNIDAD_SERVICIOS",
+                "cantidad": 1,
+                "valorVentaUnitarioItem": valor_venta,
+            }
+        )
+
+    moneda = "USD" if (credit_note["currency"] or "SOLES").upper() == "DOLARES" else "PEN"
+
+    return {
+        "close2u": {
+            "tipoIntegracion": "OFFLINE",
+            "tipoPlantilla": "01",
+            "tipoRegistro": "PRECIOS_SIN_IGV",
+        },
+        "comprobanteAjustado": {
+            "serie": invoice["series"],
+            "numero": invoice["series_number"],
+            "tipoComprobante": "01",
+            "tipoDocumento": "FACTURA",
+            "fechaEmision": invoice["issue_date"],
+        },
+        "datosDocumento": {
+            "serie": credit_note["series"],
+            "numero": credit_note["series_number"],
+            "moneda": moneda,
+            "fechaEmision": credit_note["issue_date"],
+            "horaEmision": datetime.now().strftime("%H:%M:%S"),
+            "motivo": credit_note["reason_code"],
+            "glosa": credit_note["reason_note"] or "",
+        },
+        "detalleDocumento": detalle,
+        "emisor": {
+            "correo": company.get("email", ""),
+            "nombreComercial": company.get("commercial_name", ""),
+            "nombreLegal": company.get("legal_name", ""),
+            "numeroDocumentoIdentidad": company.get("ruc", ""),
+            "tipoDocumentoIdentidad": "RUC",
+        },
+        "receptor": {
+            "correo": client["email"] or "",
+            "correoCopia": "",
+            "domicilioFiscal": {
+                "direccion": client["address"] or "",
+            },
+            "nombreComercial": client["name"],
+            "nombreLegal": client["name"],
+            "numeroDocumentoIdentidad": client["ruc"],
+            "tipoDocumentoIdentidad": "RUC",
+        },
+        "informacionAdicional": {
+            "tipoOperacion": "VENTA_INTERNA",
+        },
+        "motivo": credit_note["reason_code"],
+    }
+
+
 # 1 oct -- ver la nota larga "referencias / documento relacionado" en el
 # docstring de build_waybill_payload() (la que empieza con "CONFIRMADO, los
 # dos rondas"). Los 3 valores de acá abajo son el enum REAL de
@@ -876,9 +1045,11 @@ def build_invoice_payload(invoice, items, client, company):
 # SUNAT detrás, no hay nada razonable que mandar, así que esa guía
 # simplemente no manda "referencias". El enum completo que devolvió
 # tefacturo.pe también trae CONSTANCIA_DEPOSITO_DETRACCION, NOTADEBITO,
-# TICKETMAQUINAREGISTRADORA, NOTACREDITO y RETENCION -- no usados por este
-# sistema todavía (RELATED_DOCUMENT_TYPES en app/routes/guias.py no tiene
-# un tipo para ellos).
+# TICKETMAQUINAREGISTRADORA y RETENCION -- no usados por este sistema
+# todavía (RELATED_DOCUMENT_TYPES en app/routes/guias.py no tiene un tipo
+# para ellos). NOTACREDITO sí se usa ahora -- ver build_credit_note_payload()
+# más arriba (1 oct, pedido de Braulio: "hay que incluir en facturacion la
+# emision de notas de credito").
 RELATED_DOCUMENT_TIPO_DOCUMENTO = {
     "FACTURA": "FACTURA",                           # confirmado
     "BOLETA": "BOLETA",                             # confirmado

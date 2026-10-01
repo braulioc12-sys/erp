@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Nota de crédito {{ credit_note.number }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Nota de crédito {{ credit_note.number }} {{ m.badge(credit_note.sunat_status) }}</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('facturacion.detail', invoice_id=credit_note.invoice_id) }}" class="btn btn-secondary">← Ver factura {{ credit_note.invoice_number }}</a>
+    {% if credit_note.sunat_status != 'ACEPTADO' and can(current_user.roles, 'facturacion', 'edit') %}
+    <form method="post" action="{{ url_for('facturacion.send_credit_note_sunat', credit_note_id=credit_note.id) }}" style="display:inline;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-primary">📤 Enviar a SUNAT</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="detail-grid">
+  <div class="detail-item"><div class="label">Factura corregida</div><div class="value"><a href="{{ url_for('facturacion.detail', invoice_id=credit_note.invoice_id) }}">{{ credit_note.invoice_number }}</a></div></div>
+  <div class="detail-item"><div class="label">Cliente</div><div class="value">{{ credit_note.client_name }}</div></div>
+  <div class="detail-item"><div class="label">RUC</div><div class="value">{{ credit_note.client_ruc or '—' }}</div></div>
+  <div class="detail-item"><div class="label">Empresa que emite</div><div class="value">{{ 'BRMS' if credit_note.issuer == 'BRMS' else 'Harraso Transport' }}</div></div>
+  <div class="detail-item"><div class="label">Serie / número SUNAT</div><div class="value">{{ credit_note.series }}-{{ '%06d'|format(credit_note.series_number) }}</div></div>
+  <div class="detail-item"><div class="label">Fecha de emisión</div><div class="value">{{ credit_note.issue_date }}</div></div>
+  <div class="detail-item"><div class="label">Motivo</div><div class="value">{{ reason_label }}</div></div>
+  <div class="detail-item"><div class="label">Total</div><div class="value">{{ credit_note.amount|invoice_money(credit_note.currency) }}</div></div>
+</div>
+
+{% if credit_note.reason_note %}
+<div class="panel"><h2 class="mt-0">Glosa</h2><p class="mt-0">{{ credit_note.reason_note }}</p></div>
+{% endif %}
+
+<div class="panel">
+  <h2>Estado ante SUNAT {{ m.badge(credit_note.sunat_status) }}</h2>
+  {% if credit_note.sunat_message %}<p class="mt-0 muted">{{ credit_note.sunat_message }}</p>{% endif %}
+  {% if credit_note.sunat_sent_at %}<p class="mt-0 muted">Último envío: {{ credit_note.sunat_sent_at }}</p>{% endif %}
+  {% if credit_note.sunat_pdf_url or credit_note.sunat_xml_url or credit_note.sunat_cdr_url %}
+  <p class="mt-0">
+    {% if credit_note.sunat_pdf_url %}<a href="{{ credit_note.sunat_pdf_url }}" target="_blank" rel="noopener">PDF</a>{% endif %}
+    {% if credit_note.sunat_xml_url %}· <a href="{{ credit_note.sunat_xml_url }}" target="_blank" rel="noopener">XML</a>{% endif %}
+    {% if credit_note.sunat_cdr_url %}· <a href="{{ credit_note.sunat_cdr_url }}" target="_blank" rel="noopener">CDR</a>{% endif %}
+  </p>
+  {% endif %}
+  {% if credit_note.sunat_status == 'NO_ENVIADA' %}
+  <p class="mt-0 muted">Aún no se ha enviado a SUNAT.</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>Ítems acreditados</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Descripción</th><th class="text-right">Cantidad</th><th class="text-right">Monto</th></tr></thead>
+      <tbody>
+        {% for it in items %}
+        <tr>
+          <td class="wrap">{{ it.description }}</td>
+          <td class="text-right">{{ it.quantity|int if it.quantity == it.quantity|int else it.quantity }}</td>
+          <td class="text-right">{{ it.amount|invoice_money(credit_note.currency) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
