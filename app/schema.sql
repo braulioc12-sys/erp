@@ -1396,21 +1396,36 @@ CREATE TABLE IF NOT EXISTS waybills (
     -- de SUNAT, donde se referencia la factura/boleta o la guía de
     -- remisión del REMITENTE (el cliente) que sustenta el traslado.
     -- related_document_type: NULL/'FACTURA'/'BOLETA'/'GUIA_REMITENTE'/'OTRO'.
-    -- related_document_number es texto libre (ej. "F001-000123") porque
-    -- puede venir de un documento externo (del cliente) que este sistema
-    -- no tiene registrado. Si el viaje ya tiene una factura propia
-    -- (invoice_items) o una guía del remitente (trips.shipper_waybill_*),
-    -- el formulario los sugiere solos (ver app/routes/guias.py) -- pero
-    -- siempre son editables a mano.
-    -- IMPORTANTE: por ahora esto es solo informativo dentro del ERP (se
-    -- guarda y se muestra) -- todavía NO se manda a tefacturo.pe en
-    -- build_waybill_payload() porque su documentación/JSON confirmado para
-    -- la guía TRANSPORTISTA no incluye este campo (mismo criterio que la
-    -- detracción en `invoices`, ver ese comentario) -- hace falta
-    -- confirmar con su soporte técnico el nombre real del campo antes de
-    -- agregarlo al envío real.
+    -- related_document_series/related_document_number son texto libre (ej.
+    -- "F001" / "123") porque pueden venir de un documento externo (del
+    -- cliente) que este sistema no tiene registrado. Si el viaje ya tiene
+    -- una factura propia (invoice_items) o una guía del remitente
+    -- (trips.shipper_waybill_*), el formulario los sugiere solos (ver
+    -- app/routes/guias.py) -- pero siempre son editables a mano.
+    --
+    -- 1 oct, ACTUALIZACIÓN -- Braulio mandó una captura de la propia
+    -- documentación de tefacturo.pe (JSON de ejemplo de una guía con
+    -- "detalleGuia"/"conductores") que SÍ confirma el campo: va en
+    -- referencias.documentoReferenciaList, un array de
+    -- {serie, numero, tipoDocumento, emisor} -- "emisor" es el RUC de quien
+    -- emitió ese documento (related_document_issuer_ruc, nueva columna de
+    -- abajo). Por eso related_document_number se separa en serie/número acá
+    -- (antes era un solo campo de texto libre tipo "F001-000123" -- se creó
+    -- recién el 17 sep y se conectó al formulario recién el 1 oct, así que
+    -- no hay datos reales que migrar). tipoDocumento="FACTURA" viene
+    -- confirmado tal cual en ese ejemplo real; "GUIA_REMISION_REMITENTE" y
+    -- "BOLETA" se ASUMEN por el mismo patrón (pedido expreso de Braulio,
+    -- a sabiendas de que tefacturo.pe podría rechazar la guía si el texto
+    -- real es otro) -- ver el catálogo RELATED_DOCUMENT_TIPO_DOCUMENTO en
+    -- build_waybill_payload() (app/integrations/sunat_ose.py). Si falta la
+    -- serie, el número o el RUC del emisor, o el tipo es GUIA_REMITENTE/
+    -- BOLETA/OTRO sin ninguno confirmado aparte de los dos asumidos, el
+    -- bloque "referencias" simplemente no se manda (se emite la guía igual,
+    -- solo sin ese dato) -- mismo criterio que la detracción en `invoices`.
     related_document_type TEXT,
+    related_document_series TEXT,
     related_document_number TEXT,
+    related_document_issuer_ruc TEXT,
     notes TEXT,
     sunat_status TEXT NOT NULL DEFAULT 'NO_ENVIADA' CHECK (sunat_status IN ('NO_ENVIADA', 'ACEPTADO', 'RECHAZADO', 'ERROR')),
     sunat_message TEXT,

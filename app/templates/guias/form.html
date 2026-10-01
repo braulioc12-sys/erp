@@ -1,8 +1,15 @@
 {% extends 'base.html' %}
-{% block title %}Generar guía de remisión — Viaje {{ trip.code }}{% endblock %}
+{% block title %}{% if waybill %}Editar guía {{ waybill.series }}-{{ '%06d'|format(waybill.series_number) }}{% else %}Generar guía de remisión{% endif %} — Viaje {{ trip.code }}{% endblock %}
 {% block content %}
-<div class="page-header"><h1>Generar guía de remisión — Viaje {{ trip.code }}</h1></div>
-<p class="muted mt-0">Se completa con los datos del viaje; puedes ajustarlos antes de guardar. Después de guardar podrás enviarla a SUNAT (si la facturación electrónica ya está configurada). Se emitirá a nombre de <strong>{{ 'BRMS' if trip.issuer == 'BRMS' else 'Harraso Transport' }}</strong>, la misma empresa de este viaje.</p>
+<div class="page-header"><h1>{% if waybill %}Editar guía {{ waybill.series }}-{{ '%06d'|format(waybill.series_number) }}{% else %}Generar guía de remisión{% endif %} — Viaje {{ trip.code }}</h1></div>
+{# 1 oct, pedido de Braulio ("en la direccion de partida y llegada no sale
+   para escribir la direccion exacta"): antes no existía ninguna forma de
+   corregir una guía ya creada -- esta misma plantilla ahora sirve tanto
+   para crear (guias.new, `waybill` no se pasa) como para editar
+   (guias.edit, `waybill` trae la guía ya guardada) -- cada campo usa
+   `waybill.X` como su propio valor de partida cuando se está editando, en
+   vez de recalcularlo del viaje. #}
+<p class="muted mt-0">{% if waybill %}Corrige los datos de esta guía (todavía no fue aceptada por SUNAT).{% else %}Se completa con los datos del viaje; puedes ajustarlos antes de guardar. Después de guardar podrás enviarla a SUNAT (si la facturación electrónica ya está configurada).{% endif %} Se emitirá a nombre de <strong>{{ 'BRMS' if trip.issuer == 'BRMS' else 'Harraso Transport' }}</strong>, la misma empresa de este viaje.</p>
 
 <form class="form panel" method="post">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -15,20 +22,20 @@
       <input type="date" name="delivery_date" value="{{ form_values.delivery_date if form_values else '' }}">
     </label>
     <label>N.º de bultos
-      <input type="number" step="1" min="1" name="packages" value="{{ form_values.packages if form_values else 1 }}">
+      <input type="number" step="1" min="1" name="packages" value="{{ form_values.packages if form_values else (waybill.packages if waybill else 1) }}">
     </label>
     <label>Peso bruto total (kg)
-      <input type="number" step="0.01" name="weight_kg" value="{{ form_values.weight_kg if form_values else (trip.cargo_weight_kg or '') }}">
+      <input type="number" step="0.01" name="weight_kg" value="{{ form_values.weight_kg if form_values else ((waybill.weight_kg if waybill else trip.cargo_weight_kg) or '') }}">
     </label>
   </div>
   <p class="muted" style="margin-top:-8px;">Si dejas la fecha de entrega en blanco, se usa la misma fecha de emisión.</p>
 
   <div class="form-row">
     <label>Dirección de partida
-      <input type="text" name="origin_address" value="{{ form_values.origin_address if form_values else trip.origin }}">
+      <input type="text" name="origin_address" value="{{ form_values.origin_address if form_values else (waybill.origin_address if waybill else trip.origin) }}">
     </label>
     <label>Dirección de llegada
-      <input type="text" name="destination_address" value="{{ form_values.destination_address if form_values else trip.destination }}">
+      <input type="text" name="destination_address" value="{{ form_values.destination_address if form_values else (waybill.destination_address if waybill else trip.destination) }}">
     </label>
   </div>
 
@@ -47,7 +54,7 @@
           <input type="text" data-role="distrito-texto" maxlength="2" pattern="[0-9]{2}" placeholder="N.º de distrito (2 dígitos)" style="display:none;">
         </label>
       </div>
-      <input type="hidden" name="origin_ubigeo" data-role="ubigeo-final" value="{{ form_values.origin_ubigeo if form_values else '' }}">
+      <input type="hidden" name="origin_ubigeo" data-role="ubigeo-final" value="{{ form_values.origin_ubigeo if form_values else (waybill.origin_ubigeo if waybill else '') }}">
     </div>
     <div style="flex:1;">
       <strong>Ubigeo de llegada</strong>
@@ -63,7 +70,7 @@
           <input type="text" data-role="distrito-texto" maxlength="2" pattern="[0-9]{2}" placeholder="N.º de distrito (2 dígitos)" style="display:none;">
         </label>
       </div>
-      <input type="hidden" name="destination_ubigeo" data-role="ubigeo-final" value="{{ form_values.destination_ubigeo if form_values else '' }}">
+      <input type="hidden" name="destination_ubigeo" data-role="ubigeo-final" value="{{ form_values.destination_ubigeo if form_values else (waybill.destination_ubigeo if waybill else '') }}">
     </div>
   </div>
   <p class="muted" style="margin-top:-8px;">Elige Departamento y Provincia de la lista (son datos reales del INEI, no se pueden escribir mal). Para Amazonas, Áncash, Apurímac, Arequipa, Ayacucho, Cajamarca, Callao, Cusco y Lima también puedes elegir el Distrito por nombre; en el resto de departamentos escribe el número de distrito (2 dígitos) — igual se valida que el departamento y la provincia existan de verdad antes de guardar.</p>
@@ -71,23 +78,23 @@
   <label>Motivo de traslado
     <select name="transfer_reason">
       {% for code, label in transfer_reasons %}
-      <option value="{{ code }}" {{ 'selected' if code == (form_values.transfer_reason if form_values else 'OTROS') }}>{{ label }}</option>
+      <option value="{{ code }}" {{ 'selected' if code == (form_values.transfer_reason if form_values else (waybill.transfer_reason if waybill else 'OTROS')) }}>{{ label }}</option>
       {% endfor %}
     </select>
   </label>
 
   <div class="form-row">
     <label>Placa del vehículo
-      <input type="text" name="vehicle_plate" value="{{ form_values.vehicle_plate if form_values else (trip.vehicle_plate or '') }}">
+      <input type="text" name="vehicle_plate" value="{{ form_values.vehicle_plate if form_values else ((waybill.vehicle_plate if waybill else trip.vehicle_plate) or '') }}">
     </label>
     <label>Placa de la carreta (vehículo secundario)
-      <input type="text" name="trailer_plate" value="{{ form_values.trailer_plate if form_values else (trip.trailer_plate or '') }}">
+      <input type="text" name="trailer_plate" value="{{ form_values.trailer_plate if form_values else ((waybill.trailer_plate if waybill else trip.trailer_plate) or '') }}">
     </label>
   </div>
 
   <div class="form-row">
     <label>Conductor
-      <input type="text" name="driver_name" value="{{ form_values.driver_name if form_values else (trip.driver_name or '') }}">
+      <input type="text" name="driver_name" value="{{ form_values.driver_name if form_values else ((waybill.driver_name if waybill else trip.driver_name) or '') }}">
     </label>
   </div>
 
@@ -95,25 +102,25 @@
 
   <div class="form-row">
     <label>RUC del destinatario
-      <input type="text" name="recipient_ruc" value="{{ form_values.recipient_ruc if form_values else '' }}" placeholder="Si es distinto del cliente del viaje">
+      <input type="text" name="recipient_ruc" value="{{ form_values.recipient_ruc if form_values else (waybill.recipient_ruc if waybill else '') }}" placeholder="Si es distinto del cliente del viaje">
     </label>
     <label>Razón social del destinatario
-      <input type="text" name="recipient_name" value="{{ form_values.recipient_name if form_values else '' }}">
+      <input type="text" name="recipient_name" value="{{ form_values.recipient_name if form_values else (waybill.recipient_name if waybill else '') }}">
     </label>
   </div>
 
   <div class="form-row">
     <label>RUC de la empresa subcontratada
-      <input type="text" name="subcontractor_ruc" value="{{ form_values.subcontractor_ruc if form_values else '' }}" placeholder="Solo si se subcontrató a otra empresa de transporte">
+      <input type="text" name="subcontractor_ruc" value="{{ form_values.subcontractor_ruc if form_values else (waybill.subcontractor_ruc if waybill else '') }}" placeholder="Solo si se subcontrató a otra empresa de transporte">
     </label>
     <label>Razón social de la empresa subcontratada
-      <input type="text" name="subcontractor_name" value="{{ form_values.subcontractor_name if form_values else (trip.third_party_name or '') }}">
+      <input type="text" name="subcontractor_name" value="{{ form_values.subcontractor_name if form_values else ((waybill.subcontractor_name if waybill else trip.third_party_name) or '') }}">
     </label>
   </div>
 
   <div class="form-row">
     <label>¿Quién paga el flete?
-      {% set current_payer_type = form_values.payer_type if form_values else 'DESTINATARIO' %}
+      {% set current_payer_type = form_values.payer_type if form_values else (waybill.payer_type if waybill else 'DESTINATARIO') %}
       <select name="payer_type">
         <option value="REMITENTE" {{ 'selected' if current_payer_type == 'REMITENTE' }}>Remitente</option>
         <option value="DESTINATARIO" {{ 'selected' if current_payer_type == 'DESTINATARIO' }}>Destinatario</option>
@@ -121,32 +128,71 @@
       </select>
     </label>
     <label>RUC del pagador (si es un tercero)
-      <input type="text" name="payer_ruc" value="{{ form_values.payer_ruc if form_values else '' }}">
+      <input type="text" name="payer_ruc" value="{{ form_values.payer_ruc if form_values else (waybill.payer_ruc if waybill else '') }}">
     </label>
     <label>Razón social del pagador (si es un tercero)
-      <input type="text" name="payer_name" value="{{ form_values.payer_name if form_values else '' }}">
+      <input type="text" name="payer_name" value="{{ form_values.payer_name if form_values else (waybill.payer_name if waybill else '') }}">
     </label>
   </div>
 
   <div class="form-row">
     <label>DNI del conductor
-      <input type="text" name="driver_document" value="{{ form_values.driver_document if form_values else (trip.driver_document or '') }}" placeholder="Necesario para SUNAT">
+      <input type="text" name="driver_document" value="{{ form_values.driver_document if form_values else ((waybill.driver_document if waybill else trip.driver_document) or '') }}" placeholder="Necesario para SUNAT">
     </label>
     <label>Licencia de conducir
-      <input type="text" name="driver_license" value="{{ form_values.driver_license if form_values else (trip.driver_license or '') }}">
+      <input type="text" name="driver_license" value="{{ form_values.driver_license if form_values else ((waybill.driver_license if waybill else trip.driver_license) or '') }}">
     </label>
   </div>
   {% if not trip.driver_document %}
   <p class="muted" style="margin-top:-8px;">Este conductor no tiene DNI registrado. Puedes escribirlo aquí, o guardarlo de forma permanente en Flota → Conductores para que se autocomplete la próxima vez.</p>
   {% endif %}
 
+  {# 1 oct, pedido de Braulio ("en la guia de transportista, debe figurar la
+     guia de remitente. Hay que crear ese campo"): ver la nota larga junto a
+     RELATED_DOCUMENT_TYPES en app/routes/guias.py. Al crear una guía nueva,
+     si el viaje ya tiene cargada su "guía del remitente"
+     (trips.shipper_waybill_number, ver viajes/detail.html), se sugiere acá
+     como punto de partida (en el campo Número -- ese dato se guarda como
+     texto libre, sin serie separada, así que no hay forma de precargar la
+     Serie automáticamente).
+
+     1 oct, ACTUALIZACIÓN (mismo día): tefacturo.pe confirmó el campo real
+     (captura de su documentación) -- serie/número quedan separados y se
+     agrega el RUC del emisor del documento, porque así lo pide
+     referencias.documentoReferenciaList (ver build_waybill_payload() en
+     app/integrations/sunat_ose.py). Con tipo="Factura" SÍ se manda a SUNAT
+     (confirmado); con "Guía de remisión del remitente" o "Boleta" también
+     se manda, pero con el texto de tipoDocumento ASUMIDO (no confirmado por
+     tefacturo.pe) -- si SUNAT rechaza la guía por este dato, revisar el
+     catálogo RELATED_DOCUMENT_TIPO_DOCUMENTO ahí mismo. #}
+  {% set current_related_type = form_values.related_document_type if form_values else (waybill.related_document_type if waybill else (trip.shipper_waybill_number and 'GUIA_REMITENTE' or '')) %}
+  <div class="form-row">
+    <label>Documento relacionado
+      <select name="related_document_type">
+        {% for code, label in related_document_types %}
+        <option value="{{ code }}" {{ 'selected' if code == current_related_type }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Serie
+      <input type="text" name="related_document_series" value="{{ form_values.related_document_series if form_values else (waybill.related_document_series if waybill else '') }}" placeholder="Ej: F001" style="width:100px;">
+    </label>
+    <label>Número
+      <input type="text" name="related_document_number" value="{{ form_values.related_document_number if form_values else (waybill.related_document_number if waybill else (trip.shipper_waybill_number or '')) }}" placeholder="Ej: 123">
+    </label>
+    <label>RUC del emisor
+      <input type="text" name="related_document_issuer_ruc" value="{{ form_values.related_document_issuer_ruc if form_values else (waybill.related_document_issuer_ruc if waybill else '') }}" placeholder="RUC de quien emitió ese documento" maxlength="11" style="width:140px;">
+    </label>
+  </div>
+  <p class="muted" style="margin-top:-8px;">Se muestra en el detalle de la guía y, si completas Serie + Número + RUC del emisor, se envía junto con la guía de transportista a SUNAT/tefacturo.pe. Si falta algún dato, la guía se emite igual, solo sin ese dato.</p>
+
   <label>Observaciones
-    <textarea name="notes">{{ form_values.notes if form_values else '' }}</textarea>
+    <textarea name="notes">{{ form_values.notes if form_values else (waybill.notes if waybill else '') }}</textarea>
   </label>
 
   <div class="btn-group">
-    <button type="submit" class="btn btn-primary">Guardar guía</button>
-    <a href="{{ url_for('viajes.detail', trip_id=trip.id) }}" class="btn btn-secondary">Cancelar</a>
+    <button type="submit" class="btn btn-primary">{{ 'Guardar cambios' if waybill else 'Guardar guía' }}</button>
+    <a href="{{ url_for('guias.detail', waybill_id=waybill.id) if waybill else url_for('viajes.detail', trip_id=trip.id) }}" class="btn btn-secondary">Cancelar</a>
   </div>
 </form>
 

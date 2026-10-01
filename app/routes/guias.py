@@ -100,6 +100,30 @@ TRANSFER_REASONS = [
     ("OTROS", "Otros"),
 ]
 
+# 1 oct, pedido de Braulio ("en la guia de transportista, debe figurar la
+# guia de remitente. Hay que crear ese campo"): waybills.related_document_type/
+# related_document_number ya existían en schema.sql desde el 17 sep
+# ("documento asociado", como en el portal de SUNAT) pero nunca se habían
+# conectado a ningún formulario/ruta -- quedaron sin usar. Se completan acá.
+#
+# 1 oct, ACTUALIZACIÓN (mismo día): Braulio mandó una captura de la propia
+# documentación de tefacturo.pe que confirma el campo real -- va en
+# referencias.documentoReferenciaList (serie/numero/tipoDocumento/emisor) --
+# ver la nota larga junto a estas columnas en schema.sql y el catálogo
+# RELATED_DOCUMENT_TIPO_DOCUMENTO en build_waybill_payload()
+# (app/integrations/sunat_ose.py). Por eso acá abajo se piden serie, número
+# y RUC del emisor por separado (antes era un solo campo de texto libre).
+RELATED_DOCUMENT_TYPES = [
+    ("", "Ninguno"),
+    ("GUIA_REMITENTE", "Guía de remisión del remitente"),
+    ("FACTURA", "Factura"),
+    ("BOLETA", "Boleta"),
+    ("OTRO", "Otro"),
+]
+# Mismo catálogo de arriba, como {código: etiqueta}, para mostrar la
+# etiqueta legible (no el código crudo) en guias/detail.html.
+RELATED_DOCUMENT_LABELS = dict(RELATED_DOCUMENT_TYPES)
+
 
 def _next_series_number(series):
     row = query_one("SELECT COUNT(*) as n FROM waybills WHERE series = ?", (series,))
@@ -233,6 +257,7 @@ def new(trip_id):
                 transfer_reasons=TRANSFER_REASONS,
                 form_values=request.form,
                 ubigeo_catalog=UBIGEO_CATALOG,
+                related_document_types=RELATED_DOCUMENT_TYPES,
             )
 
         series = current_app.config["WAYBILL_SERIES"]
@@ -253,14 +278,30 @@ def new(trip_id):
         payer_type = (request.form.get("payer_type") or "DESTINATARIO").strip().upper()
         if payer_type not in ("REMITENTE", "DESTINATARIO", "TERCERO"):
             payer_type = "DESTINATARIO"
+        # 1 oct, pedido de Braulio: "documento relacionado" (ver la nota
+        # larga junto a RELATED_DOCUMENT_TYPES más arriba). Si se deja en
+        # "Ninguno", no tiene sentido guardar serie/número/RUC sueltos sin
+        # tipo -- se limpian a NULL en ese caso.
+        related_document_type = (request.form.get("related_document_type") or "").strip().upper()
+        if related_document_type not in ("FACTURA", "BOLETA", "GUIA_REMITENTE", "OTRO"):
+            related_document_type = None
+        related_document_series = request.form.get("related_document_series", "").strip() or None
+        related_document_number = request.form.get("related_document_number", "").strip() or None
+        related_document_issuer_ruc = request.form.get("related_document_issuer_ruc", "").strip() or None
+        if not related_document_type:
+            related_document_series = None
+            related_document_number = None
+            related_document_issuer_ruc = None
         waybill_id = execute(
             """INSERT INTO waybills (trip_id, series, series_number, issuer, issue_date, delivery_date,
                weight_kg, packages,
                origin_address, destination_address, origin_ubigeo, destination_ubigeo, transfer_reason,
                vehicle_plate, trailer_plate, driver_document, driver_name, driver_license,
                recipient_ruc, recipient_name, subcontractor_ruc, subcontractor_name,
-               payer_type, payer_ruc, payer_name, notes, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               payer_type, payer_ruc, payer_name, related_document_type, related_document_series,
+               related_document_number, related_document_issuer_ruc,
+               notes, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 trip_id,
                 series,
@@ -299,6 +340,10 @@ def new(trip_id):
                 payer_type,
                 request.form.get("payer_ruc", "").strip(),
                 request.form.get("payer_name", "").strip(),
+                related_document_type,
+                related_document_series,
+                related_document_number,
+                related_document_issuer_ruc,
                 request.form.get("notes", "").strip(),
                 None,
             ),
@@ -321,6 +366,150 @@ def new(trip_id):
         today=today_str(),
         transfer_reasons=TRANSFER_REASONS,
         ubigeo_catalog=UBIGEO_CATALOG,
+        related_document_types=RELATED_DOCUMENT_TYPES,
+    )
+
+
+def _waybill_edit_block_reason(waybill):
+    """1 oct, pedido de Braulio ("en la direccion de partida y llegada no
+    sale para escribir la direccion exacta"): antes NO existía ninguna
+    forma de corregir una guía ya creada (ni la dirección, ni el documento
+    relacionado, ni nada) -- solo se podía crear, ver, reenviar a SUNAT o
+    borrar. Mismo criterio que _invoice_is_locked() en
+    app/routes/facturacion.py: se puede editar mientras no esté ACEPTADA
+    por SUNAT (NO_ENVIADA, ERROR y RECHAZADO sí se pueden editar, es
+    justamente el caso de corregir un dato y volver a intentar el envío) --
+    una vez ACEPTADA, el comprobante electrónico ya quedó emitido así."""
+    if waybill["sunat_status"] == "ACEPTADO":
+        return (
+            "Esta guía ya fue aceptada por SUNAT — el comprobante electrónico ya se emitió así, no se "
+            "puede editar."
+        )
+    return None
+
+
+@bp.route("/<int:waybill_id>/editar", methods=["GET", "POST"])
+@permission_required("guias", "edit")
+def edit(waybill_id):
+    waybill = query_one("SELECT * FROM waybills WHERE id = ?", (waybill_id,))
+    if waybill is None:
+        abort(404)
+    reason = _waybill_edit_block_reason(waybill)
+    if reason:
+        flash(reason, "error")
+        return redirect(url_for("guias.detail", waybill_id=waybill_id))
+
+    # Mismo SELECT que new() -- así guias/form.html recibe un `trip` con
+    # exactamente las mismas columnas en ambos casos (vehicle_plate/
+    # driver_name/etc. vía JOIN). `waybill` (abajo) es lo que hace que el
+    # formulario parta de los valores YA GUARDADOS en esta guía, en vez de
+    # los del viaje -- ver los `if waybill else` en guias/form.html.
+    trip = query_one(
+        """SELECT t.*, v.plate as vehicle_plate, tv.plate as trailer_plate, d.name as driver_name,
+                  d.document_number as driver_document, d.license_number as driver_license,
+                  c.name as client_name
+           FROM trips t
+           LEFT JOIN vehicles v ON v.id = t.vehicle_id
+           LEFT JOIN vehicles tv ON tv.id = t.trailer_vehicle_id
+           LEFT JOIN drivers d ON d.id = t.driver_id
+           LEFT JOIN clients c ON c.id = t.client_id
+           WHERE t.id = ?""",
+        (waybill["trip_id"],),
+    )
+
+    if request.method == "POST":
+        if not validate_csrf():
+            abort(400)
+
+        origin_ubigeo = request.form.get("origin_ubigeo", "").strip()
+        destination_ubigeo = request.form.get("destination_ubigeo", "").strip()
+        ubigeo_error = validar_ubigeo(origin_ubigeo, "El ubigeo de partida") or validar_ubigeo(
+            destination_ubigeo, "El ubigeo de llegada"
+        )
+        if ubigeo_error:
+            flash(ubigeo_error, "error")
+            return render_template(
+                "guias/form.html",
+                trip=trip,
+                waybill=waybill,
+                today=today_str(),
+                transfer_reasons=TRANSFER_REASONS,
+                form_values=request.form,
+                ubigeo_catalog=UBIGEO_CATALOG,
+                related_document_types=RELATED_DOCUMENT_TYPES,
+            )
+
+        issue_date_value = parse_date(request.form.get("issue_date")) or today_str()
+        delivery_date_value = parse_date(request.form.get("delivery_date")) or issue_date_value
+        payer_type = (request.form.get("payer_type") or "DESTINATARIO").strip().upper()
+        if payer_type not in ("REMITENTE", "DESTINATARIO", "TERCERO"):
+            payer_type = "DESTINATARIO"
+        related_document_type = (request.form.get("related_document_type") or "").strip().upper()
+        if related_document_type not in ("FACTURA", "BOLETA", "GUIA_REMITENTE", "OTRO"):
+            related_document_type = None
+        related_document_series = request.form.get("related_document_series", "").strip() or None
+        related_document_number = request.form.get("related_document_number", "").strip() or None
+        related_document_issuer_ruc = request.form.get("related_document_issuer_ruc", "").strip() or None
+        if not related_document_type:
+            related_document_series = None
+            related_document_number = None
+            related_document_issuer_ruc = None
+
+        execute(
+            """UPDATE waybills SET issue_date=?, delivery_date=?, weight_kg=?, packages=?,
+               origin_address=?, destination_address=?, origin_ubigeo=?, destination_ubigeo=?,
+               transfer_reason=?, vehicle_plate=?, trailer_plate=?, driver_document=?, driver_name=?,
+               driver_license=?, recipient_ruc=?, recipient_name=?, subcontractor_ruc=?,
+               subcontractor_name=?, payer_type=?, payer_ruc=?, payer_name=?,
+               related_document_type=?, related_document_series=?, related_document_number=?,
+               related_document_issuer_ruc=?, notes=?
+               WHERE id=?""",
+            (
+                issue_date_value,
+                delivery_date_value,
+                parse_float(request.form.get("weight_kg"), None),
+                int(parse_float(request.form.get("packages"), 1)),
+                request.form.get("origin_address", "").strip() or trip["origin"],
+                request.form.get("destination_address", "").strip() or trip["destination"],
+                origin_ubigeo,
+                destination_ubigeo,
+                request.form.get("transfer_reason") or "OTROS",
+                request.form.get("vehicle_plate", "").strip(),
+                request.form.get("trailer_plate", "").strip(),
+                request.form.get("driver_document", "").strip(),
+                request.form.get("driver_name", "").strip(),
+                request.form.get("driver_license", "").strip(),
+                request.form.get("recipient_ruc", "").strip(),
+                request.form.get("recipient_name", "").strip(),
+                request.form.get("subcontractor_ruc", "").strip(),
+                request.form.get("subcontractor_name", "").strip(),
+                payer_type,
+                request.form.get("payer_ruc", "").strip(),
+                request.form.get("payer_name", "").strip(),
+                related_document_type,
+                related_document_series,
+                related_document_number,
+                related_document_issuer_ruc,
+                request.form.get("notes", "").strip(),
+                waybill_id,
+            ),
+        )
+        log_activity(
+            "guias", "EDITAR", f"Guía {waybill['series']}-{waybill['series_number']:06d} editada",
+            entity_type="guia", entity_id=waybill_id,
+            entity_url=url_for("guias.detail", waybill_id=waybill_id),
+        )
+        flash("Guía actualizada.", "success")
+        return redirect(url_for("guias.detail", waybill_id=waybill_id))
+
+    return render_template(
+        "guias/form.html",
+        trip=trip,
+        waybill=waybill,
+        today=today_str(),
+        transfer_reasons=TRANSFER_REASONS,
+        ubigeo_catalog=UBIGEO_CATALOG,
+        related_document_types=RELATED_DOCUMENT_TYPES,
     )
 
 
@@ -348,6 +537,7 @@ def detail(waybill_id):
         waybill=waybill,
         needs_order_number=_client_needs_order_number(waybill["issuer"], waybill["client_name"]),
         creator=creator,
+        related_document_labels=RELATED_DOCUMENT_LABELS,
     )
 
 

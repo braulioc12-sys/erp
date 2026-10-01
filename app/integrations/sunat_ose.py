@@ -103,6 +103,25 @@ para no perder el rastro; ver también README):
   subcontratado y/o pagador distinto del destinatario, revisa si el PDF de
   SUNAT sale con esos datos correctos o vacíos, y avísame — si hace falta,
   hay que preguntarle a Jorge el nombre real de estos campos.**
+- **`referencias` / "documento relacionado" (1 oct) — CONFIRMADO en parte,
+  el resto ASUMIDO a pedido expreso de Braulio:** Braulio mandó una captura
+  de la propia documentación de tefacturo.pe (JSON de ejemplo con
+  "detalleGuia"/"conductores") que confirma el campo real: va a nivel raíz
+  como `referencias.documentoReferenciaList`, una lista de
+  `{serie, numero, tipoDocumento, emisor}` (`emisor` es el RUC de quien
+  emitió ese documento) más `referencias.adicionalList` (vacío en el
+  ejemplo). El ejemplo solo confirma `tipoDocumento="FACTURA"` tal cual.
+  Braulio pidió asumir, por el mismo patrón, `"BOLETA"` para Boleta y
+  `"GUIA_REMISION_REMITENTE"` para la guía de remisión del remitente (el
+  caso real que motivó todo esto, la guía V001-4286) — ver el diccionario
+  `RELATED_DOCUMENT_TIPO_DOCUMENTO` más abajo. Si SUNAT rechaza la guía por
+  este dato (o lo acepta pero el PDF no muestra bien el tipo), hay que
+  confirmar el texto real con soporte de tefacturo.pe y corregir ese
+  diccionario. El bloque `referencias` solo se arma si la guía tiene tipo +
+  serie + número + RUC del emisor completos (`waybills.related_document_*`)
+  Y el tipo tiene una entrada en ese diccionario — si falta cualquiera, se
+  omite la clave entera (mismo criterio que `subcontratado` arriba y que
+  `detraccion` en `build_invoice_payload`).
 - **Ubigeo de partida/llegada**: SUNAT exige el código INEI de 6 dígitos
   del distrito de origen/destino en la guía — el ERP no tiene un catálogo
   de ubigeos, así que se pide como campo de texto manual en el formulario
@@ -791,6 +810,22 @@ def build_invoice_payload(invoice, items, client, company):
     return payload
 
 
+# 1 oct -- ver la nota larga "referencias / documento relacionado" en el
+# docstring de build_waybill_payload() (la que empieza con "CONFIRMADO en
+# parte, el resto ASUMIDO"). "FACTURA" viene confirmado tal cual en el
+# ejemplo real de tefacturo.pe que compartió Braulio; "BOLETA" y
+# "GUIA_REMISION_REMITENTE" son una apuesta razonada por el mismo patrón,
+# sin confirmar -- si tefacturo.pe rechaza una guía por este motivo, corregir
+# acá (no hay código para "OTRO": sin un tipo real de SUNAT detrás, no hay
+# nada razonable que mandar, así que esa guía simplemente no manda
+# "referencias").
+RELATED_DOCUMENT_TIPO_DOCUMENTO = {
+    "FACTURA": "FACTURA",                          # confirmado
+    "BOLETA": "BOLETA",                            # asumido, sin confirmar
+    "GUIA_REMITENTE": "GUIA_REMISION_REMITENTE",   # asumido, sin confirmar
+}
+
+
 def build_waybill_payload(waybill, trip, company, client):
     """Arma el JSON de una GUÍA DE REMISIÓN — TRANSPORTISTA en el formato
     real de tefacturo.pe. `company` es quien transporta (Harraso o BRMS, el
@@ -930,6 +965,32 @@ def build_waybill_payload(waybill, trip, company, client):
             "tipoDocumentoIdentidad": "RUC",
         }
 
+    # 1 oct -- "documento relacionado" (ver la nota larga "referencias /
+    # documento relacionado" al inicio del archivo). Solo se arma si hay
+    # tipo + serie + número + RUC del emisor completos Y el tipo tiene una
+    # entrada confirmada/asumida en RELATED_DOCUMENT_TIPO_DOCUMENTO -- si
+    # falta cualquiera de esos datos, se omite la clave "referencias"
+    # entera en vez de mandar algo a medias o inventado.
+    referencias = None
+    tipo_documento_referencia = RELATED_DOCUMENT_TIPO_DOCUMENTO.get(waybill["related_document_type"])
+    if (
+        tipo_documento_referencia
+        and waybill["related_document_series"]
+        and waybill["related_document_number"]
+        and waybill["related_document_issuer_ruc"]
+    ):
+        referencias = {
+            "documentoReferenciaList": [
+                {
+                    "serie": waybill["related_document_series"],
+                    "numero": waybill["related_document_number"],
+                    "tipoDocumento": tipo_documento_referencia,
+                    "emisor": waybill["related_document_issuer_ruc"],
+                }
+            ],
+            "adicionalList": [],
+        }
+
     payer_type = waybill["payer_type"] or "DESTINATARIO"
     if payer_type == "REMITENTE":
         pagador = dict(remitente)
@@ -1055,6 +1116,10 @@ def build_waybill_payload(waybill, trip, company, client):
     # PROPIA) no debe mandar un bloque vacío/inventado.
     if subcontratado:
         payload["subcontratado"] = subcontratado
+    # 1 oct: "referencias" (documento relacionado) solo se manda si está
+    # completo -- ver la nota larga junto a `referencias` más arriba.
+    if referencias:
+        payload["referencias"] = referencias
     return payload
 
 

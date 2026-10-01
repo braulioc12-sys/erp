@@ -478,6 +478,12 @@ COLUMN_MIGRATIONS = [
     # schema.sql (CREATE TABLE waybills) y app/routes/guias.py.
     ("waybills", "related_document_type", "TEXT"),
     ("waybills", "related_document_number", "TEXT"),
+    # 1 oct: tefacturo.pe confirmó (captura real de su documentación) que
+    # el documento relacionado va con serie/número separados más el RUC de
+    # quien lo emitió -- ver la nota larga junto a estas columnas en
+    # schema.sql.
+    ("waybills", "related_document_series", "TEXT"),
+    ("waybills", "related_document_issuer_ruc", "TEXT"),
     # 18 sep, pedido de Braulio ("historial por unidad... Marca, Modelo,
     # Tipo de llanta... altura de la cocada") -- ver el comentario largo
     # junto a estas columnas en schema.sql (CREATE TABLE tire_inventory).

@@ -9,6 +9,15 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-primary">📤 Enviar a SUNAT</button>
     </form>
+    {# 1 oct, pedido de Braulio ("en la direccion de partida y llegada no
+       sale para escribir la direccion exacta"): antes no existía ninguna
+       forma de corregir una guía ya creada -- igual que el borrado, una
+       guía ya ACEPTADA por SUNAT ya no se puede editar (ver
+       _waybill_edit_block_reason() en app/routes/guias.py), así que el
+       botón solo se muestra mientras no esté aceptada. #}
+    {% if waybill.sunat_status != 'ACEPTADO' and can(current_user.roles, 'guias', 'edit') %}
+    <a href="{{ url_for('guias.edit', waybill_id=waybill.id) }}" class="btn btn-secondary">✏️ Editar</a>
+    {% endif %}
     {# 29 sep, pedido de Braulio: borrado, solo para Administrador (permiso
        "delete") -- una guía ya ACEPTADA por SUNAT no se puede borrar del
        todo (ver _waybill_delete_block_reason() en app/routes/guias.py). #}
@@ -54,6 +63,14 @@
   <div class="detail-item"><div class="label">Conductor</div><div class="value">{{ waybill.driver_name or '—' }} ({{ waybill.driver_document or 'sin DNI' }})</div></div>
   <div class="detail-item"><div class="label">Ubigeo partida / llegada</div><div class="value">{{ waybill.origin_ubigeo or '—' }} / {{ waybill.destination_ubigeo or '—' }}</div></div>
   <div class="detail-item"><div class="label">Motivo de traslado</div><div class="value">{{ waybill.transfer_reason or 'OTROS' }}</div></div>
+  {# 1 oct, pedido de Braulio ("en la guia de transportista, debe figurar la
+     guia de remitente"): solo se muestra si se cargó algo -- ver la nota
+     larga junto a RELATED_DOCUMENT_TYPES en app/routes/guias.py. Desde el
+     1 oct (confirmado con tefacturo.pe) esto también se envía a SUNAT junto
+     con la guía -- ver build_waybill_payload() en sunat_ose.py. #}
+  {% if waybill.related_document_type %}
+  <div class="detail-item"><div class="label">Documento relacionado</div><div class="value">{{ related_document_labels.get(waybill.related_document_type, waybill.related_document_type) }}{% if waybill.related_document_series or waybill.related_document_number %} — {{ waybill.related_document_series or '' }}{{ '-' if waybill.related_document_series and waybill.related_document_number }}{{ waybill.related_document_number or '' }}{% endif %}{% if waybill.related_document_issuer_ruc %} (RUC emisor: {{ waybill.related_document_issuer_ruc }}){% endif %}</div></div>
+  {% endif %}
 </div>
 
 <div class="panel">
