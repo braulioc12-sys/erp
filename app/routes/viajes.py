@@ -1038,8 +1038,17 @@ def detail(trip_id):
     # transportista generada (módulo Guías), la pregunta de "¿la guía del
     # remitente ya figura con nuestros datos?" ya no aplica -- no se le
     # vuelve a pedir la respuesta a un viaje ya procesado.
+    # 1 oct, pedido de Braulio ("ya se creo la guia de este viaje, pero
+    # cuando lo abro no la puedo ver"): existing_waybills ya se consultaba
+    # para decidir si mostrar el botón "Generar guía de remisión" (ver más
+    # abajo en viajes/detail.html), pero nunca se listaba -- una vez
+    # generada, no había forma de verla/descargarla desde el detalle del
+    # viaje (había que ir a Guías de Remisión y buscarla a mano). Se agrega
+    # sunat_pdf_url para poder enlazar el PDF directo cuando ya fue
+    # aceptada. Un viaje puede tener más de una guía (p.ej. una incompleta
+    # y luego la correcta) -- se listan todas, la más nueva primero.
     existing_waybills = query_all(
-        "SELECT id, series, series_number, sunat_status FROM waybills WHERE trip_id = ? ORDER BY id DESC",
+        "SELECT id, series, series_number, sunat_status, sunat_pdf_url FROM waybills WHERE trip_id = ? ORDER BY id DESC",
         (trip_id,),
     )
     # 22 sep, pedido de Braulio ("que usuario creo el viaje... etc"): quién

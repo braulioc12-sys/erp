@@ -194,6 +194,37 @@
 <p class="muted" style="margin-top:-8px; margin-bottom:16px;">La liquidación (anticipo de viáticos y gastos) es una sola para todo el viaje redondo — compartida entre {{ 'este viaje y su ida' if outbound_trip else 'este viaje y su vuelta' }}. La factura y la comisión sí van separadas, cada tramo se factura aparte.</p>
 {% endif %}
 
+{# 1 oct, pedido de Braulio ("ya se creo la guia de este viaje, pero cuando
+   lo abro no la puedo ver. debe figurar para poder descargarla una vez que
+   ya fue enviada y aceptada a sunat"): existing_waybills (ver detail() en
+   app/routes/viajes.py) ya se consultaba para decidir si mostrar el botón
+   "Generar guía de remisión" de arriba, pero nunca se mostraba -- no había
+   forma de ver/descargar una guía ya creada desde el propio viaje. Un viaje
+   puede tener más de una guía (p.ej. una quedó incompleta y se generó una
+   segunda, correcta) -- se listan todas, la más nueva primero, cada una con
+   su propio enlace a Guías de Remisión y, si ya fue aceptada por SUNAT, su
+   PDF directo. #}
+{% if existing_waybills %}
+<div class="panel" style="margin-bottom:16px;">
+  <h2 class="mt-0">Guía{{ 's' if existing_waybills|length > 1 }} de remisión generada{{ 's' if existing_waybills|length > 1 }}</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>N°</th><th>Estado SUNAT</th><th>PDF</th><th></th></tr></thead>
+      <tbody>
+        {% for w in existing_waybills %}
+        <tr>
+          <td>{{ w.series }}-{{ '%06d'|format(w.series_number) }}</td>
+          <td>{{ m.badge(w.sunat_status) }}</td>
+          <td>{% if w.sunat_pdf_url %}<a href="{{ w.sunat_pdf_url }}" target="_blank" rel="noopener">Descargar PDF</a>{% else %}—{% endif %}</td>
+          <td><a href="{{ url_for('guias.detail', waybill_id=w.id) }}">Ver guía</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
 {# 15 sep, pedido de Braulio: "a la hora de crear o subir guia primero debe
    especificarse si la guia de remision figura nuestros datos como
    transportista". Solo para viajes propios (ownership != 'TERCERO') -- en
