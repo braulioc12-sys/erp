@@ -290,12 +290,54 @@
     </form>
     {% endif %}
   </div>
-  {% elif trip.shipper_waybill_shows_carrier == 'NO' and can(current_user.roles, 'viajes', 'edit') %}
-  <form method="post" action="{{ url_for('viajes.set_shipper_waybill_decision', trip_id=trip.id) }}" style="margin: -8px 0 16px;">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="decision" value="">
-    <button type="submit" class="btn btn-secondary btn-sm">¿La guía del remitente sí figura con nuestros datos? Cambiar respuesta</button>
-  </form>
+  {% elif trip.shipper_waybill_shows_carrier == 'NO' %}
+  {# 1 oct, pedido de Braulio ("cuando se crea un viaje y la guia de
+     remision no tiene nuestros datos, creamos la guia de transportista.
+     tambien tiene que estar el campo para subir la guia de remitente en el
+     portal"): antes, al responder "No", este panel solo mostraba el botón
+     de "Cambiar respuesta" -- no había forma de adjuntar la guía del
+     remitente igual, aunque el remitente SÍ la haya emitido (solo que sin
+     nuestros datos como transportista). Se reutiliza el mismo formulario
+     de número/archivo que ya existía en la rama "SI" de arriba (misma ruta
+     viajes.save_shipper_waybill) -- la guía de transportista propia (de
+     arriba, "Generar guía de remisión (SUNAT)") se sigue generando igual,
+     esto es además, no en reemplazo. #}
+  <div class="panel">
+    <h2 class="mt-0">Guía del remitente</h2>
+    <p class="muted mt-0">Esta guía del remitente NO trae los datos de {{ 'BRMS' if trip.issuer == 'BRMS' else 'Harraso Transport' }} como transportista — por eso se genera una guía de transportista propia (arriba). Aun así, puedes adjuntar la guía que emitió el remitente como referencia.</p>
+    <div class="detail-grid" style="margin-bottom:12px;">
+      <div class="detail-item"><div class="label">Número de guía</div><div class="value">{{ trip.shipper_waybill_number or '—' }}</div></div>
+      <div class="detail-item">
+        <div class="label">Archivo</div>
+        <div class="value">
+          {% if trip.shipper_waybill_filename %}
+          <a href="{{ url_for('viajes.shipper_waybill_file', trip_id=trip.id) }}" target="_blank">Ver guía adjunta</a>
+          {% else %}— (todavía no se adjunta){% endif %}
+        </div>
+      </div>
+    </div>
+    {% if can(current_user.roles, 'viajes', 'edit') %}
+    <form method="post" action="{{ url_for('viajes.save_shipper_waybill', trip_id=trip.id) }}" enctype="multipart/form-data" class="form" style="max-width:520px;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="form-row">
+        <label>Número de guía
+          <input type="text" name="shipper_waybill_number" value="{{ trip.shipper_waybill_number or '' }}">
+        </label>
+        <label>Archivo (foto o PDF)
+          <input type="file" name="shipper_waybill_file" accept=".png,.jpg,.jpeg,.pdf,.webp,.heic,.heif" class="js-scan-input">
+        </label>
+      </div>
+      <div class="btn-group">
+        <button type="submit" class="btn btn-secondary btn-sm">Guardar guía del remitente</button>
+      </div>
+    </form>
+    <form method="post" action="{{ url_for('viajes.set_shipper_waybill_decision', trip_id=trip.id) }}" style="margin-top:8px;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="decision" value="">
+      <button type="submit" class="btn btn-secondary btn-sm">¿La guía del remitente sí figura con nuestros datos? Cambiar respuesta</button>
+    </form>
+    {% endif %}
+  </div>
   {% endif %}
 {% endif %}
 
