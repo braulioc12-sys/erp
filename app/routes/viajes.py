@@ -1260,10 +1260,14 @@ def delete_trip(trip_id):
     return redirect(url_for("viajes.list_view"))
 
 
-# --- Guía de transportista (3 sep, pedido de Braulio) ---------------------
+# --- Guía de remisión del cliente (3 sep, pedido de Braulio) --------------
 #
-# Documento propio del transportista/tercero que hizo el viaje — distinto
-# de la guía de remisión SUNAT que ya genera el módulo Guías (ver
+# Documento que emitió el cliente/remitente del viaje (los nombres de
+# columnas/funciones siguen con el prefijo "carrier_waybill_*"/"guía de
+# transportista" de cuando se creó este campo, 3 sep -- ver la corrección de
+# Braulio del 1 oct junto al panel en viajes/detail.html: el nombre VISIBLE
+# en pantalla estaba al revés, esto NO es la guía de transportista -- esa es
+# la guía de remisión electrónica real que ya genera el módulo Guías, ver
 # viajes/detail.html, botón "Generar guía de remisión"). Se agrega DESPUÉS
 # de creado el viaje (no en el formulario de alta), con un número a mano
 # y/o un archivo (foto o PDF) — mismo mecanismo de almacenamiento que los
@@ -1326,11 +1330,11 @@ def save_waybill(trip_id):
     )
     log_activity(
         "viajes", "SUBIR" if new_filename else "EDITAR",
-        f"Guía de transportista del viaje {trip['code']}",
+        f"Guía de remisión del cliente del viaje {trip['code']}",
         entity_type="viaje", entity_id=trip_id,
         entity_url=url_for("viajes.detail", trip_id=trip_id),
     )
-    flash("Guía de transportista guardada.", "success")
+    flash("Guía de remisión del cliente guardada.", "success")
     return redirect(url_for("viajes.detail", trip_id=trip_id))
 
 
@@ -1351,8 +1355,9 @@ def waybill_file(trip_id):
 # especificarse si la guia de remision figura nuestros datos como
 # transportista. Si figuran, no es necesario emitir una guia nueva, solo
 # adjuntar la de remitente. Si no figuran, ahi es necesario crear la guia de
-# transportista." Documento distinto de "Guía de transportista" de arriba
-# (carrier_waybill_*) -- ver el comentario en schema.sql junto a
+# transportista." Documento distinto de "Guía de remisión del cliente" de
+# arriba (carrier_waybill_*, ver la corrección de nombre del 1 oct) -- ver
+# el comentario en schema.sql junto a
 # shipper_waybill_shows_carrier. Solo aplica a viajes con ownership !=
 # 'TERCERO' (si el viaje lo hizo un tercero subcontratado, el transportista
 # de la guía del remitente sería ese tercero, no Harraso/BRMS -- la

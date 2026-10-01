@@ -319,11 +319,17 @@ CREATE TABLE IF NOT EXISTS trips (
     third_party_payment_term TEXT CHECK (
         third_party_payment_term IN ('CONTADO', '15_DIAS', '30_DIAS', '45_DIAS', '60_DIAS')
     ),
-    -- Guía de transportista: documento propio del tercero/transportista que
-    -- hizo el viaje (distinto de la guía de remisión SUNAT que ya genera el
-    -- módulo Guías) — se agrega DESPUÉS de creado el viaje, con un número a
-    -- mano y/o una foto/PDF adjunta (mismo mecanismo de almacenamiento que
-    -- los comprobantes de Liquidaciones, ver app/storage.py).
+    -- Guía de remisión del cliente: documento que emitió el cliente/
+    -- remitente del viaje (distinto de la guía de remisión SUNAT que ya
+    -- genera el módulo Guías) — se agrega DESPUÉS de creado el viaje, con un
+    -- número a mano y/o una foto/PDF adjunta (mismo mecanismo de
+    -- almacenamiento que los comprobantes de Liquidaciones, ver
+    -- app/storage.py). Nombres de columna "carrier_waybill_*" por historia
+    -- (se llamaban así cuando el panel en pantalla decía, incorrectamente,
+    -- "Guía de transportista" -- corregido el 1 oct, pedido de Braulio: "el
+    -- nombre de los campos esta al reves" -- se deja el nombre de columna
+    -- sin tocar para no romper la migración/el dato ya guardado, solo se
+    -- corrigió lo que se ve en pantalla).
     carrier_waybill_number TEXT,
     carrier_waybill_filename TEXT,
     -- 15 sep, pedido de Braulio: "Una vez iniciado el viaje, a la hora de
@@ -332,13 +338,13 @@ CREATE TABLE IF NOT EXISTS trips (
     -- emitir una guia nueva, solo adjuntar la de remitente. Si no figuran,
     -- ahi es necesario crear la guia de transportista." Campos NUEVOS y
     -- separados de carrier_waybill_* de arriba a propósito: carrier_waybill_*
-    -- es un documento genérico del transportista (no ligado a esta pregunta
-    -- de "¿el remitente ya nos puso como transportista?"); aquí se guarda
-    -- específicamente la guía de remisión que emitió el REMITENTE (el
-    -- cliente/dueño de la carga), cuando esa guía ya trae los datos de
-    -- Harraso/BRMS como transportista y por eso no hace falta emitir una
-    -- guía de transportista nueva. NULL = todavía no se respondió la
-    -- pregunta; 'SI'/'NO' = respuesta. Sin CHECK (mismo criterio que
+    -- es un documento del cliente/remitente sin más contexto (no ligado a
+    -- esta pregunta de "¿el remitente ya nos puso como transportista?");
+    -- aquí se guarda específicamente la guía de remisión que emitió el
+    -- REMITENTE (el cliente/dueño de la carga), cuando esa guía ya trae los
+    -- datos de Harraso/BRMS como transportista y por eso no hace falta
+    -- emitir una guía de transportista nueva. NULL = todavía no se respondió
+    -- la pregunta; 'SI'/'NO' = respuesta. Sin CHECK (mismo criterio que
     -- ownership/issuer cuando la columna se agrega después vía
     -- COLUMN_MIGRATIONS) -- se valida en Python.
     shipper_waybill_shows_carrier TEXT,

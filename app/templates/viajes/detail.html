@@ -383,11 +383,24 @@
    (shipper_waybill_shows_carrier == 'SI'), este panel tampoco hace falta
    (queda cubierto por el panel "Guía del remitente" de arriba). En
    cualquier otro caso (sin responder todavía, respondió "No", o viaje
-   TERCERO) se sigue mostrando igual que siempre. #}
+   TERCERO) se sigue mostrando igual que siempre.
+
+   1 oct, corrección de Braulio ("el nombre de los campos esta al reves, las
+   guias generadas son de transportista, y la guia que se debe adjuntar en
+   caso se haya generado la nuestra como transportista, es la guia de
+   remision del cliente"): este panel se llamaba "Guía de transportista" y
+   decía ser "documento propio del transportista" -- al revés de lo que es
+   en realidad. Las guías DE TRANSPORTISTA son las que ya se listan arriba
+   en el panel "Guía(s) de remisión generada(s)" (las reales, emitidas ante
+   SUNAT). Este campo (carrier_waybill_number/carrier_waybill_filename, sin
+   cambios de fondo -- Braulio pidió solo corregir el nombre, no fusionarlo
+   con el flujo de la guía del remitente de arriba) es donde se adjunta la
+   guía de remisión QUE EMITIÓ EL CLIENTE, como referencia adicional, para
+   cuando ya se generó la guía propia como transportista. #}
 {% if trip.shipper_waybill_shows_carrier != 'SI' %}
 <div class="panel">
-  <h2>Guía de transportista</h2>
-  <p class="muted mt-0">Documento propio del transportista (distinto de la guía de remisión SUNAT de arriba) — número y/o foto/PDF adjunta.</p>
+  <h2>Guía de remisión del cliente</h2>
+  <p class="muted mt-0">Documento que emitió el cliente/remitente de este viaje (distinto de la guía de remisión SUNAT que generamos nosotros como transportista, arriba) — número y/o foto/PDF adjunta.</p>
   <div class="detail-grid" style="margin-bottom:12px;">
     <div class="detail-item"><div class="label">Número de guía</div><div class="value">{{ trip.carrier_waybill_number or '—' }}</div></div>
     <div class="detail-item">
@@ -411,7 +424,7 @@
       </label>
     </div>
     <div class="btn-group">
-      <button type="submit" class="btn btn-secondary btn-sm">Guardar guía de transportista</button>
+      <button type="submit" class="btn btn-secondary btn-sm">Guardar guía del cliente</button>
     </div>
   </form>
   {% endif %}
