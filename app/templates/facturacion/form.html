@@ -153,15 +153,21 @@
   {% endif %}
 
   <h2>Ítems adicionales (opcional)</h2>
-  <p class="muted mt-0">Para conceptos que no vienen de un viaje — alquileres u otro tipo de servicio. Puedes combinarlos con los viajes marcados arriba, o dejar los viajes sin marcar y facturar solo con estos ítems. El monto de la línea es cantidad × precio unitario.</p>
+  <p class="muted mt-0">Para conceptos que no vienen de un viaje — alquileres u otro tipo de servicio. Puedes combinarlos con los viajes marcados arriba, o dejar los viajes sin marcar y facturar solo con estos ítems. El monto de la línea es cantidad × precio unitario.
+  {% if issuer == 'HARRASO' %}El precio unitario se ingresa <strong>sin IGV</strong> — el IGV y el total se calculan solos, abajo.{% endif %}</p>
+  <!-- 1 oct, pedido de Braulio ("a la hora de facturar la parte de
+       descripcion haz que el campo sea mucho mas grande... la parte de
+       precio y subtotal puede ir mas pequeño"): Cantidad/P.unitario/Subtotal
+       pasan a ser columnas angostas de ancho fijo y Descripción se queda con
+       todo el espacio restante (sin % fijo, para que crezca con la pantalla) -->
   <div class="table-wrap" style="margin-bottom:4px;">
     <table id="items-table">
       <thead>
         <tr>
-          <th style="width:10%;">Cantidad</th>
+          <th style="width:70px;">Cantidad</th>
           <th>Descripción</th>
-          <th style="width:15%;">P. unitario (S/)</th>
-          <th style="width:14%;">Subtotal</th>
+          <th style="width:110px;">P. unitario{% if issuer == 'HARRASO' %} (sin IGV){% endif %}</th>
+          <th style="width:100px;">Subtotal</th>
           <th></th>
           <th></th>
         </tr>
@@ -169,7 +175,15 @@
       <tbody id="items-tbody"></tbody>
     </table>
   </div>
+  {% if issuer == 'HARRASO' %}
+  <p class="muted mt-0" style="margin-bottom:8px;">
+    Subtotal ítems (sin IGV): <strong id="items-subtotal-value">S/ 0.00</strong> ·
+    IGV (18%): <strong id="items-igv-value">S/ 0.00</strong> ·
+    Total ítems (con IGV): <strong id="items-total-value">S/ 0.00</strong>
+  </p>
+  {% else %}
   <p class="muted mt-0" style="margin-bottom:8px;">Total ítems adicionales: <strong id="items-total-value">S/ 0.00</strong></p>
+  {% endif %}
   <div class="btn-group" style="margin-top:0; margin-bottom:16px;">
     <button type="button" class="btn btn-secondary" id="btn-add-row">+ Agregar línea</button>
   </div>
@@ -234,6 +248,20 @@
     <label>Fecha de emisión
       <input type="date" name="issue_date" value="{{ today }}">
     </label>
+    <!-- 1 oct, pedido de Braulio ("en ambas empresas hay que poder
+         seleccionar la moneda (soles o dolares)"): mismo patrón/valores que
+         ya usa Cotizaciones (quotations.currency) -- ver cotizaciones/form.html.
+         Cambia los símbolos (S/ / US$) que se muestran en vivo en "Ítems
+         adicionales" de arriba (ver currencySelect más abajo), pero NO
+         convierte montos entre monedas -- no hay tipo de cambio en el
+         sistema. -->
+    <label>Moneda
+      <select name="currency" id="currency-select">
+        {% for cur in ['SOLES', 'DOLARES'] %}
+        <option value="{{ cur }}">{{ cur.title() }}</option>
+        {% endfor %}
+      </select>
+    </label>
   </div>
   <div class="form-row" id="due-date-row" style="display:none;">
     <label>Fecha de vencimiento
@@ -253,8 +281,23 @@
 <script>
 (function () {
   var tbody = document.getElementById('items-tbody');
+  // 1 oct, pedido de Braulio: "P. unitario" se ingresa SIN IGV solo para
+  // Harraso (BRMS está exonerada) -- ver la nota larga en
+  // _collect_manual_items() (app/routes/facturacion.py), que hace el mismo
+  // cálculo (sumar 18%) del lado del servidor. Este flag solo controla qué
+  // se MUESTRA acá (desglose Subtotal/IGV/Total) -- lo que de verdad se
+  // guarda lo decide siempre el servidor, nunca este script.
+  var issuerIsHarraso = {{ 'true' if issuer == 'HARRASO' else 'false' }};
+  var IGV_RATE = 0.18;
+  var currencySelect = document.getElementById('currency-select');
+
+  function currencySymbol() {
+    return (currencySelect && currencySelect.value === 'DOLARES') ? 'US$ ' : 'S/ ';
+  }
 
   function computeItemsTotal() {
+    // Suma de cantidad × precio unitario TAL COMO SE ESCRIBIÓ -- para
+    // Harraso esto es el subtotal SIN IGV (ver updateItemsTotal()).
     var total = 0;
     tbody.querySelectorAll('.item-row').forEach(function (tr) {
       var qty = parseFloat(tr.querySelector('[name="item_quantity"]').value) || 0;
@@ -265,8 +308,16 @@
   }
 
   function updateItemsTotal() {
-    var total = computeItemsTotal();
-    document.getElementById('items-total-value').textContent = 'S/ ' + total.toFixed(2);
+    var symbol = currencySymbol();
+    var subtotal = computeItemsTotal();
+    if (issuerIsHarraso) {
+      var igv = subtotal * IGV_RATE;
+      document.getElementById('items-subtotal-value').textContent = symbol + subtotal.toFixed(2);
+      document.getElementById('items-igv-value').textContent = symbol + igv.toFixed(2);
+      document.getElementById('items-total-value').textContent = symbol + (subtotal + igv).toFixed(2);
+    } else {
+      document.getElementById('items-total-value').textContent = symbol + subtotal.toFixed(2);
+    }
     updateDetraccionState();
     recalcDetraccionAmount();
   }
@@ -275,9 +326,9 @@
     var tr = document.createElement('tr');
     tr.className = 'item-row';
     tr.innerHTML =
-      '<td><input type="number" name="item_quantity" value="1" min="0.01" step="0.01" style="width:80px;"></td>' +
-      '<td><input type="text" name="item_description" placeholder="Ej. Alquiler de cisterna, setiembre 2026" style="min-width:200px;"></td>' +
-      '<td><input type="number" name="item_amount" min="0" step="0.01" placeholder="0.00"></td>' +
+      '<td><input type="number" name="item_quantity" value="1" min="0.01" step="0.01" style="width:100%;"></td>' +
+      '<td><input type="text" name="item_description" placeholder="Ej. Alquiler de cisterna, setiembre 2026" style="width:100%; min-width:360px;"></td>' +
+      '<td><input type="number" name="item_amount" min="0" step="0.01" placeholder="0.00" style="width:100%;"></td>' +
       '<td class="text-right item-subtotal">S/ 0.00</td>' +
       '<td><button type="button" class="btn btn-secondary btn-sm btn-save-row">Guardar</button></td>' +
       '<td><button type="button" class="btn btn-secondary btn-sm btn-remove-row">✕</button></td>';
@@ -291,7 +342,10 @@
     function recalcRow() {
       var qty = parseFloat(qtyInput.value) || 0;
       var amt = parseFloat(amtInput.value) || 0;
-      subtotalCell.textContent = 'S/ ' + (qty * amt).toFixed(2);
+      // Subtotal de la fila: cantidad × precio unitario tal cual se
+      // escribió (SIN IGV, para Harraso) -- el desglose con IGV sale en el
+      // bloque de abajo (ver updateItemsTotal()), no fila por fila.
+      subtotalCell.textContent = currencySymbol() + (qty * amt).toFixed(2);
       updateItemsTotal();
     }
     qtyInput.addEventListener('input', recalcRow);
@@ -317,6 +371,21 @@
     tbody.appendChild(rowTemplate());
     updateItemsTotal();
   });
+
+  // 1 oct, pedido de Braulio: cambiar la moneda actualiza en vivo el
+  // símbolo de cada fila ya escrita y de los totales, sin recalcular nada
+  // (no hay tipo de cambio en el sistema -- el número no cambia, solo el
+  // símbolo que lo acompaña).
+  if (currencySelect) {
+    currencySelect.addEventListener('change', function () {
+      tbody.querySelectorAll('.item-row').forEach(function (tr) {
+        var qty = parseFloat(tr.querySelector('[name="item_quantity"]').value) || 0;
+        var amt = parseFloat(tr.querySelector('[name="item_amount"]').value) || 0;
+        tr.querySelector('.item-subtotal').textContent = currencySymbol() + (qty * amt).toFixed(2);
+      });
+      updateItemsTotal();
+    });
+  }
 
   // Detracción (22 sep): cuadro chico -- por defecto solo el checkbox
   // "Afecta a detracción"; el resto de campos aparece recién al marcarlo,
@@ -356,7 +425,12 @@
     if (detraccionAmountEditedManually) { return; }
     var pct = parseFloat(detraccionPercentageInput.value);
     if (!pct) { return; }
-    var total = computeItemsTotal();
+    // 1 oct: esta sección solo existe para Harraso (ver el if de issuer ==
+    // HARRASO en detraccion-section más arriba), así que el total
+    // real de la factura (lo que el servidor usa para calcular el monto
+    // sugerido, ver new() en facturacion.py) ya incluye el IGV -- hay que
+    // subir el mismo 18% acá para que la sugerencia no salga corta.
+    var total = computeItemsTotal() * (issuerIsHarraso ? (1 + IGV_RATE) : 1);
     settingDetraccionAmountProgrammatically = true;
     detraccionAmountInput.value = (total * pct / 100).toFixed(2);
     settingDetraccionAmountProgrammatically = false;

@@ -46,7 +46,7 @@
         <td>{{ i.client_name }}</td>
         <td>{{ i.issue_date }}</td>
         <td>{{ i.due_date or '—' }}</td>
-        <td class="text-right">{{ i.amount|money }}</td>
+        <td class="text-right">{{ i.amount|invoice_money(i.currency) }}</td>
         <td>{{ m.badge(i.status) }}</td>
         <td>{{ m.badge(i.sunat_status) }}</td>
       </tr>

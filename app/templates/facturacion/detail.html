@@ -82,7 +82,12 @@
        lo que se ve acá con lo que de verdad se declaró). -->
   <div class="detail-item"><div class="label">Condición de pago</div><div class="value">{{ 'Crédito' if invoice.due_date else 'Contado' }}</div></div>
   <div class="detail-item"><div class="label">Vencimiento</div><div class="value">{{ invoice.due_date or '—' }}</div></div>
-  <div class="detail-item"><div class="label">Total</div><div class="value">{{ invoice.amount|money }}</div></div>
+  <!-- 1 oct, pedido de Braulio ("en ambas empresas hay que poder
+       seleccionar la moneda"): mismo criterio que cotizaciones/detail.html
+       -- ver invoice_money() en app/helpers.py para el símbolo según
+       invoice.currency. -->
+  <div class="detail-item"><div class="label">Moneda</div><div class="value">{{ invoice.currency.title() }}</div></div>
+  <div class="detail-item"><div class="label">Total</div><div class="value">{{ invoice.amount|invoice_money(invoice.currency) }}</div></div>
 </div>
 
 <div class="panel">
@@ -91,11 +96,11 @@
   <div class="detail-grid">
     <div class="detail-item"><div class="label">Código del bien/servicio</div><div class="value">{{ invoice.detraction_code }}</div></div>
     <div class="detail-item"><div class="label">Porcentaje</div><div class="value">{{ '%.2f'|format(invoice.detraction_percentage) }}%</div></div>
-    <div class="detail-item"><div class="label">Monto detraído</div><div class="value">{{ invoice.detraction_amount|money }}</div></div>
-    <div class="detail-item"><div class="label">Neto a cobrar del cliente</div><div class="value">{{ (invoice.amount - invoice.detraction_amount)|money }}</div></div>
+    <div class="detail-item"><div class="label">Monto detraído</div><div class="value">{{ invoice.detraction_amount|invoice_money(invoice.currency) }}</div></div>
+    <div class="detail-item"><div class="label">Neto a cobrar del cliente</div><div class="value">{{ (invoice.amount - invoice.detraction_amount)|invoice_money(invoice.currency) }}</div></div>
     <div class="detail-item"><div class="label">Cuenta Bco. de la Nación</div><div class="value">{{ invoice.detraction_bank_account or '⚠ falta configurar' }}</div></div>
   </div>
-  <p class="mt-0 muted">El cliente debe depositar {{ invoice.detraction_amount|money }} en la cuenta del Banco de la Nación de arriba y transferir el resto ({{ (invoice.amount - invoice.detraction_amount)|money }}) directamente.</p>
+  <p class="mt-0 muted">El cliente debe depositar {{ invoice.detraction_amount|invoice_money(invoice.currency) }} en la cuenta del Banco de la Nación de arriba y transferir el resto ({{ (invoice.amount - invoice.detraction_amount)|invoice_money(invoice.currency) }}) directamente.</p>
   {% else %}
   <p class="mt-0 muted">Esta factura no tiene detracción aplicada.</p>
   {% endif %}
@@ -233,7 +238,7 @@
                migración en app/db.py) y para los de viaje (siempre 1) -- solo
                varía en un ítem manual nuevo (cantidad × precio unitario). -->
           <td class="text-right">{{ it.quantity|int if it.quantity == it.quantity|int else it.quantity }}</td>
-          <td class="text-right">{{ it.amount|money }}</td>
+          <td class="text-right">{{ it.amount|invoice_money(invoice.currency) }}</td>
         </tr>
         {% endfor %}
       </tbody>

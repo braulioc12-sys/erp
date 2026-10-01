@@ -1241,6 +1241,14 @@ CREATE TABLE IF NOT EXISTS invoices (
     -- que quotations.issuer/trips.issuer.
     issuer TEXT NOT NULL DEFAULT 'HARRASO' CHECK (issuer IN ('HARRASO', 'BRMS')),
     notes TEXT,
+    -- 1 oct, pedido de Braulio ("en ambas empresas hay que poder
+    -- seleccionar la moneda (soles o dolares)"): mismo campo/valores que ya
+    -- usa quotations.currency (Cotizaciones) -- 'amount'/invoice_items.amount
+    -- siguen siendo un simple REAL, en la moneda que diga este campo (no hay
+    -- conversión/tipo de cambio en el sistema). Se manda tal cual a
+    -- tefacturo.pe como "moneda" (PEN/USD) -- ver build_invoice_payload en
+    -- app/integrations/sunat_ose.py.
+    currency TEXT NOT NULL DEFAULT 'SOLES' CHECK (currency IN ('SOLES', 'DOLARES')),
     -- Serie/número correlativo exigido por SUNAT para el comprobante
     -- electrónico (distinto del código interno "number" de arriba).
     series TEXT NOT NULL DEFAULT 'F001',

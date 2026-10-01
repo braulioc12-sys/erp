@@ -695,7 +695,16 @@ def build_invoice_payload(invoice, items, client, company):
         "datosDocumento": {
             "serie": invoice["series"],
             "numero": invoice["series_number"],
-            "moneda": "PEN",
+            # 1 oct, pedido de Braulio ("en ambas empresas hay que poder
+            # seleccionar la moneda"): antes esto estaba fijo en "PEN" -- ahora
+            # sale de invoices.currency. "PEN"/"USD" son los códigos reales del
+            # Catálogo No. 02 de SUNAT (Moneda), el mismo catálogo que ya usan
+            # tefacturo.pe y cualquier otro OSE -- a diferencia de un campo
+            # nuevo sin confirmar (ver "documento relacionado" en
+            # build_waybill_payload), acá no se está adivinando un nombre de
+            # campo ni una estructura: "moneda" ya es un campo confirmado de
+            # este mismo payload, solo cambia el valor que se le manda.
+            "moneda": "USD" if (invoice["currency"] or "SOLES").upper() == "DOLARES" else "PEN",
             "fechaEmision": invoice["issue_date"],
             "horaEmision": None,
             "formaPago": forma_pago,
@@ -751,7 +760,11 @@ def build_invoice_payload(invoice, items, client, company):
                 "monto": f"{total_con_igv:.2f}",
                 "fecha": invoice["due_date"],
                 "numero": "001",
-                "moneda": "PEN",
+                # 1 oct: antes fijo en "PEN" -- se olvidó acá la primera vez.
+                # Debe ser la misma moneda que datosDocumento.moneda arriba
+                # (ver la nota larga ahí) para no mandarle a tefacturo.pe un
+                # comprobante en USD con su única cuota en PEN.
+                "moneda": payload["datosDocumento"]["moneda"],
             }
         ]
 

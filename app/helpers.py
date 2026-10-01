@@ -72,6 +72,24 @@ def money(value):
         return "S/ 0.00"
 
 
+# 1 oct, pedido de Braulio ("en ambas empresas hay que poder seleccionar la
+# moneda (soles o dolares)"): Facturación ya guarda invoices.currency (ver
+# COLUMN_MIGRATIONS en app/db.py) -- este filtro es el único lugar que sabe
+# el símbolo de cada una, para no tener que repetir el mapeo en cada
+# plantilla. money() de arriba NO se toca (sigue asumiendo soles, que es
+# correcto para todo el resto del sistema -- viajes, gastos, liquidaciones,
+# etc. -- que no maneja otra moneda).
+CURRENCY_SYMBOLS = {"SOLES": "S/", "DOLARES": "US$"}
+
+
+def invoice_money(value, currency="SOLES"):
+    symbol = CURRENCY_SYMBOLS.get((currency or "SOLES").upper(), "S/")
+    try:
+        return f"{symbol} {float(value):,.2f}"
+    except (TypeError, ValueError):
+        return f"{symbol} 0.00"
+
+
 _UNIDADES = ["", "UNO", "DOS", "TRES", "CUATRO", "CINCO", "SEIS", "SIETE", "OCHO", "NUEVE"]
 _ESPECIALES_10_19 = ["DIEZ", "ONCE", "DOCE", "TRECE", "CATORCE", "QUINCE", "DIECISEIS",
                      "DIECISIETE", "DIECIOCHO", "DIECINUEVE"]

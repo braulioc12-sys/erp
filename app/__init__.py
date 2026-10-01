@@ -89,10 +89,13 @@ def create_app(config_object=Config):
     def index():
         return redirect(url_for("dashboard.index"))
 
-    from app.helpers import money, pretty_label
+    from app.helpers import invoice_money, money, pretty_label
 
     app.jinja_env.filters["money"] = money
     app.jinja_env.filters["pretty"] = pretty_label
+    # 1 oct, pedido de Braulio: moneda elegible (soles/dólares) en
+    # Facturación -- ver la nota junto a invoice_money() en app/helpers.py.
+    app.jinja_env.filters["invoice_money"] = invoice_money
 
     @app.context_processor
     def inject_globals():

@@ -603,6 +603,12 @@ COLUMN_MIGRATIONS = [
     # existentes sigan siendo visibles bajo alguna empresa en vez de
     # desaparecer de ambas hasta que se reasignen manualmente.
     ("vehicles", "issuer", "TEXT NOT NULL DEFAULT 'HARRASO'"),
+    # 1 oct, pedido de Braulio ("en ambas empresas hay que poder seleccionar
+    # la moneda (soles o dolares)") -- ver la nota larga junto a esta columna
+    # en schema.sql (CREATE TABLE invoices). Sin CHECK acá (mismo criterio
+    # que el resto de esta lista): se valida en Python, en
+    # app/routes/facturacion.py.
+    ("invoices", "currency", "TEXT NOT NULL DEFAULT 'SOLES'"),
 ]
 
 

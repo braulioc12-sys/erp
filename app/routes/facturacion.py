@@ -37,6 +37,7 @@ from app.helpers import (
 )
 from app.integrations.ai_vision import AiVisionError, extract_invoice_rows_from_image
 from app.integrations.sunat_ose import (
+    IGV_RATE,
     SunatOseError,
     build_client_from_config,
     build_invoice_payload,
@@ -135,7 +136,7 @@ def list_view():
     return render_template("facturacion/list.html", invoices=invoices, status=status, issuer=issuer, q=q)
 
 
-def _collect_manual_items():
+def _collect_manual_items(issuer=None):
     """21 sep, pedido de Braulio ("aparte de facturar los viajes, tambien
     se puedan emitir facturas no relacionadas a viajes, como alquileres...
     de todo tipo"): filas libres (cantidad + descripción + precio unitario)
@@ -156,6 +157,25 @@ def _collect_manual_items():
     cantidad=1 (el valor por defecto si se deja vacío) el comportamiento es
     IDÉNTICO al de antes -- una factura ya generada con una sola fila nunca
     cambia de monto por este cambio.
+
+    1 oct, pedido de Braulio ("en el caso de harraso, cuando se ingrese el
+    monto que sea sin igv y luego abajo muestres cuanto es el igv y el
+    total"): invoice_items.amount sigue significando lo mismo de siempre en
+    TODO el resto del sistema (el monto TOTAL de la línea, YA CON IGV --
+    así lo asume build_invoice_payload()/_split_igv() en
+    app/integrations/sunat_ose.py, el cálculo de detracción, los reportes,
+    etc.) -- lo único que cambia es qué escribe Braulio en el campo "P.
+    unitario" para una factura de Harraso: el precio SIN IGV, no el precio
+    final. Por eso acá, cuando `issuer == "HARRASO"`, el precio unitario
+    escrito se "sube" un 18% antes de multiplicarlo por la cantidad -- el
+    valor que queda guardado en invoice_items.amount termina siendo
+    exactamente el mismo que si Braulio hubiera escrito el precio CON IGV
+    directamente, así que nada aguas abajo (SUNAT, detracción, reportes)
+    se entera de este cambio ni hace falta tocarlo. BRMS no cambia en nada
+    (exonerada de IGV, ver igv_exonerado en company_info_for_issuer) --
+    issuer=None (valor por defecto) tampoco convierte nada, para no romper
+    el resto de los llamadores de esta función (from_image_create(),
+    manual_create(), etc.) que no pasan por este flujo.
 
     Devuelve una lista de (description, quantity, unit_amount, line_total)."""
     descriptions = request.form.getlist("item_description")
@@ -185,6 +205,8 @@ def _collect_manual_items():
         if not desc or amt <= 0 or qty <= 0:
             incomplete = True
             continue
+        if issuer == "HARRASO":
+            amt = round(amt * (1 + IGV_RATE), 2)
         items.append((desc, qty, amt, round(qty * amt, 2)))
     return items, incomplete
 
@@ -1188,7 +1210,14 @@ def new():
         trip_ids = request.form.getlist("trip_ids")
         issue_date = parse_date(request.form.get("issue_date")) or today_str()
         due_date = parse_date(request.form.get("due_date"))
-        manual_items, manual_items_incomplete = _collect_manual_items()
+        # 1 oct, pedido de Braulio ("en ambas empresas hay que poder
+        # seleccionar la moneda (soles o dolares)") -- mismo criterio que
+        # quotations.currency (Cotizaciones): sin CHECK acá, se valida acá
+        # mismo contra los dos únicos valores válidos.
+        currency = (request.form.get("currency") or "SOLES").strip().upper()
+        if currency not in ("SOLES", "DOLARES"):
+            currency = "SOLES"
+        manual_items, manual_items_incomplete = _collect_manual_items(issuer)
 
         if not client_id:
             flash("Selecciona un cliente para facturar.", "error")
@@ -1301,10 +1330,11 @@ def new():
         db = get_db()
         cur = db.execute(
             """INSERT INTO invoices (number, client_id, issue_date, due_date, amount, notes, series, series_number, issuer,
-               detraction_applies, detraction_code, detraction_percentage, detraction_amount, detraction_bank_account)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               currency, detraction_applies, detraction_code, detraction_percentage, detraction_amount, detraction_bank_account)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 number, client_id, issue_date, due_date, total, request.form.get("notes", "").strip(), series, series_number, issuer,
+                currency,
                 1 if detraction["applies"] else 0,
                 detraction["code"],
                 detraction["percentage"],
@@ -1507,7 +1537,12 @@ def edit(invoice_id):
                 return redirect(url_for("facturacion.edit", invoice_id=invoice_id))
             kept_rows.append((item_id, desc, qty, amt, items_by_id[item_id]["trip_id"]))
 
-        new_manual_items, manual_items_incomplete = _collect_manual_items()
+        # 1 oct: issuer=invoice["issuer"] -- mismo criterio de "P. unitario
+        # sin IGV para Harraso" que new() (ver la nota larga en
+        # _collect_manual_items()), para que una línea nueva agregada desde
+        # Editar factura no quede con un monto distinto del que hubiera
+        # tenido si se agregaba desde Generar factura.
+        new_manual_items, manual_items_incomplete = _collect_manual_items(invoice["issuer"])
         if manual_items_incomplete:
             flash(
                 "Hay una línea nueva a medio llenar (le falta la descripción o el monto) — "
