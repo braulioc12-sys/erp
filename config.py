@@ -158,7 +158,26 @@ class Config:
     # se usaba "T001" por suposición propia. Si ya diste de alta otra serie
     # ante SUNAT/tefacturo.pe para tus guías, ponla aquí por variable de
     # entorno.
+    #
+    # 1 oct, pedido de Braulio ("en harraso, a la hora de crear las guias de
+    # transportista esta jalando con serie v001-001, pero ya existen guias
+    # desde el año 2023 con esa serie y numero. cuando se creen, que cree con
+    # la serie v002"): WAYBILL_SERIES era una única serie compartida por
+    # AMBAS empresas (ver `_next_series_number()` en app/routes/guias.py,
+    # que solo cuenta cuántas guías ya existen con esa `series`, sin filtrar
+    # por `issuer`) — las guías de Harraso emitidas en 2023, antes de este
+    # sistema (por fuera de la tabla `waybills`, así que ese conteo no las
+    # ve), ya habían usado numeración de la serie V001 ante SUNAT, y las
+    # guías nuevas de Harraso volvían a empezar en V001-000001, chocando con
+    # esa numeración real. Se agrega HARRASO_WAYBILL_SERIES, una serie
+    # propia para Harraso (mismo patrón ya usado para separar credenciales
+    # de tefacturo.pe por empresa, ver HARRASO_TEFACTURO_EMAIL/PASSWORD y
+    # BRMS_TEFACTURO_EMAIL/PASSWORD más abajo) — por defecto "V002", para no
+    # repetir la V001 ya usada. WAYBILL_SERIES se mantiene tal cual para
+    # BRMS (no reportó ningún choque) — ver el uso de ambas en guias.new()
+    # en app/routes/guias.py.
     WAYBILL_SERIES = os.environ.get("WAYBILL_SERIES", "V001")
+    HARRASO_WAYBILL_SERIES = os.environ.get("HARRASO_WAYBILL_SERIES", "V002")
     # Número inicial de Cotizaciones (1 sep) — Braulio pidió seguir la
     # numeración real de sus cotizaciones anteriores (la última que mandó
     # como referencia fue la N° 111), así que el módulo arranca en 112.

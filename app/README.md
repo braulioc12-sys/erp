@@ -179,7 +179,8 @@ Ten en cuenta también que, según cambios normativos recientes, los negocios qu
    - `OSE_RUTA`: la URL del endpoint que te indique tu OSE.
    - `OSE_TOKEN`: el token de autenticación de tu cuenta.
    - `COMPANY_RUC` y `COMPANY_ADDRESS`: el RUC y la dirección fiscal de tu propia empresa (el emisor de los comprobantes).
-   - `INVOICE_SERIES` y `WAYBILL_SERIES`: las series que hayas dado de alta para facturas y guías (por defecto `F001` y `T001`).
+   - `INVOICE_SERIES` y `WAYBILL_SERIES`: las series que hayas dado de alta para facturas y guías de BRMS (por defecto `F001` y `T001`).
+   - `HARRASO_WAYBILL_SERIES`: la serie de guías de Harraso, separada de `WAYBILL_SERIES` (por defecto `V002`, para no repetir la serie `V001` que Harraso ya usó antes de este sistema).
 3. Registra el RUC de cada cliente (Clientes → editar) — es obligatorio para emitir una factura electrónica.
 4. Para conductores, registra también su **DNI** (Conductores → editar) — se necesita para las guías de remisión.
 5. Emite una factura de prueba (Facturación → detalle de una factura → "Enviar a SUNAT") o una guía (Viajes → viaje en curso/entregado → "Generar guía de remisión" → "Enviar a SUNAT") y revisa la respuesta.

@@ -260,7 +260,14 @@ def new(trip_id):
                 related_document_types=RELATED_DOCUMENT_TYPES,
             )
 
-        series = current_app.config["WAYBILL_SERIES"]
+        # 1 oct: serie independiente por empresa -- ver la nota larga junto a
+        # HARRASO_WAYBILL_SERIES en app/config.py (guías de Harraso de 2023,
+        # previas a este sistema, ya usaban la serie V001).
+        series = (
+            current_app.config["WAYBILL_SERIES"]
+            if trip["issuer"] == "BRMS"
+            else current_app.config["HARRASO_WAYBILL_SERIES"]
+        )
         series_number = _next_series_number(series)
         # 14 sep, patch 0029: fecha de entrega (fechaEntrega, exigida por
         # tefacturo.pe — ver la nota en build_waybill_payload) — opcional en
