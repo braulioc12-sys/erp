@@ -51,7 +51,6 @@
         </label>
         <label>Distrito
           <select data-role="distrito-select"></select>
-          <input type="text" data-role="distrito-texto" maxlength="2" pattern="[0-9]{2}" placeholder="N.º de distrito (2 dígitos)" style="display:none;">
         </label>
       </div>
       <input type="hidden" name="origin_ubigeo" data-role="ubigeo-final" value="{{ form_values.origin_ubigeo if form_values else (waybill.origin_ubigeo if waybill else '') }}">
@@ -67,13 +66,18 @@
         </label>
         <label>Distrito
           <select data-role="distrito-select"></select>
-          <input type="text" data-role="distrito-texto" maxlength="2" pattern="[0-9]{2}" placeholder="N.º de distrito (2 dígitos)" style="display:none;">
         </label>
       </div>
       <input type="hidden" name="destination_ubigeo" data-role="ubigeo-final" value="{{ form_values.destination_ubigeo if form_values else (waybill.destination_ubigeo if waybill else '') }}">
     </div>
   </div>
-  <p class="muted" style="margin-top:-8px;">Elige Departamento y Provincia de la lista (son datos reales del INEI, no se pueden escribir mal). Para Amazonas, Áncash, Apurímac, Arequipa, Ayacucho, Cajamarca, Callao, Cusco y Lima también puedes elegir el Distrito por nombre; en el resto de departamentos escribe el número de distrito (2 dígitos) — igual se valida que el departamento y la provincia existan de verdad antes de guardar.</p>
+  <!-- 1 oct, pedido de Braulio ("cuando pide codigo ubigeo 2 digitos en la
+       direccion, hay que cargarlos directamente cuando se selecciona"): ya
+       no hace falta escribir el número de distrito a mano para ningún
+       departamento -- el catálogo de distritos (app/data/ubigeo_peru.json)
+       ahora cubre los 25, no solo los 9 de antes. Se elige todo por nombre
+       de la lista, igual que Departamento y Provincia. -->
+  <p class="muted" style="margin-top:-8px;">Elige Departamento, Provincia y Distrito de la lista (son datos reales del INEI, no se pueden escribir mal).</p>
 
   <label>Motivo de traslado
     <select name="transfer_reason">
@@ -102,21 +106,23 @@
 
   <div class="form-row">
     <label>RUC del destinatario
-      <input type="text" name="recipient_ruc" value="{{ form_values.recipient_ruc if form_values else (waybill.recipient_ruc if waybill else '') }}" placeholder="Si es distinto del cliente del viaje">
+      <input type="text" name="recipient_ruc" id="recipient_ruc" value="{{ form_values.recipient_ruc if form_values else (waybill.recipient_ruc if waybill else '') }}" placeholder="Si es distinto del cliente del viaje" maxlength="11">
     </label>
     <label>Razón social del destinatario
-      <input type="text" name="recipient_name" value="{{ form_values.recipient_name if form_values else (waybill.recipient_name if waybill else '') }}">
+      <input type="text" name="recipient_name" id="recipient_name" value="{{ form_values.recipient_name if form_values else (waybill.recipient_name if waybill else '') }}">
     </label>
   </div>
+  <p class="muted ruc-status" style="margin-top:-8px;" data-for="recipient_ruc"></p>
 
   <div class="form-row">
     <label>RUC de la empresa subcontratada
-      <input type="text" name="subcontractor_ruc" value="{{ form_values.subcontractor_ruc if form_values else (waybill.subcontractor_ruc if waybill else '') }}" placeholder="Solo si se subcontrató a otra empresa de transporte">
+      <input type="text" name="subcontractor_ruc" id="subcontractor_ruc" value="{{ form_values.subcontractor_ruc if form_values else (waybill.subcontractor_ruc if waybill else '') }}" placeholder="Solo si se subcontrató a otra empresa de transporte" maxlength="11">
     </label>
     <label>Razón social de la empresa subcontratada
-      <input type="text" name="subcontractor_name" value="{{ form_values.subcontractor_name if form_values else ((waybill.subcontractor_name if waybill else trip.third_party_name) or '') }}">
+      <input type="text" name="subcontractor_name" id="subcontractor_name" value="{{ form_values.subcontractor_name if form_values else ((waybill.subcontractor_name if waybill else trip.third_party_name) or '') }}">
     </label>
   </div>
+  <p class="muted ruc-status" style="margin-top:-8px;" data-for="subcontractor_ruc"></p>
 
   <div class="form-row">
     <label>¿Quién paga el flete?
@@ -128,12 +134,13 @@
       </select>
     </label>
     <label>RUC del pagador (si es un tercero)
-      <input type="text" name="payer_ruc" value="{{ form_values.payer_ruc if form_values else (waybill.payer_ruc if waybill else '') }}">
+      <input type="text" name="payer_ruc" id="payer_ruc" value="{{ form_values.payer_ruc if form_values else (waybill.payer_ruc if waybill else '') }}" maxlength="11">
     </label>
     <label>Razón social del pagador (si es un tercero)
-      <input type="text" name="payer_name" value="{{ form_values.payer_name if form_values else (waybill.payer_name if waybill else '') }}">
+      <input type="text" name="payer_name" id="payer_name" value="{{ form_values.payer_name if form_values else (waybill.payer_name if waybill else '') }}">
     </label>
   </div>
+  <p class="muted ruc-status" style="margin-top:-8px;" data-for="payer_ruc"></p>
 
   <div class="form-row">
     <label>DNI del conductor
@@ -185,9 +192,10 @@
       <input type="text" name="related_document_number" value="{{ form_values.related_document_number if form_values else (waybill.related_document_number if waybill else (trip.shipper_waybill_number or '')) }}" placeholder="Ej: 123">
     </label>
     <label>RUC del emisor
-      <input type="text" name="related_document_issuer_ruc" value="{{ form_values.related_document_issuer_ruc if form_values else (waybill.related_document_issuer_ruc if waybill else '') }}" placeholder="RUC de quien emitió ese documento" maxlength="11" style="width:140px;">
+      <input type="text" name="related_document_issuer_ruc" id="related_document_issuer_ruc" value="{{ form_values.related_document_issuer_ruc if form_values else (waybill.related_document_issuer_ruc if waybill else '') }}" placeholder="RUC de quien emitió ese documento" maxlength="11" style="width:140px;">
     </label>
   </div>
+  <p class="muted ruc-status" style="margin-top:-8px;" data-for="related_document_issuer_ruc"></p>
   <p class="muted" style="margin-top:-8px;">Se muestra en el detalle de la guía y, si completas Serie + Número + RUC del emisor, se envía junto con la guía de transportista a SUNAT/tefacturo.pe. Si falta algún dato, la guía se emite igual, solo sin ese dato.</p>
 
   <label>Observaciones
@@ -205,7 +213,11 @@
 (function () {
   "use strict";
   var catalogo = JSON.parse(document.getElementById("ubigeo-catalog-data").textContent);
-  var completos = catalogo.completos; // códigos de depto con distritos completos
+  // 1 oct: antes acá se leía catalogo.completos para decidir si el
+  // departamento elegido tenía <select> de distrito o un campo de texto de
+  // respaldo (2 dígitos a mano) -- ya no hace falta, el catálogo de
+  // distritos ahora cubre los 25 departamentos (ver la nota en
+  // app/ubigeo.py), así que el <select> de distrito siempre tiene opciones.
 
   // Listas auxiliares, ordenadas por nombre, para llenar los <select>.
   var departamentos = Object.keys(catalogo.departamentos)
@@ -251,7 +263,6 @@
     var deptoSelect = container.querySelector('[data-role="departamento"]');
     var provSelect = container.querySelector('[data-role="provincia"]');
     var distSelect = container.querySelector('[data-role="distrito-select"]');
-    var distTexto = container.querySelector('[data-role="distrito-texto"]');
 
     fillSelect(deptoSelect, departamentos, "-- Departamento --", "code", "nombre");
 
@@ -262,14 +273,9 @@
         hiddenInput.value = "";
         return;
       }
-      if (completos.indexOf(dept) !== -1) {
-        // El <select> de distrito usa como valor el ubigeo COMPLETO de 6
-        // dígitos (viene así del catálogo) — se usa tal cual.
-        hiddenInput.value = distSelect.value || "";
-      } else {
-        var dist = distTexto.value.trim();
-        hiddenInput.value = /^[0-9]{2}$/.test(dist) ? prov + dist : "";
-      }
+      // El <select> de distrito usa como valor el ubigeo COMPLETO de 6
+      // dígitos (viene así del catálogo) — se usa tal cual.
+      hiddenInput.value = distSelect.value || "";
     }
 
     function onDeptoChange(distritoInicial) {
@@ -281,28 +287,16 @@
 
     function onProvChange(distritoInicial) {
       var prov = provSelect.value;
-      var dept = deptoSelect.value;
-      if (completos.indexOf(dept) !== -1) {
-        distSelect.style.display = "";
-        distTexto.style.display = "none";
-        var dists = distritosPorProvincia[prov] || [];
-        fillSelect(distSelect, dists, "-- Distrito --", "code", "nombre");
-        // distritoInicial, en este modo, es el ubigeo COMPLETO de 6 dígitos.
-        if (distritoInicial) { distSelect.value = distritoInicial; }
-      } else {
-        distSelect.style.display = "none";
-        distTexto.style.display = "";
-        distSelect.innerHTML = "";
-        // distritoInicial, en este modo, son los últimos 2 dígitos sueltos.
-        if (distritoInicial) { distTexto.value = distritoInicial.slice(-2); }
-      }
+      var dists = distritosPorProvincia[prov] || [];
+      fillSelect(distSelect, dists, "-- Distrito --", "code", "nombre");
+      // distritoInicial es el ubigeo COMPLETO de 6 dígitos.
+      if (distritoInicial) { distSelect.value = distritoInicial; }
       actualizarFinal();
     }
 
     deptoSelect.addEventListener("change", function () { onDeptoChange(null); });
     provSelect.addEventListener("change", function () { onProvChange(null); });
     distSelect.addEventListener("change", actualizarFinal);
-    distTexto.addEventListener("input", actualizarFinal);
 
     // Si venimos de un error de validación con un ubigeo ya elegido, se
     // reconstruyen las 3 selecciones a partir del código de 6 dígitos.
@@ -320,6 +314,62 @@
   var destinationHidden = document.querySelector('input[name="destination_ubigeo"]');
   setupGroup("origin-ubigeo-selects", originHidden, originHidden.value);
   setupGroup("destination-ubigeo-selects", destinationHidden, destinationHidden.value);
+
+  // 1 oct, pedido de Braulio ("cuando se ingresan los rucs en las guias
+  // debe jalar la informacion automaticamente como en otros lados"): mismo
+  // patrón de autocompletado que ya usa Facturación al crear un cliente
+  // nuevo (ver consultar_ruc() en app/routes/guias.py) -- se repite acá para
+  // los 4 campos de RUC de este formulario. "related_document_issuer_ruc"
+  // no tiene un campo de razón social propio (nunca lo tuvo, ver la nota
+  // junto a ese campo más arriba) -- para ese solo se muestra la razón
+  // social encontrada como texto informativo, no se guarda en ningún lado.
+  var RUC_NAME_FIELD = {
+    recipient_ruc: "recipient_name",
+    subcontractor_ruc: "subcontractor_name",
+    payer_ruc: "payer_name",
+    related_document_issuer_ruc: null,
+  };
+  var rucLookupTimers = {};
+  var lastRucLookedUp = {};
+
+  function lookupRuc(rucFieldId, ruc) {
+    if (lastRucLookedUp[rucFieldId] === ruc) { return; }
+    lastRucLookedUp[rucFieldId] = ruc;
+    var status = document.querySelector('.ruc-status[data-for="' + rucFieldId + '"]');
+    if (status) { status.textContent = "Buscando en SUNAT…"; }
+    fetch('{{ url_for("guias.consultar_ruc") }}?ruc=' + ruc)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (lastRucLookedUp[rucFieldId] !== ruc) { return; }
+        if (!data.found) {
+          if (status) { status.textContent = "No se encontró ese RUC — completa el nombre a mano."; }
+          return;
+        }
+        var nameFieldId = RUC_NAME_FIELD[rucFieldId];
+        if (nameFieldId) {
+          var nameInput = document.getElementById(nameFieldId);
+          if (nameInput && !nameInput.value.trim()) { nameInput.value = data.razon_social; }
+        }
+        if (status) {
+          var texto = data.razon_social;
+          if (data.estado && data.estado !== "ACTIVO") { texto += " — estado SUNAT: " + data.estado; }
+          status.textContent = texto;
+        }
+      })
+      .catch(function () { if (status) { status.textContent = ""; } });
+  }
+
+  Object.keys(RUC_NAME_FIELD).forEach(function (rucFieldId) {
+    var rucInput = document.getElementById(rucFieldId);
+    if (!rucInput) { return; }
+    rucInput.addEventListener("input", function () {
+      var digits = (rucInput.value || "").replace(/\D/g, "");
+      if (rucLookupTimers[rucFieldId]) { clearTimeout(rucLookupTimers[rucFieldId]); }
+      var status = document.querySelector('.ruc-status[data-for="' + rucFieldId + '"]');
+      if (digits.length !== 11) { if (status) { status.textContent = ""; } return; }
+      rucLookupTimers[rucFieldId] = setTimeout(function () { lookupRuc(rucFieldId, digits); }, 500);
+    });
+  });
 })();
 </script>
 {% endblock %}

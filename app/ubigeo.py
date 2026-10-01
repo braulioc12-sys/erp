@@ -15,20 +15,27 @@ FUENTE Y ALCANCE (importante para saber qué tan completo es este catálogo):
   que cada código de departamento/provincia es consistente entre sí — no hay
   huecos ni duplicados.
 
-- `DISTRITOS`: catálogo COMPLETO solo para los departamentos listados en
-  `DEPARTAMENTOS_CON_DISTRITOS_COMPLETOS` (Amazonas, Ancash, Apurímac,
-  Arequipa, Ayacucho, Cajamarca, Callao, Cusco y Lima — 9 de 25, elegidos
-  porque son los que se pudieron obtener y verificar dos veces de forma
-  idéntica contra la fuente). Para el resto de departamentos NO se valida el
-  distrito exacto (los últimos 2 dígitos) — solo que el departamento y la
-  provincia (los primeros 4 dígitos) existan de verdad. Ampliar esta lista a
-  los 25 departamentos queda pendiente para un patch futuro (ver nota en
-  claude/ — se necesita una fuente descargable completa y confiable; no
-  conviene adivinar/reconstruir códigos de distrito a mano).
+- `DISTRITOS`: 1 oct, pedido de Braulio ("cuando pide codigo ubigeo 2
+  digitos en la direccion, hay que cargarlos directamente cuando se
+  selecciona" -- ya no quería escribir el número de distrito a mano para
+  los 16 departamentos que antes quedaban fuera de
+  `DEPARTAMENTOS_CON_DISTRITOS_COMPLETOS`). Catálogo COMPLETO para los 25
+  departamentos (1881 distritos en total), tomado de
+  https://github.com/jmcastagnetto/ubigeo-peru-aumentado (ubigeo_distrito.csv,
+  columna `inei`) -- el mismo repo que ya respaldaba `DEPARTAMENTOS`/
+  `PROVINCIAS`. Verificado contra el `PROVINCIAS` ya existente de este mismo
+  archivo antes de cargarse: las 902 filas nuevas (de los 16 departamentos
+  que faltaban) coincidieron el 100% de las veces con el nombre y código de
+  provincia ya guardado acá (cero huecos, cero duplicados, cada una de las
+  106 provincias de esos 16 departamentos recibió al menos un distrito y su
+  distrito "01" -- la capital provincial, que siempre existe), así que no
+  hubo que adivinar ni reconstruir ningún código a mano. `DEPARTAMENTOS_CON_
+  DISTRITOS_COMPLETOS` ahora son los 25.
 
 Esto ya alcanza para el caso real que falló: "080000" (Cusco/00/00) queda
 rechazado porque la provincia "0800" no existe (las provincias de Cusco son
-0801..0813) — no hace falta el catálogo de distritos para atraparlo."""
+0801..0813) -- y ahora, para cualquier departamento, también se valida que
+el distrito exacto (los últimos 2 dígitos) exista de verdad."""
 import json
 import os
 

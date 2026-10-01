@@ -7,6 +7,7 @@ from flask import (
     abort,
     current_app,
     flash,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -26,6 +27,7 @@ from app.integrations.sunat_ose import (
     is_duplicate_comprobante_error,
     parse_ose_response,
 )
+from app.integrations.sunat_ruc import get_company_for_ruc
 from app.routes.viajes import ISSUER_CHOICES
 from app.storage import (
     local_sunat_documents_dir,
@@ -42,6 +44,42 @@ from app.ubigeo import (
 )
 
 bp = Blueprint("guias", __name__, url_prefix="/guias")
+
+
+@bp.route("/consultar-ruc")
+@permission_required("guias", "edit")
+def consultar_ruc():
+    """1 oct, pedido de Braulio ("cuando se ingresan los rucs en las guias
+    debe jalar la informacion automaticamente como en otros lados"): mismo
+    servicio y caché que ya usa Facturación (consultar_ruc() en
+    app/routes/facturacion.py) y Cotizaciones -- se arma un endpoint propio
+    de Guías (en vez de reusar directamente el de Facturación) por el mismo
+    motivo que ya explica el de Facturación: queda gateado con
+    permission_required("guias", "edit"), y no todo el que puede editar
+    guías tiene por qué tener también "facturacion" edit (ni viceversa) --
+    depender de eso sería un acoplamiento frágil entre dos módulos que no
+    tienen por qué variar juntos. Se usa para los 4 campos de RUC del
+    formulario de guía (destinatario, empresa subcontratada, pagador del
+    flete y RUC del emisor del documento relacionado) -- ver guias/form.html.
+    Nunca devuelve error 500: si el servicio externo falla o el RUC no
+    existe, responde found=false y el campo se completa a mano."""
+    ruc = request.args.get("ruc", "")
+    try:
+        company = get_company_for_ruc(
+            ruc,
+            base_url=current_app.config.get("DECOLECTA_RUC_BASE_URL") or None,
+            token=current_app.config.get("DECOLECTA_TOKEN") or None,
+        )
+    except Exception:
+        company = None
+    if not company:
+        return jsonify({"found": False})
+    return jsonify({
+        "found": True,
+        "razon_social": company["razon_social"],
+        "estado": company["estado"],
+        "direccion": company.get("direccion") or "",
+    })
 
 # 28 sep, mismo bug real encontrado en Facturación (ver la nota grande junto
 # a `logger = logging.getLogger(...)` en app/routes/facturacion.py): el
@@ -77,8 +115,10 @@ def _set_trip_order_number(trip_id, raw_value):
 
 # 10 sep, patch 0028: catálogo de ubigeos (departamento/provincia/distrito)
 # para los desplegables en cascada del formulario — se arma una sola vez acá
-# y se pasa tal cual al template (ver app/ubigeo.py para el alcance real del
-# catálogo de distritos, completo solo en 9 de los 25 departamentos).
+# y se pasa tal cual al template. 1 oct: el catálogo de distritos ya cubre
+# los 25 departamentos (ver la nota grande en app/ubigeo.py) -- "completos"
+# se deja en el JSON por si algo más lo lee, pero el template ya no
+# distingue entre departamentos "completos" e "incompletos" (todos lo son).
 UBIGEO_CATALOG = {
     "departamentos": DEPARTAMENTOS,
     "provincias": PROVINCIAS,
