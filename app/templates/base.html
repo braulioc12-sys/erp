@@ -79,6 +79,20 @@
       {% if can(current_user.roles, 'descansos', 'view') %}
       <a href="{{ url_for('descansos.list_view') }}" class="{{ 'active' if request.blueprint == 'descansos' }}">Jornada laboral</a>
       {% endif %}
+      {# 1 oct, pedido de Braulio ("quiero borrar los anteriores que
+         hicimos hasta ayer que eran de prueba"): herramienta de borrado
+         DEFINITIVO pero SELECTIVO (uno por uno) de viajes/facturas,
+         exclusiva de Administrador -- chequeado por ROL directamente
+         (igual que "Actividad" arriba), no por el catálogo de permisos por
+         usuario -- ver app/routes/admin_reset.py. Distinta del botón
+         "Reiniciar datos de prueba" de Catálogos (catalogos.reset_test_data),
+         que borra TODO lo transaccional de una sola vez sin poder elegir
+         caso por caso -- Braulio prefirió revisar y elegir qué borrar esta
+         vez, porque ya había algunos viajes/facturas reales mezclados con
+         los de prueba. #}
+      {% if 'ADMIN' in current_user.roles %}
+      <a href="{{ url_for('admin_reset.list_view') }}" class="{{ 'active' if request.blueprint == 'admin_reset' }}">Limpieza selectiva</a>
+      {% endif %}
       <a href="{{ url_for('liquidaciones.list_view') }}" class="{{ 'active' if request.blueprint == 'liquidaciones' }}">Liquidaciones</a>
       <a href="{{ url_for('mantenimiento.list_view') }}" class="{{ 'active' if request.blueprint == 'mantenimiento' }}">Mantenimiento</a>
       <a href="{{ url_for('neumaticos.list_view') }}" class="{{ 'active' if request.blueprint == 'neumaticos' }}">Neumáticos</a>

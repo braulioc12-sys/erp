@@ -32,6 +32,7 @@ def create_app(config_object=Config):
     app.register_blueprint(auth.bp)
 
     from app.routes import (
+        admin_reset,
         dashboard,
         clientes,
         flota,
@@ -57,6 +58,7 @@ def create_app(config_object=Config):
         reportes,
     )
 
+    app.register_blueprint(admin_reset.bp)
     app.register_blueprint(dashboard.bp)
     app.register_blueprint(clientes.bp)
     app.register_blueprint(flota.bp)

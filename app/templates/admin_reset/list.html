@@ -1,0 +1,121 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Limpieza selectiva{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Limpieza selectiva de viajes y facturas</h1>
+</div>
+
+<p class="muted mt-0">
+  Esta pantalla borra viajes y facturas DE VERDAD, uno por uno, incluso los que ya están
+  "ACEPTADO" por SUNAT (en el resto del sistema eso está bloqueado a propósito, porque normalmente
+  significaría un comprobante electrónico real vigente). Úsala cuando necesites revisar y elegir
+  exactamente cuáles borrar — por ejemplo, si ya tienes algunos viajes/facturas reales mezclados
+  con datos de prueba. Si en cambio quieres borrar TODOS los datos de prueba de una sola vez (y no
+  tienes nada real todavía que no se deba tocar), usa el botón "Reiniciar datos de prueba" dentro
+  de Catálogos — es más rápido para ese caso.
+</p>
+
+<p class="muted">
+  El borrado es definitivo y se lleva en cascada todo lo relacionado (inspecciones,
+  liquidaciones, guías e ítems de factura). Si marcas un viaje facturado, su factura se borra o se
+  recalcula junto con él, aunque no la hayas marcado aparte.
+</p>
+
+<form method="post" action="{{ url_for('admin_reset.borrar') }}" id="cleanupForm"
+      onsubmit="return confirm('¿Seguro que quieres borrar definitivamente lo marcado? Esta acción no se puede deshacer.');">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <h2>Viajes ({{ trips|length }})</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th><input type="checkbox" onclick="toggleAll('trip_ids', this.checked)"></th>
+          <th>Código</th>
+          <th>Fecha</th>
+          <th>Cliente</th>
+          <th>Ruta</th>
+          <th>Estado</th>
+          <th>Facturado</th>
+          <th>Guía</th>
+          <th>Vuelta enlazada</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in trips %}
+        <tr>
+          <td><input type="checkbox" name="trip_ids" value="{{ t.id }}"></td>
+          <td>{{ t.code }}</td>
+          <td>{{ t.scheduled_date }}</td>
+          <td>{{ t.client_name }}</td>
+          <td>{{ t.origin }} → {{ t.destination }}</td>
+          <td>{{ m.badge(t.status) }}</td>
+          <td>
+            {% if t.invoice_number %}
+              {{ t.invoice_number }}
+              {% if t.invoice_sunat_status %}{{ m.badge(t.invoice_sunat_status) }}{% endif %}
+            {% else %}—{% endif %}
+          </td>
+          <td>{% if t.waybill_sunat_status %}{{ m.badge(t.waybill_sunat_status) }}{% else %}—{% endif %}</td>
+          <td>{{ t.return_trip_code or '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9" class="table-empty">No hay viajes registrados.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Facturas ({{ invoices|length }})</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th><input type="checkbox" onclick="toggleAll('invoice_ids', this.checked)"></th>
+          <th>Número</th>
+          <th>Serie-número SUNAT</th>
+          <th>Cliente</th>
+          <th>Emisión</th>
+          <th class="text-right">Monto</th>
+          <th>Estado</th>
+          <th>Estado SUNAT</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for i in invoices %}
+        <tr>
+          <td><input type="checkbox" name="invoice_ids" value="{{ i.id }}"></td>
+          <td>{{ i.number }}</td>
+          <td>{{ i.series }}-{{ '%06d'|format(i.series_number) }}</td>
+          <td>{{ i.client_name }}</td>
+          <td>{{ i.issue_date }}</td>
+          <td class="text-right">{{ i.amount|money }}</td>
+          <td>{{ m.badge(i.status) }}</td>
+          <td>{{ m.badge(i.sunat_status) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="table-empty">No hay facturas registradas.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="page-header" style="margin-top:24px;">
+    <label style="max-width:360px;">Escribe "BORRAR" para confirmar
+      <input type="text" name="confirm_text" placeholder="BORRAR" autocomplete="off" required>
+    </label>
+    <div class="page-actions">
+      <button type="submit" class="btn btn-danger">Borrar seleccionados definitivamente</button>
+    </div>
+  </div>
+</form>
+
+<script>
+function toggleAll(name, checked) {
+  document.querySelectorAll('input[name="' + name + '"]').forEach(function (cb) {
+    cb.checked = checked;
+  });
+}
+</script>
+{% endblock %}

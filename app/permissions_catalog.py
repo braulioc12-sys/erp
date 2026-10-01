@@ -73,6 +73,14 @@ MODULE_LABELS = {
     # otro usuario desde Usuarios > Permisos específicos, igual que
     # cualquier otro módulo.
     "actividad": "Actividad",
+    # 1 oct: herramienta de borrado definitivo de viajes/facturas de prueba
+    # (ver app/routes/admin_reset.py) -- NO lleva fila en PERMISSION_CATALOG
+    # de abajo a propósito (nunca debe poder otorgarse como "permiso
+    # específico" a alguien que no sea Administrador; el acceso se chequea
+    # por ROL directamente en el propio código de la ruta). Esta entrada es
+    # solo para que su actividad se vea con un nombre legible en la
+    # pantalla de Actividad.
+    "admin_reset": "Limpieza selectiva",
 }
 
 # module -> [(action, etiqueta), ...] en el orden en que se muestran.
