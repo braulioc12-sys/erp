@@ -783,44 +783,6 @@ def build_invoice_payload(invoice, items, client, company):
     # por factura, ver invoices.due_date) -- se manda una sola cuota por el
     # total de la factura, cubre el caso real de Braulio; si en el futuro
     # hace falta dividir en varias cuotas, hay que rediseñar esto.
-    # 1 oct, bug real (Harraso, factura F-0020 a crédito con detracción y
-    # varios ítems): tefacturo.pe rechazó el envío con 400 ("El total de
-    # las cuotas es mayor al importe total"). Causa: `total_con_igv` sumaba
-    # directo invoice_items.amount (el monto YA CON IGV que guarda este
-    # sistema, redondeado por ítem) — pero detalleDocumento manda cada
-    # ítem SIN IGV, redondeado individualmente por _split_igv() (ver más
-    # arriba), y tefacturo.pe arma su propio "importe total" a partir de
-    # ESOS valores sin IGV (sumando el subtotal y recién ahí aplicando el
-    # 18% una sola vez) — NO volviendo a sumar nuestros montos originales
-    # con IGV. Con varios ítems, el redondeo individual de cada
-    # valorVentaUnitarioItem puede perder un centavo o dos frente a sumar
-    # los montos originales directo, así que nuestra cuota (basada en los
-    # montos originales) terminaba por encima del total que tefacturo.pe
-    # calculaba por su cuenta. Se corrige recalculando el total de la
-    # MISMA forma que tefacturo.pe (subtotal sin IGV de `detalle` -> +18%
-    # una sola vez sobre ese subtotal), para que nunca quede por encima de
-    # lo que ellos mismos calculan. BRMS (igv_exonerado) no se ve afectada:
-    # sus valorVentaUnitarioItem ya son el monto total, sin redondeo de
-    # por medio.
-    if forma_pago == "CREDITO":
-        subtotal_sin_igv = sum(d["valorVentaUnitarioItem"] for d in detalle)
-        if igv_exonerado:
-            total_con_igv = round(subtotal_sin_igv, 2)
-        else:
-            total_con_igv = round(subtotal_sin_igv * (1 + IGV_RATE), 2)
-        payload["cuotas"] = [
-            {
-                "monto": f"{total_con_igv:.2f}",
-                "fecha": invoice["due_date"],
-                "numero": "001",
-                # 1 oct: antes fijo en "PEN" -- se olvidó acá la primera vez.
-                # Debe ser la misma moneda que datosDocumento.moneda arriba
-                # (ver la nota larga ahí) para no mandarle a tefacturo.pe un
-                # comprobante en USD con su única cuota en PEN.
-                "moneda": payload["datosDocumento"]["moneda"],
-            }
-        ]
-
     # 23 sep, CONFIRMADO -- ver el bloque "CONFIRMADO (23 sep)" en el
     # docstring de esta función para la forma exacta del bloque
     # "detraccion" y por qué `codigoBienServicio` puede seguir faltando.
@@ -828,6 +790,9 @@ def build_invoice_payload(invoice, items, client, company):
     # concepto usado ya tiene su código de tefacturo.pe configurado en
     # Catálogos → Conceptos de detracción -- si falta cualquiera de las dos
     # cosas, la factura se emite igual, solo sin reportar la detracción.
+    # 1 oct: este bloque se construye ANTES que "cuotas" (más abajo) a
+    # propósito -- ver la nota larga ahí sobre por qué "cuotas.monto" debe
+    # saber si la detracción efectivamente se va a mandar.
     if invoice["detraction_applies"] and invoice["detraction_code"]:
         tefacturo_codigo_bien_servicio = get_detraction_tefacturo_code(invoice["detraction_code"])
         if tefacturo_codigo_bien_servicio:
@@ -840,6 +805,60 @@ def build_invoice_payload(invoice, items, client, company):
                 "porcentaje": f"{invoice['detraction_percentage']:g}",
                 "redondeo": False,
             }
+
+    # 1 oct, bug real (Harraso, factura F-0020 a crédito con detracción,
+    # 1 solo ítem): tefacturo.pe rechazó el envío con 400 ("El total de
+    # las cuotas es mayor al importe total"). Primer intento de arreglo
+    # (recalcular total_con_igv a partir del subtotal sin IGV de `detalle`,
+    # en vez de sumar invoice_items.amount directo) fue insuficiente -- con
+    # un solo ítem no hay redondeo que arrastrar entre ítems, así que ese
+    # cambio no modifica nada acá y el 400 seguía igual (confirmado: Braulio
+    # aplicó ese parche y el mismo error volvió a aparecer en la misma
+    # factura). La causa real: F-0020 tiene detracción (código 027, 4%,
+    # S/351.64 detraído sobre S/8,791.00). Cuando hay detracción, el monto
+    # detraído lo deposita el cliente directo en la cuenta del Banco de la
+    # Nación (ver detraccion.html / facturacion/detail.html, "el cliente
+    # debe depositar ... y transferir el resto directamente") -- NO es
+    # parte de lo que se cobra bajo el cronograma de crédito. tefacturo.pe
+    # valida que `cuotas[].monto` sume como máximo el "importe total" que
+    # queda sujeto a pago normal, que con detracción es el NETO (total con
+    # IGV menos el monto detraído, el mismo "Neto a cobrar del cliente" que
+    # ya se muestra en el detalle de la factura) y no el total bruto. Por
+    # eso ahora se resta `detraction_amount` de `cuotas.monto` SOLO cuando
+    # el bloque "detraccion" de arriba efectivamente se agregó al payload
+    # (si la detracción no tiene código de tefacturo.pe configurado y no se
+    # reporta, tefacturo.pe tampoco espera que el total ya la excluya).
+    # Se sigue recalculando el total con IGV a partir de `detalle` (en vez
+    # de sumar invoice_items.amount directo) por la razón del bug anterior
+    # (ver commit previo): detalleDocumento manda cada ítem SIN IGV,
+    # redondeado individualmente por _split_igv(), y tefacturo.pe arma su
+    # propio "importe total" a partir de esos valores (sumando el subtotal
+    # y recién ahí aplicando el 18% una sola vez) -- con varios ítems el
+    # redondeo por ítem puede perder un centavo o dos frente a sumar los
+    # montos originales directo. BRMS (igv_exonerado) no se ve afectada:
+    # sus valorVentaUnitarioItem ya son el monto total, sin redondeo de por
+    # medio, y BRMS no maneja detracción.
+    if forma_pago == "CREDITO":
+        subtotal_sin_igv = sum(d["valorVentaUnitarioItem"] for d in detalle)
+        if igv_exonerado:
+            total_con_igv = round(subtotal_sin_igv, 2)
+        else:
+            total_con_igv = round(subtotal_sin_igv * (1 + IGV_RATE), 2)
+        total_cuotas = total_con_igv
+        if "detraccion" in payload:
+            total_cuotas = round(total_cuotas - float(invoice["detraction_amount"] or 0), 2)
+        payload["cuotas"] = [
+            {
+                "monto": f"{total_cuotas:.2f}",
+                "fecha": invoice["due_date"],
+                "numero": "001",
+                # 1 oct: antes fijo en "PEN" -- se olvidó acá la primera vez.
+                # Debe ser la misma moneda que datosDocumento.moneda arriba
+                # (ver la nota larga ahí) para no mandarle a tefacturo.pe un
+                # comprobante en USD con su única cuota en PEN.
+                "moneda": payload["datosDocumento"]["moneda"],
+            }
+        ]
 
     return payload
 
