@@ -8,6 +8,13 @@
     {% if readonly %}
     <a href="{{ url_for('mantenimiento.list_view', vehicle_id=record.vehicle_id, readonly=1, issuer=record.vehicle_issuer) }}" class="btn btn-secondary">← Volver al historial</a>
     {% else %}
+    {# 2 oct, pedido de Braulio ("Hay que habilitar la opcion de editar en
+       las ordenes de mantenimiento"): antes no había forma de corregir la
+       fecha/costo/odómetro/descripción/próximo mantenimiento de una orden
+       ya creada -- ver mantenimiento.edit() en app/routes/mantenimiento.py. #}
+    {% if can(current_user.roles, 'mantenimiento', 'edit') %}
+    <a href="{{ url_for('mantenimiento.edit', record_id=record.id) }}" class="btn btn-secondary">Editar</a>
+    {% endif %}
     <a href="{{ url_for('mantenimiento.list_view', issuer=record.vehicle_issuer) }}" class="btn btn-secondary">← Volver a Mantenimiento</a>
     {% endif %}
   </div>

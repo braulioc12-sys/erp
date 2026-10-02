@@ -433,6 +433,66 @@ def delete(record_id):
     return redirect(url_for("mantenimiento.list_view", issuer=issuer))
 
 
+@bp.route("/<int:record_id>/editar", methods=["GET", "POST"])
+@permission_required("mantenimiento", "edit")
+def edit(record_id):
+    """2 oct, pedido de Braulio ("Hay que habilitar la opcion de editar en
+    las ordenes de mantenimiento"): hasta ahora, una vez creada una orden,
+    sus propios datos generales (fecha, costo, odómetro, próximo
+    mantenimiento, descripción) quedaban fijos para siempre -- lo único que
+    se podía hacer después era SUMARLE trabajos/materiales nuevos (ver
+    add_more() más arriba, "+ Agregar trabajos o materiales a esta orden"
+    en el detalle) o editar el estado/cuadrilla/mecánico de un trabajo
+    puntual (ver las rutas job_* más abajo). Esta pantalla corrige eso para
+    los datos generales de la orden en sí, con su propio formulario
+    (mantenimiento/edit_form.html) en vez de reutilizar el de creación
+    (mantenimiento/form.html) -- ese trae además la selección de unidad y
+    el checklist de trabajos/materiales a marcar, que no aplican acá.
+
+    A propósito NO deja cambiar la unidad (vehicle_id) ni los trabajos/
+    materiales ya cargados: reasignar de unidad una orden que ya tiene
+    trabajos/cuadrilla/materiales mezclaría el historial de dos unidades
+    distintas, y los trabajos/materiales ya tienen su propio mecanismo para
+    agregarse/editarse. Tampoco toca vehicles.current_km -- a diferencia de
+    new()/add_more() (donde el odómetro ingresado SÍ actualiza el
+    kilometraje actual de la unidad, porque se está registrando en el
+    momento), acá se puede estar corrigiendo el dato de una orden vieja, y
+    pisar el kilometraje actual de la unidad con un dato viejo sería un
+    error distinto al que se está arreglando."""
+    record = query_one(
+        """SELECT m.*, v.plate as vehicle_plate, v.issuer as vehicle_issuer
+           FROM maintenance_records m JOIN vehicles v ON v.id = m.vehicle_id WHERE m.id = ?""",
+        (record_id,),
+    )
+    if record is None:
+        abort(404)
+    if request.method == "POST":
+        if not validate_csrf():
+            abort(400)
+        maintenance_date = parse_date(request.form.get("maintenance_date")) or record["maintenance_date"]
+        execute(
+            """UPDATE maintenance_records SET maintenance_date = ?, cost = ?, description = ?, odometer_km = ?,
+               next_due_date = ?, next_due_km = ? WHERE id = ?""",
+            (
+                maintenance_date,
+                parse_float(request.form.get("cost"), 0) or 0,
+                request.form.get("description", "").strip(),
+                parse_float(request.form.get("odometer_km"), None),
+                parse_date(request.form.get("next_due_date")),
+                parse_float(request.form.get("next_due_km"), None),
+                record_id,
+            ),
+        )
+        log_activity(
+            "mantenimiento", "EDITAR", f"{_order_label(record_id)}: datos generales de la orden actualizados",
+            entity_type="orden_mantenimiento", entity_id=record_id,
+            entity_url=url_for("mantenimiento.detail", record_id=record_id),
+        )
+        flash("Orden de mantenimiento actualizada.", "success")
+        return redirect(url_for("mantenimiento.detail", record_id=record_id))
+    return render_template("mantenimiento/edit_form.html", record=record)
+
+
 # --- Detalle de una orden: marcar trabajos terminados/pendientes y asignar mecánico ---
 
 @bp.route("/<int:record_id>")

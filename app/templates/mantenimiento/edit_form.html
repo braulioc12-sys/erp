@@ -1,0 +1,59 @@
+{% extends 'base.html' %}
+{% block title %}Editar orden de mantenimiento{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Editar orden — {{ record.vehicle_plate }}</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('mantenimiento.detail', record_id=record.id) }}" class="btn btn-secondary">← Volver a la orden</a>
+  </div>
+</div>
+
+{# 2 oct, pedido de Braulio ("Hay que habilitar la opcion de editar en las
+   ordenes de mantenimiento"): formulario propio, aparte del de creación
+   (mantenimiento/form.html) -- solo los datos generales de la orden. La
+   unidad no se puede cambiar acá (ver el comentario largo en
+   mantenimiento.edit() de app/routes/mantenimiento.py); los trabajos y
+   materiales se agregan/editan desde el detalle de la orden, no desde
+   acá. #}
+<form class="form panel" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <div class="form-row">
+    <label>Unidad
+      <input type="text" value="{{ record.vehicle_plate }}" disabled>
+    </label>
+    <label>Fecha *
+      <input type="date" name="maintenance_date" value="{{ record.maintenance_date }}" required>
+    </label>
+  </div>
+  <p class="muted" style="margin-top:-8px;">La unidad de la orden no se puede cambiar desde acá.</p>
+
+  <div class="form-row">
+    <label>Costo total (S/)
+      <input type="number" step="0.01" name="cost" value="{{ record.cost }}">
+    </label>
+    <label>Kilometraje Odómetro
+      <input type="number" step="1" name="odometer_km" value="{{ record.odometer_km if record.odometer_km is not none else '' }}" placeholder="Ej. 118500">
+    </label>
+  </div>
+  <p class="muted" style="margin-top:-8px;">Corregir el costo o el odómetro acá no vuelve a sumar nada de los trabajos/materiales de la orden ni actualiza el kilometraje actual de la unidad -- es solo el dato guardado de esta orden.</p>
+
+  <div class="form-row">
+    <label>Próximo mantenimiento (fecha)
+      <input type="date" name="next_due_date" value="{{ record.next_due_date or '' }}">
+    </label>
+    <label>Próximo mantenimiento (km)
+      <input type="number" step="1" name="next_due_km" value="{{ record.next_due_km if record.next_due_km is not none else '' }}">
+    </label>
+  </div>
+
+  <label>Descripción
+    <textarea name="description">{{ record.description or '' }}</textarea>
+  </label>
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Guardar cambios</button>
+    <a href="{{ url_for('mantenimiento.detail', record_id=record.id) }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+{% endblock %}
