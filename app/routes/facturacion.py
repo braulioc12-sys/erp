@@ -168,7 +168,7 @@ def list_view():
     (patch 0066)."""
     issuer = request.args.get("issuer", "").strip().upper()
     if issuer not in ISSUER_CHOICES:
-        return render_template("facturacion/list.html", invoices=None, issuer=None, status="", q="")
+        return render_template("facturacion/list.html", invoices=None, issuer=None, status="", q="", pending_e001=0)
 
     status = request.args.get("status", "")
     q = request.args.get("q", "").strip()
@@ -184,7 +184,71 @@ def list_view():
         params += [f"%{q}%"] * 3
     sql += " ORDER BY i.issue_date DESC, i.id DESC"
     invoices = query_all(sql, params)
-    return render_template("facturacion/list.html", invoices=invoices, status=status, issuer=issuer, q=q)
+    # 1 oct, pedido de Braulio ("todas las facturas e001... ya todas han
+    # sido cobradas, hay que cambiar su status"): para mostrar el botón de
+    # marcar-pagadas-en-lote (ver brms_e001_mark_paid() más arriba) solo
+    # cuando BRMS tiene al menos una E001 pendiente -- si ya se usó una vez
+    # y no quedan más, el botón deja de aparecer solo (no hace falta que
+    # Braulio adivine si ya no hay nada por hacer).
+    pending_e001 = 0
+    if issuer == "BRMS":
+        row = query_one(
+            "SELECT COUNT(*) as n FROM invoices WHERE issuer = 'BRMS' AND series = 'E001' "
+            "AND status NOT IN ('PAGADA', 'ANULADA')"
+        )
+        pending_e001 = row["n"] if row else 0
+    return render_template(
+        "facturacion/list.html", invoices=invoices, status=status, issuer=issuer, q=q,
+        pending_e001=pending_e001,
+    )
+
+
+@bp.route("/brms-e001/marcar-pagadas", methods=["POST"])
+@permission_required("facturacion", "edit")
+def brms_e001_mark_paid():
+    """1 oct, pedido de Braulio ("en la facturacion de BRMS, todas las
+    facturas e001-, es decir las que se emitieron anteriormente en otro
+    sistema ya todas han sido cobradas, hay que cambiar su status"): arreglo
+    puntual de datos, no un flujo recurrente. Las facturas con serie "E001"
+    son las que BRMS emitió en su sistema anterior (antes de que existiera
+    este ERP) y se cargaron acá con "Cargar factura ya emitida (SUNAT)" (ver
+    manual_create() más arriba), preservando su serie-número real tal cual
+    -- nunca se les asignó un correlativo nuevo (ver el comentario de 30 sep
+    en manual_create()). Braulio confirma que TODAS esas ya fueron cobradas
+    en su momento, así que este botón las pone en PAGADA de una sola vez en
+    vez de una por una con "Cambiar estado" (change_status() más arriba).
+
+    Alcance deliberadamente acotado para no tocar nada que no se pidió:
+    - issuer='BRMS' AND series='E001' únicamente -- ni las F001 nuevas de
+      BRMS (facturadas desde este ERP) ni ninguna factura de Harraso.
+    - Excluye las que ya están en PAGADA (nada que cambiar, la deja igual
+      -- este botón es idempotente, se puede apretar de nuevo sin efecto
+      si ya no queda ninguna pendiente) y las ANULADA (una factura anulada
+      marcada como pagada sería contradictorio -- si alguna E001 quedó
+      anulada por error, se corrige a mano, no con este botón masivo).
+    Mismo permiso que change_status() (facturacion/edit) porque es
+    conceptualmente la misma acción (cambiar el estado de una factura),
+    solo que aplicada en lote a las que ya califican."""
+    if not validate_csrf():
+        abort(400)
+    rows = query_all(
+        "SELECT id, number FROM invoices WHERE issuer = 'BRMS' AND series = 'E001' "
+        "AND status NOT IN ('PAGADA', 'ANULADA')"
+    )
+    if not rows:
+        flash("No hay facturas E001 de BRMS pendientes de marcar como pagadas.", "info")
+        return redirect(url_for("facturacion.list_view", issuer="BRMS"))
+    ids = [r["id"] for r in rows]
+    placeholders = ",".join("?" * len(ids))
+    execute(f"UPDATE invoices SET status = 'PAGADA' WHERE id IN ({placeholders})", ids)
+    numbers = ", ".join(r["number"] for r in rows)
+    log_activity(
+        "facturacion", "ESTADO",
+        f"{len(rows)} factura(s) E001 de BRMS marcadas como PAGADA en lote ({numbers})",
+        entity_type="factura",
+    )
+    flash(f"{len(rows)} factura(s) E001 de BRMS marcadas como pagadas.", "success")
+    return redirect(url_for("facturacion.list_view", issuer="BRMS"))
 
 
 def _collect_manual_items(issuer=None):

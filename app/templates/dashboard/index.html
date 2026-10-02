@@ -13,6 +13,18 @@
     <div class="stat-value">{{ active_trips }}</div>
     <div class="stat-sub">Pendientes + en curso</div>
   </div>
+  <!-- 2 oct, pedido de Braulio ("solo los administradores que vean
+       ingresos del mes y por cobrar, es decir todo lo relacionado a
+       ventas"): estas dos tarjetas son las únicas de "Panel general" con
+       cifras de ventas/cobranza -- se ocultan para cualquiera que no tenga
+       el rol Administrador, sin tocar el resto del panel (viajes activos y
+       vehículos en mantenimiento siguen viéndose igual que antes para
+       todos los que tienen acceso al dashboard). Mismo patrón ya usado en
+       catalogos/list.html ('ADMIN' in current_user.roles directo en el
+       template) -- a propósito NO se usa can(..., 'facturacion', 'view'),
+       porque Contabilidad también tiene ese permiso y Braulio pidió
+       "solo los administradores", no todo el que vea Facturación. -->
+  {% if 'ADMIN' in current_user.roles %}
   <div class="stat-card">
     <div class="stat-label">Ingresos del mes</div>
     <div class="stat-value">{{ revenue_month|money }}</div>
@@ -23,6 +35,7 @@
     <div class="stat-value">{{ pending_invoices.total|money }}</div>
     <div class="stat-sub">{{ pending_invoices.n }} factura(s) pendiente(s)</div>
   </div>
+  {% endif %}
   <div class="stat-card">
     <div class="stat-label">Vehículos en mantenimiento</div>
     <div class="stat-value">{{ vehicles_maintenance }}</div>

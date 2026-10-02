@@ -14,6 +14,23 @@
   {% endif %}
 </div>
 
+{# 1 oct, pedido de Braulio ("todas las facturas e001... ya todas han sido
+   cobradas, hay que cambiar su status"): botón de arreglo puntual, solo
+   visible en BRMS y solo si todavía queda alguna E001 pendiente (ver
+   pending_e001 en facturacion.list_view()) -- una vez que ya no quede
+   ninguna, el botón desaparece solo. Confirmación obligatoria porque
+   actualiza varias facturas de una sola vez. #}
+{% if issuer == 'BRMS' and pending_e001 %}
+<form method="post" action="{{ url_for('facturacion.brms_e001_mark_paid') }}" style="margin-bottom:16px;"
+      onsubmit="return confirm('¿Marcar como PAGADAS las {{ pending_e001 }} factura(s) E001 de BRMS pendientes? Son las facturas emitidas en el sistema anterior, que ya fueron cobradas.');">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <p class="muted">
+    Hay {{ pending_e001 }} factura(s) con serie E001 (emitidas en el sistema anterior) que aún no están marcadas como pagadas.
+    <button type="submit" class="btn btn-secondary">Marcar E001 como pagadas</button>
+  </p>
+</form>
+{% endif %}
+
 {% if not issuer %}
 {{ cg.company_gate('facturacion.list_view', 'para ver sus facturas') }}
 {% else %}
