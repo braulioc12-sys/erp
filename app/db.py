@@ -1256,6 +1256,74 @@ def _backfill_advance_driver_id_postgres(conn):
     )
 
 
+# 1 oct, pedido de Braulio ("por que toda la flota a pasado a harraso? La
+# flota debe mantenerse por default en el propietario... en el caso de
+# Miguel contreras y BK PERU por default que sean BRMS"): corrige, UNA SOLA
+# VEZ, las unidades de estos dos propietarios que quedaron en
+# issuer='HARRASO' por el valor por defecto que trajo la columna "issuer"
+# el 30 sep (ver su comentario en COLUMN_MIGRATIONS más arriba) -- antes de
+# que existiera esa columna no había forma de saber la empresa real de cada
+# unidad ya cargada, así que TODAS, sin importar su propietario, quedaron
+# en HARRASO hasta reasignarlas a mano. Mismos dos nombres que
+# VEHICLE_OWNER_DEFAULT_ISSUER en app/routes/flota.py (que además usa este
+# mismo criterio LOWER/TRIM en su JS) -- duplicados acá a propósito, igual
+# que los literales 'HARRASO'/'BRMS' que ya usa este archivo en
+# COLUMN_MIGRATIONS, para no crear un import circular (app/routes/flota.py
+# importa de app/db.py, nunca al revés).
+#
+# A diferencia de los demás "_backfill_*"/"_fix_*" de este archivo (que
+# siguen corriendo en cada arranque porque su WHERE identifica datos que
+# NUNCA deberían quedar así), acá "issuer" SÍ se puede reasignar a mano
+# libremente después -- Braulio: "una unidad puede estar este mes como
+# harraso pero el siguiente como brms". Si esto corriera sin guardar en
+# cada arranque, pisaría para siempre cualquier reasignación manual a
+# HARRASO que Braulio haga más adelante para una unidad de estos dos
+# propietarios. Por eso queda detrás de un marcador en app_settings que
+# hace que solo se ejecute la primera vez.
+_VEHICLE_OWNER_ISSUER_BACKFILL_KEY = "vehicle_owner_issuer_backfill_v1"
+_VEHICLE_OWNER_ISSUER_BACKFILL_OWNERS = ("miguel contreras", "bk peru")
+
+
+def _backfill_vehicle_owner_issuer_sqlite(conn):
+    marker = conn.execute(
+        "SELECT value FROM app_settings WHERE key = ?", (_VEHICLE_OWNER_ISSUER_BACKFILL_KEY,)
+    ).fetchone()
+    if marker:
+        return
+    placeholders = ",".join("?" * len(_VEHICLE_OWNER_ISSUER_BACKFILL_OWNERS))
+    conn.execute(
+        f"UPDATE vehicles SET issuer = 'BRMS' "
+        f"WHERE LOWER(TRIM(owner)) IN ({placeholders}) AND issuer != 'BRMS'",
+        _VEHICLE_OWNER_ISSUER_BACKFILL_OWNERS,
+    )
+    conn.execute(
+        "INSERT INTO app_settings (key, value) VALUES (?, '1') "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (_VEHICLE_OWNER_ISSUER_BACKFILL_KEY,),
+    )
+
+
+def _backfill_vehicle_owner_issuer_postgres(conn):
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT value FROM app_settings WHERE key = %s", (_VEHICLE_OWNER_ISSUER_BACKFILL_KEY,)
+    )
+    marker = cur.fetchone()
+    if marker:
+        return
+    placeholders = ",".join(["%s"] * len(_VEHICLE_OWNER_ISSUER_BACKFILL_OWNERS))
+    cur.execute(
+        f"UPDATE vehicles SET issuer = 'BRMS' "
+        f"WHERE LOWER(TRIM(owner)) IN ({placeholders}) AND issuer != 'BRMS'",
+        _VEHICLE_OWNER_ISSUER_BACKFILL_OWNERS,
+    )
+    cur.execute(
+        "INSERT INTO app_settings (key, value) VALUES (%s, '1') "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (_VEHICLE_OWNER_ISSUER_BACKFILL_KEY,),
+    )
+
+
 def _fix_boleta_account_codes_postgres(conn):
     cur = conn.cursor()
     for name, (account_code, doc_code, label) in _BOLETA_ACCOUNT_FIXES.items():
@@ -1676,6 +1744,7 @@ def init_db(app):
             _backfill_tefacturo_codigo_bien_servicio_postgres(conn)
             _backfill_manual_invoice_numbers_postgres(conn)
             _backfill_advance_driver_id_postgres(conn)
+            _backfill_vehicle_owner_issuer_postgres(conn)
             conn.commit()
         finally:
             conn.close()
@@ -1700,6 +1769,7 @@ def init_db(app):
         _backfill_tefacturo_codigo_bien_servicio_sqlite(conn)
         _backfill_manual_invoice_numbers_sqlite(conn)
         _backfill_advance_driver_id_sqlite(conn)
+        _backfill_vehicle_owner_issuer_sqlite(conn)
         conn.commit()
         conn.close()
 

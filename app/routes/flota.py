@@ -134,6 +134,37 @@ def _vehicle_owners():
     )
 
 
+# 1 oct, pedido de Braulio ("por que toda la flota a pasado a harraso? La
+# flota debe mantenerse por default en el propietario. En el caso de
+# Miguel contreras y BK PERU por default que sean BRMS"): hasta ahora, al
+# crear una unidad nueva, "Empresa" solo se pre-seleccionaba según desde
+# qué lista de Flota (Harraso o BRMS) se llegó al formulario -- el
+# propietario elegido no influía en nada. Este mapeo (propietario → empresa
+# por defecto) se usa en flota/vehicle_form.html (modo "nuevo" únicamente)
+# para que, apenas se elige uno de estos propietarios, el selector
+# "Empresa" se marque solo en BRMS -- sigue siendo editable a mano (el
+# propio Braulio pidió "igual debe haber opcion de editar"), esto solo
+# cambia cuál queda marcada por defecto. El resto de propietarios (incluido
+# "Harraso Transport" y "Tercero afiliado") no está acá a propósito: para
+# ellos el comportamiento de siempre (heredar la empresa de la lista desde
+# la que se creó la unidad) sigue siendo el correcto.
+#
+# Claves en minúscula y sin espacios de sobra: el propietario es texto
+# libre tomado del catálogo (Catálogos → Propietarios de unidades) y no
+# hay garantía de que Braulio lo haya escrito con mayúsculas/espacios
+# idénticos cada vez -- la comparación en JS (ver el bloque <script> del
+# template) normaliza igual antes de buscar en este mapeo. Mismo criterio
+# (LOWER(TRIM(...))) que usa _backfill_vehicle_owner_issuer_sqlite/_postgres
+# en app/db.py para corregir, una sola vez, las unidades de estos dos
+# propietarios que quedaron en HARRASO por el valor por defecto que trajo
+# la columna "issuer" el 30 sep -- duplicado ahí (no importado desde acá)
+# para no crear un import circular, ver el comentario largo en ese archivo.
+VEHICLE_OWNER_DEFAULT_ISSUER = {
+    "miguel contreras": "BRMS",
+    "bk peru": "BRMS",
+}
+
+
 @bp.route("")
 @permission_required("flota", "view")
 def list_view():
@@ -322,13 +353,15 @@ def new_vehicle():
         if not plate:
             flash("La placa es obligatoria.", "error")
             return render_template(
-                "flota/vehicle_form.html", vehicle=request.form, mode="new", owners=_vehicle_owners(), issuer=issuer
+                "flota/vehicle_form.html", vehicle=request.form, mode="new", owners=_vehicle_owners(), issuer=issuer,
+                owner_default_issuer=VEHICLE_OWNER_DEFAULT_ISSUER,
             )
         existing = query_one("SELECT id FROM vehicles WHERE plate = ?", (plate,))
         if existing:
             flash("Ya existe una unidad con esa placa.", "error")
             return render_template(
-                "flota/vehicle_form.html", vehicle=request.form, mode="new", owners=_vehicle_owners(), issuer=issuer
+                "flota/vehicle_form.html", vehicle=request.form, mode="new", owners=_vehicle_owners(), issuer=issuer,
+                owner_default_issuer=VEHICLE_OWNER_DEFAULT_ISSUER,
             )
         brand = request.form.get("brand", "").strip()
         model = request.form.get("model", "").strip()
@@ -368,7 +401,10 @@ def new_vehicle():
         )
         flash("Unidad registrada.", "success")
         return redirect(url_for("flota.list_view", issuer=issuer))
-    return render_template("flota/vehicle_form.html", vehicle=None, mode="new", owners=_vehicle_owners(), issuer=issuer)
+    return render_template(
+        "flota/vehicle_form.html", vehicle=None, mode="new", owners=_vehicle_owners(), issuer=issuer,
+        owner_default_issuer=VEHICLE_OWNER_DEFAULT_ISSUER,
+    )
 
 
 @bp.route("/<int:vehicle_id>/editar", methods=["GET", "POST"])

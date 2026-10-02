@@ -80,6 +80,9 @@
     </select>
   </label>
   <p class="muted" style="margin-top:-8px;">Los propietarios disponibles se administran en <a href="{{ url_for('catalogos.list_view', categoria='vehicle_owner') }}" target="_blank">Catálogos → Propietarios de unidades</a>.</p>
+  {% if mode == 'new' %}
+  <p class="muted" style="margin-top:-8px;">Para algunos propietarios (ej. Miguel Contreras, BK Peru) la Empresa se marca sola en BRMS al elegirlos — se puede cambiar a mano igual.</p>
+  {% endif %}
 
   <div class="section-title">Documentos obligatorios</div>
   <div class="form-row">
@@ -134,4 +137,34 @@
     <a href="{{ url_for('flota.list_view', issuer=issuer) }}" class="btn btn-secondary">Cancelar</a>
   </div>
 </form>
+
+{% if mode == 'new' %}
+{# 1 oct, pedido de Braulio ("la flota debe mantenerse por default en el
+   propietario... en el caso de Miguel contreras y BK PERU por default que
+   sean BRMS"): al elegir uno de estos propietarios, "Empresa" se marca
+   sola en la empresa que le corresponde -- sigue siendo un <select> normal,
+   editable a mano después (ver VEHICLE_OWNER_DEFAULT_ISSUER en
+   app/routes/flota.py para el mapeo completo y por qué solo aplica acá, en
+   modo "nuevo", no en Editar). Se normaliza a minúsculas/sin espacios de
+   sobra antes de buscar en el mapeo -- mismo criterio que usa el backfill
+   de app/db.py -- porque el propietario es texto libre y no hay garantía
+   de que esté escrito siempre con la misma mayúscula/minúscula. #}
+<script>
+(function () {
+  var OWNER_DEFAULT_ISSUER = {{ owner_default_issuer|tojson }};
+  var ownerSelect = document.querySelector('select[name="owner"]');
+  var issuerSelect = document.querySelector('select[name="issuer"]');
+  if (!ownerSelect || !issuerSelect) { return; }
+  function normalize(value) {
+    return (value || "").trim().toLowerCase();
+  }
+  function applyDefault() {
+    var mapped = OWNER_DEFAULT_ISSUER[normalize(ownerSelect.value)];
+    if (mapped) { issuerSelect.value = mapped; }
+  }
+  ownerSelect.addEventListener("change", applyDefault);
+  applyDefault();
+})();
+</script>
+{% endif %}
 {% endblock %}
