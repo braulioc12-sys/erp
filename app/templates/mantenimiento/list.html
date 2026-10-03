@@ -18,6 +18,16 @@
     {% endif %}
   </div>
   {% endif %}
+{% if request.args.get('creado') == '1' and issuer %}
+<script>
+  // 3 oct, pedido de Braulio ("prefiero que recuerde lo guardado"): la
+  // orden recién creada ya se guardó en la base de datos -- hay que borrar
+  // el borrador que mantenimiento/form.html autoguardaba en localStorage
+  // mientras se llenaba, para que la PRÓXIMA orden nueva de esta misma
+  // empresa no arranque con los datos de la anterior ya guardada.
+  try { localStorage.removeItem('mant_nuevo_draft_v1:' + {{ issuer|tojson }}); } catch (e) { /* no-op */ }
+</script>
+{% endif %}
 </div>
 
 {% if not issuer %}

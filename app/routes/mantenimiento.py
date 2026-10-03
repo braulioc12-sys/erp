@@ -390,7 +390,15 @@ def new():
             )
 
         flash("Mantenimiento registrado.", "success")
-        return redirect(url_for("mantenimiento.list_view", issuer=issuer))
+        # 3 oct, pedido de Braulio ("prefiero que recuerde lo guardado"): el
+        # formulario de arriba autoguarda un borrador en localStorage del
+        # navegador mientras se llena (ver mantenimiento/form.html) -- este
+        # ?creado=1 le avisa a mantenimiento/list.html que la orden se
+        # guardó con éxito, para que borre ese borrador. Si no se borrara,
+        # la próxima vez que se abra "Registrar mantenimiento" para esta
+        # misma empresa reaparecería la orden YA guardada como si fuera un
+        # borrador pendiente.
+        return redirect(url_for("mantenimiento.list_view", issuer=issuer, creado=1))
 
     return render_template(
         "mantenimiento/form.html", record=None, vehicles=vehicles, vehicles_km=vehicles_km,

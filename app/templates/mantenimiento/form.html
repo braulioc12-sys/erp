@@ -2,7 +2,18 @@
 {% block title %}Registrar mantenimiento{% endblock %}
 {% block content %}
 <div class="page-header"><h1>Registrar mantenimiento{% if issuer %} — {{ 'BRMS' if issuer == 'BRMS' else 'Harraso Transport' }}{% endif %}</h1></div>
-<form class="form panel" method="post">
+{# 3 oct, pedido de Braulio ("prefiero que recuerde lo guardado"): tras el
+   fix anterior (botón "Volver a Mantenimiento" desde Inventarios), lo que
+   realmente hacía falta era que el formulario NO perdiera lo ya llenado al
+   ir a agregar un repuesto y volver -- este aviso solo se muestra cuando el
+   JS de más abajo efectivamente restaura un borrador guardado en el
+   navegador (ver restoreDraft()/saveDraft() en el <script> de este
+   archivo). #}
+<p id="draft-restored-notice" class="muted panel" style="display:none; padding:10px 14px; border-left:3px solid var(--primary, #2563eb); align-items:center; justify-content:space-between; gap:12px; flex-direction:row;">
+  <span>Se restauraron los datos que habías llenado antes de salir de esta página.</span>
+  <button type="button" id="discard-draft-btn" class="btn btn-secondary btn-sm">Descartar y empezar de nuevo</button>
+</p>
+<form class="form panel" method="post" id="mant-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   {# 30 sep: la lista de unidades (`vehicles`) ya viene filtrada por esta
      empresa desde mantenimiento.new() -- este campo oculto solo repite el
@@ -104,14 +115,179 @@
     <p class="mt-0"><a href="{{ url_for('inventarios.list_view', from_mantenimiento=1, issuer=issuer) }}" target="_blank">Ver/agregar repuestos en Inventarios</a></p>
     <p class="muted mt-0" style="margin-top:2px;">Si usas más de lo que hay en stock, se permite igual — solo se avisa (el stock puede quedar en negativo).</p>
   </div>
+
+  <div class="form-row">
+    <label>Próximo mantenimiento (fecha)
+      <input type="date" name="next_due_date" value="{{ record.next_due_date if record else '' }}">
+    </label>
+    <label>Próximo mantenimiento (km)
+      <input type="number" step="1" name="next_due_km" value="{{ record.next_due_km if record else '' }}">
+    </label>
+  </div>
+
+  <label>Descripción
+    <textarea name="description">{{ record.description if record else '' }}</textarea>
+  </label>
+
+  <label style="flex-direction: row; align-items: center; gap: 8px;">
+    <input type="checkbox" name="mark_in_maintenance" value="1" id="mark-in-maintenance-check" style="width:auto;">
+    Marcar la unidad como "En mantenimiento" ahora
+  </label>
+  <label style="flex-direction: row; align-items: center; gap: 8px; margin-top:-8px;">
+    <input type="checkbox" name="available_for_scheduling" value="1" style="width:auto;">
+    Ya está disponible para programar viajes mientras se le hace mantenimiento
+  </label>
+  <p class="muted" style="margin-top:-8px;">Solo tiene efecto si marcas la casilla de arriba. Solo Administrador o el personal de Mantenimiento pueden marcar esta opción — sin ella, la unidad no se puede elegir al crear un viaje mientras esté en mantenimiento. Se puede cambiar después desde Mantenimiento → Por unidad.</p>
+
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Guardar</button>
+    <a href="{{ url_for('mantenimiento.list_view', issuer=issuer) }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+
+  {# 3 oct, pedido de Braulio ("prefiero que recuerde lo guardado"): este
+     script se movió acá, al final del <form>, DESPUÉS de todos sus campos
+     (antes vivía más arriba, justo después del panel de materiales) --
+     restoreDraft() necesita leer/escribir campos como "next_due_date",
+     "next_due_km", "description" y las casillas de abajo, que en el HTML
+     están más abajo que donde vivía el script. Un <script> inline se
+     ejecuta apenas el parser del navegador lo alcanza, ANTES de seguir
+     parseando el resto del documento -- con el script más arriba,
+     form.querySelector('[name="description"]') (y las demás) siempre
+     devolvía null porque esos nodos todavía no existían en el DOM. Todo lo
+     demás que el script ya hacía (checkboxes de trabajos/materiales,
+     cuadrillas, odómetro/GPS) sigue funcionando igual, porque esos campos
+     siguen estando más arriba que el script, sea donde sea que viva. #}
   <script>
     (function () {
+      var form = document.getElementById('mant-form');
       var checks = document.querySelectorAll('.job-check');
       var matChecks = document.querySelectorAll('.material-check');
       var total = document.getElementById('job-minutes-total');
       var costInput = document.getElementById('cost-input');
       var laborCosts = {{ labor_costs|tojson }};
       var lastSuggestedCost = null;
+
+      // 3 oct, pedido de Braulio ("prefiero que recuerde lo guardado"): este
+      // formulario no tiene forma de guardar un borrador en el servidor (es
+      // una orden que ni siquiera existe todavía), así que mientras se
+      // llena se autoguarda en localStorage del navegador, por empresa
+      // (issuer) -- si el usuario sale a "Ver/agregar repuestos en
+      // Inventarios" (u otra pestaña) y vuelve o recarga esta página, se
+      // restaura todo lo que ya había marcado/escrito. Se borra solo al
+      // guardar la orden con éxito (ver el script en mantenimiento/list.html
+      // que corre cuando new() redirige acá con ?created=1) -- así no queda
+      // un borrador viejo reapareciendo en la siguiente orden nueva.
+      var issuer = {{ issuer|tojson }};
+      var draftKey = 'mant_nuevo_draft_v1:' + issuer;
+      var draftNotice = document.getElementById('draft-restored-notice');
+      var discardBtn = document.getElementById('discard-draft-btn');
+      var saveDraftTimer = null;
+
+      // qtyInputFor() se usa acá abajo pero se declara más abajo (junto a
+      // update()) -- las funciones declaradas con "function" se "izan"
+      // (hoisting) dentro de todo este IIFE, así que se puede usar antes de
+      // su definición en el archivo sin problema.
+
+      function serializeDraft() {
+        var data = {
+          vehicle_id: vehicleSelect.value,
+          maintenance_date: form.querySelector('[name="maintenance_date"]').value,
+          cost: costInput.value,
+          odometer_km: odometerInput.value,
+          next_due_date: form.querySelector('[name="next_due_date"]').value,
+          next_due_km: form.querySelector('[name="next_due_km"]').value,
+          description: form.querySelector('[name="description"]').value,
+          mark_in_maintenance: form.querySelector('#mark-in-maintenance-check').checked,
+          available_for_scheduling: form.querySelector('[name="available_for_scheduling"]').checked,
+          job_ids: [],
+          crew: {},
+          materials: [],
+        };
+        checks.forEach(function (c) {
+          if (!c.checked) return;
+          var jobId = c.dataset.jobId;
+          data.job_ids.push(jobId);
+          var container = document.querySelector('.crew-container[data-job-id="' + jobId + '"]');
+          var rows = [];
+          container.querySelectorAll('.crew-row').forEach(function (row) {
+            rows.push({
+              type: row.querySelector('.crew-type').value,
+              count: row.querySelector('.crew-count').value,
+              mechanic: row.querySelector('.crew-mechanic').value,
+            });
+          });
+          data.crew[jobId] = rows;
+        });
+        matChecks.forEach(function (c) {
+          if (!c.checked) return;
+          var matId = c.dataset.materialId;
+          var qtyInput = qtyInputFor(matId);
+          data.materials.push({ id: matId, qty: qtyInput ? qtyInput.value : '1' });
+        });
+        return data;
+      }
+
+      function saveDraft() {
+        // localStorage puede fallar (modo privado del navegador, cuota
+        // llena, etc.) -- no es crítico para poder seguir usando el
+        // formulario, así que cualquier error se ignora en silencio.
+        try {
+          localStorage.setItem(draftKey, JSON.stringify(serializeDraft()));
+        } catch (e) { /* no-op */ }
+      }
+
+      function saveDraftDebounced() {
+        if (saveDraftTimer) clearTimeout(saveDraftTimer);
+        saveDraftTimer = setTimeout(saveDraft, 300);
+      }
+
+      function restoreDraft(data) {
+        if (data.vehicle_id) vehicleSelect.value = data.vehicle_id;
+        if (data.maintenance_date) form.querySelector('[name="maintenance_date"]').value = data.maintenance_date;
+        if (data.next_due_date) form.querySelector('[name="next_due_date"]').value = data.next_due_date;
+        if (data.next_due_km) form.querySelector('[name="next_due_km"]').value = data.next_due_km;
+        if (data.description) form.querySelector('[name="description"]').value = data.description;
+        form.querySelector('#mark-in-maintenance-check').checked = !!data.mark_in_maintenance;
+        form.querySelector('[name="available_for_scheduling"]').checked = !!data.available_for_scheduling;
+
+        // El odómetro se restaura ANTES de updateGpsKm() y se marca como
+        // "tocado" para que el auto-llenado del GPS (más abajo) no lo pise.
+        odometerTouched = true;
+        updateGpsKm();
+        if (data.odometer_km) odometerInput.value = data.odometer_km;
+
+        (data.job_ids || []).forEach(function (jobId) {
+          var check = document.querySelector('.job-check[data-job-id="' + jobId + '"]');
+          if (!check) return; // el trabajo pudo haberse desactivado/eliminado del catálogo mientras tanto
+          check.checked = true;
+          var rows = (data.crew && data.crew[jobId]) || [];
+          var container = document.querySelector('.crew-container[data-job-id="' + jobId + '"]');
+          var addBtn = container.querySelector('.add-crew-row');
+          // Ya existe 1 fila de cuadrilla por defecto -- se agregan las que falten.
+          for (var i = container.querySelectorAll('.crew-row').length; i < rows.length; i++) {
+            addBtn.click();
+          }
+          var rowEls = container.querySelectorAll('.crew-row');
+          rows.forEach(function (r, idx) {
+            var rowEl = rowEls[idx];
+            if (!rowEl) return;
+            rowEl.querySelector('.crew-type').value = r.type;
+            rowEl.querySelector('.crew-count').value = r.count;
+            rowEl.querySelector('.crew-mechanic').value = r.mechanic;
+          });
+        });
+
+        (data.materials || []).forEach(function (m) {
+          var check = document.querySelector('.material-check[data-material-id="' + m.id + '"]');
+          if (!check) return; // el repuesto pudo haberse desactivado mientras tanto
+          check.checked = true;
+          var qtyInput = qtyInputFor(m.id);
+          if (qtyInput) qtyInput.value = m.qty;
+        });
+
+        if (data.cost) costInput.value = data.cost;
+        update();
+      }
 
       // --- Cuadrilla por trabajo: agregar/quitar filas tipo+cantidad ---
       document.querySelectorAll('.add-crew-row').forEach(function (btn) {
@@ -126,15 +302,17 @@
           newRow.querySelector('.remove-crew-row').addEventListener('click', function () {
             newRow.remove();
             update();
+            saveDraft();
           });
           newRow.querySelector('.crew-type').addEventListener('change', update);
           newRow.querySelector('.crew-count').addEventListener('input', update);
           container.insertBefore(newRow, btn);
           update();
+          saveDraft();
         });
       });
       document.querySelectorAll('.remove-crew-row').forEach(function (btn) {
-        btn.addEventListener('click', function () { btn.closest('.crew-row').remove(); update(); });
+        btn.addEventListener('click', function () { btn.closest('.crew-row').remove(); update(); saveDraft(); });
       });
 
       // 15 sep, pedido de Braulio: "en la parte de mantenimiento deberia
@@ -224,35 +402,36 @@
       matChecks.forEach(function (c) { c.addEventListener('change', update); });
       document.querySelectorAll('.material-qty').forEach(function (s) { s.addEventListener('input', update); });
       update();
+
+      // 3 oct (ver la nota larga junto a `draftKey` más arriba): si esta es
+      // una carga nueva de la página (no un reintento tras un error de
+      // validación -- en ese caso el servidor ya repuebla `record` con lo
+      // que se mandó) y hay un borrador guardado para esta empresa, se
+      // restaura y se avisa.
+      {% if not record %}
+      (function () {
+        try {
+          var savedDraftRaw = localStorage.getItem(draftKey);
+          if (savedDraftRaw) {
+            restoreDraft(JSON.parse(savedDraftRaw));
+            if (draftNotice) draftNotice.style.display = 'flex';
+          }
+        } catch (e) { /* borrador corrupto o localStorage no disponible -- se ignora, el usuario empieza en blanco */ }
+      })();
+      {% endif %}
+
+      if (discardBtn) {
+        discardBtn.addEventListener('click', function () {
+          try { localStorage.removeItem(draftKey); } catch (e) { /* no-op */ }
+          window.location.reload();
+        });
+      }
+
+      // Autoguardado: cualquier cambio en el formulario (escribir, marcar
+      // una casilla, cambiar una unidad/select) actualiza el borrador.
+      form.addEventListener('input', saveDraftDebounced);
+      form.addEventListener('change', saveDraft);
     })();
   </script>
-
-  <div class="form-row">
-    <label>Próximo mantenimiento (fecha)
-      <input type="date" name="next_due_date" value="{{ record.next_due_date if record else '' }}">
-    </label>
-    <label>Próximo mantenimiento (km)
-      <input type="number" step="1" name="next_due_km" value="{{ record.next_due_km if record else '' }}">
-    </label>
-  </div>
-
-  <label>Descripción
-    <textarea name="description">{{ record.description if record else '' }}</textarea>
-  </label>
-
-  <label style="flex-direction: row; align-items: center; gap: 8px;">
-    <input type="checkbox" name="mark_in_maintenance" value="1" id="mark-in-maintenance-check" style="width:auto;">
-    Marcar la unidad como "En mantenimiento" ahora
-  </label>
-  <label style="flex-direction: row; align-items: center; gap: 8px; margin-top:-8px;">
-    <input type="checkbox" name="available_for_scheduling" value="1" style="width:auto;">
-    Ya está disponible para programar viajes mientras se le hace mantenimiento
-  </label>
-  <p class="muted" style="margin-top:-8px;">Solo tiene efecto si marcas la casilla de arriba. Solo Administrador o el personal de Mantenimiento pueden marcar esta opción — sin ella, la unidad no se puede elegir al crear un viaje mientras esté en mantenimiento. Se puede cambiar después desde Mantenimiento → Por unidad.</p>
-
-  <div class="btn-group">
-    <button type="submit" class="btn btn-primary">Guardar</button>
-    <a href="{{ url_for('mantenimiento.list_view', issuer=issuer) }}" class="btn btn-secondary">Cancelar</a>
-  </div>
 </form>
 {% endblock %}
