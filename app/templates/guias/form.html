@@ -186,7 +186,14 @@
       </select>
     </label>
     <label>Serie
-      <input type="text" name="related_document_series" value="{{ form_values.related_document_series if form_values else (waybill.related_document_series if waybill else '') }}" placeholder="Ej: F001" style="width:100px;">
+      {# 3 oct, pedido de Braulio (guía V001-000024, "Enviar a SUNAT"
+         rechazada por SUNAT: la serie no tenía 4 caracteres): la serie de
+         cualquier documento electrónico peruano SIEMPRE tiene 4 caracteres
+         (F001, B001, V001...) -- maxlength=4 para que no se pueda ni
+         escribir de más; la validación real (exactamente 4, no "hasta 4")
+         vive en _related_document_series_error() (app/routes/guias.py) y en
+         build_waybill_payload() (app/integrations/sunat_ose.py). #}
+      <input type="text" name="related_document_series" value="{{ form_values.related_document_series if form_values else (waybill.related_document_series if waybill else '') }}" placeholder="Ej: F001" maxlength="4" style="width:100px;">
     </label>
     <label>Número
       <input type="text" name="related_document_number" value="{{ form_values.related_document_number if form_values else (waybill.related_document_number if waybill else (trip.shipper_waybill_number or '')) }}" placeholder="Ej: 123">
@@ -196,7 +203,7 @@
     </label>
   </div>
   <p class="muted ruc-status" style="margin-top:-8px;" data-for="related_document_issuer_ruc"></p>
-  <p class="muted" style="margin-top:-8px;">Se muestra en el detalle de la guía y, si completas Serie + Número + RUC del emisor, se envía junto con la guía de transportista a SUNAT/tefacturo.pe. Si falta algún dato, la guía se emite igual, solo sin ese dato.</p>
+  <p class="muted" style="margin-top:-8px;">Se muestra en el detalle de la guía y, si completas Serie + Número + RUC del emisor, se envía junto con la guía de transportista a SUNAT/tefacturo.pe. Si falta algún dato, la guía se emite igual, solo sin ese dato. La Serie debe tener exactamente 4 caracteres (ej: F001, B001, V001) -- SUNAT la rechaza si no.</p>
 
   <label>Observaciones
     <textarea name="notes">{{ form_values.notes if form_values else (waybill.notes if waybill else '') }}</textarea>

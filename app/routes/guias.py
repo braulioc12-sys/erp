@@ -165,6 +165,27 @@ RELATED_DOCUMENT_TYPES = [
 RELATED_DOCUMENT_LABELS = dict(RELATED_DOCUMENT_TYPES)
 
 
+# 3 oct, pedido de Braulio (guía V001-000024, "Enviar a SUNAT" devolvió un
+# 400 real de tefacturo.pe: "createForTransport.request.references[0].series:
+# length must be between 4 and 4"): la serie de CUALQUIER documento
+# electrónico peruano (factura, boleta, guía de remisión) tiene SIEMPRE 4
+# caracteres por norma de SUNAT (F001, B001, V001, etc.) -- el campo
+# "Serie" del documento relacionado (related_document_series) nunca
+# validó esto, así que una guía con una serie mal escrita (de cualquier
+# largo que no fuera 4) se guardaba sin problema y recién reventaba al
+# emitir, con un error crudo de tefacturo.pe en vez de un aviso claro acá.
+# Se valida esto en new()/edit() ANTES de guardar (mismo patrón que
+# validar_ubigeo() más abajo) para que el error se vea de inmediato, en
+# español, sin necesidad de llegar a "Enviar a SUNAT" para descubrirlo.
+def _related_document_series_error(series):
+    if series and len(series) != 4:
+        return (
+            f"La serie del documento relacionado ('{series}') debe tener "
+            "exactamente 4 caracteres (ej: F001, B001, V001) -- así lo exige SUNAT."
+        )
+    return None
+
+
 def _next_series_number(series):
     row = query_one("SELECT COUNT(*) as n FROM waybills WHERE series = ?", (series,))
     return (row["n"] if row else 0) + 1
@@ -339,6 +360,18 @@ def new(trip_id):
             related_document_series = None
             related_document_number = None
             related_document_issuer_ruc = None
+        series_error = _related_document_series_error(related_document_series)
+        if series_error:
+            flash(series_error, "error")
+            return render_template(
+                "guias/form.html",
+                trip=trip,
+                today=today_str(),
+                transfer_reasons=TRANSFER_REASONS,
+                form_values=request.form,
+                ubigeo_catalog=UBIGEO_CATALOG,
+                related_document_types=RELATED_DOCUMENT_TYPES,
+            )
         waybill_id = execute(
             """INSERT INTO waybills (trip_id, series, series_number, issuer, issue_date, delivery_date,
                weight_kg, packages,
@@ -501,6 +534,19 @@ def edit(waybill_id):
             related_document_series = None
             related_document_number = None
             related_document_issuer_ruc = None
+        series_error = _related_document_series_error(related_document_series)
+        if series_error:
+            flash(series_error, "error")
+            return render_template(
+                "guias/form.html",
+                trip=trip,
+                waybill=waybill,
+                today=today_str(),
+                transfer_reasons=TRANSFER_REASONS,
+                form_values=request.form,
+                ubigeo_catalog=UBIGEO_CATALOG,
+                related_document_types=RELATED_DOCUMENT_TYPES,
+            )
 
         execute(
             """UPDATE waybills SET issue_date=?, delivery_date=?, weight_kg=?, packages=?,

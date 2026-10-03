@@ -1225,6 +1225,27 @@ def build_waybill_payload(waybill, trip, company, client):
         and waybill["related_document_number"]
         and waybill["related_document_issuer_ruc"]
     ):
+        # 3 oct, pedido de Braulio (guía V001-000024, "Enviar a SUNAT"
+        # devolvió un 400 real: "createForTransport.request.references[0]
+        # .series: length must be between 4 and 4") -- la serie de
+        # cualquier documento electrónico peruano SIEMPRE tiene 4
+        # caracteres (F001, B001, V001...), por norma de SUNAT. Esta guía
+        # ya tenía una serie guardada de un largo distinto, de antes de que
+        # app/routes/guias.py validara esto al crear/editar (ver
+        # _related_document_series_error() ahí) -- así que acá también hay
+        # que frenarla, en vez de mandarla igual y dejar que SUNAT la
+        # rechace con un error críptico. Se valida justo acá adentro (y no
+        # antes, suelto) para no afectar el tipo "OTRO" -- ese nunca tiene
+        # un tipoDocumento real de SUNAT detrás (tipo_documento_referencia
+        # sale None), así que nunca llega a esta rama ni se manda a
+        # ninguna parte; no tiene sentido exigirle el formato de una serie
+        # real a un campo que es, a propósito, solo una anotación libre.
+        if len(waybill["related_document_series"]) != 4:
+            raise SunatOseError(
+                f"La serie del documento relacionado ('{waybill['related_document_series']}') debe tener "
+                "exactamente 4 caracteres (ej: F001, B001, V001) -- así lo exige SUNAT. "
+                "Corrígela desde \"Editar\" antes de volver a enviar la guía."
+            )
         referencias = {
             "documentoReferenciaList": [
                 {
