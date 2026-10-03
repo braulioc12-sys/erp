@@ -93,7 +93,15 @@
     {% else %}
     <p class="muted mt-0">Todavía no hay repuestos registrados.</p>
     {% endfor %}
-    <p class="mt-0"><a href="{{ url_for('inventarios.list_view') }}" target="_blank">Ver/agregar repuestos en Inventarios</a></p>
+    {# 3 oct, pedido de Braulio ("cuando no hay un repuesto te envia al menu
+       de inventario para registrarlo, pero luego no hay boton ni opcion
+       para volver a la orden de mantenimiento"): el link ya abría en una
+       pestaña nueva (target="_blank"), pero una vez en Inventarios no
+       había ninguna forma de volver -- se manda from_mantenimiento=1 +
+       issuer para que inventarios/list.html pueda mostrar un botón "←
+       Volver a Mantenimiento" de regreso a este mismo formulario (con la
+       empresa ya seleccionada). #}
+    <p class="mt-0"><a href="{{ url_for('inventarios.list_view', from_mantenimiento=1, issuer=issuer) }}" target="_blank">Ver/agregar repuestos en Inventarios</a></p>
     <p class="muted mt-0" style="margin-top:2px;">Si usas más de lo que hay en stock, se permite igual — solo se avisa (el stock puede quedar en negativo).</p>
   </div>
   <script>

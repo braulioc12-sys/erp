@@ -48,8 +48,21 @@ def list_view():
     pending_purchases = query_one(
         "SELECT COUNT(*) n FROM inventory_purchases WHERE status = 'PENDIENTE'"
     )["n"]
+    # 3 oct, pedido de Braulio ("cuando no hay un repuesto te envia al menu
+    # de inventario para registrarlo, pero luego no hay boton ni opcion
+    # para volver a la orden de mantenimiento"): mantenimiento/form.html
+    # (registrar una orden nueva) manda from_mantenimiento=1 + issuer al
+    # link "Ver/agregar repuestos en Inventarios" -- si están presentes, se
+    # le pasa a la plantilla para mostrar un botón de regreso explícito.
+    from_mantenimiento = request.args.get("from_mantenimiento") == "1"
+    issuer = request.args.get("issuer", "").strip().upper()
     return render_template(
-        "inventarios/list.html", items=items, pending_purchases=pending_purchases, q=q
+        "inventarios/list.html",
+        items=items,
+        pending_purchases=pending_purchases,
+        q=q,
+        from_mantenimiento=from_mantenimiento,
+        issuer=issuer,
     )
 
 

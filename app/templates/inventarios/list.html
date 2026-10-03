@@ -4,6 +4,21 @@
 <div class="page-header">
   <h1>Inventarios — Repuestos</h1>
   <div class="page-actions">
+    {# 3 oct, pedido de Braulio ("cuando no hay un repuesto te envia al
+       menu de inventario para registrarlo, pero luego no hay boton ni
+       opcion para volver a la orden de mantenimiento"): si se llegó acá
+       desde "Ver/agregar repuestos en Inventarios" del formulario de
+       Registrar mantenimiento (ver mantenimiento/form.html), se ofrece un
+       botón explícito de regreso -- con la empresa ya seleccionada, igual
+       que se había dejado allá. No restaura los demás datos que ya se
+       hubieran llenado en ese formulario (unidad, trabajos, etc.) porque
+       esta pantalla no guarda ese estado -- por eso el link de origen abre
+       en una pestaña nueva (target="_blank"): lo más seguro sigue siendo
+       no cerrar esa pestaña original y solo volver a ella; este botón es
+       para cuando igual se perdió esa pestaña. #}
+    {% if from_mantenimiento %}
+    <a href="{{ url_for('mantenimiento.new', issuer=issuer) }}" class="btn btn-secondary">← Volver a Mantenimiento (nueva orden)</a>
+    {% endif %}
     <a href="{{ url_for('inventarios.providers_list') }}" class="btn btn-secondary">Proveedores</a>
     <a href="{{ url_for('inventarios.purchases_list') }}" class="btn btn-secondary">
       Compras{% if pending_purchases %} <span class="badge badge-pendiente">{{ pending_purchases }} pendiente{{ 's' if pending_purchases != 1 }}</span>{% endif %}
