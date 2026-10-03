@@ -103,6 +103,21 @@ para no perder el rastro; ver también README):
   subcontratado y/o pagador distinto del destinatario, revisa si el PDF de
   SUNAT sale con esos datos correctos o vacíos, y avísame — si hace falta,
   hay que preguntarle a Jorge el nombre real de estos campos.**
+  - **2 oct — CONFIRMADO el motivo de "SIN FLETE" en el PDF (Braulio: "se
+    elige pagador de flete pero a la hora de emitirla, arriba sale 'sin
+    flete'"):** la causa real era que `pagador` de arriba solo manda la
+    IDENTIDAD de quien paga, pero nunca el indicador de catálogo que le
+    dice a tefacturo.pe que use/muestre ese pagador. Se revisó de nuevo la
+    documentación (ahora sí la página "Catálogos / Datos Maestros",
+    sección "Guía de Remisión Transportista" → "7.2 Catálogo Tipo Flete":
+    `null`="No utiliza flete", `FLETE_REMITENTE`, `FLETE_SUBCONTRATADOR`,
+    `FLETE_TERCERO`) y se agregó `datosEnvio.tipoFlete` con ese catálogo
+    (ver la nota junto a `tipo_flete` en build_waybill_payload más abajo).
+    El nombre exacto de la clave SIGUE sin confirmar contra un JSON de
+    ejemplo real (la documentación solo lista los valores, nunca el campo
+    en contexto) -- se asumió por el mismo patrón que sus vecinos de
+    catálogo (todos dentro de `datosEnvio`). `subcontratado`/`pagador`
+    siguen sin confirmar como keys; `tipoFlete` es la pieza nueva.
 - **`referencias` / "documento relacionado" (1 oct) — CONFIRMADO, los dos
   rondas:** Braulio mandó primero una captura de la propia documentación de
   tefacturo.pe (JSON de ejemplo con "detalleGuia"/"conductores") que
@@ -1239,6 +1254,43 @@ def build_waybill_payload(waybill, trip, company, client):
         # (pagador == destinatario en ese ejemplo).
         pagador = dict(destinatario)
 
+    # 2 oct, pedido de Braulio ("cuando se crea la guia de transportista se
+    # elige pagador de flete pero a la hora de emitirla, arriba sale 'sin
+    # flete'"): el `pagador` de arriba (15 sep, patch 0037, SIN CONFIRMAR)
+    # nunca hizo que el PDF mostrara el pagador elegido -- revisando de
+    # nuevo la documentación de tefacturo.pe (Catálogos / Datos Maestros →
+    # "Guía de Remisión Transportista" → "7.2 Catálogo Tipo Flete": valores
+    # null="No utiliza flete", FLETE_REMITENTE, FLETE_SUBCONTRATADOR,
+    # FLETE_TERCERO) se confirma que SÍ existe un campo de catálogo
+    # específico para esto, y que su ausencia/null es exactamente "SIN
+    # FLETE" -- lo que salía siempre en el PDF porque nunca se mandaba este
+    # campo (el `pagador` de arriba solo manda la IDENTIDAD de quien paga,
+    # nunca el indicador que le dice a tefacturo.pe que de verdad hay un
+    # pagador que mostrar).
+    #
+    # El nombre exacto de la clave NO está confirmado -- la documentación
+    # de tefacturo.pe solo lista los valores del catálogo, nunca un JSON de
+    # ejemplo que lo incluya. Se asume `datosEnvio.tipoFlete`, por el mismo
+    # patrón que siguen sus vecinos del mismo catálogo (datosEnvio.
+    # transbordoProgramado/retornoVehiculoVacio/unidadMedida acá, y en la
+    # guía REMITENTE, datosEnvio.modalidadTraslado) -- todo lo demás que
+    # tefacturo.pe documenta como "catálogo de la guía" vive dentro de
+    # datosEnvio, con el prefijo "tipo"/"modalidad" + sustantivo, igual que
+    # este. El catálogo no tiene ningún valor para "paga el destinatario"
+    # (la opción más común) ni para TERCERO sin RUC cargado todavía -- en
+    # esos dos casos se manda null, igual que el resto del catálogo cuando
+    # no hay flete que declarar.
+    #
+    # **Braulio: la próxima guía con flete de Remitente o de Tercero,
+    # revisa si el PDF ya sale con el pagador correcto (no "SIN FLETE") --
+    # si sigue saliendo mal, hay que pedirle a tefacturo.pe el nombre real
+    # de este campo.**
+    tipo_flete = None
+    if payer_type == "REMITENTE":
+        tipo_flete = "FLETE_REMITENTE"
+    elif payer_type == "TERCERO" and waybill["payer_ruc"]:
+        tipo_flete = "FLETE_TERCERO"
+
     payload = {
         "close2u": {
             "tipoIntegracion": "OFFLINE",
@@ -1296,6 +1348,11 @@ def build_waybill_payload(waybill, trip, company, client):
             # el sistema) — avisar si eso llega a no ser cierto en algún
             # caso.
             "trasladoTotalBienes": True,
+            # 2 oct (ver la nota larga más arriba, junto a `tipo_flete`):
+            # indicador de quién paga el flete -- ausente hasta ahora, por
+            # eso el PDF siempre mostraba "SIN FLETE" sin importar lo
+            # elegido en "¿Quién paga el flete?" del formulario.
+            "tipoFlete": tipo_flete,
         },
         "transportista": {
             "correo": company.get("email", ""),
