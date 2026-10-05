@@ -179,7 +179,7 @@
     {% endif %}
     {% else %}
     {% if advance %}
-    <a href="{{ url_for('liquidaciones.detail', advance_id=advance.id) }}" class="btn btn-secondary btn-sm">💵 Ver liquidación {{ 'del viaje redondo' if outbound_trip or return_trip else 'de este viaje' }}</a>
+    <a href="{{ url_for('liquidaciones.detail', advance_id=advance.id) }}" class="btn btn-secondary btn-sm">💵 Ver liquidación {{ 'del viaje redondo' if liquidacion_compartida else 'de este viaje' }}</a>
     {% else %}
     <a href="{{ url_for('liquidaciones.new_advance', trip_id=liquidacion_trip_id) }}" class="btn btn-secondary btn-sm">💵 Confirmar anticipo de viáticos</a>
     {% endif %}
@@ -190,8 +190,15 @@
 {% if trip.ownership == 'TERCERO' %}
 <p class="muted" style="margin-top:-8px; margin-bottom:16px;">Los viajes con terceros no registran liquidación (sin anticipo de viáticos, gastos de viaje ni inspección) — el costo de este viaje es el flete acordado.</p>
 {% endif %}
-{% if outbound_trip or return_trip %}
+{# 5 oct, pedido de Braulio: el texto de "liquidación compartida" solo
+   aplica si de verdad se comparte (un único conductor, el mismo en ida y
+   vuelta -- ver liquidation_anchor_trip_id() en app/routes/viajes.py). Con
+   doble conductor, o conductores distintos en ida y vuelta, cada viaje
+   liquida por su cuenta y no se mezclan sus gastos. #}
+{% if liquidacion_compartida %}
 <p class="muted" style="margin-top:-8px; margin-bottom:16px;">La liquidación (anticipo de viáticos y gastos) es una sola para todo el viaje redondo — compartida entre {{ 'este viaje y su ida' if outbound_trip else 'este viaje y su vuelta' }}. La factura y la comisión sí van separadas, cada tramo se factura aparte.</p>
+{% elif outbound_trip or return_trip %}
+<p class="muted" style="margin-top:-8px; margin-bottom:16px;">Este viaje y {{ 'su ida' if outbound_trip else 'su vuelta' }} liquidan por separado (doble conductor o conductores distintos): cada uno tiene su propio anticipo y sus propios gastos.</p>
 {% endif %}
 
 {# 1 oct, pedido de Braulio ("ya se creo la guia de este viaje, pero cuando
@@ -433,7 +440,7 @@
 
 {% if trip.ownership != 'TERCERO' %}
 <div class="panel">
-  <h2>Gastos asociados a {{ 'este viaje redondo (ida + vuelta)' if outbound_trip or return_trip else 'este viaje' }} ({{ total_expenses|money }})</h2>
+  <h2>Gastos asociados a {{ 'este viaje redondo (ida + vuelta)' if liquidacion_compartida else 'este viaje' }} ({{ total_expenses|money }})</h2>
   <div class="table-wrap">
     <table>
       <thead><tr><th>Fecha</th><th>Tipo</th><th>Descripción</th><th class="text-right">Monto</th></tr></thead>

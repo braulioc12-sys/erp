@@ -38,7 +38,7 @@ from app.integrations.sunat_exchange_rate import get_rate_for_date
 from app.integrations.sunat_ruc import get_company_for_ruc
 from app.reports import build_expenses_workbook, build_liquidacion_workbook
 from app.routes.rutas import find_route
-from app.routes.viajes import ISSUER_CHOICES
+from app.routes.viajes import ISSUER_CHOICES, liquidation_anchor_trip_id
 from app import storage
 
 bp = Blueprint("liquidaciones", __name__, url_prefix="/liquidaciones")
@@ -51,17 +51,24 @@ def _liquidacion_anchor_trip_id(trip_id):
     el comentario largo en viajes.detail(), liquidacion_trip_id). Esto
     normaliza cualquier trip_id que llegue (por ejemplo el de una vuelta,
     si se entra directo por la URL) al id que realmente hay que usar."""
-    trip = query_one("SELECT id, return_of_trip_id FROM trips WHERE id = ?", (trip_id,))
-    if trip is None:
-        return trip_id
-    return trip["return_of_trip_id"] or trip["id"]
+    # 5 oct, pedido de Braulio: ya no es "siempre la ida" -- con doble
+    # conductor (o conductores distintos en ida y vuelta) cada viaje liquida
+    # por su cuenta; ver liquidation_anchor_trip_id() en app/routes/viajes.py.
+    return liquidation_anchor_trip_id(trip_id)
 
 
 def _paired_trip(ida_trip_id):
     """El viaje de vuelta de esta ida, si ya se creó (ver return_of_trip_id
-    en schema.sql) -- para mostrar "Viaje H-0032 + Vuelta H-0033" en el
-    detalle/impresión de una liquidación compartida."""
-    return query_one("SELECT id, code FROM trips WHERE return_of_trip_id = ?", (ida_trip_id,))
+    en schema.sql) Y comparte su liquidación -- para mostrar "Viaje H-0032 +
+    Vuelta H-0033" en el detalle/impresión de una liquidación compartida.
+    5 oct: si la vuelta liquida por su cuenta (doble conductor / conductores
+    distintos, ver liquidation_anchor_trip_id() en app/routes/viajes.py)
+    devuelve None, igual que si no existiera -- esa liquidación NO incluye
+    los gastos de la vuelta, así que no debe presentarse como "ida + vuelta"."""
+    vuelta = query_one("SELECT id, code FROM trips WHERE return_of_trip_id = ?", (ida_trip_id,))
+    if vuelta and liquidation_anchor_trip_id(vuelta["id"]) == ida_trip_id:
+        return vuelta
+    return None
 
 ALLOWED_RECEIPT_EXTENSIONS = {".png", ".jpg", ".jpeg", ".pdf", ".webp", ".heic", ".heif"}
 
@@ -284,8 +291,12 @@ def new_advance(trip_id, driver_slot):
     # links de viajes/detail.html ya mandan directo el id de la ida
     # (liquidacion_trip_id) sin importar desde qué pantalla se abrieron,
     # pero esto también cubre entrar directo con la URL de una vuelta.
-    if trip["return_of_trip_id"]:
-        trip = query_one("SELECT * FROM trips WHERE id = ?", (trip["return_of_trip_id"],))
+    # 5 oct: la vuelta solo se normaliza a la ida si comparten liquidación
+    # (un único conductor, el mismo en ambos tramos) -- ver
+    # liquidation_anchor_trip_id() en app/routes/viajes.py.
+    anchor_id = liquidation_anchor_trip_id(trip_id)
+    if anchor_id != trip["id"]:
+        trip = query_one("SELECT * FROM trips WHERE id = ?", (anchor_id,))
         trip_id = trip["id"]
     # 4 sep, pedido de Braulio: "los viajes con terceros no deben registrar
     # liquidación, por lo tanto no tienen anticipo de viáticos, inspección

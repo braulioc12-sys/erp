@@ -472,6 +472,45 @@ def _advance_for_driver(trip_id, driver_id):
     )
 
 
+def liquidation_anchor_trip_id(trip_id):
+    """5 oct, pedido de Braulio (viajes H-0039 ida / H-0040 vuelta):
+    "esta jalando los gastos del h-0040, son doble conductor pero quedamos
+    que cada uno liquidaba sus gastos de manera independiente".
+
+    Desde el 29 sep la liquidación (anticipo + gastos) de un viaje redondo
+    era SIEMPRE una sola, anclada al viaje de IDA (trip_id de la ida) -- así
+    cada gasto registrado desde la pantalla de la vuelta terminaba guardado
+    (y mostrado) en la ida. Eso tiene sentido cuando UN solo conductor hace
+    todo el viaje redondo, pero no cuando es doble conductor: ahí cada
+    conductor liquida lo suyo, de forma independiente (ver 30 sep, una
+    liquidación por conductor) y la ida y la vuelta no deben mezclar gastos.
+
+    Devuelve el trip_id donde viven el anticipo y los gastos de `trip_id`:
+    - una ida (o un viaje normal): él mismo, siempre.
+    - una vuelta: el id de la ida SOLO si ambos tramos son de un único
+      conductor y es el mismo (ahí sí se sigue compartiendo una sola
+      liquidación, como desde el 29 sep). Si cualquiera de los dos tramos
+      es doble conductor, o los conductores de ida y vuelta son distintos
+      (o falta alguno), la vuelta liquida por su cuenta: devuelve su propio
+      id."""
+    trip = query_one(
+        "SELECT id, return_of_trip_id, driver_id, double_driver FROM trips WHERE id = ?", (trip_id,)
+    )
+    if trip is None:
+        return trip_id
+    outbound_id = trip["return_of_trip_id"]
+    if not outbound_id:
+        return trip["id"]
+    outbound = query_one("SELECT id, driver_id, double_driver FROM trips WHERE id = ?", (outbound_id,))
+    if outbound is None:
+        return trip["id"]
+    if trip["double_driver"] or outbound["double_driver"]:
+        return trip["id"]
+    if not trip["driver_id"] or trip["driver_id"] != outbound["driver_id"]:
+        return trip["id"]
+    return outbound["id"]
+
+
 def _ownership_and_third_party_fields(form):
     """Resuelve, a partir del formulario, los campos de unidad propia vs.
     tercero (3 sep, pedido de Braulio). Devuelve un dict listo para pasar
@@ -1002,7 +1041,11 @@ def detail(trip_id):
     # ambas pantallas leen/escriben el mismo anticipo y la misma lista de
     # gastos (ver también los links de "Confirmar anticipo"/"Registrar
     # gasto" en viajes/detail.html, que usan este mismo id).
-    liquidacion_trip_id = trip["return_of_trip_id"] or trip["id"]
+    # 5 oct, pedido de Braulio: ya no es "siempre la ida" -- ver
+    # liquidation_anchor_trip_id(): si es doble conductor (o los conductores
+    # de ida y vuelta no son el mismo único conductor), cada viaje liquida
+    # por su cuenta y su propio id es el ancla.
+    liquidacion_trip_id = liquidation_anchor_trip_id(trip["id"])
     expenses = query_all(
         "SELECT * FROM expenses WHERE trip_id = ? ORDER BY expense_date DESC", (liquidacion_trip_id,)
     )
@@ -1071,6 +1114,17 @@ def detail(trip_id):
     else:
         return_trip = _return_trip_of(trip_id)
     conformidad_opcional = bool(trip["return_of_trip_id"]) and trip["issuer"] == "HARRASO"
+    # 5 oct: ¿la liquidación de este viaje se comparte con su ida/vuelta?
+    # Una vuelta la comparte si su ancla es la ida; una ida la comparte si
+    # su vuelta (si ya existe) tiene a esta ida como ancla. Los textos
+    # "viaje redondo" de viajes/detail.html dependen de esto, no de que
+    # simplemente exista el enlace ida/vuelta.
+    if outbound_trip:
+        liquidacion_compartida = liquidacion_trip_id == outbound_trip["id"]
+    elif return_trip:
+        liquidacion_compartida = liquidation_anchor_trip_id(return_trip["id"]) == trip["id"]
+    else:
+        liquidacion_compartida = False
     return render_template(
         "viajes/detail.html", trip=trip, expenses=expenses,
         total_expenses=total_expenses, next_statuses=next_statuses, advance=advance, advance2=advance2,
@@ -1078,7 +1132,7 @@ def detail(trip_id):
         payment_term_labels=payment_term_labels,
         existing_waybills=existing_waybills, creator=creator,
         outbound_trip=outbound_trip, return_trip=return_trip, conformidad_opcional=conformidad_opcional,
-        liquidacion_trip_id=liquidacion_trip_id,
+        liquidacion_trip_id=liquidacion_trip_id, liquidacion_compartida=liquidacion_compartida,
     )
 
 
