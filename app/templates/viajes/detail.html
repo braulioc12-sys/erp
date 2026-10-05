@@ -14,7 +14,7 @@
   {% if files %}
   <div class="table-wrap" style="margin-bottom:12px;">
     <table>
-      <thead><tr><th>#</th><th>Número de guía</th><th>Archivo</th><th>Subida</th></tr></thead>
+      <thead><tr><th>#</th><th>Número de guía</th><th>Archivo</th><th>Subida</th><th></th></tr></thead>
       <tbody>
         {% for f in files %}
         <tr>
@@ -22,6 +22,14 @@
           <td>{{ f.guide_number or '—' }}</td>
           <td>{% if f.filename %}<a href="{{ url_for('viajes.trip_guide_file', trip_id=trip.id, file_id=f.id) }}" target="_blank">Ver guía adjunta</a>{% else %}— (sin archivo){% endif %}</td>
           <td class="muted">{{ f.created_at[:16] if f.created_at else '' }}{% if f.created_by_name %} · {{ f.created_by_name }}{% endif %}</td>
+          <td>
+            {% if can(current_user.roles, 'viajes', 'edit') %}
+            <form method="post" action="{{ url_for('viajes.delete_trip_guide', trip_id=trip.id, file_id=f.id) }}" onsubmit="return confirm('¿Eliminar esta guía{{ ' (' ~ f.guide_number ~ ')' if f.guide_number else '' }}? Esta acción no se puede deshacer.');" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
+            </form>
+            {% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>

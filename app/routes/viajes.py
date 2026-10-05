@@ -1474,6 +1474,48 @@ def trip_guide_file(trip_id, file_id):
     return send_from_directory(storage.local_carrier_waybills_dir(), row["filename"])
 
 
+@bp.route("/<int:trip_id>/guias/<int:file_id>/eliminar", methods=["POST"])
+@permission_required("viajes", "edit")
+def delete_trip_guide(trip_id, file_id):
+    """5 oct, pedido de Braulio ("sumar ese boton para borrar guias por
+    error"): quita UNA guía adjunta (la fila de trip_waybill_files); las
+    demás no se tocan. Las columnas viejas de trips se vuelven a calcular
+    con la primera guía que queda de ese tipo (o NULL) -- si no, el
+    respaldo de arranque (_backfill_trip_waybill_files_*) volvería a crear
+    la guía borrada a partir de ellas. El archivo en sí no se borra del
+    almacenamiento (la app nunca borra adjuntos, igual que al eliminar un
+    viaje)."""
+    if not validate_csrf():
+        abort(400)
+    row = query_one(
+        """SELECT f.id, f.kind, f.guide_number, t.code FROM trip_waybill_files f
+           JOIN trips t ON t.id = f.trip_id WHERE f.id = ? AND f.trip_id = ?""",
+        (file_id, trip_id),
+    )
+    if row is None:
+        abort(404)
+    execute("DELETE FROM trip_waybill_files WHERE id = ?", (file_id,))
+    cfg = GUIDE_KINDS[row["kind"]]
+    remaining = query_all(
+        "SELECT guide_number, filename FROM trip_waybill_files WHERE trip_id = ? AND kind = ? ORDER BY id",
+        (trip_id, row["kind"]),
+    )
+    first_number = next((r["guide_number"] for r in remaining if r["guide_number"]), None)
+    first_filename = next((r["filename"] for r in remaining if r["filename"]), None)
+    execute(
+        f"UPDATE trips SET {cfg['legacy_number']} = ?, {cfg['legacy_filename']} = ? WHERE id = ?",
+        (first_number, first_filename, trip_id),
+    )
+    log_activity(
+        "viajes", "ELIMINAR",
+        f"{cfg['label']} {row['guide_number'] or '(sin número)'} del viaje {row['code']}: eliminada",
+        entity_type="viaje", entity_id=trip_id,
+        entity_url=url_for("viajes.detail", trip_id=trip_id),
+    )
+    flash(f"{cfg['label']} eliminada.", "success")
+    return redirect(url_for("viajes.detail", trip_id=trip_id))
+
+
 @bp.route("/<int:trip_id>/guia", methods=["POST"])
 @permission_required("viajes", "edit")
 def save_waybill(trip_id):
