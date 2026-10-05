@@ -165,6 +165,35 @@ VEHICLE_OWNER_DEFAULT_ISSUER = {
 }
 
 
+def pending_jobs_by_vehicle(vehicle_ids):
+    """5 oct, pedido de Braulio ("cuando entro a Flota me salen en
+    mantenimiento, quiero que desde ese menu se pueda ver que trabajos
+    tienen pendientes cada carro para que los despachadores de viajes
+    puedan ver tambien sin tener que entrar a otro menu"): trabajos con
+    status PENDIENTE (maintenance_record_jobs) de las órdenes de
+    mantenimiento de cada unidad, para mostrarlos directo en Flota. Devuelve
+    {vehicle_id: [{record_id, job_name, mechanic_name, maintenance_date}]},
+    más antiguos primero; las unidades sin trabajos pendientes no aparecen
+    en el dict. Es de solo lectura y se muestra con el permiso de Flota (el
+    despachador no necesita acceso al módulo de Mantenimiento para verlo)."""
+    ids = [i for i in vehicle_ids if i]
+    if not ids:
+        return {}
+    placeholders = ",".join("?" * len(ids))
+    rows = query_all(
+        f"""SELECT m.vehicle_id, m.id AS record_id, m.maintenance_date, j.job_name, j.mechanic_name
+            FROM maintenance_record_jobs j
+            JOIN maintenance_records m ON m.id = j.maintenance_record_id
+            WHERE j.status = 'PENDIENTE' AND m.vehicle_id IN ({placeholders})
+            ORDER BY m.maintenance_date, m.id, j.job_name""",
+        tuple(ids),
+    )
+    result = {}
+    for row in rows:
+        result.setdefault(row["vehicle_id"], []).append(row)
+    return result
+
+
 @bp.route("")
 @permission_required("flota", "view")
 def list_view():
@@ -192,7 +221,7 @@ def list_view():
     issuer = request.args.get("issuer", "").strip().upper()
     if issuer not in ISSUER_CHOICES:
         return render_template(
-            "flota/list.html", vehicles=None, issuer=None, show_inactive=False, inactive_count=0,
+            "flota/list.html", vehicles=None, pending_jobs={}, issuer=None, show_inactive=False, inactive_count=0,
             vehicle_type_filter="", status_filter="", model_filter="",
         )
     show_inactive = request.args.get("ver") == "inactivas"
@@ -227,6 +256,7 @@ def list_view():
     return render_template(
         "flota/list.html",
         vehicles=vehicles,
+        pending_jobs=pending_jobs_by_vehicle([v["id"] for v in vehicles]),
         issuer=issuer,
         show_inactive=show_inactive,
         inactive_count=inactive_count,
@@ -264,6 +294,7 @@ def vehicle_detail(vehicle_id):
         document_types=VEHICLE_DOCUMENT_TYPES,
         creator=creator,
         gps_location=gps_location,
+        pending_jobs=pending_jobs_by_vehicle([vehicle_id]).get(vehicle_id, []),
     )
 
 

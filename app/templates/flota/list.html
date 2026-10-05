@@ -62,7 +62,7 @@
 
 <div class="table-wrap">
   <table id="vehicleTable">
-    <thead><tr><th>#</th><th>Placa</th><th>Marca / Modelo</th><th>Tipo</th><th>Empresa</th><th>Estado</th><th>SOAT vence</th><th>Rev. técnica vence</th><th></th></tr></thead>
+    <thead><tr><th>#</th><th>Placa</th><th>Marca / Modelo</th><th>Tipo</th><th>Empresa</th><th>Estado</th><th>Trabajos pendientes</th><th>SOAT vence</th><th>Rev. técnica vence</th><th></th></tr></thead>
     <tbody>
       {% for v in vehicles %}
       <tr onclick="window.location='{{ url_for('flota.vehicle_detail', vehicle_id=v.id) }}'" style="cursor:pointer;" data-plate="{{ v.plate|lower }}">
@@ -76,6 +76,23 @@
         </td>
         <td>{{ 'BRMS' if v.issuer == 'BRMS' else 'Harraso Transport' }}</td>
         <td>{{ m.badge(v.status) }}</td>
+        <td onclick="event.stopPropagation();">
+          {% set jobs = pending_jobs.get(v.id) %}
+          {% if jobs %}
+          <ul class="pending-jobs">
+            {% for j in jobs %}
+            <li>
+              {% if can(current_user.roles, 'mantenimiento', 'view') %}
+              <a href="{{ url_for('mantenimiento.detail', record_id=j.record_id) }}" title="Orden #{{ j.record_id }} — {{ j.maintenance_date }}">{{ j.job_name }}</a>
+              {% else %}
+              <span title="Orden #{{ j.record_id }} — {{ j.maintenance_date }}">{{ j.job_name }}</span>
+              {% endif %}
+              {% if j.mechanic_name %}<span class="muted">({{ j.mechanic_name }})</span>{% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
         <td>{{ v.soat_expiry or '—' }}</td>
         <td>{{ v.technical_review_expiry or '—' }}</td>
         <td onclick="event.stopPropagation();">
@@ -91,12 +108,18 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="9" class="table-empty">{% if show_inactive %}No hay unidades inactivas.{% else %}No hay unidades registradas.{% endif %}</td></tr>
+      <tr><td colspan="10" class="table-empty">{% if show_inactive %}No hay unidades inactivas.{% else %}No hay unidades registradas.{% endif %}</td></tr>
       {% endfor %}
     </tbody>
   </table>
   <p id="vehicleSearchEmpty" class="table-empty" style="display:none;">Ninguna unidad coincide con la búsqueda.</p>
 </div>
+
+<style>
+  .pending-jobs { list-style: none; margin: 0; padding: 0; font-size: 0.9em; }
+  .pending-jobs li { margin: 2px 0; }
+  .pending-jobs li::before { content: "• "; color: #b45309; }
+</style>
 
 <script>
 function filterVehicles() {

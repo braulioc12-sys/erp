@@ -49,6 +49,24 @@
 </div>
 
 <div class="panel">
+  <h2>Trabajos pendientes de mantenimiento</h2>
+  {% if pending_jobs %}
+  <ul class="pending-jobs-detail">
+    {% for j in pending_jobs %}
+    <li>
+      {% if can(current_user.roles, 'mantenimiento', 'view') %}
+      <a href="{{ url_for('mantenimiento.detail', record_id=j.record_id) }}">{{ j.job_name }}</a>
+      {% else %}{{ j.job_name }}{% endif %}
+      <span class="muted">— orden #{{ j.record_id }} del {{ j.maintenance_date }}{% if j.mechanic_name %} · {{ j.mechanic_name }}{% endif %}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted mt-0">Esta unidad no tiene trabajos de mantenimiento pendientes.</p>
+  {% endif %}
+</div>
+
+<div class="panel">
   <h2>Kilometraje</h2>
   <div class="detail-grid">
     <div class="detail-item">
