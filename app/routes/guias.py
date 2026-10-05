@@ -755,8 +755,22 @@ def _brms_trip_guide_index():
     trips = query_all(
         "SELECT id, carrier_waybill_number, shipper_waybill_number FROM trips WHERE issuer = 'BRMS'"
     )
-    carrier_index = _index_guia_values((t["carrier_waybill_number"], t["id"]) for t in trips)
-    shipper_index = _index_guia_values((t["shipper_waybill_number"], t["id"]) for t in trips)
+    # 5 oct: un viaje puede tener varias guías de cada tipo (tabla
+    # trip_waybill_files, ver schema.sql) -- las columnas de trips solo
+    # guardan la primera, así que se indexan también las demás.
+    extra = query_all(
+        """SELECT f.trip_id, f.kind, f.guide_number FROM trip_waybill_files f
+           JOIN trips t ON t.id = f.trip_id
+           WHERE t.issuer = 'BRMS' AND COALESCE(f.guide_number, '') != ''"""
+    )
+    carrier_index = _index_guia_values(
+        [(t["carrier_waybill_number"], t["id"]) for t in trips]
+        + [(f["guide_number"], f["trip_id"]) for f in extra if f["kind"] == "TRANSPORTISTA"]
+    )
+    shipper_index = _index_guia_values(
+        [(t["shipper_waybill_number"], t["id"]) for t in trips]
+        + [(f["guide_number"], f["trip_id"]) for f in extra if f["kind"] == "REMITENTE"]
+    )
 
     waybills = query_all(
         """SELECT w.trip_id, w.series, w.series_number FROM waybills w

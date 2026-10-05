@@ -1524,6 +1524,31 @@ CREATE TABLE IF NOT EXISTS waybills (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- 5 oct, pedido de Braulio ("hay que tener la opcion de subir guia de
+-- remitente y tambien la guia de transportista nuestra (cuando es generada
+-- en otro portal)... una vez subidas ya no debe figurar la opcion de subir
+-- archivo, a menos que sea para agregar. No quiero que al subir uno nuevo
+-- reemplace al anterior"): un viaje puede tener VARIAS guías adjuntas de
+-- cada tipo. kind = 'REMITENTE' (guía de remisión que emitió el remitente,
+-- antes trips.shipper_waybill_*) o 'TRANSPORTISTA' (guía de transportista
+-- nuestra, emitida en otro portal, antes trips.carrier_waybill_* -- el
+-- nombre de columna "carrier" ya decía transportista). Cada fila es UNA
+-- guía: número a mano y/o un archivo (los archivos se guardan en el mismo
+-- lugar de siempre, ver app/storage.py). Las columnas viejas de trips se
+-- siguen llenando con la PRIMERA guía de cada tipo (solo las leen
+-- app/routes/guias.py -- enlace de pedidos y sugerencia de documento
+-- relacionado); los datos que ya estaban se copian a esta tabla una sola
+-- vez al arrancar (ver _backfill_trip_waybill_files_* en app/db.py).
+CREATE TABLE IF NOT EXISTS trip_waybill_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trip_id INTEGER NOT NULL REFERENCES trips(id),
+    kind TEXT NOT NULL,
+    guide_number TEXT,
+    filename TEXT,
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- 20 sep, pedido de Braulio ("y si las guías fueron emitidas por
 -- tefacturo.pe, pero antes de que se cree harris?"): guías transportista
 -- reales, ya aceptadas (o no) por SUNAT vía tefacturo.pe, que Harris nunca
@@ -1957,6 +1982,7 @@ CREATE INDEX IF NOT EXISTS idx_expenses_vehicle ON expenses(vehicle_id);
 CREATE INDEX IF NOT EXISTS idx_maintenance_vehicle ON maintenance_records(vehicle_id);
 CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_waybills_trip ON waybills(trip_id);
+CREATE INDEX IF NOT EXISTS idx_trip_waybill_files_trip ON trip_waybill_files(trip_id, kind);
 CREATE INDEX IF NOT EXISTS idx_sunat_history_issuer_date ON sunat_waybills_history(issuer, issue_date);
 CREATE INDEX IF NOT EXISTS idx_inspections_vehicle ON inspections(vehicle_id);
 CREATE INDEX IF NOT EXISTS idx_inspection_items_inspection ON inspection_items(inspection_id);

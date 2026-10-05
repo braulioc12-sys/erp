@@ -104,6 +104,7 @@ def _force_delete_trip(trip_id):
     execute("DELETE FROM expenses WHERE trip_id = ?", (trip_id,))
     execute("DELETE FROM expense_advances WHERE trip_id = ?", (trip_id,))
     execute("DELETE FROM waybills WHERE trip_id = ?", (trip_id,))
+    execute("DELETE FROM trip_waybill_files WHERE trip_id = ?", (trip_id,))
 
     affected_invoice_ids = [
         r["invoice_id"] for r in query_all(

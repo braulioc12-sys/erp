@@ -637,8 +637,8 @@ _RESET_GROUPS = [
     ("Descansos laborales", ["driver_rests"], [
         "DELETE FROM driver_rests",
     ]),
-    ("Viajes", ["trips"], [
-        "DELETE FROM trips",
+    ("Viajes", ["trip_waybill_files", "trips"], [
+        "DELETE FROM trip_waybill_files", "DELETE FROM trips",
     ]),
 ]
 

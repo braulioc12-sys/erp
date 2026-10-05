@@ -301,6 +301,34 @@
   </div>
   <p class="muted" id="commission-hint" style="margin-top:-12px;"></p>
 
+  {# 5 oct, pedido de Braulio: al crear el viaje se puede adjuntar ya la
+     guía del remitente y/o la guía de transportista nuestra (cuando se
+     generó en otro portal). Opcionales; después se pueden agregar más desde
+     el detalle del viaje sin reemplazar estas (ver app/routes/viajes.py,
+     add_trip_guide()). #}
+  {% if mode in ('new', 'vuelta') %}
+  <fieldset style="border:1px solid var(--border, #ddd); border-radius:8px; padding:12px 16px; margin:12px 0;">
+    <legend style="padding:0 6px; font-weight:600;">Guías (opcional)</legend>
+    <p class="muted mt-0">Si ya tienes las guías, súbelas ahora; si no, puedes agregarlas después desde el detalle del viaje.</p>
+    <div class="form-row">
+      <label>Guía de remisión del remitente — número
+        <input type="text" name="shipper_waybill_number" value="{{ trip.shipper_waybill_number if trip and trip.shipper_waybill_number else '' }}">
+      </label>
+      <label>Guía del remitente — archivo (foto o PDF)
+        <input type="file" name="shipper_waybill_file" accept=".png,.jpg,.jpeg,.pdf,.webp,.heic,.heif" class="js-scan-input">
+      </label>
+    </div>
+    <div class="form-row">
+      <label>Guía de transportista (nuestra, emitida en otro portal) — número
+        <input type="text" name="carrier_waybill_number" value="{{ trip.carrier_waybill_number if trip and trip.carrier_waybill_number else '' }}">
+      </label>
+      <label>Guía de transportista — archivo (foto o PDF)
+        <input type="file" name="carrier_waybill_file" accept=".png,.jpg,.jpeg,.pdf,.webp,.heic,.heif" class="js-scan-input">
+      </label>
+    </div>
+  </fieldset>
+  {% endif %}
+
   <label>Notas
     <textarea name="notes">{{ trip.notes if trip else '' }}</textarea>
   </label>

@@ -1256,6 +1256,35 @@ def _backfill_advance_driver_id_postgres(conn):
     )
 
 
+# 5 oct, pedido de Braulio: varias guías por viaje sin reemplazarse (ver el
+# comentario largo junto a trip_waybill_files en schema.sql). Copia, una sola
+# vez por viaje y tipo, la guía que ya estaba guardada en las columnas viejas
+# de trips (shipper_waybill_* / carrier_waybill_*) a la tabla nueva. Corre en
+# cada arranque; el NOT EXISTS la hace un no-op para cualquier viaje ya
+# migrado o que ya tenga guías cargadas desde la pantalla nueva.
+_TRIP_WAYBILL_FILES_BACKFILL_SQL = [
+    """INSERT INTO trip_waybill_files (trip_id, kind, guide_number, filename)
+       SELECT t.id, 'REMITENTE', t.shipper_waybill_number, t.shipper_waybill_filename FROM trips t
+       WHERE (COALESCE(t.shipper_waybill_number, '') != '' OR COALESCE(t.shipper_waybill_filename, '') != '')
+         AND NOT EXISTS (SELECT 1 FROM trip_waybill_files f WHERE f.trip_id = t.id AND f.kind = 'REMITENTE')""",
+    """INSERT INTO trip_waybill_files (trip_id, kind, guide_number, filename)
+       SELECT t.id, 'TRANSPORTISTA', t.carrier_waybill_number, t.carrier_waybill_filename FROM trips t
+       WHERE (COALESCE(t.carrier_waybill_number, '') != '' OR COALESCE(t.carrier_waybill_filename, '') != '')
+         AND NOT EXISTS (SELECT 1 FROM trip_waybill_files f WHERE f.trip_id = t.id AND f.kind = 'TRANSPORTISTA')""",
+]
+
+
+def _backfill_trip_waybill_files_sqlite(conn):
+    for sql in _TRIP_WAYBILL_FILES_BACKFILL_SQL:
+        conn.execute(sql)
+
+
+def _backfill_trip_waybill_files_postgres(conn):
+    cur = conn.cursor()
+    for sql in _TRIP_WAYBILL_FILES_BACKFILL_SQL:
+        cur.execute(sql)
+
+
 # 1 oct, pedido de Braulio ("por que toda la flota a pasado a harraso? La
 # flota debe mantenerse por default en el propietario... en el caso de
 # Miguel contreras y BK PERU por default que sean BRMS"): corrige, UNA SOLA
@@ -1745,6 +1774,7 @@ def init_db(app):
             _backfill_manual_invoice_numbers_postgres(conn)
             _backfill_advance_driver_id_postgres(conn)
             _backfill_vehicle_owner_issuer_postgres(conn)
+            _backfill_trip_waybill_files_postgres(conn)
             conn.commit()
         finally:
             conn.close()
@@ -1770,6 +1800,7 @@ def init_db(app):
         _backfill_manual_invoice_numbers_sqlite(conn)
         _backfill_advance_driver_id_sqlite(conn)
         _backfill_vehicle_owner_issuer_sqlite(conn)
+        _backfill_trip_waybill_files_sqlite(conn)
         conn.commit()
         conn.close()
 

@@ -557,6 +557,25 @@ def _ownership_and_third_party_fields(form):
     return fields, errors
 
 
+def _add_creation_guides(trip_id, code):
+    """5 oct, pedido de Braulio: la guía del remitente y la guía de
+    transportista (nuestra, emitida en otro portal) se pueden subir desde
+    la creación del viaje (también la de un viaje de vuelta) -- ambas
+    opcionales. Se pueden agregar más después desde el detalle del viaje,
+    sin reemplazar estas."""
+    added = []
+    if add_trip_guide(trip_id, "REMITENTE", request.form.get("shipper_waybill_number"), request.files.get("shipper_waybill_file")):
+        added.append("remitente")
+    if add_trip_guide(trip_id, "TRANSPORTISTA", request.form.get("carrier_waybill_number"), request.files.get("carrier_waybill_file")):
+        added.append("transportista")
+    if added:
+        log_activity(
+            "viajes", "SUBIR", f"Viaje {code}: guía de {' y de '.join(added)} adjuntada al crear",
+            entity_type="viaje", entity_id=trip_id,
+            entity_url=url_for("viajes.detail", trip_id=trip_id),
+        )
+
+
 @bp.route("/nuevo", methods=["GET", "POST"])
 @permission_required("viajes", "edit")
 def new():
@@ -678,6 +697,7 @@ def new():
             entity_url=url_for("viajes.detail", trip_id=trip_id),
         )
         flash(f"Viaje {code} creado.", "success")
+        _add_creation_guides(trip_id, code)
         for w in (
             _vehicle_open_orders_warning(ownership_fields["vehicle_id"]),
             _vehicle_open_orders_warning(ownership_fields["trailer_vehicle_id"]),
@@ -978,6 +998,7 @@ def new_return_trip(trip_id):
             entity_url=url_for("viajes.detail", trip_id=new_trip_id),
         )
         flash(f"Viaje de vuelta {code} creado.", "success")
+        _add_creation_guides(new_trip_id, code)
         for w in (
             _vehicle_open_orders_warning(ownership_fields["vehicle_id"]),
             _vehicle_open_orders_warning(ownership_fields["trailer_vehicle_id"]),
@@ -1133,6 +1154,7 @@ def detail(trip_id):
         existing_waybills=existing_waybills, creator=creator,
         outbound_trip=outbound_trip, return_trip=return_trip, conformidad_opcional=conformidad_opcional,
         liquidacion_trip_id=liquidacion_trip_id, liquidacion_compartida=liquidacion_compartida,
+        guides=trip_guides(trip_id),
     )
 
 
@@ -1282,6 +1304,7 @@ def delete_trip(trip_id):
     # Guía de remisión del viaje (ya se confirmó arriba que no está
     # aceptada por SUNAT).
     execute("DELETE FROM waybills WHERE trip_id = ?", (trip_id,))
+    execute("DELETE FROM trip_waybill_files WHERE trip_id = ?", (trip_id,))
 
     # Ítems de factura de este viaje -- ya se confirmó arriba que ninguna
     # de esas facturas está aceptada por SUNAT. Si a alguna no le queda
@@ -1367,28 +1390,113 @@ def _save_delivery_proof_file(file_storage):
     return _save_binary_attachment(file_storage, storage.save_delivery_proof)
 
 
+# --- Varias guías por viaje, sin reemplazarse (5 oct, pedido de Braulio) --
+#
+# "hay que tener la opcion de subir guia de remitente y tambien la guia de
+# transportista nuestra (cuando es generada en otro portal)... una vez
+# subidas ya no debe figurar la opcion de subir archivo, a menos que sea
+# para agregar. No quiero que al subir uno nuevo reemplace al anterior."
+# Cada guía subida es una fila de trip_waybill_files (ver schema.sql); subir
+# otra SIEMPRE agrega una fila nueva, nunca pisa el archivo anterior. Las
+# columnas viejas de trips (shipper_waybill_* / carrier_waybill_*) solo se
+# llenan con la primera guía de cada tipo, para app/routes/guias.py.
+GUIDE_KINDS = {
+    "REMITENTE": {
+        "save": lambda fs: _save_shipper_waybill_file(fs),
+        "legacy_number": "shipper_waybill_number",
+        "legacy_filename": "shipper_waybill_filename",
+        "label": "Guía del remitente",
+    },
+    "TRANSPORTISTA": {
+        "save": lambda fs: _save_waybill_file(fs),
+        "legacy_number": "carrier_waybill_number",
+        "legacy_filename": "carrier_waybill_filename",
+        "label": "Guía de transportista",
+    },
+}
+
+
+def add_trip_guide(trip_id, kind, number, file_storage):
+    """Agrega UNA guía (número y/o archivo) a un viaje, sin tocar las que ya
+    tiene. Devuelve True si se guardó algo, False si no venía ni número ni
+    un archivo válido."""
+    cfg = GUIDE_KINDS[kind]
+    number = (number or "").strip() or None
+    filename = cfg["save"](file_storage)
+    if not number and not filename:
+        return False
+    user = getattr(g, "user", None)
+    execute(
+        "INSERT INTO trip_waybill_files (trip_id, kind, guide_number, filename, created_by) VALUES (?, ?, ?, ?, ?)",
+        (trip_id, kind, number, filename, user["id"] if user else None),
+    )
+    # Columnas viejas de trips: solo la primera guía de cada tipo (si ya
+    # hay una, no se pisa).
+    legacy = query_one(
+        f"SELECT {cfg['legacy_number']} AS n, {cfg['legacy_filename']} AS f FROM trips WHERE id = ?", (trip_id,)
+    )
+    if legacy is not None:
+        if number and not legacy["n"]:
+            execute(f"UPDATE trips SET {cfg['legacy_number']} = ? WHERE id = ?", (number, trip_id))
+        if filename and not legacy["f"]:
+            execute(f"UPDATE trips SET {cfg['legacy_filename']} = ? WHERE id = ?", (filename, trip_id))
+    return True
+
+
+def trip_guides(trip_id):
+    """{kind: [guías]} de un viaje, la más vieja primero."""
+    rows = query_all(
+        """SELECT f.id, f.kind, f.guide_number, f.filename, f.created_at, u.name AS created_by_name
+           FROM trip_waybill_files f LEFT JOIN users u ON u.id = f.created_by
+           WHERE f.trip_id = ? ORDER BY f.id""",
+        (trip_id,),
+    )
+    result = {"REMITENTE": [], "TRANSPORTISTA": []}
+    for row in rows:
+        result.setdefault(row["kind"], []).append(row)
+    return result
+
+
+@bp.route("/<int:trip_id>/guias/<int:file_id>/archivo")
+@permission_required("viajes", "view")
+def trip_guide_file(trip_id, file_id):
+    row = query_one(
+        "SELECT kind, filename FROM trip_waybill_files WHERE id = ? AND trip_id = ?", (file_id, trip_id)
+    )
+    if row is None or not row["filename"]:
+        abort(404)
+    if row["kind"] == "REMITENTE":
+        if storage.using_s3():
+            return redirect(storage.shipper_waybill_url(row["filename"]))
+        return send_from_directory(storage.local_shipper_waybills_dir(), row["filename"])
+    if storage.using_s3():
+        return redirect(storage.carrier_waybill_url(row["filename"]))
+    return send_from_directory(storage.local_carrier_waybills_dir(), row["filename"])
+
+
 @bp.route("/<int:trip_id>/guia", methods=["POST"])
 @permission_required("viajes", "edit")
 def save_waybill(trip_id):
+    """Guía de transportista (nuestra, emitida en otro portal): AGREGA una
+    guía al viaje; las anteriores se conservan (ver add_trip_guide())."""
     if not validate_csrf():
         abort(400)
-    trip = query_one("SELECT code, carrier_waybill_filename FROM trips WHERE id = ?", (trip_id,))
+    trip = query_one("SELECT code FROM trips WHERE id = ?", (trip_id,))
     if trip is None:
         abort(404)
-    number = request.form.get("carrier_waybill_number", "").strip() or None
-    new_filename = _save_waybill_file(request.files.get("carrier_waybill_file"))
-    filename = new_filename if new_filename else trip["carrier_waybill_filename"]
-    execute(
-        "UPDATE trips SET carrier_waybill_number=?, carrier_waybill_filename=? WHERE id=?",
-        (number, filename, trip_id),
+    added = add_trip_guide(
+        trip_id, "TRANSPORTISTA", request.form.get("carrier_waybill_number"), request.files.get("carrier_waybill_file")
     )
+    if not added:
+        flash("Escribe el número de la guía o adjunta un archivo (foto o PDF).", "error")
+        return redirect(url_for("viajes.detail", trip_id=trip_id))
     log_activity(
-        "viajes", "SUBIR" if new_filename else "EDITAR",
-        f"Guía de remisión del cliente del viaje {trip['code']}",
+        "viajes", "SUBIR",
+        f"Guía de transportista (nuestra) del viaje {trip['code']}",
         entity_type="viaje", entity_id=trip_id,
         entity_url=url_for("viajes.detail", trip_id=trip_id),
     )
-    flash("Guía de remisión del cliente guardada.", "success")
+    flash("Guía de transportista agregada.", "success")
     return redirect(url_for("viajes.detail", trip_id=trip_id))
 
 
@@ -1455,25 +1563,26 @@ def _save_shipper_waybill_file(file_storage):
 @bp.route("/<int:trip_id>/guia-remitente", methods=["POST"])
 @permission_required("viajes", "edit")
 def save_shipper_waybill(trip_id):
+    """Guía de remisión del remitente: AGREGA una guía al viaje; las
+    anteriores se conservan (ver add_trip_guide())."""
     if not validate_csrf():
         abort(400)
-    trip = query_one("SELECT code, shipper_waybill_filename FROM trips WHERE id = ?", (trip_id,))
+    trip = query_one("SELECT code FROM trips WHERE id = ?", (trip_id,))
     if trip is None:
         abort(404)
-    number = request.form.get("shipper_waybill_number", "").strip() or None
-    new_filename = _save_shipper_waybill_file(request.files.get("shipper_waybill_file"))
-    filename = new_filename if new_filename else trip["shipper_waybill_filename"]
-    execute(
-        "UPDATE trips SET shipper_waybill_number=?, shipper_waybill_filename=? WHERE id=?",
-        (number, filename, trip_id),
+    added = add_trip_guide(
+        trip_id, "REMITENTE", request.form.get("shipper_waybill_number"), request.files.get("shipper_waybill_file")
     )
+    if not added:
+        flash("Escribe el número de la guía o adjunta un archivo (foto o PDF).", "error")
+        return redirect(url_for("viajes.detail", trip_id=trip_id))
     log_activity(
-        "viajes", "SUBIR" if new_filename else "EDITAR",
+        "viajes", "SUBIR",
         f"Guía del remitente del viaje {trip['code']}",
         entity_type="viaje", entity_id=trip_id,
         entity_url=url_for("viajes.detail", trip_id=trip_id),
     )
-    flash("Guía del remitente guardada.", "success")
+    flash("Guía del remitente agregada.", "success")
     return redirect(url_for("viajes.detail", trip_id=trip_id))
 
 
