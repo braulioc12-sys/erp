@@ -1,0 +1,86 @@
+{% extends 'base.html' %}
+{% block title %}Vacaciones{% endblock %}
+{% block content %}
+{% set can_edit = can(current_user.roles, 'pagos_personal', 'edit') %}
+<div class="page-header">
+  <h1>Vacaciones{% if show_inactive %} — Inactivos{% endif %}</h1>
+  <div class="page-actions">
+    {% if show_inactive %}
+    <a href="{{ url_for('vacaciones.index') }}" class="btn btn-secondary">Ver activos</a>
+    {% else %}
+    <a href="{{ url_for('vacaciones.index', ver='inactivos') }}" class="btn btn-secondary">Ver inactivos</a>
+    {% endif %}
+    <a href="{{ url_for('pagos_personal.hub') }}" class="btn btn-secondary">← Volver a RRHH</a>
+  </div>
+</div>
+<p class="muted mt-0">Saldo de vacaciones de cada trabajador: crece solo desde su fecha de ingreso (la del <a href="{{ url_for('legajo.index') }}">Legajo</a>) y baja con las vacaciones aprobadas. Con 30 días por año son 2.5 días por mes.</p>
+
+{% if pending %}
+<div class="panel" style="border-left:4px solid #b45309;">
+  <h2 class="mt-0">Solicitudes por aprobar ({{ pending|length }})</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Persona</th><th>Qué</th><th>Fechas</th><th>Días</th><th>Notas</th><th></th></tr></thead>
+      <tbody>
+        {% for p in pending %}
+        <tr>
+          <td><a href="{{ url_for('vacaciones.detail', staff_id=p.staff_id) }}">{{ p.staff_name }}</a></td>
+          <td>{{ kind_labels.get(p.kind, p.kind) }}</td>
+          <td>{% if p.start_date %}{{ p.start_date }} → {{ p.end_date }}{% else %}—{% endif %}</td>
+          <td>{{ '%g'|format(p.days) }}</td>
+          <td>{{ p.notes or '' }}</td>
+          <td>
+            {% if can_edit %}
+            <div class="btn-group">
+              {% for dec, label, cls in [('APROBADA', 'Aprobar', 'btn-primary'), ('RECHAZADA', 'Rechazar', 'btn-secondary')] %}
+              <form method="post" action="{{ url_for('vacaciones.decide', staff_id=p.staff_id, entry_id=p.id) }}" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="decision" value="{{ dec }}">
+                <input type="hidden" name="next" value="{{ url_for('vacaciones.index') }}">
+                <button type="submit" class="btn {{ cls }} btn-sm">{{ label }}</button>
+              </form>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<div class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Persona</th><th>Ingreso</th><th>Días/año</th><th>Ganados</th><th>Tomados</th><th>Ajustes</th><th>Por aprobar</th><th>Saldo</th><th></th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+        {% set b = r.bal %}
+        <tr>
+          <td><a href="{{ url_for('vacaciones.detail', staff_id=r.staff.id) }}">{{ r.staff.name }}</a></td>
+          <td>{{ r.staff.hire_date or '—' }}</td>
+          {% if b %}
+          <td>{{ '%g'|format(b.per_year) }}</td>
+          <td>{{ '%.2f'|format(b.accrued) }}</td>
+          <td>{{ '%.2f'|format(b.taken) }}</td>
+          <td>{{ '%.2f'|format(b.adjustments) }}</td>
+          <td>{{ '%.2f'|format(b.pending) if b.pending else '—' }}</td>
+          <td><strong>{{ '%.2f'|format(b.balance) }}</strong>
+            {% if b.balance < 0 %}<span class="badge badge-cancelado" style="font-size:0.75em;">Negativo</span>
+            {% elif b.balance > b.per_year %}<span class="badge badge-pendiente" style="font-size:0.75em;" title="Acumula más de un periodo de vacaciones sin tomar">Acumulado</span>{% endif %}
+          </td>
+          {% else %}
+          <td colspan="6" class="muted">Falta la fecha de ingreso — agrégala en el <a href="{{ url_for('legajo.detail', staff_id=r.staff.id) }}">legajo</a>.</td>
+          {% endif %}
+          <td><a href="{{ url_for('vacaciones.detail', staff_id=r.staff.id) }}" class="btn btn-secondary btn-sm">Abrir</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9" class="table-empty">No hay personas {{ 'inactivas' if show_inactive else 'registradas' }}.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

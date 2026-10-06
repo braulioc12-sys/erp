@@ -1,0 +1,144 @@
+{% extends 'base.html' %}
+{% block title %}Vacaciones — {{ staff.name }}{% endblock %}
+{% block content %}
+{% set can_edit = can(current_user.roles, 'pagos_personal', 'edit') %}
+<div class="page-header">
+  <h1>Vacaciones — {{ staff.name }}</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('legajo.detail', staff_id=staff.id) }}" class="btn btn-secondary">Legajo</a>
+    <a href="{{ url_for('vacaciones.index') }}" class="btn btn-secondary">← Vacaciones</a>
+  </div>
+</div>
+
+{% if bal %}
+<div class="panel">
+  <div class="detail-grid">
+    <div class="detail-item"><div class="label">Saldo disponible</div><div class="value" style="font-size:1.6em;">{{ '%.2f'|format(bal.balance) }} días
+      {% if bal.balance < 0 %}<span class="badge badge-cancelado" style="font-size:0.5em;">Negativo</span>{% endif %}</div></div>
+    <div class="detail-item"><div class="label">Ganados desde el ingreso ({{ staff.hire_date }})</div><div class="value">{{ '%.2f'|format(bal.accrued) }}</div></div>
+    <div class="detail-item"><div class="label">Tomados / vendidos</div><div class="value">{{ '%.2f'|format(bal.taken) }}</div></div>
+    <div class="detail-item"><div class="label">Ajustes</div><div class="value">{{ '%.2f'|format(bal.adjustments) }}</div></div>
+    <div class="detail-item"><div class="label">Solicitudes por aprobar</div><div class="value">{{ '%.2f'|format(bal.pending) }}</div></div>
+  </div>
+  {% if bal.balance > bal.per_year %}
+  <p class="muted" style="margin-bottom:0;">⚠ Acumula más de un periodo de vacaciones sin tomar ({{ '%g'|format(bal.per_year) }} días): conviene programarlas.</p>
+  {% endif %}
+</div>
+{% else %}
+<div class="panel">
+  <p class="mt-0" style="margin-bottom:0;">Para calcular el saldo falta la <strong>fecha de ingreso</strong>. Agrégala en el <a href="{{ url_for('legajo.detail', staff_id=staff.id) }}">legajo</a>.</p>
+</div>
+{% endif %}
+
+{% if can_edit %}
+<div class="panel">
+  <h2 class="mt-0">Registrar</h2>
+  <form method="post" action="{{ url_for('vacaciones.add_entry', staff_id=staff.id) }}" class="form" id="vac-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <label>Qué registrar *
+        <select name="kind" id="vac-kind" required>
+          <option value="GOZADAS">Vacaciones gozadas (con fechas)</option>
+          <option value="COMPRADAS">Vacaciones vendidas (pagadas)</option>
+          <option value="AJUSTE">Ajuste de saldo (saldo inicial o corrección)</option>
+        </select>
+      </label>
+      <label>Estado
+        <select name="status">
+          <option value="APROBADA">Aprobada</option>
+          <option value="PENDIENTE">Pendiente de aprobar</option>
+        </select>
+      </label>
+    </div>
+    <div class="form-row" id="vac-dates">
+      <label>Desde <input type="date" name="start_date"></label>
+      <label>Hasta <input type="date" name="end_date"></label>
+    </div>
+    <div class="form-row" id="vac-days" style="display:none;">
+      <label>Días <input type="number" step="0.01" name="days" placeholder="Ej. 10"></label>
+    </div>
+    <p class="muted" id="vac-hint" style="margin-top:-6px;">Se cuentan los días calendario, del primer al último día inclusive.</p>
+    <label>Notas <input type="text" name="notes"></label>
+    <div class="btn-group"><button type="submit" class="btn btn-primary btn-sm">Registrar</button></div>
+  </form>
+  <script>
+    (function () {
+      var kind = document.getElementById('vac-kind');
+      var hint = document.getElementById('vac-hint');
+      function sync() {
+        var gozadas = kind.value === 'GOZADAS';
+        document.getElementById('vac-dates').style.display = gozadas ? '' : 'none';
+        document.getElementById('vac-days').style.display = gozadas ? 'none' : '';
+        hint.textContent = gozadas ? 'Se cuentan los días calendario, del primer al último día inclusive.'
+          : (kind.value === 'AJUSTE' ? 'Un número positivo suma días al saldo; uno negativo los resta (por ejemplo, vacaciones que tomó antes de usar el sistema).'
+          : 'Días que se pagan en vez de tomarse.');
+      }
+      kind.addEventListener('change', sync); sync();
+    })();
+  </script>
+</div>
+
+<div class="panel">
+  <h2 class="mt-0">Días de vacaciones por año</h2>
+  <form method="post" action="{{ url_for('vacaciones.set_days_per_year', staff_id=staff.id) }}" class="form" style="max-width:420px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <label>Días por año de servicio
+        <input type="number" step="0.5" min="1" max="60" name="vacation_days_per_year" value="{{ '%g'|format(staff.vacation_days_per_year if staff.vacation_days_per_year is not none else 30) }}">
+      </label>
+    </div>
+    <p class="muted" style="margin-top:-8px;">30 en el régimen laboral general; 15 en MYPE. Se usa para calcular los días ganados.</p>
+    <div class="btn-group"><button type="submit" class="btn btn-secondary btn-sm">Guardar</button></div>
+  </form>
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2 class="mt-0">Historial</h2>
+  {% if entries %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Qué</th><th>Fechas</th><th>Días</th><th>Estado</th><th>Notas</th><th>Registrado</th><th></th></tr></thead>
+      <tbody>
+        {% for e in entries %}
+        <tr>
+          <td>{{ kind_labels.get(e.kind, e.kind) }}</td>
+          <td>{% if e.start_date %}{{ e.start_date }} → {{ e.end_date }}{% else %}—{% endif %}</td>
+          <td>{{ '%g'|format(e.days) }}</td>
+          <td>
+            {% if e.status == 'APROBADA' %}<span class="badge badge-activo">Aprobada</span>
+            {% elif e.status == 'PENDIENTE' %}<span class="badge badge-pendiente">Pendiente</span>
+            {% else %}<span class="badge badge-cancelado">Rechazada</span>{% endif %}
+            {% if e.decided_by_name %}<div class="muted" style="font-size:0.8em;">{{ e.decided_by_name }}</div>{% endif %}
+          </td>
+          <td>{{ e.notes or '' }}</td>
+          <td class="muted">{{ e.created_at[:16] if e.created_at else '' }}{% if e.created_by_name %} · {{ e.created_by_name }}{% endif %}</td>
+          <td>
+            {% if can_edit %}
+            <div class="btn-group">
+              {% if e.status == 'PENDIENTE' %}
+              {% for dec, label, cls in [('APROBADA', 'Aprobar', 'btn-primary'), ('RECHAZADA', 'Rechazar', 'btn-secondary')] %}
+              <form method="post" action="{{ url_for('vacaciones.decide', staff_id=staff.id, entry_id=e.id) }}" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="decision" value="{{ dec }}">
+                <button type="submit" class="btn {{ cls }} btn-sm">{{ label }}</button>
+              </form>
+              {% endfor %}
+              {% endif %}
+              <form method="post" action="{{ url_for('vacaciones.delete_entry', staff_id=staff.id, entry_id=e.id) }}" onsubmit="return confirm('¿Eliminar este registro? Esta acción no se puede deshacer.');" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
+              </form>
+            </div>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted mt-0" style="margin-bottom:0;">Todavía no hay vacaciones registradas.</p>
+  {% endif %}
+</div>
+{% endblock %}

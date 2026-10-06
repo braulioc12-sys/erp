@@ -1782,6 +1782,9 @@ CREATE TABLE IF NOT EXISTS staff (
     email TEXT,
     address TEXT,
     area TEXT,
+    -- 6 oct, fase 2 (vacaciones): días de vacaciones que gana por año de
+    -- servicio (30 en régimen general; 15 en MYPE -- se ajusta por persona).
+    vacation_days_per_year REAL NOT NULL DEFAULT 30,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -1801,6 +1804,28 @@ CREATE TABLE IF NOT EXISTS staff_contracts (
     salary REAL,
     notes TEXT,
     filename TEXT,
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Vacaciones del personal (6 oct, pedido de Braulio, fase 2 de "algo similar a
+-- Buk"). Cada fila es un movimiento del saldo de vacaciones de una persona:
+-- GOZADAS (días tomados, de start_date a end_date, días calendario),
+-- COMPRADAS (días vendidos/pagados, sin fechas) o AJUSTE (saldo inicial o
+-- corrección a mano, days puede ser negativo). status PENDIENTE (solicitada,
+-- falta aprobar), APROBADA (cuenta en el saldo) o RECHAZADA. El saldo se
+-- calcula al vuelo (ver app/routes/vacaciones.py, vacation_balance()).
+CREATE TABLE IF NOT EXISTS staff_vacations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id INTEGER NOT NULL REFERENCES staff(id),
+    kind TEXT NOT NULL,
+    start_date TEXT,
+    end_date TEXT,
+    days REAL NOT NULL,
+    status TEXT NOT NULL DEFAULT 'APROBADA',
+    notes TEXT,
+    decided_by INTEGER REFERENCES users(id),
+    decided_at TEXT,
     created_by INTEGER REFERENCES users(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -2030,6 +2055,7 @@ CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id
 CREATE INDEX IF NOT EXISTS idx_waybills_trip ON waybills(trip_id);
 CREATE INDEX IF NOT EXISTS idx_staff_contracts_staff ON staff_contracts(staff_id);
 CREATE INDEX IF NOT EXISTS idx_staff_documents_staff ON staff_documents(staff_id);
+CREATE INDEX IF NOT EXISTS idx_staff_vacations_staff ON staff_vacations(staff_id);
 CREATE INDEX IF NOT EXISTS idx_trip_waybill_files_trip ON trip_waybill_files(trip_id, kind);
 CREATE INDEX IF NOT EXISTS idx_sunat_history_issuer_date ON sunat_waybills_history(issuer, issue_date);
 CREATE INDEX IF NOT EXISTS idx_inspections_vehicle ON inspections(vehicle_id);

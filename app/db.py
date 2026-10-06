@@ -360,6 +360,7 @@ COLUMN_MIGRATIONS = [
     ("staff", "email", "TEXT"),
     ("staff", "address", "TEXT"),
     ("staff", "area", "TEXT"),
+    ("staff", "vacation_days_per_year", "REAL NOT NULL DEFAULT 30"),
     ("trips", "carrier_waybill_number", "TEXT"),
     ("trips", "carrier_waybill_filename", "TEXT"),
     ("trips", "paid", "INTEGER NOT NULL DEFAULT 0"),
