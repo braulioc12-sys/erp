@@ -1407,13 +1407,25 @@ def delete(waybill_id):
 def view_sunat_pdf(waybill_id):
     """Sirve el PDF real que devolvió tefacturo.pe al emitir esta guía (7
     sep, segunda ronda) — mismo patrón que las demás descargas de archivos
-    del sistema (disco local o redirect a URL firmada en S3)."""
-    waybill = query_one("SELECT sunat_pdf_filename FROM waybills WHERE id = ?", (waybill_id,))
+    del sistema (disco local o redirect a URL firmada en S3).
+
+    6 oct, pedido de Braulio ("a la hora de descargar la guia de
+    transportista generada, el archivo que salga con el nombre de la
+    guia"): el archivo se llama como la guía (ej. "V001-000009.pdf", igual
+    que ya hace el XML y el PDF de las facturas) en vez del nombre interno
+    con el uuid. Sigue abriéndose en la pestaña; el nombre es el que
+    propone el navegador al guardarlo."""
+    waybill = query_one(
+        "SELECT sunat_pdf_filename, series, series_number FROM waybills WHERE id = ?", (waybill_id,)
+    )
     if waybill is None or not waybill["sunat_pdf_filename"]:
         abort(404)
+    download_name = f"{waybill['series']}-{waybill['series_number']:06d}.pdf"
     if using_s3():
-        return redirect(sunat_document_url(waybill["sunat_pdf_filename"]))
-    return send_from_directory(local_sunat_documents_dir(), waybill["sunat_pdf_filename"])
+        return redirect(sunat_document_url(waybill["sunat_pdf_filename"], download_name=download_name))
+    return send_from_directory(
+        local_sunat_documents_dir(), waybill["sunat_pdf_filename"], download_name=download_name
+    )
 
 
 @bp.route("/<int:waybill_id>/xml-sunat")
