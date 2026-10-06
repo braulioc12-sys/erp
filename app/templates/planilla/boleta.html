@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boleta de pago</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; color: #111827; margin: 0; background: #f3f4f6; }
+  .bar { padding: 10px 20px; background: #111827; color: #fff; display: flex; gap: 12px; align-items: center; }
+  .bar button { padding: 6px 14px; border-radius: 6px; border: 0; cursor: pointer; }
+  .sheet { background: #fff; width: 780px; max-width: 96%; margin: 16px auto; padding: 28px 34px; box-shadow: 0 1px 4px rgba(0,0,0,.2); page-break-after: always; }
+  h1 { font-size: 18px; margin: 0 0 2px; text-align: center; }
+  .sub { text-align: center; color: #4b5563; margin-bottom: 14px; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td, th { padding: 4px 6px; vertical-align: top; }
+  .info td { border-bottom: 1px solid #e5e7eb; }
+  .info td.k { color: #6b7280; width: 20%; }
+  .cols { display: flex; gap: 16px; margin-top: 14px; }
+  .cols > div { flex: 1; }
+  .cols h2 { font-size: 13px; background: #eef2ff; padding: 5px 8px; margin: 0 0 4px; }
+  .num { text-align: right; white-space: nowrap; }
+  .tot td { border-top: 1px solid #111827; font-weight: 700; }
+  .net { margin-top: 14px; padding: 10px 12px; background: #ecfdf3; border: 1px solid #a6f4c5; font-size: 16px; font-weight: 700; display: flex; justify-content: space-between; }
+  .emp { margin-top: 12px; font-size: 12px; color: #4b5563; }
+  .sign { display: flex; justify-content: space-between; margin-top: 54px; font-size: 12px; }
+  .sign div { width: 40%; border-top: 1px solid #111827; text-align: center; padding-top: 4px; }
+  @media print { body { background: #fff; } .bar { display: none; } .sheet { box-shadow: none; margin: 0 auto; width: 100%; max-width: 100%; } }
+</style>
+</head>
+<body>
+<div class="bar"><button onclick="window.print()">🖨 Imprimir / guardar como PDF</button><span>Boleta(s) de pago</span></div>
+{% for b in boletas %}
+{% set l = b.l %}{% set s = b.s %}
+<div class="sheet">
+  <h1>BOLETA DE PAGO</h1>
+  <div class="sub">{{ s.company or 'Empleador' }} · {{ b.title }}</div>
+  <table class="info">
+    <tr><td class="k">Trabajador</td><td>{{ s.name }}</td><td class="k">{{ s.document_type }}</td><td>{{ s.document_number or '—' }}</td></tr>
+    <tr><td class="k">Cargo</td><td>{{ s.position or '—' }}</td><td class="k">Ingreso</td><td>{{ s.hire_date or '—' }}</td></tr>
+    <tr><td class="k">Régimen</td><td>{{ b.regime_labels.get(l.regime, l.regime) }}</td><td class="k">Pensión</td><td>{{ b.pension_labels.get(l.pension_system, l.pension_system) }}{% if l.afp_name %} {{ l.afp_name|title }}{% endif %}{% if s.cuspp %} · CUSPP {{ s.cuspp }}{% endif %}</td></tr>
+    <tr><td class="k">Días trabajados</td><td>{{ '%g'|format(l.days_worked) }}</td><td class="k">Sueldo básico</td><td>S/ {{ '%.2f'|format(l.basic_salary) }}</td></tr>
+  </table>
+  <div class="cols">
+    <div>
+      <h2>INGRESOS</h2>
+      <table>
+        <tr><td>Remuneración del mes</td><td class="num">{{ '%.2f'|format(l.salary_earned) }}</td></tr>
+        {% if l.family_allowance %}<tr><td>Asignación familiar</td><td class="num">{{ '%.2f'|format(l.family_allowance) }}</td></tr>{% endif %}
+        {% for i in b.extra if i.kind == 'INGRESO' %}<tr><td>{{ i.concept }}</td><td class="num">{{ '%.2f'|format(i.amount) }}</td></tr>{% endfor %}
+        {% if l.gratification %}<tr><td>Gratificación</td><td class="num">{{ '%.2f'|format(l.gratification) }}</td></tr>
+        <tr><td>Bonificación extraordinaria</td><td class="num">{{ '%.2f'|format(l.gratification_bonus) }}</td></tr>{% endif %}
+        <tr class="tot"><td>TOTAL INGRESOS</td><td class="num">{{ '%.2f'|format(l.gross_total) }}</td></tr>
+      </table>
+    </div>
+    <div>
+      <h2>DESCUENTOS</h2>
+      <table>
+        {% if l.absence_deduction %}<tr><td>Faltas / permisos sin goce</td><td class="num">{{ '%.2f'|format(l.absence_deduction) }}</td></tr>{% endif %}
+        {% if l.tardiness_deduction %}<tr><td>Tardanzas</td><td class="num">{{ '%.2f'|format(l.tardiness_deduction) }}</td></tr>{% endif %}
+        {% if l.subsidy_deduction %}<tr><td>Días con subsidio EsSalud</td><td class="num">{{ '%.2f'|format(l.subsidy_deduction) }}</td></tr>{% endif %}
+        {% if l.pension_deduction %}<tr><td>{{ l.pension_detail or 'Pensión' }}</td><td class="num">{{ '%.2f'|format(l.pension_deduction) }}</td></tr>{% endif %}
+        {% if l.fifth_deduction %}<tr><td>Renta de 5ta categoría</td><td class="num">{{ '%.2f'|format(l.fifth_deduction) }}</td></tr>{% endif %}
+        {% if l.loan_deduction %}<tr><td>Cuota de préstamo</td><td class="num">{{ '%.2f'|format(l.loan_deduction) }}</td></tr>{% endif %}
+        {% if l.advance_deduction %}<tr><td>Adelanto de sueldo</td><td class="num">{{ '%.2f'|format(l.advance_deduction) }}</td></tr>{% endif %}
+        {% if l.debt_deduction %}<tr><td>Reconocimiento de deuda</td><td class="num">{{ '%.2f'|format(l.debt_deduction) }}</td></tr>{% endif %}
+        {% for i in b.extra if i.kind == 'DESCUENTO' %}<tr><td>{{ i.concept }}</td><td class="num">{{ '%.2f'|format(i.amount) }}</td></tr>{% endfor %}
+        <tr class="tot"><td>TOTAL DESCUENTOS</td><td class="num">{{ '%.2f'|format(l.total_deductions) }}</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="net"><span>NETO A PAGAR</span><span>S/ {{ '%.2f'|format(l.net_pay) }}</span></div>
+  <div class="emp">Aportes del empleador (no se descuentan al trabajador): {{ 'Seguro SIS' if l.regime == 'MYPE_MICRO' else 'EsSalud' }} S/ {{ '%.2f'|format(l.essalud_employer) }}</div>
+  <div class="sign"><div>Empleador</div><div>Trabajador</div></div>
+</div>
+{% endfor %}
+</body>
+</html>

@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+{% block title %}CTS{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>CTS</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('planilla.cts_view', semestre=sem, formato='xlsx') }}" class="btn btn-secondary">⬇ Excel</a>
+    <a href="{{ url_for('planilla.index') }}" class="btn btn-secondary">← Planilla</a>
+  </div>
+</div>
+<p class="muted mt-0">Cálculo del semestre para depositar la CTS en el banco de cada trabajador: noviembre–abril (se deposita hasta el 15 de mayo) y mayo–octubre (hasta el 15 de noviembre). Solo régimen general (CTS completa) y MYPE pequeña empresa (mitad); la microempresa no tiene CTS.</p>
+<div class="panel">
+  <form method="get" class="form"><div class="form-row" style="align-items:flex-end;">
+    <label>Depósito de
+      <select name="semestre" onchange="this.form.submit()">
+        {% for o in options %}<option value="{{ o }}" {% if o == sem %}selected{% endif %}>{{ '15 de mayo' if o[5:] == '05' else '15 de noviembre' }} de {{ o[:4] }}</option>{% endfor %}
+      </select>
+    </label></div></form>
+  <p class="mt-0"><strong>{% if dm == 5 %}Noviembre {{ year - 1 }} a abril {{ year }}{% else %}Mayo a octubre {{ year }}{% endif %}</strong></p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Persona</th><th>Régimen</th><th>Periodo computable</th><th>Meses y días</th><th>Sueldo + asig. fam.</th><th>1/6 gratificación</th><th>Remuneración computable</th><th>CTS a depositar</th></tr></thead>
+    <tbody>
+      {% for x in rows %}
+      <tr>
+        <td>{{ x.staff.name }}</td><td>{{ 'General' if x.regime == 'GENERAL' else 'MYPE pequeña' }}</td><td>{{ x.start }} → {{ x.end }}</td>
+        <td>{{ x.months }} m {{ x.days }} d</td><td>{{ '%.2f'|format(x.basic + x.family) }}</td>
+        <td>{{ '%.2f'|format(x.grati / 6) }}{% if x.grati_is_estimate %} <span class="muted" title="Aún no hay planilla de esa gratificación: se estima con el sueldo actual">(est.)</span>{% endif %}</td>
+        <td>{{ '%.2f'|format(x.computable) }}</td><td><strong>S/ {{ '%.2f'|format(x.cts) }}</strong></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="muted">No hay personas con CTS en este semestre (marca a quién entra en planilla y su régimen en el Perfil de planilla).</td></tr>
+      {% endfor %}
+      {% if rows %}<tr style="font-weight:700; background:#f9fafb;"><td colspan="7">TOTAL</td><td>S/ {{ '%.2f'|format(total) }}</td></tr>{% endif %}
+    </tbody></table></div>
+  <p class="muted" style="margin-bottom:0;">Fórmula: remuneración computable (sueldo + asignación familiar + 1/6 de la última gratificación) ÷ 12 por mes completo + ÷ 360 por día. No promedia comisiones variables. Confirma con tu contador antes de depositar.</p>
+</div>
+{% endblock %}

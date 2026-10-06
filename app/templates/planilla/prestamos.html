@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+{% block title %}Préstamos y adelantos{% endblock %}
+{% block content %}
+{% set can_edit = can(current_user.roles, 'pagos_personal', 'edit') %}
+<div class="page-header">
+  <h1>Préstamos, adelantos y deudas</h1>
+  <div class="page-actions">
+    {% if show == 'todos' %}<a href="{{ url_for('planilla.loans') }}" class="btn btn-secondary">Solo vigentes</a>
+    {% else %}<a href="{{ url_for('planilla.loans', ver='todos') }}" class="btn btn-secondary">Ver también pagados y anulados</a>{% endif %}
+    <a href="{{ url_for('planilla.index') }}" class="btn btn-secondary">← Planilla</a>
+  </div>
+</div>
+<p class="muted mt-0">Se descuentan solos en cada planilla, en cuotas, desde el mes que indiques. Las cuotas quedan registradas al cerrar cada planilla.</p>
+
+{% if can_edit %}
+<div class="panel">
+  <h2 class="mt-0">Registrar</h2>
+  <form method="post" action="{{ url_for('planilla.loan_add') }}" enctype="multipart/form-data" class="form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <label>Persona *<select name="staff_id" required><option value="">— elige —</option>{% for s in people %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}</select></label>
+      <label>Tipo *<select name="kind" id="loan-kind">{% for code, lb in kinds %}<option value="{{ code }}">{{ lb }}</option>{% endfor %}</select></label>
+      <label>Concepto <input type="text" name="concept" placeholder="Ej. Préstamo personal / daño de unidad"></label>
+    </div>
+    <div class="form-row">
+      <label>Monto total (S/) *<input type="number" step="0.01" min="0.01" name="amount" required></label>
+      <label id="loan-inst-wrap">N° de cuotas<input type="number" min="1" max="60" name="installments" value="1"></label>
+      <label>Se descuenta desde *<input type="month" name="start_period" value="{{ default_period }}" required></label>
+    </div>
+    <div class="form-row">
+      <label>Sustento (pagaré, reconocimiento de deuda firmado: foto o PDF)<input type="file" name="loan_file" accept="image/*,.pdf"></label>
+      <label>Notas<input type="text" name="notes"></label>
+    </div>
+    <div class="btn-group" style="margin-top:12px;"><button type="submit" class="btn btn-primary">Registrar</button></div>
+  </form>
+</div>
+<script>
+(function(){var k=document.getElementById('loan-kind'),w=document.getElementById('loan-inst-wrap');
+function s(){w.style.display=k.value==='ADELANTO'?'none':'';} k.addEventListener('change',s); s();})();
+</script>
+{% endif %}
+
+<div class="panel">
+  <div class="table-wrap"><table>
+    <thead><tr><th>Persona</th><th>Tipo</th><th>Concepto</th><th>Monto</th><th>Cuotas</th><th>Desde</th><th>Descontado</th><th>Saldo</th><th>Estado</th><th></th></tr></thead>
+    <tbody>
+      {% for x in loans %}{% set r = x.row %}
+      <tr>
+        <td>{{ r.staff_name }}</td><td>{{ kind_labels.get(r.kind, r.kind) }}</td><td>{{ r.concept or '' }}{% if r.filename %} <a href="{{ url_for('planilla.loan_file', loan_id=r.id) }}" target="_blank">sustento</a>{% endif %}</td>
+        <td>S/ {{ '%.2f'|format(r.amount) }}</td><td>{{ r.installments }} × {{ '%.2f'|format(r.installment_amount) }}</td><td>{{ label(r.start_period) }}</td>
+        <td>{{ '%.2f'|format(x.paid) }}</td><td><strong>{{ '%.2f'|format(x.remaining) }}</strong></td>
+        <td>{% if x.state == 'ACTIVO' %}<span class="badge badge-pendiente">Vigente</span>{% elif x.state == 'PAGADO' %}<span class="badge badge-ok">Pagado</span>{% else %}<span class="badge badge-cancelado">Anulado</span>{% endif %}</td>
+        <td>{% if can_edit and x.state == 'ACTIVO' %}
+          <form method="post" action="{{ url_for('planilla.loan_cancel', loan_id=r.id) }}" style="display:inline;" onsubmit="return confirm('¿Anular? Ya no se descontará en las próximas planillas.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="btn btn-danger btn-sm">Anular</button></form>{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="10" class="muted">No hay préstamos vigentes.</td></tr>
+      {% endfor %}
+    </tbody></table></div>
+</div>
+{% endblock %}

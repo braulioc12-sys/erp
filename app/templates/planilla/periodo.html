@@ -1,0 +1,120 @@
+{% extends 'base.html' %}
+{% block title %}Planilla {{ title }}{% endblock %}
+{% block content %}
+{% set can_edit = can(current_user.roles, 'pagos_personal', 'edit') %}
+{% set open = p.status == 'ABIERTO' %}
+<div class="page-header">
+  <h1>Planilla de {{ title }} {% if open %}<span class="badge badge-pendiente" style="font-size:0.5em;">Abierta</span>{% else %}<span class="badge badge-ok" style="font-size:0.5em;">Cerrada</span>{% endif %}</h1>
+  <div class="page-actions">
+    {% if lines %}
+    <a href="{{ url_for('planilla.boletas', period=p.period) }}" target="_blank" class="btn btn-secondary">🖨 Todas las boletas</a>
+    <a href="{{ url_for('planilla.period_excel', period=p.period) }}" class="btn btn-secondary">⬇ Excel</a>
+    {% endif %}
+    <a href="{{ url_for('planilla.index') }}" class="btn btn-secondary">← Planilla</a>
+  </div>
+</div>
+
+{% if can_edit %}
+<div class="panel">
+  <div class="btn-group">
+    {% if open %}
+    <form method="post" action="{{ url_for('planilla.period_calc', period=p.period) }}" style="display:inline;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-primary">{{ 'Recalcular planilla' if lines else 'Calcular planilla' }}</button>
+    </form>
+    {% if lines %}
+    <form method="post" action="{{ url_for('planilla.period_close', period=p.period) }}" style="display:inline;" onsubmit="return confirm('¿Cerrar la planilla de {{ title }}? Quedan fijos los montos, se registran las cuotas de préstamos y se generan los pagos de planilla pendientes.');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-secondary">Cerrar planilla y generar pagos</button>
+    </form>
+    {% endif %}
+    <form method="post" action="{{ url_for('planilla.period_delete', period=p.period) }}" style="display:inline;" onsubmit="return confirm('¿Eliminar este periodo abierto con sus boletas y conceptos?');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-danger">Eliminar periodo</button>
+    </form>
+    {% else %}
+    <a href="{{ url_for('pagos_personal.hub') }}" class="btn btn-secondary">Ir a Pagos de planilla (Telecrédito)</a>
+    <form method="post" action="{{ url_for('planilla.period_reopen', period=p.period) }}" style="display:inline;" onsubmit="return confirm('¿Reabrir la planilla? Los pagos ya generados se quedan en Pagos y tendrás que corregirlos allí.');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-secondary">Reabrir</button>
+    </form>
+    {% endif %}
+  </div>
+  {% if open %}<p class="muted" style="margin-bottom:0;">Usa las incidencias de asistencia del mes ({{ p.period }}) y los conceptos de abajo. Si cambias algo, vuelve a calcular; al cerrar se recalcula solo.</p>{% endif %}
+</div>
+{% endif %}
+
+{% if lines %}
+<div class="panel">
+  <h2 class="mt-0">Boletas</h2>
+  <div class="table-wrap"><table style="font-size:0.9em;">
+    <thead><tr>
+      <th>Persona</th><th>Días</th><th>Ingresos</th><th title="Faltas, tardanzas y días con subsidio EsSalud">Falt./tard.</th><th>Pensión</th><th>5ta</th><th title="Préstamos, adelantos y deuda reconocida">Préstamos</th><th>Otros</th><th>Neto</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for l in lines %}
+      <tr>
+        <td>{{ l.staff_name }}<div class="muted" style="font-size:0.85em;">{{ l.position or '' }}</div></td>
+        <td>{{ '%g'|format(l.days_worked) }}</td>
+        <td>{{ '%.2f'|format(l.gross_total) }}{% if l.gratification %}<div class="muted" style="font-size:0.85em;">grati. {{ '%.2f'|format(l.gratification) }} + bonif.</div>{% endif %}</td>
+        <td>{{ '%.2f'|format(l.absence_deduction + l.tardiness_deduction + l.subsidy_deduction) }}</td>
+        <td title="{{ l.pension_detail or '' }}">{{ '%.2f'|format(l.pension_deduction) }}</td>
+        <td>{{ '%.2f'|format(l.fifth_deduction) }}</td>
+        <td>{{ '%.2f'|format(l.loan_deduction + l.advance_deduction + l.debt_deduction) }}</td>
+        <td>{{ '%.2f'|format(l.other_deduction) }}</td>
+        <td><strong {% if l.net_pay < 0 %}style="color:#b42318;"{% endif %}>{{ '%.2f'|format(l.net_pay) }}</strong></td>
+        <td><a href="{{ url_for('planilla.boleta', period=p.period, staff_id=l.staff_id) }}" target="_blank" class="btn btn-secondary btn-sm">Boleta</a></td>
+      </tr>
+      {% if l.warnings %}<tr><td colspan="10" style="color:#b45309; font-size:0.85em; padding-top:0;">⚠ {{ l.staff_name }}: {{ l.warnings }}</td></tr>{% endif %}
+      {% endfor %}
+      <tr style="font-weight:700; background:#f9fafb;">
+        <td>TOTAL</td><td></td><td>{{ '%.2f'|format(totals.gross_total) }}</td>
+        <td>{{ '%.2f'|format(totals.absence_deduction + totals.tardiness_deduction + totals.subsidy_deduction) }}</td>
+        <td>{{ '%.2f'|format(totals.pension_deduction) }}</td><td>{{ '%.2f'|format(totals.fifth_deduction) }}</td>
+        <td>{{ '%.2f'|format(totals.loan_deduction + totals.advance_deduction + totals.debt_deduction) }}</td>
+        <td>{{ '%.2f'|format(totals.other_deduction) }}</td><td>{{ '%.2f'|format(totals.net_pay) }}</td><td></td>
+      </tr>
+    </tbody></table></div>
+  <p class="muted" style="margin-bottom:0;">Costo total para la empresa este mes: <strong>S/ {{ '%.2f'|format(totals.employer_cost) }}</strong> (sueldos pagados + aporte EsSalud/SIS del empleador: S/ {{ '%.2f'|format(totals.essalud_employer) }}). Pasa el mouse por la pensión para ver el detalle de la AFP.</p>
+</div>
+{% elif open %}
+<div class="panel"><p class="muted" style="margin:0;">Todavía no se calculó. Revisa el perfil de planilla de cada persona y las incidencias del mes y pulsa "Calcular planilla".</p></div>
+{% endif %}
+
+<div class="panel">
+  <h2 class="mt-0">Comisiones, bonos y descuentos del mes</h2>
+  {% if open and can_edit %}
+  <form method="post" action="{{ url_for('planilla.item_add', period=p.period) }}" class="form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <label>Persona
+        <select name="staff_id" required><option value="">— elige —</option>{% for s in people %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}</select>
+      </label>
+      <label>Tipo
+        <select name="kind"><option value="INGRESO">Ingreso (comisión, bono...)</option><option value="DESCUENTO">Descuento</option></select>
+      </label>
+      <label>Concepto <input type="text" name="concept" placeholder="Ej. Comisión por viajes" required></label>
+      <label>Monto (S/) <input type="number" step="0.01" min="0.01" name="amount" required></label>
+    </div>
+    <label style="display:flex; gap:8px; align-items:center;"><input type="checkbox" name="nontaxable" value="1"> Ingreso no afecto (no descuenta AFP/ONP, EsSalud ni 5ta; ej. movilidad por condiciones de trabajo)</label>
+    <div class="btn-group" style="margin-top:12px;"><button type="submit" class="btn btn-primary">Agregar concepto</button></div>
+  </form>
+  {% endif %}
+  <div class="table-wrap" style="margin-top:12px;"><table>
+    <thead><tr><th>Persona</th><th>Tipo</th><th>Concepto</th><th>Monto</th><th></th></tr></thead>
+    <tbody>
+      {% for i in items %}
+      <tr>
+        <td>{{ i.staff_name }}</td>
+        <td>{{ 'Ingreso' if i.kind == 'INGRESO' else 'Descuento' }}{% if i.kind == 'INGRESO' and not i.taxable %} (no afecto){% endif %}</td>
+        <td>{{ i.concept }}</td><td>S/ {{ '%.2f'|format(i.amount) }}</td>
+        <td>{% if open and can_edit %}
+          <form method="post" action="{{ url_for('planilla.item_delete', period=p.period, item_id=i.id) }}" style="display:inline;" onsubmit="return confirm('¿Eliminar este concepto?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="btn btn-danger btn-sm">Eliminar</button></form>{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="muted">Sin conceptos manuales este mes.</td></tr>
+      {% endfor %}
+    </tbody></table></div>
+</div>
+{% endblock %}

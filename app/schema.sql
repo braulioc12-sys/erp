@@ -2153,3 +2153,101 @@ CREATE TABLE IF NOT EXISTS staff_incidents (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_staff_incidents_staff ON staff_incidents(staff_id, start_date);
+
+-- Planilla mensual (6 oct, fase 3b). Un periodo por mes ('YYYY-MM'); ABIERTO
+-- se puede recalcular, CERRADO queda fijo (al cerrar se generan los pagos de
+-- planilla para el Telecrédito y se registran las cuotas de préstamos).
+CREATE TABLE IF NOT EXISTS payroll_periods (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    period TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'ABIERTO',
+    closed_at TEXT,
+    closed_by INTEGER REFERENCES users(id),
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Conceptos manuales del mes por persona: comisiones, bonos y otros
+-- ingresos (kind INGRESO; taxable = 1 si está afecto a pensión, EsSalud y
+-- 5ta) o descuentos en general (kind DESCUENTO).
+CREATE TABLE IF NOT EXISTS payroll_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    period_id INTEGER NOT NULL REFERENCES payroll_periods(id),
+    staff_id INTEGER NOT NULL REFERENCES staff(id),
+    kind TEXT NOT NULL,
+    concept TEXT NOT NULL,
+    amount REAL NOT NULL,
+    taxable INTEGER NOT NULL DEFAULT 1,
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_payroll_items_period ON payroll_items(period_id, staff_id);
+
+-- Boleta de cada persona en el periodo (resultado del cálculo).
+CREATE TABLE IF NOT EXISTS payroll_lines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    period_id INTEGER NOT NULL REFERENCES payroll_periods(id),
+    staff_id INTEGER NOT NULL REFERENCES staff(id),
+    regime TEXT,
+    pension_system TEXT,
+    afp_name TEXT,
+    basic_salary REAL NOT NULL DEFAULT 0,
+    days_worked REAL NOT NULL DEFAULT 0,
+    salary_earned REAL NOT NULL DEFAULT 0,
+    family_allowance REAL NOT NULL DEFAULT 0,
+    other_income REAL NOT NULL DEFAULT 0,
+    other_income_nontaxable REAL NOT NULL DEFAULT 0,
+    gratification REAL NOT NULL DEFAULT 0,
+    gratification_bonus REAL NOT NULL DEFAULT 0,
+    absence_deduction REAL NOT NULL DEFAULT 0,
+    tardiness_deduction REAL NOT NULL DEFAULT 0,
+    subsidy_deduction REAL NOT NULL DEFAULT 0,
+    gross_total REAL NOT NULL DEFAULT 0,
+    pension_base REAL NOT NULL DEFAULT 0,
+    pension_deduction REAL NOT NULL DEFAULT 0,
+    pension_detail TEXT,
+    fifth_base_income REAL NOT NULL DEFAULT 0,
+    fifth_deduction REAL NOT NULL DEFAULT 0,
+    loan_deduction REAL NOT NULL DEFAULT 0,
+    advance_deduction REAL NOT NULL DEFAULT 0,
+    debt_deduction REAL NOT NULL DEFAULT 0,
+    other_deduction REAL NOT NULL DEFAULT 0,
+    total_deductions REAL NOT NULL DEFAULT 0,
+    net_pay REAL NOT NULL DEFAULT 0,
+    essalud_employer REAL NOT NULL DEFAULT 0,
+    employer_cost REAL NOT NULL DEFAULT 0,
+    warnings TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (period_id, staff_id)
+);
+CREATE INDEX IF NOT EXISTS idx_payroll_lines_staff ON payroll_lines(staff_id);
+
+-- Préstamos, adelantos y reconocimientos de deuda del personal: se descuentan
+-- en cuotas desde start_period ('YYYY-MM'). Las cuotas realmente
+-- descontadas quedan en staff_loan_payments al cerrar cada periodo.
+CREATE TABLE IF NOT EXISTS staff_loans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id INTEGER NOT NULL REFERENCES staff(id),
+    kind TEXT NOT NULL,
+    concept TEXT,
+    amount REAL NOT NULL,
+    installments INTEGER NOT NULL DEFAULT 1,
+    installment_amount REAL,
+    start_period TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ACTIVO',
+    notes TEXT,
+    filename TEXT,
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_staff_loans_staff ON staff_loans(staff_id);
+
+CREATE TABLE IF NOT EXISTS staff_loan_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    loan_id INTEGER NOT NULL REFERENCES staff_loans(id),
+    period_id INTEGER NOT NULL REFERENCES payroll_periods(id),
+    amount REAL NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_staff_loan_payments_loan ON staff_loan_payments(loan_id);
+

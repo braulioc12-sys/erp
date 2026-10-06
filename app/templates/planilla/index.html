@@ -1,25 +1,64 @@
 {% extends 'base.html' %}
 {% block title %}Planilla{% endblock %}
 {% block content %}
+{% set can_edit = can(current_user.roles, 'pagos_personal', 'edit') %}
 <div class="page-header">
   <h1>Planilla</h1>
   <div class="page-actions">
     <a href="{{ url_for('pagos_personal.hub') }}" class="btn btn-secondary">← Volver a RRHH</a>
   </div>
 </div>
-<p class="muted mt-0">Prepara la planilla en este orden: cada persona con su perfil, las incidencias del mes y los parámetros legales.</p>
-<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:16px; margin-top:16px;">
+<p class="muted mt-0">Cada mes: abre el periodo, carga comisiones y descuentos, calcula, revisa las boletas y cierra. Antes completa el perfil de cada persona y las incidencias del mes.</p>
+
+<div class="panel">
+  <h2 class="mt-0">Planillas mensuales</h2>
+  {% if can_edit %}
+  <form method="post" action="{{ url_for('planilla.period_open') }}" class="form" style="margin-bottom:12px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row" style="align-items:flex-end;">
+      <label>Abrir el mes <input type="month" name="period" value="{{ default_period }}" required></label>
+      <div><button type="submit" class="btn btn-primary">Abrir planilla del mes</button></div>
+    </div>
+  </form>
+  {% endif %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Mes</th><th>Estado</th><th>Boletas</th><th>Neto a pagar</th><th>Costo empresa</th><th></th></tr></thead>
+    <tbody>
+      {% for p in periods %}
+      <tr>
+        <td><a href="{{ url_for('planilla.period_view', period=p.period) }}">{{ label(p.period) }}</a></td>
+        <td>{% if p.status == 'CERRADO' %}<span class="badge badge-ok">Cerrada</span>{% else %}<span class="badge badge-pendiente">Abierta</span>{% endif %}</td>
+        <td>{{ p.people }}</td>
+        <td>S/ {{ '%.2f'|format(p.net) }}</td>
+        <td>S/ {{ '%.2f'|format(p.cost) }}</td>
+        <td><a href="{{ url_for('planilla.period_view', period=p.period) }}" class="btn btn-secondary btn-sm">Abrir</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted">Todavía no hay planillas. Abre la del mes arriba.</td></tr>
+      {% endfor %}
+    </tbody></table></div>
+</div>
+
+<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:16px; margin-top:16px;">
   <a href="{{ url_for('planilla.profiles') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
     <h2 style="margin-top:0;">👤 Perfil de planilla</h2>
-    <p class="muted" style="margin-bottom:0;">Quién entra en planilla, régimen laboral, ONP o AFP, sueldo básico y asignación familiar. Hoy hay <strong>{{ in_payroll }}</strong> persona(s) en planilla.</p>
+    <p class="muted" style="margin-bottom:0;">Régimen, ONP/AFP, sueldo y asignación familiar. Hoy hay <strong>{{ in_payroll }}</strong> persona(s) en planilla.</p>
   </a>
   <a href="{{ url_for('incidencias.index') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
     <h2 style="margin-top:0;">🗓 Asistencia e incidencias</h2>
-    <p class="muted" style="margin-bottom:0;">Tardanzas, faltas, permisos, licencias y descansos médicos, con importación desde Excel y aviso de subsidio EsSalud.</p>
+    <p class="muted" style="margin-bottom:0;">Tardanzas, faltas, permisos, licencias y descansos médicos.</p>
+  </a>
+  <a href="{{ url_for('planilla.loans') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
+    <h2 style="margin-top:0;">💳 Préstamos y adelantos</h2>
+    <p class="muted" style="margin-bottom:0;">Préstamos, adelantos de sueldo y reconocimientos de deuda con descuento en cuotas.</p>
+  </a>
+  <a href="{{ url_for('planilla.cts_view') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
+    <h2 style="margin-top:0;">🏦 CTS</h2>
+    <p class="muted" style="margin-bottom:0;">Cálculo semestral para el depósito de mayo y noviembre.</p>
   </a>
   <a href="{{ url_for('planilla.params_view') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
     <h2 style="margin-top:0;">⚖ Parámetros de planilla</h2>
-    <p class="muted" style="margin-bottom:0;">UIT, remuneración mínima, tasas de AFP, ONP y EsSalud. Se corrigen aquí cuando cambien.</p>
+    <p class="muted" style="margin-bottom:0;">UIT, RMV y tasas de AFP, ONP y EsSalud.</p>
   </a>
   <a href="{{ url_for('vacaciones.index') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
     <h2 style="margin-top:0;">🏖 Vacaciones</h2>

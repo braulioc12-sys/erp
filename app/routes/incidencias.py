@@ -207,9 +207,19 @@ def medical_alerts(year=None, params=None):
 
 
 def last_12_months_remuneration(staff_id):
-    """Remuneraciones de los últimos 12 meses (para el promedio del
-    subsidio). None si todavía no hay planilla calculada de esta persona."""
-    return None
+    """Remuneraciones (sueldo ganado + asignación familiar + ingresos afectos)
+    de los últimos 12 meses con planilla calculada, del más reciente hacia
+    atrás, para el promedio del subsidio. None si todavía no hay planilla
+    de esta persona."""
+    rows = query_all(
+        """SELECT l.salary_earned + l.family_allowance + l.other_income AS rem
+           FROM payroll_lines l JOIN payroll_periods p ON p.id = l.period_id
+           WHERE l.staff_id = ? ORDER BY p.period DESC LIMIT 12""",
+        (staff_id,),
+    )
+    if not rows:
+        return None
+    return [r["rem"] for r in rows]
 
 
 def _days_between(start, end):

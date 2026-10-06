@@ -237,7 +237,9 @@ def planilla_placeholder():
     Los datos y las rutas de Planilla (new_payment/edit_payment/etc, más
     abajo) siguen intactos para cuando se retome este módulo — nomás no
     hay ningún link hacia ellas desde acá todavía."""
-    return render_template("pagos_personal/planilla_placeholder.html")
+    # 6 oct, fase 3b: la planilla ya existe (app/routes/planilla.py); esta URL
+    # vieja redirige para no romper enlaces guardados.
+    return redirect(url_for("planilla.index"))
 
 
 def _payment_form_context(payment=None):
