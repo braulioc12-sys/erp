@@ -1785,6 +1785,21 @@ CREATE TABLE IF NOT EXISTS staff (
     -- 6 oct, fase 2 (vacaciones): días de vacaciones que gana por año de
     -- servicio (30 en régimen general; 15 en MYPE -- se ajusta por persona).
     vacation_days_per_year REAL NOT NULL DEFAULT 30,
+    -- 6 oct, fase 3 (planilla): perfil de planilla de la persona -- ver
+    -- app/routes/planilla.py. in_payroll = 1 si entra en la planilla mensual
+    -- (los de recibo por honorarios quedan en 0). Régimen laboral:
+    -- GENERAL | MYPE_MICRO | MYPE_PEQUENA (define vacaciones, CTS y
+    -- gratificación). Sistema de pensiones: ONP | AFP | NINGUNO.
+    in_payroll INTEGER NOT NULL DEFAULT 0,
+    labor_regime TEXT NOT NULL DEFAULT 'GENERAL',
+    pension_system TEXT NOT NULL DEFAULT 'ONP',
+    afp_name TEXT,
+    afp_commission_type TEXT NOT NULL DEFAULT 'FLUJO',
+    cuspp TEXT,
+    basic_salary REAL,
+    family_allowance INTEGER NOT NULL DEFAULT 0,
+    fifth_prior_income REAL NOT NULL DEFAULT 0,
+    fifth_prior_withheld REAL NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -2105,3 +2120,36 @@ CREATE INDEX IF NOT EXISTS idx_activity_log_module ON activity_log(module);
 CREATE INDEX IF NOT EXISTS idx_activity_log_user ON activity_log(user_id);
 CREATE INDEX IF NOT EXISTS idx_activity_log_entity ON activity_log(entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_activity_log_created ON activity_log(created_at);
+
+-- Parámetros de planilla (6 oct, fase 3): tasas y valores legales que
+-- cambian cada año (UIT, RMV, AFP, ONP, EsSalud...). Se siembran con los
+-- valores vigentes de 2026 (app/payroll_params.py) y se corrigen desde la
+-- pantalla "Parámetros de planilla" cuando cambien.
+CREATE TABLE IF NOT EXISTS payroll_params (
+    key TEXT PRIMARY KEY,
+    value REAL NOT NULL,
+    updated_at TEXT,
+    updated_by INTEGER REFERENCES users(id)
+);
+
+-- Incidencias de asistencia (6 oct, fase 3): tardanzas, faltas, permisos,
+-- licencias, descansos médicos e incapacidad temporal -- una fila por
+-- evento (rango de fechas). Las tardanzas llevan minutos. Ver
+-- app/routes/incidencias.py (reglas de cómo afectan la planilla).
+CREATE TABLE IF NOT EXISTS staff_incidents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id INTEGER NOT NULL REFERENCES staff(id),
+    kind TEXT NOT NULL,
+    start_date TEXT NOT NULL,
+    end_date TEXT NOT NULL,
+    minutes REAL,
+    certificate_number TEXT,
+    notes TEXT,
+    filename TEXT,
+    -- Solo descansos médicos / incapacidad / maternidad: seguimiento del
+    -- subsidio a pedir a EsSalud (NULL | PENDIENTE | SOLICITADO | COBRADO).
+    subsidy_status TEXT,
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_staff_incidents_staff ON staff_incidents(staff_id, start_date);

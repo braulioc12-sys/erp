@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+{% block title %}Perfil de planilla — {{ staff.name }}{% endblock %}
+{% block content %}
+{% set can_edit = can(current_user.roles, 'pagos_personal', 'edit') %}
+<div class="page-header">
+  <h1>Perfil de planilla — {{ staff.name }}</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('legajo.detail', staff_id=staff.id) }}" class="btn btn-secondary">Legajo</a>
+    <a href="{{ url_for('vacaciones.detail', staff_id=staff.id) }}" class="btn btn-secondary">Vacaciones</a>
+    <a href="{{ url_for('planilla.profiles') }}" class="btn btn-secondary">← Perfiles</a>
+  </div>
+</div>
+<div class="panel">
+  <form method="post" action="{{ url_for('planilla.profile_save', staff_id=staff.id) }}" class="form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label style="display:flex; gap:8px; align-items:center;">
+      <input type="checkbox" name="in_payroll" value="1" {% if staff.in_payroll %}checked{% endif %} {% if not can_edit %}disabled{% endif %}>
+      <strong>Entra en la planilla mensual</strong>
+    </label>
+    <div class="form-row" style="margin-top:12px;">
+      <label>Régimen laboral
+        <select name="labor_regime" {% if not can_edit %}disabled{% endif %}>
+          {% for code, label in regimes %}<option value="{{ code }}" {% if staff.labor_regime == code %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Sueldo básico mensual (S/)
+        <input type="number" step="0.01" min="0" name="basic_salary" value="{{ '%.2f'|format(staff.basic_salary) if staff.basic_salary is not none else '' }}" placeholder="{{ ('Del contrato: ' ~ '%.2f'|format(contract.salary)) if contract and contract.salary else 'Sin contrato con sueldo' }}" {% if not can_edit %}disabled{% endif %}>
+      </label>
+    </div>
+    <p class="muted" style="margin-top:-6px;">Si lo dejas vacío se usa el sueldo del contrato vigente del legajo. Al cambiar el régimen, los días de vacaciones por año de la persona pasan a {{ '%g'|format(regime_vacation_days.GENERAL) }} (general) o {{ '%g'|format(regime_vacation_days.MYPE_MICRO) }} (MYPE).</p>
+    <label style="display:flex; gap:8px; align-items:center;">
+      <input type="checkbox" name="family_allowance" value="1" {% if staff.family_allowance %}checked{% endif %} {% if not can_edit %}disabled{% endif %}>
+      Recibe asignación familiar (tiene hijos menores de 18 o estudiando)
+    </label>
+
+    <h2>Pensiones</h2>
+    <div class="form-row">
+      <label>Sistema
+        <select name="pension_system" id="pen-sys" {% if not can_edit %}disabled{% endif %}>
+          {% for code, label in pension_systems %}<option value="{{ code }}" {% if staff.pension_system == code %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="afp-only">AFP
+        <select name="afp_name" {% if not can_edit %}disabled{% endif %}>
+          <option value="">— elige —</option>
+          {% for code, label in afp_names %}<option value="{{ code }}" {% if staff.afp_name == code %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="afp-only">Tipo de comisión
+        <select name="afp_commission_type" {% if not can_edit %}disabled{% endif %}>
+          {% for code, label in commission_types %}<option value="{{ code }}" {% if staff.afp_commission_type == code %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="afp-only">CUSPP <input type="text" name="cuspp" value="{{ staff.cuspp or '' }}" {% if not can_edit %}disabled{% endif %}></label>
+    </div>
+
+    <h2>Renta de 5ta categoría</h2>
+    <p class="muted mt-0">Solo si empezaste a usar el sistema a mitad de año o la persona tuvo otro empleador este año: lo ganado y lo retenido antes, para que la proyección del impuesto sea correcta.</p>
+    <div class="form-row">
+      <label>Ingresos acumulados del año antes del sistema (S/) <input type="number" step="0.01" min="0" name="fifth_prior_income" value="{{ '%g'|format(staff.fifth_prior_income or 0) }}" {% if not can_edit %}disabled{% endif %}></label>
+      <label>Retenciones acumuladas antes del sistema (S/) <input type="number" step="0.01" min="0" name="fifth_prior_withheld" value="{{ '%g'|format(staff.fifth_prior_withheld or 0) }}" {% if not can_edit %}disabled{% endif %}></label>
+    </div>
+    {% if can_edit %}<div class="btn-group" style="margin-top:14px;"><button type="submit" class="btn btn-primary">Guardar perfil</button></div>{% endif %}
+  </form>
+</div>
+<script>
+(function () {
+  var sel = document.getElementById('pen-sys');
+  function sync() { document.querySelectorAll('.afp-only').forEach(function (el) { el.style.display = sel.value === 'AFP' ? '' : 'none'; }); }
+  sel.addEventListener('change', sync); sync();
+})();
+</script>
+{% endblock %}

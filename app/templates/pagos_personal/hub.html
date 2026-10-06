@@ -28,9 +28,13 @@
     <h2 style="margin-top:0;">🏖 Vacaciones</h2>
     <p class="muted" style="margin-bottom:0;">Saldo de días de cada trabajador, solicitudes y aprobación.</p>
   </a>
-  <a href="{{ url_for('pagos_personal.planilla_placeholder') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
+  <a href="{{ url_for('planilla.index') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
     <h2 style="margin-top:0;">📋 Planilla</h2>
-    <p class="muted" style="margin-bottom:0;">Pagos de planilla del personal.</p>
+    <p class="muted" style="margin-bottom:0;">Perfil de planilla, parámetros legales (AFP, ONP, EsSalud, UIT) y planilla mensual.</p>
+  </a>
+  <a href="{{ url_for('incidencias.index') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
+    <h2 style="margin-top:0;">🗓 Asistencia e incidencias</h2>
+    <p class="muted" style="margin-bottom:0;">Tardanzas, faltas, permisos, licencias y descansos médicos; importa desde Excel.</p>
   </a>
   <a href="{{ url_for('pagos_personal.honorarios_plantilla') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
     <h2 style="margin-top:0;">🧾 Recibos por honorarios</h2>

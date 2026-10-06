@@ -7,6 +7,7 @@
   <div class="page-actions">
     {% if can_edit %}<a href="{{ url_for('pagos_personal.staff_edit', staff_id=staff.id) }}" class="btn btn-secondary">Editar datos y cuenta bancaria</a>{% endif %}
     <a href="{{ url_for('vacaciones.detail', staff_id=staff.id) }}" class="btn btn-secondary">🏖 Vacaciones</a>
+    <a href="{{ url_for('planilla.profile', staff_id=staff.id) }}" class="btn btn-secondary">📋 Perfil de planilla</a>
     <a href="{{ url_for('legajo.index') }}" class="btn btn-secondary">← Legajo del personal</a>
   </div>
 </div>

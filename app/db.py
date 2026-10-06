@@ -33,7 +33,7 @@ _POSTGRES_PREFIXES = ("postgres://", "postgresql://")
 
 # Tablas cuya clave primaria NO es una columna "id" autoincremental (se
 # revisó schema.sql a mano para armar esta lista completa: 26 tablas usan
-# "id INTEGER PRIMARY KEY AUTOINCREMENT" y estas 5 son la excepción). Un
+# "id INTEGER PRIMARY KEY AUTOINCREMENT" y estas son la excepción). Un
 # INSERT sobre estas tablas nunca debe recibir "RETURNING id" agregado
 # automáticamente en modo Postgres — esa columna no existe ahí.
 _TABLES_WITHOUT_ID = {
@@ -42,6 +42,7 @@ _TABLES_WITHOUT_ID = {
     "sunat_ruc_cache",  # PK: ruc
     "app_settings",  # PK: key
     "vehicle_locations",  # PK: vehicle_id
+    "payroll_params",  # PK: key
 }
 
 _INSERT_INTO_RE = re.compile(r"^\s*INSERT\s+INTO\s+([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
@@ -361,6 +362,17 @@ COLUMN_MIGRATIONS = [
     ("staff", "address", "TEXT"),
     ("staff", "area", "TEXT"),
     ("staff", "vacation_days_per_year", "REAL NOT NULL DEFAULT 30"),
+    # 6 oct, fase 3 (planilla): perfil de planilla -- ver schema.sql.
+    ("staff", "in_payroll", "INTEGER NOT NULL DEFAULT 0"),
+    ("staff", "labor_regime", "TEXT NOT NULL DEFAULT 'GENERAL'"),
+    ("staff", "pension_system", "TEXT NOT NULL DEFAULT 'ONP'"),
+    ("staff", "afp_name", "TEXT"),
+    ("staff", "afp_commission_type", "TEXT NOT NULL DEFAULT 'FLUJO'"),
+    ("staff", "cuspp", "TEXT"),
+    ("staff", "basic_salary", "REAL"),
+    ("staff", "family_allowance", "INTEGER NOT NULL DEFAULT 0"),
+    ("staff", "fifth_prior_income", "REAL NOT NULL DEFAULT 0"),
+    ("staff", "fifth_prior_withheld", "REAL NOT NULL DEFAULT 0"),
     ("trips", "carrier_waybill_number", "TEXT"),
     ("trips", "carrier_waybill_filename", "TEXT"),
     ("trips", "paid", "INTEGER NOT NULL DEFAULT 0"),
@@ -1653,6 +1665,25 @@ def _seed_detraction_concepts_postgres(conn):
         )
 
 
+def _seed_payroll_params_sqlite(conn):
+    """Siembra los parámetros de planilla que falten (no pisa los que el
+    usuario ya corrigió)."""
+    from app.payroll_params import DEFAULT_PARAMS
+
+    for key, _label, value, _src in DEFAULT_PARAMS:
+        conn.execute("INSERT OR IGNORE INTO payroll_params (key, value) VALUES (?, ?)", (key, value))
+
+
+def _seed_payroll_params_postgres(conn):
+    from app.payroll_params import DEFAULT_PARAMS
+
+    cur = conn.cursor()
+    for key, _label, value, _src in DEFAULT_PARAMS:
+        cur.execute(
+            "INSERT INTO payroll_params (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING", (key, value)
+        )
+
+
 _PRAGMA_LINE_RE = re.compile(r"^\s*PRAGMA\s[^\n]*;\s*$", re.MULTILINE | re.IGNORECASE)
 _CREATE_TABLE_START_RE = re.compile(r"CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\(")
 _COL_REFERENCES_RE = re.compile(r"\s+REFERENCES\s+(\w+)\s*\(([^)]+)\)")
@@ -1786,6 +1817,7 @@ def init_db(app):
             _backfill_advance_driver_id_postgres(conn)
             _backfill_vehicle_owner_issuer_postgres(conn)
             _backfill_trip_waybill_files_postgres(conn)
+            _seed_payroll_params_postgres(conn)
             conn.commit()
         finally:
             conn.close()
@@ -1812,6 +1844,7 @@ def init_db(app):
         _backfill_advance_driver_id_sqlite(conn)
         _backfill_vehicle_owner_issuer_sqlite(conn)
         _backfill_trip_waybill_files_sqlite(conn)
+        _seed_payroll_params_sqlite(conn)
         conn.commit()
         conn.close()
 

@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+{% block title %}Planilla{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Planilla</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('pagos_personal.hub') }}" class="btn btn-secondary">← Volver a RRHH</a>
+  </div>
+</div>
+<p class="muted mt-0">Prepara la planilla en este orden: cada persona con su perfil, las incidencias del mes y los parámetros legales.</p>
+<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:16px; margin-top:16px;">
+  <a href="{{ url_for('planilla.profiles') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
+    <h2 style="margin-top:0;">👤 Perfil de planilla</h2>
+    <p class="muted" style="margin-bottom:0;">Quién entra en planilla, régimen laboral, ONP o AFP, sueldo básico y asignación familiar. Hoy hay <strong>{{ in_payroll }}</strong> persona(s) en planilla.</p>
+  </a>
+  <a href="{{ url_for('incidencias.index') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
+    <h2 style="margin-top:0;">🗓 Asistencia e incidencias</h2>
+    <p class="muted" style="margin-bottom:0;">Tardanzas, faltas, permisos, licencias y descansos médicos, con importación desde Excel y aviso de subsidio EsSalud.</p>
+  </a>
+  <a href="{{ url_for('planilla.params_view') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
+    <h2 style="margin-top:0;">⚖ Parámetros de planilla</h2>
+    <p class="muted" style="margin-bottom:0;">UIT, remuneración mínima, tasas de AFP, ONP y EsSalud. Se corrigen aquí cuando cambien.</p>
+  </a>
+  <a href="{{ url_for('vacaciones.index') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
+    <h2 style="margin-top:0;">🏖 Vacaciones</h2>
+    <p class="muted" style="margin-bottom:0;">Saldo de cada trabajador según su régimen.</p>
+  </a>
+</div>
+{% endblock %}

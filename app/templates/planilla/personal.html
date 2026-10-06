@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+{% block title %}Perfil de planilla{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Perfil de planilla</h1>
+  <div class="page-actions">
+    {% if show == 'planilla' %}
+    <a href="{{ url_for('planilla.profiles') }}" class="btn btn-secondary">Ver todos</a>
+    {% else %}
+    <a href="{{ url_for('planilla.profiles', ver='planilla') }}" class="btn btn-secondary">Solo en planilla</a>
+    {% endif %}
+    <a href="{{ url_for('planilla.index') }}" class="btn btn-secondary">← Planilla</a>
+  </div>
+</div>
+<p class="muted mt-0">Marca quién entra en la planilla mensual y completa su régimen y su sistema de pensiones. Los que cobran por recibo por honorarios no entran en planilla.</p>
+<div class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Persona</th><th>En planilla</th><th>Régimen</th><th>Pensión</th><th>Sueldo básico</th><th></th></tr></thead>
+      <tbody>
+        {% for s in rows %}
+        <tr>
+          <td><a href="{{ url_for('planilla.profile', staff_id=s.id) }}">{{ s.name }}</a><div class="muted" style="font-size:0.85em;">{{ s.position or '' }}</div></td>
+          <td>{% if s.in_payroll %}<span class="badge badge-activo">Sí</span>{% else %}<span class="badge badge-inactivo">No</span>{% endif %}</td>
+          <td>{{ regime_labels.get(s.labor_regime, s.labor_regime) }}</td>
+          <td>{{ pension_labels.get(s.pension_system, s.pension_system) }}{% if s.pension_system == 'AFP' %} — {{ afp_labels.get(s.afp_name, 'falta elegir') }}{% endif %}</td>
+          <td>{% set sal = salary_of(s) %}{% if sal %}S/ {{ '%.2f'|format(sal) }}{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td><a href="{{ url_for('planilla.profile', staff_id=s.id) }}" class="btn btn-secondary btn-sm">Abrir</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="muted">No hay personas.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

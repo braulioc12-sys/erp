@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% block title %}Parámetros de planilla{% endblock %}
+{% block content %}
+{% set can_edit = can(current_user.roles, 'pagos_personal', 'edit') %}
+<div class="page-header">
+  <h1>Parámetros de planilla</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('planilla.index') }}" class="btn btn-secondary">← Planilla</a>
+  </div>
+</div>
+<p class="muted mt-0">Tasas y valores legales que usa el cálculo. Están cargados con los vigentes de 2026; corrígelos aquí cuando cambien (la remuneración máxima asegurable de la AFP cambia cada trimestre). Confirma siempre con tu contador.</p>
+<div class="panel">
+  <form method="post" class="form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Parámetro</th><th style="width:150px;">Valor</th><th>Fuente / nota</th><th>Sugerido</th></tr></thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td>{{ r.label }}</td>
+            <td><input type="number" step="any" min="0" name="p_{{ r.key }}" value="{{ '%g'|format(r.value) }}" {% if not can_edit %}disabled{% endif %}></td>
+            <td class="muted">{{ r.source }}{% if r.updated_at %} · editado {{ r.updated_at[:10] }}{% endif %}</td>
+            <td class="muted">{{ '%g'|format(r.default) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if can_edit %}<div class="btn-group" style="margin-top:14px;"><button type="submit" class="btn btn-primary">Guardar parámetros</button></div>{% endif %}
+  </form>
+</div>
+{% endblock %}

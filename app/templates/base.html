@@ -119,7 +119,7 @@
          entrada en el caso raro de una excepción puntual por usuario que
          los separe. #}
       {% if can(current_user.roles, 'pagos_personal', 'view') or can(current_user.roles, 'rrhh', 'view') %}
-      <a href="{{ url_for('pagos_personal.hub') }}" class="{{ 'active' if request.blueprint in ('pagos_personal', 'rrhh', 'legajo', 'vacaciones') }}">RRHH</a>
+      <a href="{{ url_for('pagos_personal.hub') }}" class="{{ 'active' if request.blueprint in ('pagos_personal', 'rrhh', 'legajo', 'vacaciones', 'planilla', 'incidencias') }}">RRHH</a>
       {% endif %}
       {% if can(current_user.roles, 'rutas', 'view') %}
       <a href="{{ url_for('rutas.list_view') }}" class="{{ 'active' if request.blueprint == 'rutas' }}">Rutas</a>

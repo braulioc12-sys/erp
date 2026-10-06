@@ -1,0 +1,132 @@
+{% extends 'base.html' %}
+{% block title %}Asistencia e incidencias{% endblock %}
+{% block content %}
+{% set can_edit = can(current_user.roles, 'pagos_personal', 'edit') %}
+<div class="page-header">
+  <h1>Asistencia e incidencias</h1>
+  <div class="page-actions">
+    {% if can_edit %}<a href="{{ url_for('incidencias.import_incidents') }}" class="btn btn-secondary">⬆ Importar desde Excel</a>{% endif %}
+    <a href="{{ url_for('planilla.index') }}" class="btn btn-secondary">← Planilla</a>
+  </div>
+</div>
+<p class="muted mt-0">Se asume que todos asisten: aquí solo anotas las excepciones (tardanzas, faltas, permisos, licencias y descansos médicos). La planilla las usa para descontar.</p>
+
+{% if alerts %}
+<div class="panel" style="border-left:4px solid #b45309;">
+  <h2 class="mt-0">Descanso médico del {{ year }}: subsidio de EsSalud</h2>
+  <p class="muted mt-0">El empleador paga los primeros {{ alerts[0].limit }} días de descanso médico del año; del día {{ alerts[0].limit + 1 }} en adelante lo cubre EsSalud.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Persona</th><th>Días en el año</th><th>Estado</th><th></th></tr></thead>
+    <tbody>
+      {% for a in alerts %}
+      <tr>
+        <td><a href="{{ url_for('incidencias.index', persona=a.staff_id, mes=mes) }}">{{ a.name }}</a></td>
+        <td>{{ a.total }} de {{ a.limit }}{% if a.essalud_days %} · <strong>{{ a.essalud_days }} a cargo de EsSalud</strong>{% endif %}</td>
+        <td>{% if a.level == 'EXCEDIDO' %}<span class="badge badge-urgente">Pedir subsidio</span>{% else %}<span class="badge badge-atencion">Cerca del tope (quedan {{ a.remaining }})</span>{% endif %}</td>
+        <td>{% if a.level == 'EXCEDIDO' %}<a href="{{ url_for('incidencias.subsidy_file', staff_id=a.staff_id, year=year) }}" class="btn btn-primary btn-sm">⬇ Archivo para EsSalud</a>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody></table></div>
+</div>
+{% endif %}
+
+{% if can_edit %}
+<div class="panel">
+  <h2 class="mt-0">Registrar incidencia</h2>
+  <form method="post" action="{{ url_for('incidencias.add') }}" enctype="multipart/form-data" class="form" id="inc-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <label>Persona *
+        <select name="staff_id" required>
+          <option value="">— elige —</option>
+          {% for p in people %}<option value="{{ p.id }}" {% if persona == p.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Tipo *
+        <select name="kind" id="inc-kind" required>
+          {% set ns = namespace(group='') %}
+          {% for code, label, group, uses_min in kinds %}
+            {% if group != ns.group %}{% if ns.group %}</optgroup>{% endif %}<optgroup label="{{ group }}">{% set ns.group = group %}{% endif %}
+            <option value="{{ code }}" data-min="{{ 1 if uses_min else 0 }}">{{ label }}</option>
+          {% endfor %}
+          </optgroup>
+        </select>
+      </label>
+    </div>
+    <div class="form-row">
+      <label><span id="lbl-start">Desde *</span> <input type="date" name="start_date" value="{{ today }}" required></label>
+      <label id="end-wrap">Hasta <input type="date" name="end_date"></label>
+      <label id="min-wrap" style="display:none;">Minutos de tardanza <input type="number" step="1" min="1" name="minutes" placeholder="Ej. 25"></label>
+    </div>
+    <div class="form-row">
+      <label>N° de certificado (CITT / descanso médico) <input type="text" name="certificate_number"></label>
+      <label>Certificado o sustento (foto o PDF) <input type="file" name="certificate_file" accept="image/*,.pdf"></label>
+    </div>
+    <label>Observaciones <input type="text" name="notes"></label>
+    <div class="btn-group" style="margin-top:14px;"><button type="submit" class="btn btn-primary">Registrar</button></div>
+  </form>
+</div>
+<script>
+(function () {
+  var kind = document.getElementById('inc-kind');
+  function sync() {
+    var uses = kind.options[kind.selectedIndex].dataset.min === '1';
+    document.getElementById('min-wrap').style.display = uses ? '' : 'none';
+    document.getElementById('end-wrap').style.display = uses ? 'none' : '';
+    document.getElementById('lbl-start').textContent = uses ? 'Día *' : 'Desde *';
+  }
+  kind.addEventListener('change', sync); sync();
+})();
+</script>
+{% endif %}
+
+<div class="panel">
+  <div class="page-header" style="margin-bottom:8px;">
+    <h2 class="mt-0">Incidencias de {{ mes }}</h2>
+    <div class="page-actions">
+      <a href="{{ url_for('incidencias.index', mes=prev_m, persona=persona) }}" class="btn btn-secondary btn-sm">← Mes anterior</a>
+      <a href="{{ url_for('incidencias.index', mes=next_m, persona=persona) }}" class="btn btn-secondary btn-sm">Mes siguiente →</a>
+      {% if persona %}<a href="{{ url_for('incidencias.index', mes=mes) }}" class="btn btn-secondary btn-sm">Ver todas las personas</a>{% endif %}
+    </div>
+  </div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Persona</th><th>Tipo</th><th>Fechas</th><th>Cantidad</th><th>Certificado</th><th>Subsidio EsSalud</th><th>Notas</th><th></th></tr></thead>
+    <tbody>
+      {% for i in incidents %}
+      <tr>
+        <td><a href="{{ url_for('incidencias.index', persona=i.staff_id, mes=mes) }}">{{ i.staff_name }}</a></td>
+        <td>{{ kind_labels.get(i.kind, i.kind) }}</td>
+        <td>{{ i.start_date }}{% if i.end_date != i.start_date %} → {{ i.end_date }}{% endif %}</td>
+        <td>{{ summary_text(i) }}</td>
+        <td>{% if i.certificate_number %}{{ i.certificate_number }}{% endif %}{% if i.filename %} <a href="{{ url_for('incidencias.certificate_file', incident_id=i.id) }}" target="_blank">ver archivo</a>{% endif %}</td>
+        <td>
+          {% if i.kind in essalud_kinds %}
+            {% if can_edit %}
+            <form method="post" action="{{ url_for('incidencias.set_subsidy', incident_id=i.id) }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <select name="subsidy_status" onchange="this.form.submit()">
+                {% for code, label in subsidy_status.items() %}<option value="{{ code }}" {% if i.subsidy_status == code %}selected{% endif %}>{{ label }}</option>{% endfor %}
+              </select>
+            </form>
+            {% else %}{{ subsidy_status.get(i.subsidy_status, '') }}{% endif %}
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+        <td>{{ i.notes or '' }}</td>
+        <td>
+          {% if can_edit %}
+          <form method="post" action="{{ url_for('incidencias.delete', incident_id=i.id) }}" onsubmit="return confirm('¿Eliminar esta incidencia?');" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="muted">No hay incidencias en este mes.</td></tr>
+      {% endfor %}
+    </tbody></table></div>
+  {% if persona %}
+  <p style="margin-bottom:0;"><a href="{{ url_for('incidencias.subsidy_file', staff_id=persona, year=year) }}" class="btn btn-secondary btn-sm">⬇ Archivo de subsidio EsSalud {{ year }}</a></p>
+  {% endif %}
+</div>
+{% endblock %}
