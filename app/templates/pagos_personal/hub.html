@@ -20,6 +20,10 @@
 <p class="muted mt-0">Elige qué quieres hacer.</p>
 
 <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:16px; margin-top:16px;">
+  <a href="{{ url_for('legajo.index') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
+    <h2 style="margin-top:0;">🗂 Legajo del personal</h2>
+    <p class="muted" style="margin-bottom:0;">Ficha de cada colaborador: datos laborales, contratos y documentos, con avisos de vencimiento.</p>
+  </a>
   <a href="{{ url_for('pagos_personal.planilla_placeholder') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
     <h2 style="margin-top:0;">📋 Planilla</h2>
     <p class="muted" style="margin-bottom:0;">Pagos de planilla del personal.</p>

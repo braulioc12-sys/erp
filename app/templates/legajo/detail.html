@@ -1,0 +1,163 @@
+{% extends 'base.html' %}
+{% block title %}Legajo — {{ staff.name }}{% endblock %}
+{% block content %}
+{% set can_edit = can(current_user.roles, 'pagos_personal', 'edit') %}
+<div class="page-header">
+  <h1>{{ staff.name }}{% if staff.status != 'ACTIVO' %} <span class="badge badge-cancelado">Inactivo</span>{% endif %}</h1>
+  <div class="page-actions">
+    {% if can_edit %}<a href="{{ url_for('pagos_personal.staff_edit', staff_id=staff.id) }}" class="btn btn-secondary">Editar datos y cuenta bancaria</a>{% endif %}
+    <a href="{{ url_for('legajo.index') }}" class="btn btn-secondary">← Legajo del personal</a>
+  </div>
+</div>
+<p class="muted mt-0">{{ staff.document_type }} {{ staff.document_number or '—' }}{% if staff.position %} · {{ staff.position }}{% endif %}</p>
+
+<div class="panel">
+  <h2 class="mt-0">Datos personales y laborales</h2>
+  {% if can_edit %}
+  <form method="post" action="{{ url_for('legajo.save_data', staff_id=staff.id) }}" class="form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <label>Fecha de ingreso <input type="date" name="hire_date" value="{{ staff.hire_date or '' }}"></label>
+      <label>Fecha de cese <input type="date" name="termination_date" value="{{ staff.termination_date or '' }}"></label>
+      <label>Fecha de nacimiento <input type="date" name="birth_date" value="{{ staff.birth_date or '' }}"></label>
+    </div>
+    <div class="form-row">
+      <label>Área <input type="text" name="area" value="{{ staff.area or '' }}" placeholder="Ej. Operaciones, Administración"></label>
+      <label>Teléfono <input type="text" name="phone" value="{{ staff.phone or '' }}"></label>
+      <label>Correo <input type="email" name="email" value="{{ staff.email or '' }}"></label>
+    </div>
+    <label>Dirección <input type="text" name="address" value="{{ staff.address or '' }}"></label>
+    <div class="btn-group"><button type="submit" class="btn btn-secondary btn-sm">Guardar datos</button></div>
+  </form>
+  {% else %}
+  <div class="detail-grid">
+    <div class="detail-item"><div class="label">Ingreso</div><div class="value">{{ staff.hire_date or '—' }}</div></div>
+    <div class="detail-item"><div class="label">Cese</div><div class="value">{{ staff.termination_date or '—' }}</div></div>
+    <div class="detail-item"><div class="label">Nacimiento</div><div class="value">{{ staff.birth_date or '—' }}</div></div>
+    <div class="detail-item"><div class="label">Área</div><div class="value">{{ staff.area or '—' }}</div></div>
+    <div class="detail-item"><div class="label">Teléfono</div><div class="value">{{ staff.phone or '—' }}</div></div>
+    <div class="detail-item"><div class="label">Correo</div><div class="value">{{ staff.email or '—' }}</div></div>
+    <div class="detail-item"><div class="label">Dirección</div><div class="value">{{ staff.address or '—' }}</div></div>
+  </div>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2 class="mt-0">Contratos</h2>
+  {% if contracts %}
+  <div class="table-wrap" style="margin-bottom:12px;">
+    <table>
+      <thead><tr><th>Tipo</th><th>Inicio</th><th>Fin</th><th>Cargo</th><th>Sueldo</th><th>Archivo</th><th>Subido</th><th></th></tr></thead>
+      <tbody>
+        {% for c in contracts %}
+        {% set st = expiry_state(c.end_date) if c.id == current_contract_id else None %}
+        <tr>
+          <td>{{ contract_type_labels.get(c.contract_type, c.contract_type) }}{% if c.id == current_contract_id %} <span class="badge badge-activo" style="font-size:0.75em;">Vigente</span>{% endif %}</td>
+          <td>{{ c.start_date }}</td>
+          <td>{{ c.end_date or 'Indefinido' }}
+            {% if st == 'VENCIDO' %}<span class="badge badge-cancelado" style="font-size:0.75em;">Vencido</span>{% elif st == 'POR_VENCER' %}<span class="badge badge-pendiente" style="font-size:0.75em;">Por vencer</span>{% endif %}
+          </td>
+          <td>{{ c.position or '—' }}</td>
+          <td>{{ 'S/ {:,.2f}'.format(c.salary) if c.salary is not none else '—' }}</td>
+          <td>{% if c.filename %}<a href="{{ url_for('legajo.contract_file', staff_id=staff.id, contract_id=c.id) }}" target="_blank">Ver contrato</a>{% else %}— (sin archivo){% endif %}</td>
+          <td class="muted">{{ c.created_at[:16] if c.created_at else '' }}{% if c.created_by_name %} · {{ c.created_by_name }}{% endif %}</td>
+          <td>
+            {% if can_edit %}
+            <form method="post" action="{{ url_for('legajo.delete_contract', staff_id=staff.id, contract_id=c.id) }}" onsubmit="return confirm('¿Eliminar este contrato? Esta acción no se puede deshacer.');" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted mt-0" style="margin-bottom:12px;">Todavía no hay contratos registrados.</p>
+  {% endif %}
+  {% if can_edit %}
+  {% if contracts %}<details><summary class="btn btn-secondary btn-sm" style="cursor:pointer; display:inline-block;">+ Agregar contrato</summary><div style="margin-top:10px;">{% endif %}
+  <form method="post" action="{{ url_for('legajo.add_contract', staff_id=staff.id) }}" enctype="multipart/form-data" class="form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <label>Tipo de contrato *
+        <select name="contract_type" required>
+          <option value="">-- Elige --</option>
+          {% for code, label in contract_types %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Inicio * <input type="date" name="start_date" required></label>
+      <label>Fin (vacío si es indefinido) <input type="date" name="end_date"></label>
+    </div>
+    <div class="form-row">
+      <label>Cargo <input type="text" name="position" value="{{ staff.position or '' }}"></label>
+      <label>Sueldo mensual (S/) <input type="number" step="0.01" name="salary"></label>
+      <label>Archivo del contrato (foto o PDF) <input type="file" name="contract_file" accept=".png,.jpg,.jpeg,.pdf,.webp,.heic,.heif" class="js-scan-input"></label>
+    </div>
+    <label>Notas <input type="text" name="notes"></label>
+    <div class="btn-group"><button type="submit" class="btn btn-secondary btn-sm">Guardar contrato</button></div>
+  </form>
+  {% if contracts %}</div></details>{% endif %}
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2 class="mt-0">Documentos</h2>
+  {% if documents %}
+  <div class="table-wrap" style="margin-bottom:12px;">
+    <table>
+      <thead><tr><th>Tipo</th><th>Detalle</th><th>Emitido</th><th>Vence</th><th>Archivo</th><th>Subido</th><th></th></tr></thead>
+      <tbody>
+        {% for d in documents %}
+        {% set st = expiry_state(d.expiry_date) %}
+        <tr>
+          <td>{{ document_type_labels.get(d.doc_type, d.doc_type) }}</td>
+          <td>{{ d.title or '—' }}</td>
+          <td>{{ d.issue_date or '—' }}</td>
+          <td>{{ d.expiry_date or '—' }}
+            {% if st == 'VENCIDO' %}<span class="badge badge-cancelado" style="font-size:0.75em;">Vencido</span>{% elif st == 'POR_VENCER' %}<span class="badge badge-pendiente" style="font-size:0.75em;">Por vencer</span>{% endif %}
+          </td>
+          <td>{% if d.filename %}<a href="{{ url_for('legajo.document_file', staff_id=staff.id, document_id=d.id) }}" target="_blank">Ver documento</a>{% else %}—{% endif %}</td>
+          <td class="muted">{{ d.created_at[:16] if d.created_at else '' }}{% if d.created_by_name %} · {{ d.created_by_name }}{% endif %}</td>
+          <td>
+            {% if can_edit %}
+            <form method="post" action="{{ url_for('legajo.delete_document', staff_id=staff.id, document_id=d.id) }}" onsubmit="return confirm('¿Eliminar este documento? Esta acción no se puede deshacer.');" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted mt-0" style="margin-bottom:12px;">Todavía no hay documentos en el legajo.</p>
+  {% endif %}
+  {% if can_edit %}
+  {% if documents %}<details><summary class="btn btn-secondary btn-sm" style="cursor:pointer; display:inline-block;">+ Agregar documento</summary><div style="margin-top:10px;">{% endif %}
+  <form method="post" action="{{ url_for('legajo.add_document', staff_id=staff.id) }}" enctype="multipart/form-data" class="form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <label>Tipo de documento *
+        <select name="doc_type" required>
+          <option value="">-- Elige --</option>
+          {% for code, label in document_types %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Detalle (opcional) <input type="text" name="title" placeholder="Ej. Examen de ingreso 2026"></label>
+    </div>
+    <div class="form-row">
+      <label>Fecha de emisión <input type="date" name="issue_date"></label>
+      <label>Vence (si aplica) <input type="date" name="expiry_date"></label>
+      <label>Archivo (foto o PDF) * <input type="file" name="document_file" accept=".png,.jpg,.jpeg,.pdf,.webp,.heic,.heif" class="js-scan-input" required></label>
+    </div>
+    <div class="btn-group"><button type="submit" class="btn btn-secondary btn-sm">Guardar documento</button></div>
+  </form>
+  {% if documents %}</div></details>{% endif %}
+  {% endif %}
+</div>
+{% endblock %}

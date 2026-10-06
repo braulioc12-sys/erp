@@ -53,6 +53,7 @@
           <td>{{ s.cci or '—' }}</td>
           <td>{{ 'Soles' if s.currency == 'S' else 'Dólares' }}</td>
           <td>
+            <a href="{{ url_for('legajo.detail', staff_id=s.id) }}" class="btn btn-secondary btn-sm">Legajo</a>
             {% if can(current_user.roles, 'pagos_personal', 'edit') %}
             <a href="{{ url_for('pagos_personal.staff_edit', staff_id=s.id) }}" class="btn btn-secondary btn-sm">Editar</a>
             {% endif %}

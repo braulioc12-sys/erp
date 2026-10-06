@@ -119,6 +119,14 @@ def local_driver_documents_dir():
     return _local_dir("driver_documents")
 
 
+def local_staff_documents_dir():
+    """Igual que local_driver_documents_dir(), pero para el LEGAJO digital
+    del personal (contratos y documentos de cada trabajador -- 6 oct, pedido
+    de Braulio: "algo similar a Buk"). Carpeta separada de los comprobantes
+    de pago (local_staff_payment_receipts_dir)."""
+    return _local_dir("staff_documents")
+
+
 def local_staff_payment_receipts_dir():
     """Igual que las anteriores, pero para los comprobantes de pago de
     personal (boleta de planilla o recibo por honorarios — 18 sep, módulo
@@ -172,6 +180,10 @@ def _s3_vehicle_documents_prefix():
 
 def _s3_driver_documents_prefix():
     return (current_app.config.get("AWS_S3_DRIVER_DOCUMENTS_PREFIX") or "documentos-conductores").strip("/")
+
+
+def _s3_staff_documents_prefix():
+    return (current_app.config.get("AWS_S3_STAFF_DOCUMENTS_PREFIX") or "legajo-personal").strip("/")
 
 
 def _s3_staff_payment_receipts_prefix():
@@ -475,6 +487,23 @@ def driver_document_url(filename):
     conductor guardado en S3. En disco local, usar
     local_driver_documents_dir() + send_from_directory."""
     return _presigned_url(_s3_driver_documents_prefix(), filename)
+
+
+def save_staff_document(filename, raw_bytes):
+    """Igual que save_driver_document(), pero para un contrato o documento
+    del legajo de una persona del catálogo de Personal."""
+    if using_s3():
+        _put_object(_s3_staff_documents_prefix(), filename, raw_bytes)
+    else:
+        with open(os.path.join(local_staff_documents_dir(), filename), "wb") as f:
+            f.write(raw_bytes)
+
+
+def staff_document_url(filename):
+    """Igual que driver_document_url(), pero para el legajo del personal
+    guardado en S3. En disco local, usar local_staff_documents_dir() +
+    send_from_directory."""
+    return _presigned_url(_s3_staff_documents_prefix(), filename)
 
 
 def save_staff_payment_receipt(filename, raw_bytes):

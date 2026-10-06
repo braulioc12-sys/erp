@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+{% block title %}Legajo del personal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Legajo del personal{% if show_inactive %} — Inactivos{% endif %}</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('pagos_personal.hub') }}" class="btn btn-secondary">← Volver a RRHH</a>
+  </div>
+</div>
+<p class="muted mt-0">Ficha digital de cada colaborador: datos laborales, historial de contratos y documentos, con aviso cuando algo está por vencer. Las personas se agregan en el <a href="{{ url_for('pagos_personal.staff_list') }}">Catálogo de Personal</a>.</p>
+
+{% if alerts %}
+<div class="panel" style="border-left:4px solid #b45309;">
+  <h2 class="mt-0">⚠ Por vencer o vencidos ({{ alerts|length }})</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Persona</th><th>Qué</th><th>Detalle</th><th>Vence</th><th></th></tr></thead>
+      <tbody>
+        {% for a in alerts %}
+        <tr>
+          <td><a href="{{ url_for('legajo.detail', staff_id=a.staff_id) }}">{{ a.name }}</a></td>
+          <td>{{ a.kind }}</td>
+          <td>{{ a.label }}</td>
+          <td>{{ a.expiry }}</td>
+          <td>{% if a.overdue %}<span class="badge badge-cancelado">Vencido</span>{% else %}<span class="badge badge-pendiente">Por vencer</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<form class="filters" method="get">
+  <label>Buscar
+    <input type="text" name="q" value="{{ q }}" placeholder="Nombre o documento">
+  </label>
+  {% if show_inactive %}<input type="hidden" name="ver" value="inactivos">{% endif %}
+  <button class="btn btn-secondary" type="submit">Filtrar</button>
+  {% if show_inactive %}
+  <a href="{{ url_for('legajo.index') }}" class="btn btn-secondary">Ver activos</a>
+  {% else %}
+  <a href="{{ url_for('legajo.index', ver='inactivos') }}" class="btn btn-secondary">Ver inactivos</a>
+  {% endif %}
+</form>
+
+<div class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Nombre</th><th>Cargo / Área</th><th>Ingreso</th><th>Contrato vigente</th><th>Vence</th><th>Docs</th><th></th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td><a href="{{ url_for('legajo.detail', staff_id=r.staff.id) }}">{{ r.staff.name }}</a>
+            {% if r.alerts %}<span class="badge badge-pendiente" style="font-size:0.75em;" title="Tiene contratos o documentos por vencer">⚠ {{ r.alerts|length }}</span>{% endif %}
+          </td>
+          <td>{{ r.contract.position if r.contract and r.contract.position else (r.staff.position or '—') }}{% if r.staff.area %} · {{ r.staff.area }}{% endif %}</td>
+          <td>{{ r.staff.hire_date or '—' }}</td>
+          <td>{{ contract_type_labels.get(r.contract.contract_type, r.contract.contract_type) if r.contract else 'Sin contrato' }}</td>
+          <td>{{ (r.contract.end_date or 'Indefinido') if r.contract else '—' }}</td>
+          <td>{{ r.n_docs }}</td>
+          <td><a href="{{ url_for('legajo.detail', staff_id=r.staff.id) }}" class="btn btn-secondary btn-sm">Abrir legajo</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="table-empty">No hay personas {{ 'inactivas' if show_inactive else 'registradas' }}.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

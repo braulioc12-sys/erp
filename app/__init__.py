@@ -53,6 +53,7 @@ def create_app(config_object=Config):
         integraciones,
         tarifario,
         pagos_personal,
+        legajo,
         descansos,
         actividad,
         reportes,
@@ -81,6 +82,7 @@ def create_app(config_object=Config):
     app.register_blueprint(integraciones.bp)
     app.register_blueprint(tarifario.bp)
     app.register_blueprint(pagos_personal.bp)
+    app.register_blueprint(legajo.bp)
     app.register_blueprint(descansos.bp)
     app.register_blueprint(actividad.bp)
     app.register_blueprint(reportes.bp)

@@ -1772,6 +1772,52 @@ CREATE TABLE IF NOT EXISTS staff (
     currency TEXT NOT NULL DEFAULT 'S' CHECK (currency IN ('S', 'D')),
     status TEXT NOT NULL DEFAULT 'ACTIVO' CHECK (status IN ('ACTIVO', 'INACTIVO')),
     notes TEXT,
+    -- 6 oct, pedido de Braulio ("algo similar a Buk", fase 1: legajo
+    -- digital): datos personales y laborales de la persona -- ver
+    -- app/routes/legajo.py. Fechas en YYYY-MM-DD, todo opcional.
+    hire_date TEXT,
+    termination_date TEXT,
+    birth_date TEXT,
+    phone TEXT,
+    email TEXT,
+    address TEXT,
+    area TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Legajo digital (6 oct, pedido de Braulio, fase 1 de "algo similar a
+-- Buk"): historial de contratos de cada persona del catálogo de Personal --
+-- uno por fila, el más reciente (start_date) es el vigente. Cada contrato
+-- puede traer su archivo (foto/PDF del contrato firmado). Subir un contrato
+-- nuevo SIEMPRE agrega una fila (nunca reemplaza al anterior). salary queda
+-- listo para la fase de planillas.
+CREATE TABLE IF NOT EXISTS staff_contracts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id INTEGER NOT NULL REFERENCES staff(id),
+    contract_type TEXT NOT NULL,
+    start_date TEXT NOT NULL,
+    end_date TEXT,
+    position TEXT,
+    salary REAL,
+    notes TEXT,
+    filename TEXT,
+    created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Documentos del legajo de cada persona (DNI, CV, examen médico, SCTR,
+-- antecedentes, certificados...), varios por persona y por tipo, con fecha
+-- de vencimiento opcional para avisar cuando están por vencer. Igual que
+-- staff_contracts: subir otro agrega, nunca reemplaza.
+CREATE TABLE IF NOT EXISTS staff_documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id INTEGER NOT NULL REFERENCES staff(id),
+    doc_type TEXT NOT NULL,
+    title TEXT,
+    issue_date TEXT,
+    expiry_date TEXT,
+    filename TEXT,
+    created_by INTEGER REFERENCES users(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -1982,6 +2028,8 @@ CREATE INDEX IF NOT EXISTS idx_expenses_vehicle ON expenses(vehicle_id);
 CREATE INDEX IF NOT EXISTS idx_maintenance_vehicle ON maintenance_records(vehicle_id);
 CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_waybills_trip ON waybills(trip_id);
+CREATE INDEX IF NOT EXISTS idx_staff_contracts_staff ON staff_contracts(staff_id);
+CREATE INDEX IF NOT EXISTS idx_staff_documents_staff ON staff_documents(staff_id);
 CREATE INDEX IF NOT EXISTS idx_trip_waybill_files_trip ON trip_waybill_files(trip_id, kind);
 CREATE INDEX IF NOT EXISTS idx_sunat_history_issuer_date ON sunat_waybills_history(issuer, issue_date);
 CREATE INDEX IF NOT EXISTS idx_inspections_vehicle ON inspections(vehicle_id);

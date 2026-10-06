@@ -350,6 +350,16 @@ COLUMN_MIGRATIONS = [
     ("trips", "third_party_unit", "TEXT"),
     ("trips", "third_party_rate", "REAL"),
     ("trips", "third_party_payment_term", "TEXT"),
+    # 6 oct, pedido de Braulio ("algo similar a Buk", fase 1: legajo
+    # digital): datos personales/laborales de cada persona del catálogo de
+    # Personal -- ver el comentario junto a estas columnas en schema.sql.
+    ("staff", "hire_date", "TEXT"),
+    ("staff", "termination_date", "TEXT"),
+    ("staff", "birth_date", "TEXT"),
+    ("staff", "phone", "TEXT"),
+    ("staff", "email", "TEXT"),
+    ("staff", "address", "TEXT"),
+    ("staff", "area", "TEXT"),
     ("trips", "carrier_waybill_number", "TEXT"),
     ("trips", "carrier_waybill_filename", "TEXT"),
     ("trips", "paid", "INTEGER NOT NULL DEFAULT 0"),
