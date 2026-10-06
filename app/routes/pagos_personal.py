@@ -775,9 +775,21 @@ def staff_list():
     )
 
 
+def _company_from_form():
+    """(company_id, nombre) de la empresa elegida en el formulario (6 oct:
+    catálogo `companies`). staff.company (texto) se mantiene igual al nombre
+    para el Telecrédito y los listados."""
+    company_id = request.form.get("company_id", type=int)
+    row = query_one("SELECT id, name FROM companies WHERE id = ?", (company_id,)) if company_id else None
+    return (row["id"], row["name"]) if row else (None, None)
+
+
 def _staff_form_context(staff=None):
     return {
         "staff": staff,
+        "companies": query_all(
+            "SELECT id, name FROM companies WHERE active = 1 OR id = ? ORDER BY name", ((staff["company_id"] or 0) if staff else 0,)
+        ),
         "drivers": query_all("SELECT id, name FROM drivers WHERE status = 'ACTIVO' ORDER BY name"),
         "document_type_choices": DOCUMENT_TYPE_CHOICES,
         "currency_labels": CURRENCY_LABELS,
@@ -804,13 +816,14 @@ def staff_new():
         account_type = request.form.get("account_type") or "AHORROS"
         if account_type not in ACCOUNT_TYPE_LABELS:
             account_type = "AHORROS"
+        company_id, company_name = _company_from_form()
         staff_id = execute(
-            """INSERT INTO staff (name, document_type, document_number, position, company, driver_id,
+            """INSERT INTO staff (name, document_type, document_number, position, company, company_id, driver_id,
                bank_name, account_number, account_type, cci, currency, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 name, request.form.get("document_type") or "DNI", request.form.get("document_number", "").strip() or None,
-                request.form.get("position", "").strip() or None, request.form.get("company", "").strip() or None, driver_id,
+                request.form.get("position", "").strip() or None, company_name, company_id, driver_id,
                 request.form.get("bank_name", "").strip() or None, request.form.get("account_number", "").strip() or None,
                 account_type, request.form.get("cci", "").strip() or None, request.form.get("currency") or "S",
                 request.form.get("notes", "").strip() or None,
@@ -845,12 +858,13 @@ def staff_edit(staff_id):
         account_type = request.form.get("account_type") or "AHORROS"
         if account_type not in ACCOUNT_TYPE_LABELS:
             account_type = "AHORROS"
+        company_id, company_name = _company_from_form()
         execute(
-            """UPDATE staff SET name = ?, document_type = ?, document_number = ?, position = ?, company = ?, driver_id = ?,
+            """UPDATE staff SET name = ?, document_type = ?, document_number = ?, position = ?, company = ?, company_id = ?, driver_id = ?,
                bank_name = ?, account_number = ?, account_type = ?, cci = ?, currency = ?, notes = ? WHERE id = ?""",
             (
                 name, request.form.get("document_type") or "DNI", request.form.get("document_number", "").strip() or None,
-                request.form.get("position", "").strip() or None, request.form.get("company", "").strip() or None, driver_id,
+                request.form.get("position", "").strip() or None, company_name, company_id, driver_id,
                 request.form.get("bank_name", "").strip() or None, request.form.get("account_number", "").strip() or None,
                 account_type, request.form.get("cci", "").strip() or None, request.form.get("currency") or "S",
                 request.form.get("notes", "").strip() or None, staff_id,

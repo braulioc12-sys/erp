@@ -641,6 +641,12 @@ COLUMN_MIGRATIONS = [
     # que el resto de esta lista): se valida en Python, en
     # app/routes/facturacion.py.
     ("invoices", "currency", "TEXT NOT NULL DEFAULT 'SOLES'"),
+    # 6 oct, planilla por empresa: cada persona pertenece a una empresa del
+    # catálogo `companies` y cada periodo de planilla es de UNA empresa. Sin
+    # REFERENCES acá (mismo criterio que el resto de la lista): en una base
+    # nueva schema.sql ya las declara con su FK.
+    ("staff", "company_id", "INTEGER"),
+    ("payroll_periods", "company_id", "INTEGER"),
 ]
 
 
@@ -1687,6 +1693,162 @@ def _seed_payroll_params_postgres(conn):
         )
 
 
+# 6 oct, pedido de Braulio: "los trabajadores pueden pertenecer a diferentes
+# empresas. Hay que crear un catálogo de empresas y cuando se crean las
+# planillas son por empresa". Tres pasos, todos idempotentes (corren en cada
+# arranque, ver init_db):
+#  1) payroll_periods ya existía con "period TEXT NOT NULL UNIQUE" (un
+#     periodo por mes para todos): ahora es único por (empresa, mes), así que
+#     hay que quitar ese UNIQUE. En SQLite no se puede -> se recrea la tabla
+#     (mismo mecanismo que _apply_role_check_migration_sqlite).
+#  2) Las empresas que ya estaban escritas como texto en staff.company pasan
+#     al catálogo y cada persona queda enlazada por company_id.
+#  3) Los periodos que ya existían se asignan a la empresa de la mayoría de
+#     sus boletas (o a la primera / "Empresa principal" si no tienen).
+_PAYROLL_PERIODS_COLS = (
+    "id, company_id, period, status, closed_at, closed_by, created_by, created_at"
+)
+
+
+def _migrate_payroll_periods_per_company_sqlite(conn):
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='payroll_periods'").fetchone()
+    if row and row[0] and "period TEXT NOT NULL UNIQUE" in row[0]:
+        conn.commit()
+        fk_was_on = conn.execute("PRAGMA foreign_keys").fetchone()[0]
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute("PRAGMA legacy_alter_table = ON")
+        try:
+            conn.execute("ALTER TABLE payroll_periods RENAME TO payroll_periods_per_company_old")
+            conn.execute(
+                """CREATE TABLE payroll_periods (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    company_id INTEGER REFERENCES companies(id),
+                    period TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'ABIERTO',
+                    closed_at TEXT,
+                    closed_by INTEGER REFERENCES users(id),
+                    created_by INTEGER REFERENCES users(id),
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )"""
+            )
+            conn.execute(
+                f"""INSERT INTO payroll_periods ({_PAYROLL_PERIODS_COLS})
+                    SELECT {_PAYROLL_PERIODS_COLS} FROM payroll_periods_per_company_old"""
+            )
+            conn.execute("DROP TABLE payroll_periods_per_company_old")
+        finally:
+            conn.execute("PRAGMA legacy_alter_table = OFF")
+            conn.execute(f"PRAGMA foreign_keys = {'ON' if fk_was_on else 'OFF'}")
+    _backfill_companies_sqlite(conn)
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_payroll_periods_company_period ON payroll_periods(company_id, period)"
+    )
+
+
+def _backfill_companies_sqlite(conn):
+    # 2) empresas escritas como texto en Personal -> catálogo
+    texts = conn.execute(
+        """SELECT DISTINCT TRIM(company) FROM staff
+           WHERE company_id IS NULL AND company IS NOT NULL AND TRIM(company) != '' ORDER BY 1"""
+    ).fetchall()
+    for (text,) in texts:
+        row = conn.execute("SELECT id FROM companies WHERE LOWER(name) = LOWER(?)", (text,)).fetchone()
+        cid = row[0] if row else conn.execute("INSERT INTO companies (name) VALUES (?)", (text,)).lastrowid
+        conn.execute(
+            "UPDATE staff SET company_id = ? WHERE company_id IS NULL AND LOWER(TRIM(company)) = LOWER(?)",
+            (cid, text),
+        )
+    # 3) periodos viejos sin empresa
+    for (pid,) in conn.execute("SELECT id FROM payroll_periods WHERE company_id IS NULL ORDER BY id").fetchall():
+        top = conn.execute(
+            """SELECT s.company_id FROM payroll_lines l JOIN staff s ON s.id = l.staff_id
+               WHERE l.period_id = ? AND s.company_id IS NOT NULL
+               GROUP BY s.company_id ORDER BY COUNT(*) DESC, s.company_id LIMIT 1""",
+            (pid,),
+        ).fetchone()
+        if top:
+            cid = top[0]
+        else:
+            row = conn.execute("SELECT id FROM companies ORDER BY id LIMIT 1").fetchone()
+            cid = row[0] if row else conn.execute("INSERT INTO companies (name) VALUES ('Empresa principal')").lastrowid
+        conn.execute("UPDATE payroll_periods SET company_id = ? WHERE id = ?", (cid, pid))
+        # quien ya tenía boleta en ese periodo y no tenía empresa queda en esa
+        conn.execute(
+            """UPDATE staff SET company_id = ?
+               WHERE company_id IS NULL AND id IN (SELECT staff_id FROM payroll_lines WHERE period_id = ?)""",
+            (cid, pid),
+        )
+    conn.execute(
+        """UPDATE staff SET company = (SELECT name FROM companies c WHERE c.id = staff.company_id)
+           WHERE company_id IS NOT NULL AND (company IS NULL OR TRIM(company) = '')"""
+    )
+
+
+def _migrate_payroll_periods_per_company_postgres(conn):
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT con.conname FROM pg_constraint con
+           JOIN pg_class rel ON rel.oid = con.conrelid
+           WHERE rel.relname = 'payroll_periods' AND con.contype = 'u'
+             AND pg_get_constraintdef(con.oid) = 'UNIQUE (period)'"""
+    )
+    for (conname,) in cur.fetchall():
+        cur.execute(f'ALTER TABLE payroll_periods DROP CONSTRAINT "{conname}"')
+    _backfill_companies_postgres(conn)
+    cur.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_payroll_periods_company_period ON payroll_periods(company_id, period)"
+    )
+
+
+def _backfill_companies_postgres(conn):
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT DISTINCT TRIM(company) FROM staff
+           WHERE company_id IS NULL AND company IS NOT NULL AND TRIM(company) != '' ORDER BY 1"""
+    )
+    for (text,) in cur.fetchall():
+        cur.execute("SELECT id FROM companies WHERE LOWER(name) = LOWER(%s)", (text,))
+        row = cur.fetchone()
+        if row:
+            cid = row[0]
+        else:
+            cur.execute("INSERT INTO companies (name) VALUES (%s) RETURNING id", (text,))
+            cid = cur.fetchone()[0]
+        cur.execute(
+            "UPDATE staff SET company_id = %s WHERE company_id IS NULL AND LOWER(TRIM(company)) = LOWER(%s)",
+            (cid, text),
+        )
+    cur.execute("SELECT id FROM payroll_periods WHERE company_id IS NULL ORDER BY id")
+    for (pid,) in cur.fetchall():
+        cur.execute(
+            """SELECT s.company_id FROM payroll_lines l JOIN staff s ON s.id = l.staff_id
+               WHERE l.period_id = %s AND s.company_id IS NOT NULL
+               GROUP BY s.company_id ORDER BY COUNT(*) DESC, s.company_id LIMIT 1""",
+            (pid,),
+        )
+        top = cur.fetchone()
+        if top:
+            cid = top[0]
+        else:
+            cur.execute("SELECT id FROM companies ORDER BY id LIMIT 1")
+            row = cur.fetchone()
+            if row:
+                cid = row[0]
+            else:
+                cur.execute("INSERT INTO companies (name) VALUES ('Empresa principal') RETURNING id")
+                cid = cur.fetchone()[0]
+        cur.execute("UPDATE payroll_periods SET company_id = %s WHERE id = %s", (cid, pid))
+        cur.execute(
+            """UPDATE staff SET company_id = %s
+               WHERE company_id IS NULL AND id IN (SELECT staff_id FROM payroll_lines WHERE period_id = %s)""",
+            (cid, pid),
+        )
+    cur.execute(
+        """UPDATE staff SET company = (SELECT name FROM companies c WHERE c.id = staff.company_id)
+           WHERE company_id IS NOT NULL AND (company IS NULL OR TRIM(company) = '')"""
+    )
+
+
 _PRAGMA_LINE_RE = re.compile(r"^\s*PRAGMA\s[^\n]*;\s*$", re.MULTILINE | re.IGNORECASE)
 _CREATE_TABLE_START_RE = re.compile(r"CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\(")
 _COL_REFERENCES_RE = re.compile(r"\s+REFERENCES\s+(\w+)\s*\(([^)]+)\)")
@@ -1821,6 +1983,7 @@ def init_db(app):
             _backfill_vehicle_owner_issuer_postgres(conn)
             _backfill_trip_waybill_files_postgres(conn)
             _seed_payroll_params_postgres(conn)
+            _migrate_payroll_periods_per_company_postgres(conn)
             conn.commit()
         finally:
             conn.close()
@@ -1848,6 +2011,7 @@ def init_db(app):
         _backfill_vehicle_owner_issuer_sqlite(conn)
         _backfill_trip_waybill_files_sqlite(conn)
         _seed_payroll_params_sqlite(conn)
+        _migrate_payroll_periods_per_company_sqlite(conn)
         conn.commit()
         conn.close()
 

@@ -42,11 +42,14 @@
     <label>Cargo
       <input type="text" name="position" value="{{ staff.position if staff else '' }}" placeholder="Ej. Asistente contable, Chofer, Practicante...">
     </label>
-    <label>Empresa que la emplea (opcional)
-      <input type="text" name="company" value="{{ staff.company if staff else '' }}" placeholder="Ej. Harraso Transport">
+    <label>Empresa que la emplea
+      <select name="company_id">
+        <option value="">— sin empresa —</option>
+        {% for c in companies %}<option value="{{ c.id }}" {{ 'selected' if staff and staff.company_id == c.id }}>{{ c.name }}</option>{% endfor %}
+      </select>
     </label>
   </div>
-  <p class="muted" style="margin-top:-8px;">Si se deja vacío, el archivo de Telecrédito usa el nombre de la empresa dueña de la cuenta que elijas al generarlo — solo hace falta completarlo si esta persona depende de una empresa distinta a esa.</p>
+  <p class="muted" style="margin-top:-8px;">Elígela del <a href="{{ url_for('planilla.companies') }}">catálogo de empresas</a>. La planilla se calcula por empresa, y el archivo de Telecrédito usa su nombre; si no tiene empresa, usa la de la cuenta que elijas al generarlo.</p>
 
   <label>Conductor vinculado (opcional)
     <select name="driver_id">

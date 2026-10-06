@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% block title %}Empresa — {{ c.name }}{% endblock %}
+{% block content %}
+{% set can_edit = can(current_user.roles, 'pagos_personal', 'edit') %}
+<div class="page-header">
+  <h1>Empresa — {{ c.name }}</h1>
+  <div class="page-actions"><a href="{{ url_for('planilla.companies') }}" class="btn btn-secondary">← Empresas</a></div>
+</div>
+<div class="panel">
+  <form method="post" action="{{ url_for('planilla.company_save', company_id=c.id) }}" class="form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <label>Nombre corto <input type="text" name="name" required value="{{ c.name }}" {% if not can_edit %}disabled{% endif %}></label>
+      <label>Razón social <input type="text" name="legal_name" value="{{ c.legal_name or '' }}" {% if not can_edit %}disabled{% endif %}></label>
+      <label>RUC <input type="text" name="ruc" inputmode="numeric" maxlength="11" value="{{ c.ruc or '' }}" {% if not can_edit %}disabled{% endif %}></label>
+    </div>
+    <label>Dirección <input type="text" name="address" value="{{ c.address or '' }}" {% if not can_edit %}disabled{% endif %}></label>
+    {% if can_edit %}<div class="btn-group" style="margin-top:12px;"><button type="submit" class="btn btn-primary">Guardar</button></div>{% endif %}
+  </form>
+</div>
+<div class="panel">
+  <h2 class="mt-0">Personal de esta empresa ({{ staff|length }})</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Persona</th><th>Cargo</th><th>Estado</th><th>En planilla</th></tr></thead>
+    <tbody>
+      {% for s in staff %}
+      <tr><td><a href="{{ url_for('planilla.profile', staff_id=s.id) }}">{{ s.name }}</a></td><td>{{ s.position or '' }}</td><td>{{ s.status }}</td><td>{{ 'Sí' if s.in_payroll else 'No' }}</td></tr>
+      {% else %}
+      <tr><td colspan="4" class="muted">Nadie asignado todavía. Asigna la empresa en el Perfil de planilla o en la ficha de Personal.</td></tr>
+      {% endfor %}
+    </tbody></table></div>
+</div>
+{% endblock %}

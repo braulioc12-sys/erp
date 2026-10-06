@@ -12,15 +12,22 @@
     <a href="{{ url_for('planilla.index') }}" class="btn btn-secondary">← Planilla</a>
   </div>
 </div>
+<form method="get" class="form" style="margin-bottom:12px;">
+  {% if show %}<input type="hidden" name="ver" value="{{ show }}">{% endif %}
+  <div class="form-row" style="align-items:flex-end;">
+    <label>Empresa <select name="empresa" onchange="this.form.submit()"><option value="">Todas</option>{% for c in companies %}<option value="{{ c.id }}" {% if company_filter == c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></label>
+  </div>
+</form>
 <p class="muted mt-0">Marca quién entra en la planilla mensual y completa su régimen y su sistema de pensiones. Los que cobran por recibo por honorarios no entran en planilla.</p>
 <div class="panel">
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Persona</th><th>En planilla</th><th>Régimen</th><th>Pensión</th><th>Sueldo básico</th><th></th></tr></thead>
+      <thead><tr><th>Persona</th><th>Empresa</th><th>En planilla</th><th>Régimen</th><th>Pensión</th><th>Sueldo básico</th><th></th></tr></thead>
       <tbody>
         {% for s in rows %}
         <tr>
           <td><a href="{{ url_for('planilla.profile', staff_id=s.id) }}">{{ s.name }}</a><div class="muted" style="font-size:0.85em;">{{ s.position or '' }}</div></td>
+          <td>{{ s.company_name or '—' }}</td>
           <td>{% if s.in_payroll %}<span class="badge badge-activo">Sí</span>{% else %}<span class="badge badge-inactivo">No</span>{% endif %}</td>
           <td>{{ regime_labels.get(s.labor_regime, s.labor_regime) }}</td>
           <td>{{ pension_labels.get(s.pension_system, s.pension_system) }}{% if s.pension_system == 'AFP' %} — {{ afp_labels.get(s.afp_name, 'falta elegir') }}{% endif %}</td>
@@ -28,7 +35,7 @@
           <td><a href="{{ url_for('planilla.profile', staff_id=s.id) }}" class="btn btn-secondary btn-sm">Abrir</a></td>
         </tr>
         {% else %}
-        <tr><td colspan="6" class="muted">No hay personas.</td></tr>
+        <tr><td colspan="7" class="muted">No hay personas.</td></tr>
         {% endfor %}
       </tbody>
     </table>

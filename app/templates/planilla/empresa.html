@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+{% block title %}Planilla — {{ c.name }}{% endblock %}
+{% block content %}
+{% set can_edit = can(current_user.roles, 'pagos_personal', 'edit') %}
+<div class="page-header">
+  <h1>Planilla — {{ c.name }}</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('planilla.cts_view', company_id=c.id) }}" class="btn btn-secondary">🏦 CTS</a>
+    <a href="{{ url_for('planilla.profiles', empresa=c.id) }}" class="btn btn-secondary">👤 Personal de la empresa</a>
+    <a href="{{ url_for('planilla.index') }}" class="btn btn-secondary">← Empresas</a>
+  </div>
+</div>
+<p class="muted mt-0">{% if c.legal_name %}{{ c.legal_name }} · {% endif %}{% if c.ruc %}RUC {{ c.ruc }} · {% endif %}<strong>{{ in_payroll }}</strong> persona(s) en planilla.</p>
+{% if not c.active %}<div class="panel" style="border-left:4px solid #d97706;"><p style="margin:0;">Esta empresa está desactivada: se conserva su historial pero no se pueden abrir planillas nuevas.</p></div>{% endif %}
+{% if unassigned %}
+<div class="panel" style="border-left:4px solid #d97706;"><p style="margin:0;">⚠ Hay <strong>{{ unassigned }}</strong> persona(s) marcadas en planilla sin empresa. <a href="{{ url_for('planilla.profiles', ver='planilla') }}">Asígnales empresa en el Perfil de planilla</a>.</p></div>
+{% endif %}
+
+<div class="panel">
+  <h2 class="mt-0">Planillas mensuales</h2>
+  {% if can_edit and c.active %}
+  <form method="post" action="{{ url_for('planilla.period_open', company_id=c.id) }}" class="form" style="margin-bottom:12px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row" style="align-items:flex-end;">
+      <label>Abrir el mes <input type="month" name="period" value="{{ default_period }}" required></label>
+      <div><button type="submit" class="btn btn-primary">Abrir planilla del mes</button></div>
+    </div>
+  </form>
+  {% endif %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Mes</th><th>Estado</th><th>Boletas</th><th>Neto a pagar</th><th>Costo empresa</th><th></th></tr></thead>
+    <tbody>
+      {% for p in periods %}
+      <tr>
+        <td><a href="{{ url_for('planilla.period_view', period_id=p.id) }}">{{ label(p.period) }}</a></td>
+        <td>{% if p.status == 'CERRADO' %}<span class="badge badge-ok">Cerrada</span>{% else %}<span class="badge badge-pendiente">Abierta</span>{% endif %}</td>
+        <td>{{ p.people }}</td>
+        <td>S/ {{ '%.2f'|format(p.net) }}</td>
+        <td>S/ {{ '%.2f'|format(p.cost) }}</td>
+        <td><a href="{{ url_for('planilla.period_view', period_id=p.id) }}" class="btn btn-secondary btn-sm">Abrir</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted">Todavía no hay planillas de esta empresa. Abre la del mes arriba.</td></tr>
+      {% endfor %}
+    </tbody></table></div>
+</div>
+{% endblock %}

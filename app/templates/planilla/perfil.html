@@ -18,6 +18,12 @@
       <strong>Entra en la planilla mensual</strong>
     </label>
     <div class="form-row" style="margin-top:12px;">
+      <label>Empresa que la emplea
+        <select name="company_id" {% if not can_edit %}disabled{% endif %}>
+          <option value="">— sin empresa —</option>
+          {% for c in companies %}<option value="{{ c.id }}" {% if staff.company_id == c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+        </select>
+      </label>
       <label>Régimen laboral
         <select name="labor_regime" {% if not can_edit %}disabled{% endif %}>
           {% for code, label in regimes %}<option value="{{ code }}" {% if staff.labor_regime == code %}selected{% endif %}>{{ label }}</option>{% endfor %}

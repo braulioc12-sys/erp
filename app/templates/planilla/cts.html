@@ -2,10 +2,10 @@
 {% block title %}CTS{% endblock %}
 {% block content %}
 <div class="page-header">
-  <h1>CTS</h1>
+  <h1>CTS — {{ c.name }}</h1>
   <div class="page-actions">
-    <a href="{{ url_for('planilla.cts_view', semestre=sem, formato='xlsx') }}" class="btn btn-secondary">⬇ Excel</a>
-    <a href="{{ url_for('planilla.index') }}" class="btn btn-secondary">← Planilla</a>
+    <a href="{{ url_for('planilla.cts_view', company_id=c.id, semestre=sem, formato='xlsx') }}" class="btn btn-secondary">⬇ Excel</a>
+    <a href="{{ url_for('planilla.company_home', company_id=c.id) }}" class="btn btn-secondary">← {{ c.name }}</a>
   </div>
 </div>
 <p class="muted mt-0">Cálculo del semestre para depositar la CTS en el banco de cada trabajador: noviembre–abril (se deposita hasta el 15 de mayo) y mayo–octubre (hasta el 15 de noviembre). Solo régimen general (CTS completa) y MYPE pequeña empresa (mitad); la microempresa no tiene CTS.</p>

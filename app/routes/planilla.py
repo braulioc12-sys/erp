@@ -17,6 +17,9 @@ Esta primera parte trae lo que la planilla necesita antes de calcular:
   app/payroll_calc.py para las reglas y sus límites.
 - CTS (mayo y noviembre): cálculo por semestre para depositar.
 - Préstamos, adelantos y reconocimientos de deuda con cuotas.
+- Empresas (6 oct): catálogo de empresas empleadoras. Cada persona pertenece a
+  una; la planilla se abre POR EMPRESA y mes (cada una con sus boletas, su
+  cierre y su CTS). Los periodos se identifican por id (/planilla/periodo/<id>).
 - Perfil de planilla de cada persona: si entra en planilla, régimen laboral
   (general / MYPE micro / MYPE pequeña), sistema de pensiones (ONP / AFP y
   cuál), sueldo básico, asignación familiar. Cambiar el régimen ajusta los
@@ -90,47 +93,200 @@ def period_label(period):
     return f"{MONTHS_ES[int(period[5:7])].capitalize()} {period[:4]}"
 
 
-def _period_or_404(period):
-    if not _PERIOD_RE.match(period or ""):
-        abort(404)
-    row = query_one("SELECT * FROM payroll_periods WHERE period = ?", (period,))
+def _period_or_404(period_id):
+    row = query_one(
+        """SELECT p.*, c.name AS company_name, c.legal_name AS company_legal_name, c.ruc AS company_ruc,
+                  c.address AS company_address
+           FROM payroll_periods p LEFT JOIN companies c ON c.id = p.company_id WHERE p.id = ?""",
+        (period_id,),
+    )
     if row is None:
         abort(404)
     return row
 
 
+def _company_or_404(company_id):
+    row = query_one("SELECT * FROM companies WHERE id = ?", (company_id,))
+    if row is None:
+        abort(404)
+    return row
+
+
+def _period_url(p):
+    return url_for("planilla.period_view", period_id=p["id"])
+
+
+def _slug(text):
+    return re.sub(r"[^A-Za-z0-9]+", "_", text or "").strip("_").lower() or "empresa"
+
+
+def _unassigned_count():
+    """Personas marcadas en planilla (activas) que no tienen empresa: no entran
+    a ningún cálculo hasta que se les asigne una."""
+    return query_one(
+        "SELECT COUNT(*) AS n FROM staff WHERE in_payroll = 1 AND status = 'ACTIVO' AND company_id IS NULL"
+    )["n"]
+
+
 @bp.route("")
 @permission_required("pagos_personal", "view")
 def index():
+    companies = query_all(
+        """SELECT c.*,
+                  (SELECT COUNT(*) FROM staff s WHERE s.company_id = c.id AND s.in_payroll = 1 AND s.status = 'ACTIVO') AS people,
+                  (SELECT COUNT(*) FROM payroll_periods p WHERE p.company_id = c.id) AS n_periods,
+                  (SELECT p.period FROM payroll_periods p WHERE p.company_id = c.id ORDER BY p.period DESC LIMIT 1) AS last_period,
+                  (SELECT COUNT(*) FROM payroll_periods p WHERE p.company_id = c.id AND p.status = 'ABIERTO') AS open_periods
+           FROM companies c WHERE c.active = 1 ORDER BY c.name"""
+    )
     in_payroll = query_one("SELECT COUNT(*) AS n FROM staff WHERE status = 'ACTIVO' AND in_payroll = 1")["n"]
+    return render_template(
+        "planilla/index.html", companies=companies, in_payroll=in_payroll, unassigned=_unassigned_count(), label=period_label,
+    )
+
+
+# --- Catálogo de empresas ---------------------------------------------------
+
+def _company_form_values(f):
+    return {
+        "name": (f.get("name") or "").strip(),
+        "legal_name": (f.get("legal_name") or "").strip() or None,
+        "ruc": re.sub(r"\s+", "", f.get("ruc") or "") or None,
+        "address": (f.get("address") or "").strip() or None,
+    }
+
+
+def _validate_company(v, exclude_id=None):
+    if not v["name"]:
+        return "Escribe el nombre de la empresa."
+    if v["ruc"] and not re.fullmatch(r"\d{11}", v["ruc"]):
+        return "El RUC debe tener 11 dígitos."
+    for row in query_all("SELECT id, name FROM companies"):
+        if row["id"] != exclude_id and row["name"].strip().lower() == v["name"].lower():
+            return "Ya existe una empresa con ese nombre."
+    return None
+
+
+@bp.route("/empresas")
+@permission_required("pagos_personal", "view")
+def companies():
+    rows = query_all(
+        """SELECT c.*, (SELECT COUNT(*) FROM staff s WHERE s.company_id = c.id AND s.status = 'ACTIVO') AS people,
+                  (SELECT COUNT(*) FROM payroll_periods p WHERE p.company_id = c.id) AS n_periods
+           FROM companies c ORDER BY c.active DESC, c.name"""
+    )
+    return render_template("planilla/empresas.html", rows=rows)
+
+
+@bp.route("/empresas/nueva", methods=["POST"])
+@permission_required("pagos_personal", "edit")
+def company_add():
+    if not validate_csrf():
+        abort(400)
+    v = _company_form_values(request.form)
+    error = _validate_company(v)
+    if error:
+        flash(error, "error")
+        return redirect(url_for("planilla.companies"))
+    cid = execute(
+        "INSERT INTO companies (name, legal_name, ruc, address) VALUES (?, ?, ?, ?)",
+        (v["name"], v["legal_name"], v["ruc"], v["address"]),
+    )
+    log_activity("pagos_personal", "CREAR", f"Empresa: {v['name']}", entity_type="empresa", entity_id=cid,
+                 entity_url=url_for("planilla.company_edit", company_id=cid))
+    flash(f"Empresa «{v['name']}» creada. Asigna a su personal desde el Perfil de planilla o la ficha de Personal.", "success")
+    return redirect(url_for("planilla.companies"))
+
+
+@bp.route("/empresas/<int:company_id>/guardar", methods=["POST"])
+@permission_required("pagos_personal", "edit")
+def company_save(company_id):
+    if not validate_csrf():
+        abort(400)
+    _company_or_404(company_id)
+    v = _company_form_values(request.form)
+    error = _validate_company(v, exclude_id=company_id)
+    if error:
+        flash(error, "error")
+        return redirect(url_for("planilla.company_edit", company_id=company_id))
+    execute("UPDATE companies SET name = ?, legal_name = ?, ruc = ?, address = ? WHERE id = ?",
+            (v["name"], v["legal_name"], v["ruc"], v["address"], company_id))
+    # el texto staff.company (Telecrédito, listados) sigue al nombre del catálogo
+    execute("UPDATE staff SET company = ? WHERE company_id = ?", (v["name"], company_id))
+    log_activity("pagos_personal", "EDITAR", f"Empresa: {v['name']}", entity_type="empresa", entity_id=company_id,
+                 entity_url=url_for("planilla.company_edit", company_id=company_id))
+    flash("Empresa guardada.", "success")
+    return redirect(url_for("planilla.companies"))
+
+
+@bp.route("/empresas/<int:company_id>")
+@permission_required("pagos_personal", "view")
+def company_edit(company_id):
+    c = _company_or_404(company_id)
+    staff = query_all("SELECT id, name, position, in_payroll, status FROM staff WHERE company_id = ? ORDER BY status, name", (company_id,))
+    return render_template("planilla/empresa_form.html", c=c, staff=staff)
+
+
+@bp.route("/empresas/<int:company_id>/alternar", methods=["POST"])
+@permission_required("pagos_personal", "edit")
+def company_toggle(company_id):
+    if not validate_csrf():
+        abort(400)
+    c = _company_or_404(company_id)
+    new = 0 if c["active"] else 1
+    execute("UPDATE companies SET active = ? WHERE id = ?", (new, company_id))
+    log_activity("pagos_personal", "EDITAR", f"Empresa {c['name']}: {'activada' if new else 'desactivada'}",
+                 entity_type="empresa", entity_id=company_id)
+    flash("Empresa activada." if new else "Empresa desactivada: ya no aparece al elegir empresa, su historial se conserva.", "success")
+    return redirect(url_for("planilla.companies"))
+
+
+@bp.route("/empresa/<int:company_id>")
+@permission_required("pagos_personal", "view")
+def company_home(company_id):
+    c = _company_or_404(company_id)
     periods = query_all(
         """SELECT p.*, COUNT(l.id) AS people, COALESCE(SUM(l.net_pay), 0) AS net, COALESCE(SUM(l.employer_cost), 0) AS cost
            FROM payroll_periods p LEFT JOIN payroll_lines l ON l.period_id = p.id
-           GROUP BY p.id ORDER BY p.period DESC"""
+           WHERE p.company_id = ? GROUP BY p.id ORDER BY p.period DESC""",
+        (company_id,),
     )
+    in_payroll = query_one(
+        "SELECT COUNT(*) AS n FROM staff WHERE status = 'ACTIVO' AND in_payroll = 1 AND company_id = ?", (company_id,)
+    )["n"]
     return render_template(
-        "planilla/index.html", in_payroll=in_payroll, periods=periods, label=period_label, default_period=today_str()[:7],
+        "planilla/empresa.html", c=c, periods=periods, in_payroll=in_payroll, label=period_label, default_period=today_str()[:7],
+        unassigned=_unassigned_count(),
     )
 
 
-@bp.route("/periodos/abrir", methods=["POST"])
+@bp.route("/empresa/<int:company_id>/periodos/abrir", methods=["POST"])
 @permission_required("pagos_personal", "edit")
-def period_open():
+def period_open(company_id):
     if not validate_csrf():
         abort(400)
+    c = _company_or_404(company_id)
+    back = redirect(url_for("planilla.company_home", company_id=company_id))
+    if not c["active"]:
+        flash("La empresa está desactivada.", "error")
+        return back
     period = (request.form.get("period") or "").strip()
     if not _PERIOD_RE.match(period):
         flash("Elige el mes de la planilla.", "error")
-        return redirect(url_for("planilla.index"))
-    if query_one("SELECT id FROM payroll_periods WHERE period = ?", (period,)):
-        flash("Ese mes ya está abierto.", "info")
-        return redirect(url_for("planilla.period_view", period=period))
+        return back
+    existing = query_one("SELECT id FROM payroll_periods WHERE company_id = ? AND period = ?", (company_id, period))
+    if existing:
+        flash("Ese mes ya está abierto para esta empresa.", "info")
+        return redirect(url_for("planilla.period_view", period_id=existing["id"]))
     user = getattr(g, "user", None)
-    pid = execute("INSERT INTO payroll_periods (period, created_by) VALUES (?, ?)", (period, user["id"] if user else None))
-    log_activity("pagos_personal", "CREAR", f"Planilla {period_label(period)}: periodo abierto", entity_type="planilla", entity_id=pid,
-                 entity_url=url_for("planilla.period_view", period=period))
-    flash(f"Planilla de {period_label(period)} abierta. Carga las incidencias y los conceptos del mes y luego calcula.", "success")
-    return redirect(url_for("planilla.period_view", period=period))
+    pid = execute(
+        "INSERT INTO payroll_periods (company_id, period, created_by) VALUES (?, ?, ?)",
+        (company_id, period, user["id"] if user else None),
+    )
+    log_activity("pagos_personal", "CREAR", f"Planilla {c['name']} {period_label(period)}: periodo abierto", entity_type="planilla",
+                 entity_id=pid, entity_url=url_for("planilla.period_view", period_id=pid))
+    flash(f"Planilla de {c['name']} — {period_label(period)} abierta. Carga las incidencias y los conceptos del mes y luego calcula.", "success")
+    return redirect(url_for("planilla.period_view", period_id=pid))
 
 
 def _lines_for(period_id):
@@ -141,10 +297,11 @@ def _lines_for(period_id):
     )
 
 
-@bp.route("/periodo/<period>")
+@bp.route("/periodo/<int:period_id>")
 @permission_required("pagos_personal", "view")
-def period_view(period):
-    p = _period_or_404(period)
+def period_view(period_id):
+    p = _period_or_404(period_id)
+    period = p["period"]
     lines = _lines_for(p["id"])
     items = query_all(
         """SELECT i.*, s.name AS staff_name FROM payroll_items i JOIN staff s ON s.id = i.staff_id
@@ -156,9 +313,12 @@ def period_view(period):
         "absence_deduction", "tardiness_deduction", "subsidy_deduction", "other_deduction", "total_deductions", "net_pay",
         "essalud_employer", "employer_cost", "gratification", "gratification_bonus",
     )}
-    people = query_all("SELECT id, name FROM staff WHERE in_payroll = 1 AND status = 'ACTIVO' ORDER BY name")
+    people = query_all(
+        "SELECT id, name FROM staff WHERE in_payroll = 1 AND status = 'ACTIVO' AND company_id = ? ORDER BY name", (p["company_id"],)
+    )
     return render_template(
         "planilla/periodo.html", p=p, lines=lines, items=items, totals=totals, people=people, title=period_label(period),
+        unassigned=_unassigned_count(),
     )
 
 
@@ -167,9 +327,9 @@ def _calculate_period(p):
     params = get_params()
     first = f"{p['period']}-01"
     staff_rows = query_all(
-        """SELECT * FROM staff WHERE in_payroll = 1 AND (status = 'ACTIVO' OR COALESCE(termination_date, '') >= ?)
-           ORDER BY name""",
-        (first,),
+        """SELECT * FROM staff WHERE in_payroll = 1 AND company_id = ?
+           AND (status = 'ACTIVO' OR COALESCE(termination_date, '') >= ?) ORDER BY name""",
+        (p["company_id"], first),
     )
     all_items = query_all("SELECT * FROM payroll_items WHERE period_id = ?", (p["id"],))
     execute("DELETE FROM payroll_lines WHERE period_id = ?", (p["id"],))
@@ -188,37 +348,42 @@ def _calculate_period(p):
     return count
 
 
-@bp.route("/periodo/<period>/calcular", methods=["POST"])
+@bp.route("/periodo/<int:period_id>/calcular", methods=["POST"])
 @permission_required("pagos_personal", "edit")
-def period_calc(period):
+def period_calc(period_id):
     if not validate_csrf():
         abort(400)
-    p = _period_or_404(period)
+    p = _period_or_404(period_id)
+    period = p["period"]
     if p["status"] != "ABIERTO":
         flash("Esta planilla ya está cerrada. Reábrela para recalcular.", "error")
-        return redirect(url_for("planilla.period_view", period=period))
+        return redirect(url_for("planilla.period_view", period_id=p["id"]))
     n = _calculate_period(p)
     if n == 0:
-        flash("No hay personas para calcular: marca a quién entra en planilla en el Perfil de planilla.", "error")
+        flash(f"No hay personas para calcular en {p['company_name']}: marca en el Perfil de planilla a quién entra en planilla y asígnale esta empresa.", "error")
     else:
         warns = query_one("SELECT COUNT(*) AS n FROM payroll_lines WHERE period_id = ? AND warnings IS NOT NULL", (p["id"],))["n"]
         flash(f"Planilla calculada: {n} boleta(s)." + (f" {warns} con avisos para revisar." if warns else ""), "success")
-        log_activity("pagos_personal", "CALCULAR", f"Planilla {period_label(period)}: calculada ({n} boletas)",
-                     entity_type="planilla", entity_id=p["id"], entity_url=url_for("planilla.period_view", period=period))
-    return redirect(url_for("planilla.period_view", period=period))
+        log_activity("pagos_personal", "CALCULAR", f"Planilla {p['company_name']} {period_label(period)}: calculada ({n} boletas)",
+                     entity_type="planilla", entity_id=p["id"], entity_url=url_for("planilla.period_view", period_id=p["id"]))
+    return redirect(url_for("planilla.period_view", period_id=p["id"]))
 
 
-@bp.route("/periodo/<period>/cerrar", methods=["POST"])
+@bp.route("/periodo/<int:period_id>/cerrar", methods=["POST"])
 @permission_required("pagos_personal", "edit")
-def period_close(period):
+def period_close(period_id):
     if not validate_csrf():
         abort(400)
-    p = _period_or_404(period)
-    back = redirect(url_for("planilla.period_view", period=period))
+    p = _period_or_404(period_id)
+    period = p["period"]
+    back = redirect(url_for("planilla.period_view", period_id=p["id"]))
     if p["status"] != "ABIERTO":
         flash("Esta planilla ya está cerrada.", "info")
         return back
-    earlier = query_one("SELECT period FROM payroll_periods WHERE period < ? AND status = 'ABIERTO' ORDER BY period LIMIT 1", (period,))
+    earlier = query_one(
+        "SELECT period FROM payroll_periods WHERE company_id = ? AND period < ? AND status = 'ABIERTO' ORDER BY period LIMIT 1",
+        (p["company_id"], period),
+    )
     if earlier:
         flash(f"Cierra primero la planilla de {period_label(earlier['period'])} (se cierran en orden).", "error")
         return back
@@ -249,8 +414,8 @@ def period_close(period):
         created += 1
     execute("UPDATE payroll_periods SET status = 'CERRADO', closed_at = ?, closed_by = ? WHERE id = ?",
             (now_str(), user["id"] if user else None, p["id"]))
-    log_activity("pagos_personal", "CERRAR", f"Planilla {period_label(period)}: cerrada ({n} boletas, {created} pagos generados)",
-                 entity_type="planilla", entity_id=p["id"], entity_url=url_for("planilla.period_view", period=period))
+    log_activity("pagos_personal", "CERRAR", f"Planilla {p['company_name']} {period_label(period)}: cerrada ({n} boletas, {created} pagos generados)",
+                 entity_type="planilla", entity_id=p["id"], entity_url=url_for("planilla.period_view", period_id=p["id"]))
     msg = f"Planilla cerrada. Se generaron {created} pago(s) de planilla pendientes para el Telecrédito."
     if existing:
         msg += f" {existing} ya existían y no se duplicaron."
@@ -258,51 +423,56 @@ def period_close(period):
     return back
 
 
-@bp.route("/periodo/<period>/reabrir", methods=["POST"])
+@bp.route("/periodo/<int:period_id>/reabrir", methods=["POST"])
 @permission_required("pagos_personal", "edit")
-def period_reopen(period):
+def period_reopen(period_id):
     if not validate_csrf():
         abort(400)
-    p = _period_or_404(period)
-    back = redirect(url_for("planilla.period_view", period=period))
+    p = _period_or_404(period_id)
+    period = p["period"]
+    back = redirect(url_for("planilla.period_view", period_id=p["id"]))
     if p["status"] != "CERRADO":
         return back
-    later = query_one("SELECT period FROM payroll_periods WHERE period > ? AND status = 'CERRADO' LIMIT 1", (period,))
+    later = query_one(
+        "SELECT period FROM payroll_periods WHERE company_id = ? AND period > ? AND status = 'CERRADO' LIMIT 1", (p["company_id"], period)
+    )
     if later:
         flash(f"No se puede reabrir: la planilla de {period_label(later['period'])} ya está cerrada. Reábrela primero.", "error")
         return back
     execute("DELETE FROM staff_loan_payments WHERE period_id = ?", (p["id"],))
     execute("UPDATE payroll_periods SET status = 'ABIERTO', closed_at = NULL, closed_by = NULL WHERE id = ?", (p["id"],))
-    log_activity("pagos_personal", "REABRIR", f"Planilla {period_label(period)}: reabierta", entity_type="planilla", entity_id=p["id"],
-                 entity_url=url_for("planilla.period_view", period=period))
+    log_activity("pagos_personal", "REABRIR", f"Planilla {p['company_name']} {period_label(period)}: reabierta", entity_type="planilla", entity_id=p["id"],
+                 entity_url=url_for("planilla.period_view", period_id=p["id"]))
     flash("Planilla reabierta. Los pagos de planilla que se generaron al cerrar siguen en Pagos: corrígelos o elimínalos allí si cambian los montos.", "info")
     return back
 
 
-@bp.route("/periodo/<period>/eliminar", methods=["POST"])
+@bp.route("/periodo/<int:period_id>/eliminar", methods=["POST"])
 @permission_required("pagos_personal", "edit")
-def period_delete(period):
+def period_delete(period_id):
     if not validate_csrf():
         abort(400)
-    p = _period_or_404(period)
+    p = _period_or_404(period_id)
+    period = p["period"]
     if p["status"] != "ABIERTO":
         flash("Solo se puede eliminar una planilla abierta.", "error")
-        return redirect(url_for("planilla.period_view", period=period))
+        return redirect(url_for("planilla.period_view", period_id=p["id"]))
     execute("DELETE FROM payroll_lines WHERE period_id = ?", (p["id"],))
     execute("DELETE FROM payroll_items WHERE period_id = ?", (p["id"],))
     execute("DELETE FROM payroll_periods WHERE id = ?", (p["id"],))
-    log_activity("pagos_personal", "ELIMINAR", f"Planilla {period_label(period)}: periodo eliminado")
+    log_activity("pagos_personal", "ELIMINAR", f"Planilla {p['company_name']} {period_label(period)}: periodo eliminado")
     flash("Periodo eliminado.", "success")
-    return redirect(url_for("planilla.index"))
+    return redirect(url_for("planilla.company_home", company_id=p["company_id"]))
 
 
-@bp.route("/periodo/<period>/conceptos", methods=["POST"])
+@bp.route("/periodo/<int:period_id>/conceptos", methods=["POST"])
 @permission_required("pagos_personal", "edit")
-def item_add(period):
+def item_add(period_id):
     if not validate_csrf():
         abort(400)
-    p = _period_or_404(period)
-    back = redirect(url_for("planilla.period_view", period=period))
+    p = _period_or_404(period_id)
+    period = p["period"]
+    back = redirect(url_for("planilla.period_view", period_id=p["id"]))
     if p["status"] != "ABIERTO":
         flash("La planilla está cerrada.", "error")
         return back
@@ -311,6 +481,9 @@ def item_add(period):
     kind = f.get("kind")
     concept = (f.get("concept") or "").strip()
     amount = parse_float(f.get("amount"), None)
+    if staff is not None and staff["company_id"] != p["company_id"]:
+        flash("Esa persona no pertenece a la empresa de esta planilla.", "error")
+        return back
     if staff is None or kind not in ("INGRESO", "DESCUENTO") or not concept or amount is None or amount <= 0:
         flash("Elige la persona, el tipo, escribe el concepto y un monto mayor a cero.", "error")
         return back
@@ -320,18 +493,19 @@ def item_add(period):
            VALUES (?, ?, ?, ?, ?, ?, ?)""",
         (p["id"], staff["id"], kind, concept, amount, 0 if (kind == "INGRESO" and f.get("nontaxable")) else 1, user["id"] if user else None),
     )
-    log_activity("pagos_personal", "CREAR", f"Planilla {period_label(period)} — {'ingreso' if kind == 'INGRESO' else 'descuento'} {concept} S/ {amount:.2f}: {staff['name']}",
-                 entity_type="planilla", entity_id=p["id"], entity_url=url_for("planilla.period_view", period=period))
+    log_activity("pagos_personal", "CREAR", f"Planilla {p['company_name']} {period_label(period)} — {'ingreso' if kind == 'INGRESO' else 'descuento'} {concept} S/ {amount:.2f}: {staff['name']}",
+                 entity_type="planilla", entity_id=p["id"], entity_url=url_for("planilla.period_view", period_id=p["id"]))
     flash("Concepto agregado. Vuelve a calcular para ver el efecto.", "success")
     return back
 
 
-@bp.route("/periodo/<period>/conceptos/<int:item_id>/eliminar", methods=["POST"])
+@bp.route("/periodo/<int:period_id>/conceptos/<int:item_id>/eliminar", methods=["POST"])
 @permission_required("pagos_personal", "edit")
-def item_delete(period, item_id):
+def item_delete(period_id, item_id):
     if not validate_csrf():
         abort(400)
-    p = _period_or_404(period)
+    p = _period_or_404(period_id)
+    period = p["period"]
     row = query_one("SELECT * FROM payroll_items WHERE id = ? AND period_id = ?", (item_id, p["id"]))
     if row is None:
         abort(404)
@@ -340,22 +514,23 @@ def item_delete(period, item_id):
     else:
         execute("DELETE FROM payroll_items WHERE id = ?", (item_id,))
         flash("Concepto eliminado. Vuelve a calcular.", "success")
-    return redirect(url_for("planilla.period_view", period=period))
+    return redirect(url_for("planilla.period_view", period_id=p["id"]))
 
 
 def _boleta_context(p, line):
     staff = query_one("SELECT * FROM staff WHERE id = ?", (line["staff_id"],))
     items = query_all("SELECT * FROM payroll_items WHERE period_id = ? AND staff_id = ? ORDER BY id", (p["id"], line["staff_id"]))
     return {
-        "p": p, "l": line, "s": staff, "extra": items, "title": period_label(p["period"]), "regime_labels": REGIME_LABELS,
+        "p": p, "l": line, "s": staff, "extra": items, "company": p, "title": period_label(p["period"]), "regime_labels": REGIME_LABELS,
         "pension_labels": PENSION_LABELS,
     }
 
 
-@bp.route("/periodo/<period>/boleta/<int:staff_id>")
+@bp.route("/periodo/<int:period_id>/boleta/<int:staff_id>")
 @permission_required("pagos_personal", "view")
-def boleta(period, staff_id):
-    p = _period_or_404(period)
+def boleta(period_id, staff_id):
+    p = _period_or_404(period_id)
+    period = p["period"]
     line = query_one(
         "SELECT l.* FROM payroll_lines l WHERE l.period_id = ? AND l.staff_id = ?", (p["id"], staff_id)
     )
@@ -364,10 +539,11 @@ def boleta(period, staff_id):
     return render_template("planilla/boleta.html", boletas=[_boleta_context(p, line)])
 
 
-@bp.route("/periodo/<period>/boletas")
+@bp.route("/periodo/<int:period_id>/boletas")
 @permission_required("pagos_personal", "view")
-def boletas(period):
-    p = _period_or_404(period)
+def boletas(period_id):
+    p = _period_or_404(period_id)
+    period = p["period"]
     lines = query_all(
         """SELECT l.* FROM payroll_lines l JOIN staff s ON s.id = l.staff_id WHERE l.period_id = ? ORDER BY s.name""", (p["id"],)
     )
@@ -376,10 +552,11 @@ def boletas(period):
     return render_template("planilla/boleta.html", boletas=[_boleta_context(p, l) for l in lines])
 
 
-@bp.route("/periodo/<period>/excel")
+@bp.route("/periodo/<int:period_id>/excel")
 @permission_required("pagos_personal", "view")
-def period_excel(period):
-    p = _period_or_404(period)
+def period_excel(period_id):
+    p = _period_or_404(period_id)
+    period = p["period"]
     lines = _lines_for(p["id"])
     wb = Workbook()
     ws = wb.active
@@ -395,7 +572,7 @@ def period_excel(period):
         ("Total descuentos", "total_deductions"), ("NETO A PAGAR", "net_pay"), ("EsSalud empleador", "essalud_employer"),
         ("Costo empresa", "employer_cost"),
     ]
-    ws["A1"] = f"Planilla {period_label(period)} ({p['status'].lower()})"
+    ws["A1"] = f"Planilla {p['company_name']} — {period_label(period)} ({p['status'].lower()})"
     ws["A1"].font = Font(bold=True, size=14, color="1D4ED8")
     for c, (h, _k) in enumerate(heads, start=1):
         cell = ws.cell(row=3, column=c, value=h)
@@ -417,8 +594,9 @@ def period_excel(period):
     ws.freeze_panes = "B4"
     buf = io.BytesIO()
     wb.save(buf)
-    log_activity("pagos_personal", "EXPORTAR", f"Planilla {period_label(period)}: Excel", entity_type="planilla", entity_id=p["id"])
-    return Response(buf.getvalue(), mimetype=XLSX_MIME, headers={"Content-Disposition": f'attachment; filename="planilla_{period}.xlsx"'})
+    log_activity("pagos_personal", "EXPORTAR", f"Planilla {p['company_name']} {period_label(period)}: Excel", entity_type="planilla", entity_id=p["id"])
+    fname = f"planilla_{_slug(p['company_name'])}_{period}.xlsx"
+    return Response(buf.getvalue(), mimetype=XLSX_MIME, headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
 
 # --- Préstamos, adelantos y reconocimientos de deuda -----------------------
@@ -428,7 +606,8 @@ def period_excel(period):
 def loans():
     show = request.args.get("ver", "")
     rows = query_all(
-        "SELECT l.*, s.name AS staff_name FROM staff_loans l JOIN staff s ON s.id = l.staff_id ORDER BY l.id DESC"
+        """SELECT l.*, s.name AS staff_name, s.company AS staff_company FROM staff_loans l
+           JOIN staff s ON s.id = l.staff_id ORDER BY l.id DESC"""
     )
     out = []
     for r in rows:
@@ -522,7 +701,15 @@ def loan_file(loan_id):
 
 @bp.route("/cts")
 @permission_required("pagos_personal", "view")
-def cts_view():
+def cts_redirect():
+    """Enlace viejo: la CTS ahora es por empresa."""
+    return redirect(url_for("planilla.index"))
+
+
+@bp.route("/empresa/<int:company_id>/cts")
+@permission_required("pagos_personal", "view")
+def cts_view(company_id):
+    comp = _company_or_404(company_id)
     today = date.today()
     sem = request.args.get("semestre") or (f"{today.year}-05" if today.month <= 8 else f"{today.year}-11")
     if not re.match(r"^\d{4}-(05|11)$", sem):
@@ -530,7 +717,7 @@ def cts_view():
     year, dm = int(sem[:4]), int(sem[5:7])
     params = get_params()
     rows, total = [], 0.0
-    for st in query_all("SELECT * FROM staff WHERE in_payroll = 1 ORDER BY name"):
+    for st in query_all("SELECT * FROM staff WHERE in_payroll = 1 AND company_id = ? ORDER BY name", (company_id,)):
         res = cts_for(st, dm, year, params, effective_salary)
         if res:
             rows.append({"staff": st, **res})
@@ -540,7 +727,7 @@ def cts_view():
         ws = wb.active
         ws.title = "CTS"
         heads = ["Persona", "DNI", "Régimen", "Desde", "Hasta", "Meses", "Días", "Sueldo básico", "Asig. familiar", "Gratificación (base)", "Remuneración computable", "CTS a depositar"]
-        ws["A1"] = f"CTS {'noviembre ' + str(year - 1) + ' – abril ' + str(year) if dm == 5 else 'mayo – octubre ' + str(year)} (depósito 15 de {'mayo' if dm == 5 else 'noviembre'} {year})"
+        ws["A1"] = f"{comp['name']} — CTS {'noviembre ' + str(year - 1) + ' – abril ' + str(year) if dm == 5 else 'mayo – octubre ' + str(year)} (depósito 15 de {'mayo' if dm == 5 else 'noviembre'} {year})"
         ws["A1"].font = Font(bold=True, size=13, color="1D4ED8")
         for c, h in enumerate(heads, start=1):
             cell = ws.cell(row=3, column=c, value=h)
@@ -556,9 +743,12 @@ def cts_view():
             ws.column_dimensions[ws.cell(row=3, column=c).column_letter].width = 18 if c > 1 else 30
         buf = io.BytesIO()
         wb.save(buf)
-        return Response(buf.getvalue(), mimetype=XLSX_MIME, headers={"Content-Disposition": f'attachment; filename="cts_{sem}.xlsx"'})
+        fname = f"cts_{_slug(comp['name'])}_{sem}.xlsx"
+        return Response(buf.getvalue(), mimetype=XLSX_MIME, headers={"Content-Disposition": f'attachment; filename="{fname}"'})
     options = [f"{y}-{m}" for y in (year - 1, year, year + 1) for m in ("05", "11")]
-    return render_template("planilla/cts.html", sem=sem, year=year, dm=dm, rows=rows, total=r2(total), options=options)
+    return render_template("planilla/cts.html", c=comp, sem=sem, year=year, dm=dm, rows=rows, total=r2(total), options=options)
+
+
 @bp.route("/parametros", methods=["GET", "POST"])
 @permission_required("pagos_personal", "edit")
 def params_view():
@@ -593,11 +783,18 @@ def params_view():
 @permission_required("pagos_personal", "view")
 def profiles():
     show = request.args.get("ver", "")
-    rows = query_all("SELECT * FROM staff WHERE status = 'ACTIVO' ORDER BY in_payroll DESC, name")
+    company_filter = request.args.get("empresa", type=int)
+    rows = query_all(
+        """SELECT s.*, c.name AS company_name FROM staff s LEFT JOIN companies c ON c.id = s.company_id
+           WHERE s.status = 'ACTIVO' ORDER BY s.in_payroll DESC, s.name"""
+    )
     if show == "planilla":
         rows = [r for r in rows if r["in_payroll"]]
+    if company_filter:
+        rows = [r for r in rows if r["company_id"] == company_filter]
+    companies_all = query_all("SELECT id, name FROM companies WHERE active = 1 ORDER BY name")
     return render_template(
-        "planilla/personal.html", rows=rows, show=show, regime_labels=REGIME_LABELS, pension_labels=PENSION_LABELS,
+        "planilla/personal.html", rows=rows, show=show, company_filter=company_filter, companies=companies_all, regime_labels=REGIME_LABELS, pension_labels=PENSION_LABELS,
         afp_labels=AFP_LABELS, salary_of=effective_salary,
     )
 
@@ -607,8 +804,11 @@ def profiles():
 def profile(staff_id):
     staff = _get_staff_or_404(staff_id)
     contract = current_contract(staff_id)
+    companies_all = query_all(
+        "SELECT id, name FROM companies WHERE active = 1 OR id = ? ORDER BY name", (staff["company_id"] or 0,)
+    )
     return render_template(
-        "planilla/perfil.html", staff=staff, regimes=REGIMES, pension_systems=PENSION_SYSTEMS, afp_names=AFP_NAMES,
+        "planilla/perfil.html", staff=staff, companies=companies_all, regimes=REGIMES, pension_systems=PENSION_SYSTEMS, afp_names=AFP_NAMES,
         commission_types=COMMISSION_TYPES, contract=contract, salary=effective_salary(staff),
         regime_vacation_days=REGIME_VACATION_DAYS,
     )
@@ -642,6 +842,14 @@ def profile_save(staff_id):
     prior_withheld = parse_float(f.get("fifth_prior_withheld"), 0) or 0
     if prior_income < 0 or prior_withheld < 0:
         errors.append("Los montos de 5ta categoría no pueden ser negativos.")
+    company_id = f.get("company_id", type=int)
+    company = query_one("SELECT * FROM companies WHERE id = ?", (company_id,)) if company_id else None
+    if company_id and company is None:
+        errors.append("La empresa elegida no existe.")
+    elif company is not None and not company["active"] and company["id"] != staff["company_id"]:
+        errors.append("La empresa elegida está desactivada.")
+    if f.get("in_payroll") and company is None:
+        errors.append("Para que entre en planilla, elige la empresa a la que pertenece.")
     if errors:
         for e in errors:
             flash(e, "error")
@@ -652,11 +860,12 @@ def profile_save(staff_id):
     execute(
         """UPDATE staff SET in_payroll = ?, labor_regime = ?, pension_system = ?, afp_name = ?,
            afp_commission_type = ?, cuspp = ?, basic_salary = ?, family_allowance = ?, fifth_prior_income = ?,
-           fifth_prior_withheld = ?, vacation_days_per_year = ? WHERE id = ?""",
+           fifth_prior_withheld = ?, vacation_days_per_year = ?, company_id = ?, company = ? WHERE id = ?""",
         (
             1 if f.get("in_payroll") else 0, regime, pension, afp if pension == "AFP" else None, commission,
             (f.get("cuspp") or "").strip() or None, salary, 1 if f.get("family_allowance") else 0,
-            prior_income, prior_withheld, vac_days, staff_id,
+            prior_income, prior_withheld, vac_days, company["id"] if company else None,
+            company["name"] if company else None, staff_id,
         ),
     )
     log_activity(

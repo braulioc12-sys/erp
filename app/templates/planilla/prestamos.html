@@ -42,11 +42,11 @@ function s(){w.style.display=k.value==='ADELANTO'?'none':'';} k.addEventListener
 
 <div class="panel">
   <div class="table-wrap"><table>
-    <thead><tr><th>Persona</th><th>Tipo</th><th>Concepto</th><th>Monto</th><th>Cuotas</th><th>Desde</th><th>Descontado</th><th>Saldo</th><th>Estado</th><th></th></tr></thead>
+    <thead><tr><th>Persona</th><th>Empresa</th><th>Tipo</th><th>Concepto</th><th>Monto</th><th>Cuotas</th><th>Desde</th><th>Descontado</th><th>Saldo</th><th>Estado</th><th></th></tr></thead>
     <tbody>
       {% for x in loans %}{% set r = x.row %}
       <tr>
-        <td>{{ r.staff_name }}</td><td>{{ kind_labels.get(r.kind, r.kind) }}</td><td>{{ r.concept or '' }}{% if r.filename %} <a href="{{ url_for('planilla.loan_file', loan_id=r.id) }}" target="_blank">sustento</a>{% endif %}</td>
+        <td>{{ r.staff_name }}</td><td>{{ r.staff_company or '—' }}</td><td>{{ kind_labels.get(r.kind, r.kind) }}</td><td>{{ r.concept or '' }}{% if r.filename %} <a href="{{ url_for('planilla.loan_file', loan_id=r.id) }}" target="_blank">sustento</a>{% endif %}</td>
         <td>S/ {{ '%.2f'|format(r.amount) }}</td><td>{{ r.installments }} × {{ '%.2f'|format(r.installment_amount) }}</td><td>{{ label(r.start_period) }}</td>
         <td>{{ '%.2f'|format(x.paid) }}</td><td><strong>{{ '%.2f'|format(x.remaining) }}</strong></td>
         <td>{% if x.state == 'ACTIVO' %}<span class="badge badge-pendiente">Vigente</span>{% elif x.state == 'PAGADO' %}<span class="badge badge-ok">Pagado</span>{% else %}<span class="badge badge-cancelado">Anulado</span>{% endif %}</td>
@@ -55,7 +55,7 @@ function s(){w.style.display=k.value==='ADELANTO'?'none':'';} k.addEventListener
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="btn btn-danger btn-sm">Anular</button></form>{% endif %}</td>
       </tr>
       {% else %}
-      <tr><td colspan="10" class="muted">No hay préstamos vigentes.</td></tr>
+      <tr><td colspan="11" class="muted">No hay préstamos vigentes.</td></tr>
       {% endfor %}
     </tbody></table></div>
 </div>

@@ -1,0 +1,35 @@
+warning: in the working copy of 'app/db.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/routes/guias.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/schema.sql', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/templates/guias/detail.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/templates/guias/list.html', LF will be replaced by CRLF the next time Git touches it
+ 0001-rutas-editar-y-galones.patch                  |  258 [31m----[m
+ 0002-rutas-usar-default-fuel-amount.patch          |  128 [31m--[m
+ 0003-rutas-eliminar-editar-y-combustible.patch     |  204 [31m---[m
+ 0004-rutas-tabla-mas-ancha.patch                   |   25 [31m-[m
+ 0005-rutas-buscador-y-boton-agregar.patch          |  153 [31m---[m
+ 0006-tefacturo-harraso-brms.patch                  |  497 [31m--------[m
+ 0007-tefacturo-api-real.patch                      | 1330 [31m-------------------[m
+ 0008-tefacturo-real-repo.patch                     | 1331 [31m--------------------[m
+ 0009-tefacturo-unidad-medida-servicio.patch        |   31 [31m-[m
+ 0010-tefacturo-item-tarifa-cero.patch              |   48 [31m-[m
+ 0011-tefacturo-guia-codigo-almacen.patch           |  196 [31m---[m
+ 0012-tefacturo-pdf-texto-plano.patch               |   78 [31m--[m
+ 0013-tefacturo-comprobante-ya-existe.patch         |  150 [31m---[m
+ 0014-tefacturo-detraccion.patch                    |  292 [31m-----[m
+ 0015-flota-documentos-y-filtros.patch              |  421 [31m-------[m
+ 0016-comisiones-fix-postgres-groupby.patch         |   26 [31m-[m
+ 0017-guia-transportista-fix-esquema-postman.patch  |  226 [31m----[m
+ ...ransportista-fix-tipo-documento-conductor.patch |   73 [31m--[m
+ 0019-panel-flota-liquidaciones-rrhh.patch          |  436 [31m-------[m
+ 0020-liquidaciones-combustible-ajuste.patch        |  345 [31m-----[m
+ 0021-modulo-rrhh.patch                             |  366 [31m------[m
+ 0022-rrhh-exportar-excel.patch                     |  244 [31m----[m
+ 0023-recorte-tipo-escaner.patch                    |  584 [31m---------[m
+ 0024-codigo-foto-contenedor.patch                  |  405 [31m------[m
+ app/db.py                                          |    5 [32m+[m
+ app/routes/guias.py                                |   85 [32m+[m[31m-[m
+ app/schema.sql                                     |    8 [32m+[m
+ app/templates/guias/detail.html                    |   27 [32m+[m
+ app/templates/guias/list.html                      |   35 [32m+[m[31m-[m
+ 29 files changed, 148 insertions(+), 7859 deletions(-)

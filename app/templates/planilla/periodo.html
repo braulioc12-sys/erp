@@ -4,37 +4,40 @@
 {% set can_edit = can(current_user.roles, 'pagos_personal', 'edit') %}
 {% set open = p.status == 'ABIERTO' %}
 <div class="page-header">
-  <h1>Planilla de {{ title }} {% if open %}<span class="badge badge-pendiente" style="font-size:0.5em;">Abierta</span>{% else %}<span class="badge badge-ok" style="font-size:0.5em;">Cerrada</span>{% endif %}</h1>
+  <h1>Planilla {{ p.company_name or 'sin empresa' }} — {{ title }} {% if open %}<span class="badge badge-pendiente" style="font-size:0.5em;">Abierta</span>{% else %}<span class="badge badge-ok" style="font-size:0.5em;">Cerrada</span>{% endif %}</h1>
   <div class="page-actions">
     {% if lines %}
-    <a href="{{ url_for('planilla.boletas', period=p.period) }}" target="_blank" class="btn btn-secondary">🖨 Todas las boletas</a>
-    <a href="{{ url_for('planilla.period_excel', period=p.period) }}" class="btn btn-secondary">⬇ Excel</a>
+    <a href="{{ url_for('planilla.boletas', period_id=p.id) }}" target="_blank" class="btn btn-secondary">🖨 Todas las boletas</a>
+    <a href="{{ url_for('planilla.period_excel', period_id=p.id) }}" class="btn btn-secondary">⬇ Excel</a>
     {% endif %}
-    <a href="{{ url_for('planilla.index') }}" class="btn btn-secondary">← Planilla</a>
+    <a href="{{ url_for('planilla.company_home', company_id=p.company_id) }}" class="btn btn-secondary">← {{ p.company_name }}</a>
   </div>
 </div>
+{% if unassigned %}
+<div class="panel" style="border-left:4px solid #d97706;"><p style="margin:0;">⚠ Hay <strong>{{ unassigned }}</strong> persona(s) marcadas en planilla que no tienen empresa y no entran en ningún cálculo. <a href="{{ url_for('planilla.profiles', ver='planilla') }}">Asígnales empresa en el Perfil de planilla</a>.</p></div>
+{% endif %}
 
 {% if can_edit %}
 <div class="panel">
   <div class="btn-group">
     {% if open %}
-    <form method="post" action="{{ url_for('planilla.period_calc', period=p.period) }}" style="display:inline;">
+    <form method="post" action="{{ url_for('planilla.period_calc', period_id=p.id) }}" style="display:inline;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-primary">{{ 'Recalcular planilla' if lines else 'Calcular planilla' }}</button>
     </form>
     {% if lines %}
-    <form method="post" action="{{ url_for('planilla.period_close', period=p.period) }}" style="display:inline;" onsubmit="return confirm('¿Cerrar la planilla de {{ title }}? Quedan fijos los montos, se registran las cuotas de préstamos y se generan los pagos de planilla pendientes.');">
+    <form method="post" action="{{ url_for('planilla.period_close', period_id=p.id) }}" style="display:inline;" onsubmit="return confirm('¿Cerrar la planilla de {{ title }}? Quedan fijos los montos, se registran las cuotas de préstamos y se generan los pagos de planilla pendientes.');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-secondary">Cerrar planilla y generar pagos</button>
     </form>
     {% endif %}
-    <form method="post" action="{{ url_for('planilla.period_delete', period=p.period) }}" style="display:inline;" onsubmit="return confirm('¿Eliminar este periodo abierto con sus boletas y conceptos?');">
+    <form method="post" action="{{ url_for('planilla.period_delete', period_id=p.id) }}" style="display:inline;" onsubmit="return confirm('¿Eliminar este periodo abierto con sus boletas y conceptos?');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-danger">Eliminar periodo</button>
     </form>
     {% else %}
     <a href="{{ url_for('pagos_personal.hub') }}" class="btn btn-secondary">Ir a Pagos de planilla (Telecrédito)</a>
-    <form method="post" action="{{ url_for('planilla.period_reopen', period=p.period) }}" style="display:inline;" onsubmit="return confirm('¿Reabrir la planilla? Los pagos ya generados se quedan en Pagos y tendrás que corregirlos allí.');">
+    <form method="post" action="{{ url_for('planilla.period_reopen', period_id=p.id) }}" style="display:inline;" onsubmit="return confirm('¿Reabrir la planilla? Los pagos ya generados se quedan en Pagos y tendrás que corregirlos allí.');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-secondary">Reabrir</button>
     </form>
@@ -63,7 +66,7 @@
         <td>{{ '%.2f'|format(l.loan_deduction + l.advance_deduction + l.debt_deduction) }}</td>
         <td>{{ '%.2f'|format(l.other_deduction) }}</td>
         <td><strong {% if l.net_pay < 0 %}style="color:#b42318;"{% endif %}>{{ '%.2f'|format(l.net_pay) }}</strong></td>
-        <td><a href="{{ url_for('planilla.boleta', period=p.period, staff_id=l.staff_id) }}" target="_blank" class="btn btn-secondary btn-sm">Boleta</a></td>
+        <td><a href="{{ url_for('planilla.boleta', period_id=p.id, staff_id=l.staff_id) }}" target="_blank" class="btn btn-secondary btn-sm">Boleta</a></td>
       </tr>
       {% if l.warnings %}<tr><td colspan="10" style="color:#b45309; font-size:0.85em; padding-top:0;">⚠ {{ l.staff_name }}: {{ l.warnings }}</td></tr>{% endif %}
       {% endfor %}
@@ -84,7 +87,7 @@
 <div class="panel">
   <h2 class="mt-0">Comisiones, bonos y descuentos del mes</h2>
   {% if open and can_edit %}
-  <form method="post" action="{{ url_for('planilla.item_add', period=p.period) }}" class="form">
+  <form method="post" action="{{ url_for('planilla.item_add', period_id=p.id) }}" class="form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="form-row">
       <label>Persona
@@ -109,7 +112,7 @@
         <td>{{ 'Ingreso' if i.kind == 'INGRESO' else 'Descuento' }}{% if i.kind == 'INGRESO' and not i.taxable %} (no afecto){% endif %}</td>
         <td>{{ i.concept }}</td><td>S/ {{ '%.2f'|format(i.amount) }}</td>
         <td>{% if open and can_edit %}
-          <form method="post" action="{{ url_for('planilla.item_delete', period=p.period, item_id=i.id) }}" style="display:inline;" onsubmit="return confirm('¿Eliminar este concepto?');">
+          <form method="post" action="{{ url_for('planilla.item_delete', period_id=p.id, item_id=i.id) }}" style="display:inline;" onsubmit="return confirm('¿Eliminar este concepto?');">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="btn btn-danger btn-sm">Eliminar</button></form>{% endif %}</td>
       </tr>
       {% else %}

@@ -5,44 +5,35 @@
 <div class="page-header">
   <h1>Planilla</h1>
   <div class="page-actions">
+    <a href="{{ url_for('planilla.companies') }}" class="btn btn-secondary">🏢 Catálogo de empresas</a>
     <a href="{{ url_for('pagos_personal.hub') }}" class="btn btn-secondary">← Volver a RRHH</a>
   </div>
 </div>
-<p class="muted mt-0">Cada mes: abre el periodo, carga comisiones y descuentos, calcula, revisa las boletas y cierra. Antes completa el perfil de cada persona y las incidencias del mes.</p>
+<p class="muted mt-0">La planilla se hace por empresa: elige la empresa, abre el mes, carga comisiones y descuentos, calcula, revisa las boletas y cierra. Antes asigna a cada persona su empresa y completa su perfil y las incidencias del mes.</p>
 
-<div class="panel">
-  <h2 class="mt-0">Planillas mensuales</h2>
-  {% if can_edit %}
-  <form method="post" action="{{ url_for('planilla.period_open') }}" class="form" style="margin-bottom:12px;">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <div class="form-row" style="align-items:flex-end;">
-      <label>Abrir el mes <input type="month" name="period" value="{{ default_period }}" required></label>
-      <div><button type="submit" class="btn btn-primary">Abrir planilla del mes</button></div>
-    </div>
-  </form>
-  {% endif %}
-  <div class="table-wrap"><table>
-    <thead><tr><th>Mes</th><th>Estado</th><th>Boletas</th><th>Neto a pagar</th><th>Costo empresa</th><th></th></tr></thead>
-    <tbody>
-      {% for p in periods %}
-      <tr>
-        <td><a href="{{ url_for('planilla.period_view', period=p.period) }}">{{ label(p.period) }}</a></td>
-        <td>{% if p.status == 'CERRADO' %}<span class="badge badge-ok">Cerrada</span>{% else %}<span class="badge badge-pendiente">Abierta</span>{% endif %}</td>
-        <td>{{ p.people }}</td>
-        <td>S/ {{ '%.2f'|format(p.net) }}</td>
-        <td>S/ {{ '%.2f'|format(p.cost) }}</td>
-        <td><a href="{{ url_for('planilla.period_view', period=p.period) }}" class="btn btn-secondary btn-sm">Abrir</a></td>
-      </tr>
-      {% else %}
-      <tr><td colspan="6" class="muted">Todavía no hay planillas. Abre la del mes arriba.</td></tr>
-      {% endfor %}
-    </tbody></table></div>
+{% if unassigned %}
+<div class="panel" style="border-left:4px solid #d97706;"><p style="margin:0;">⚠ Hay <strong>{{ unassigned }}</strong> persona(s) marcadas en planilla sin empresa: no entran en ningún cálculo. <a href="{{ url_for('planilla.profiles', ver='planilla') }}">Asígnales empresa en el Perfil de planilla</a>.</p></div>
+{% endif %}
+
+<h2>Empresas</h2>
+<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:16px;">
+  {% for c in companies %}
+  <a href="{{ url_for('planilla.company_home', company_id=c.id) }}" class="panel" style="text-decoration:none; color:inherit; display:block; margin:0;">
+    <h2 style="margin-top:0;">🏢 {{ c.name }}</h2>
+    <p class="muted" style="margin:0 0 6px;">{% if c.ruc %}RUC {{ c.ruc }}{% else %}Sin RUC{% endif %}</p>
+    <p style="margin:0;"><strong>{{ c.people }}</strong> persona(s) en planilla{% if c.last_period %} · última planilla: {{ label(c.last_period) }}{% endif %}</p>
+    {% if c.open_periods %}<p style="margin:6px 0 0;"><span class="badge badge-pendiente">{{ c.open_periods }} abierta(s)</span></p>{% endif %}
+  </a>
+  {% else %}
+  <div class="panel" style="margin:0;"><p class="muted" style="margin:0;">Todavía no hay empresas. {% if can_edit %}<a href="{{ url_for('planilla.companies') }}">Crea la primera en el catálogo de empresas</a>.{% endif %}</p></div>
+  {% endfor %}
 </div>
 
-<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:16px; margin-top:16px;">
+<h2 style="margin-top:24px;">Más</h2>
+<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:16px;">
   <a href="{{ url_for('planilla.profiles') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
     <h2 style="margin-top:0;">👤 Perfil de planilla</h2>
-    <p class="muted" style="margin-bottom:0;">Régimen, ONP/AFP, sueldo y asignación familiar. Hoy hay <strong>{{ in_payroll }}</strong> persona(s) en planilla.</p>
+    <p class="muted" style="margin-bottom:0;">Empresa, régimen, ONP/AFP, sueldo y asignación familiar. Hoy hay <strong>{{ in_payroll }}</strong> persona(s) en planilla.</p>
   </a>
   <a href="{{ url_for('incidencias.index') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
     <h2 style="margin-top:0;">🗓 Asistencia e incidencias</h2>
@@ -52,13 +43,9 @@
     <h2 style="margin-top:0;">💳 Préstamos y adelantos</h2>
     <p class="muted" style="margin-bottom:0;">Préstamos, adelantos de sueldo y reconocimientos de deuda con descuento en cuotas.</p>
   </a>
-  <a href="{{ url_for('planilla.cts_view') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
-    <h2 style="margin-top:0;">🏦 CTS</h2>
-    <p class="muted" style="margin-bottom:0;">Cálculo semestral para el depósito de mayo y noviembre.</p>
-  </a>
   <a href="{{ url_for('planilla.params_view') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
     <h2 style="margin-top:0;">⚖ Parámetros de planilla</h2>
-    <p class="muted" style="margin-bottom:0;">UIT, RMV y tasas de AFP, ONP y EsSalud.</p>
+    <p class="muted" style="margin-bottom:0;">UIT, RMV y tasas de AFP, ONP y EsSalud (valen para todas las empresas).</p>
   </a>
   <a href="{{ url_for('vacaciones.index') }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
     <h2 style="margin-top:0;">🏖 Vacaciones</h2>

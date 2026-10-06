@@ -1741,6 +1741,21 @@ CREATE INDEX IF NOT EXISTS idx_whatsapp_expense_drafts_status ON whatsapp_expens
 -- (pedido explícito de Braulio al elegir entre las opciones que se le
 -- dieron). Los datos bancarios (banco/cuenta/CCI) son los que se usan
 -- luego para armar el archivo de Telecrédito.
+-- Catálogo de empresas empleadoras (6 oct, pedido de Braulio: "los
+-- trabajadores pueden pertenecer a diferentes empresas... cuando se crean
+-- las planillas son por empresa"). Cada persona de `staff` pertenece a una
+-- (company_id); `staff.company` (texto) se mantiene igual al nombre para el
+-- Telecrédito y los listados que ya lo usaban.
+CREATE TABLE IF NOT EXISTS companies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    legal_name TEXT,
+    ruc TEXT,
+    address TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS staff (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -1807,6 +1822,7 @@ CREATE TABLE IF NOT EXISTS staff (
     family_allowance INTEGER NOT NULL DEFAULT 0,
     fifth_prior_income REAL NOT NULL DEFAULT 0,
     fifth_prior_withheld REAL NOT NULL DEFAULT 0,
+    company_id INTEGER REFERENCES companies(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -2161,12 +2177,16 @@ CREATE TABLE IF NOT EXISTS staff_incidents (
 );
 CREATE INDEX IF NOT EXISTS idx_staff_incidents_staff ON staff_incidents(staff_id, start_date);
 
--- Planilla mensual (6 oct, fase 3b). Un periodo por mes ('YYYY-MM'); ABIERTO
+-- Planilla mensual (6 oct, fase 3b). Un periodo por empresa y mes ('YYYY-MM';
+-- la unicidad (company_id, period) la crea la migración _migrate_payroll_*
+-- de app/db.py, porque en bases ya creadas la columna company_id llega por
+-- COLUMN_MIGRATIONS); ABIERTO
 -- se puede recalcular, CERRADO queda fijo (al cerrar se generan los pagos de
 -- planilla para el Telecrédito y se registran las cuotas de préstamos).
 CREATE TABLE IF NOT EXISTS payroll_periods (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    period TEXT NOT NULL UNIQUE,
+    company_id INTEGER REFERENCES companies(id),
+    period TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'ABIERTO',
     closed_at TEXT,
     closed_by INTEGER REFERENCES users(id),

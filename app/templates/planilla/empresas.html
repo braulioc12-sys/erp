@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+{% block title %}Empresas{% endblock %}
+{% block content %}
+{% set can_edit = can(current_user.roles, 'pagos_personal', 'edit') %}
+<div class="page-header">
+  <h1>Catálogo de empresas</h1>
+  <div class="page-actions"><a href="{{ url_for('planilla.index') }}" class="btn btn-secondary">← Planilla</a></div>
+</div>
+<p class="muted mt-0">Las empresas que emplean a tu personal. Cada persona pertenece a una (se asigna en su ficha de Personal o en el Perfil de planilla) y la planilla se calcula por empresa. El nombre legal y el RUC salen en las boletas.</p>
+
+{% if can_edit %}
+<div class="panel">
+  <h2 class="mt-0">Nueva empresa</h2>
+  <form method="post" action="{{ url_for('planilla.company_add') }}" class="form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <label>Nombre corto <input type="text" name="name" required placeholder="Ej. Harraso Transport"></label>
+      <label>Razón social <input type="text" name="legal_name" placeholder="Ej. Harraso Transport S.A.C."></label>
+      <label>RUC <input type="text" name="ruc" inputmode="numeric" maxlength="11" placeholder="11 dígitos"></label>
+    </div>
+    <label>Dirección <input type="text" name="address"></label>
+    <div class="btn-group" style="margin-top:12px;"><button type="submit" class="btn btn-primary">Agregar empresa</button></div>
+  </form>
+</div>
+{% endif %}
+
+<div class="panel">
+  <div class="table-wrap"><table style="font-size:0.92em;">
+    <thead><tr><th>Empresa</th><th>Razón social</th><th>RUC</th><th>Personal activo</th><th>Planillas</th><th>Estado</th><th></th></tr></thead>
+    <tbody>
+      {% for c in rows %}
+      <tr>
+        <td><a href="{{ url_for('planilla.company_edit', company_id=c.id) }}">{{ c.name }}</a></td>
+        <td>{{ c.legal_name or '—' }}</td><td>{{ c.ruc or '—' }}</td><td>{{ c.people }}</td><td>{{ c.n_periods }}</td>
+        <td>{% if c.active %}<span class="badge badge-activo">Activa</span>{% else %}<span class="badge badge-inactivo">Desactivada</span>{% endif %}</td>
+        <td><div style="display:flex; gap:6px; flex-wrap:wrap;">
+          <a href="{{ url_for('planilla.company_home', company_id=c.id) }}" class="btn btn-secondary btn-sm">Planilla</a>
+          <a href="{{ url_for('planilla.company_edit', company_id=c.id) }}" class="btn btn-secondary btn-sm">{{ 'Editar' if can_edit else 'Ver' }}</a>
+          {% if can_edit %}
+          <form method="post" action="{{ url_for('planilla.company_toggle', company_id=c.id) }}" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-secondary btn-sm">{{ 'Desactivar' if c.active else 'Activar' }}</button>
+          </form>
+          {% endif %}
+        </div></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="muted">Todavía no hay empresas.</td></tr>
+      {% endfor %}
+    </tbody></table></div>
+</div>
+{% endblock %}

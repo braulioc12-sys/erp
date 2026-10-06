@@ -407,8 +407,11 @@ def build_subsidy_workbook(staff, year):
     ws["A1"].font = Font(bold=True, size=14, color="1D4ED8")
     ws["A2"] = "Archivo de trabajo para llenar la solicitud en EsSalud. Verifica los datos con tu agencia de EsSalud."
     ws["A2"].font = Font(italic=True, color="667085")
+    comp = query_one("SELECT * FROM companies WHERE id = ?", (staff["company_id"],)) if staff["company_id"] else None
+    employer = (comp["legal_name"] or comp["name"]) if comp else (staff["company"] or "")
     info = [
-        ("Empleador", staff["company"] or ""),
+        ("Empleador", employer),
+        ("RUC del empleador", (comp["ruc"] if comp else "") or ""),
         ("Trabajador", staff["name"]),
         (staff["document_type"] or "Documento", staff["document_number"] or ""),
         ("Cargo", staff["position"] or ""),

@@ -33,7 +33,7 @@
 {% set l = b.l %}{% set s = b.s %}
 <div class="sheet">
   <h1>BOLETA DE PAGO</h1>
-  <div class="sub">{{ s.company or 'Empleador' }} · {{ b.title }}</div>
+  <div class="sub">{{ b.company.company_legal_name or b.company.company_name or s.company or 'Empleador' }}{% if b.company.company_ruc %} · RUC {{ b.company.company_ruc }}{% endif %} · {{ b.title }}</div>
   <table class="info">
     <tr><td class="k">Trabajador</td><td>{{ s.name }}</td><td class="k">{{ s.document_type }}</td><td>{{ s.document_number or '—' }}</td></tr>
     <tr><td class="k">Cargo</td><td>{{ s.position or '—' }}</td><td class="k">Ingreso</td><td>{{ s.hire_date or '—' }}</td></tr>
