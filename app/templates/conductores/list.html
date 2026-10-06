@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% import 'partials/macros.html' as m %}
+{% import 'partials/driver_photo.html' as dp %}
 {% block title %}Conductores{% endblock %}
 {% block content %}
 <div class="page-header">
@@ -39,7 +40,7 @@
         <td>
           <a href="{{ url_for('conductores.driver_detail', driver_id=d.id) }}">
             {% if d.photo_filename %}
-            <img class="driver-thumb" src="{{ url_for('conductores.driver_photo', driver_id=d.id) }}" alt="">
+            {{ dp.driver_photo(d, 'pframe-sm') }}
             {% endif %}
             {{ d.name }}
           </a>

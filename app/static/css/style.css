@@ -303,6 +303,21 @@ textarea { resize: vertical; min-height: 70px; }
 .driver-photo { width: 140px; height: 140px; object-fit: cover; border-radius: 10px; border: 1px solid var(--border); display: block; }
 .driver-photo-placeholder { width: 140px; height: 140px; border-radius: 10px; border: 1px dashed var(--border); display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 0.8rem; text-align: center; padding: 8px; }
 .driver-thumb { width: 32px; height: 32px; object-fit: cover; border-radius: 50%; border: 1px solid var(--border); vertical-align: middle; margin-right: 8px; }
+/* 6 oct: foto de conductor con encuadre propio (punto de enfoque + zoom) y
+   clic para verla grande -- ver partials/driver_photo.html y
+   static/js/photo-lightbox.js. */
+.pframe { display: inline-block; overflow: hidden; position: relative; flex-shrink: 0; border: 1px solid var(--border); background: #e5e7eb; }
+.pframe img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pframe-lg { width: 140px; height: 140px; border-radius: 10px; }
+.pframe-sm { width: 32px; height: 32px; border-radius: 50%; vertical-align: middle; margin-right: 8px; }
+.pframe-edit { width: 240px; height: 240px; border-radius: 12px; cursor: grab; touch-action: none; user-select: none; }
+.pframe-edit img { pointer-events: none; -webkit-user-drag: none; }
+.pframe-edit.dragging { cursor: grabbing; }
+[data-lightbox] { cursor: zoom-in; }
+.lb-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; cursor: zoom-out; }
+.lb-overlay img { max-width: 94vw; max-height: 86vh; border-radius: 8px; box-shadow: 0 8px 40px rgba(0,0,0,0.6); }
+.lb-overlay .lb-caption { color: #fff; margin-top: 10px; font-size: 0.95rem; }
+.lb-overlay .lb-close { position: absolute; top: 14px; right: 20px; color: #fff; font-size: 2rem; line-height: 1; }
 .alert-list { display: flex; flex-direction: column; gap: 8px; }
 .alert-item { padding: 10px 14px; border-radius: 8px; background: var(--warning-soft); color: var(--warning); font-size: 0.88rem; display: flex; justify-content: space-between; gap: 10px; }
 

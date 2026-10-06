@@ -1,0 +1,11 @@
+{# Foto de un conductor con su encuadre (punto de enfoque y zoom guardados en
+   la ficha) y, si zoomable, clic para verla grande sin recorte. #}
+{% macro driver_photo(d, size_class, zoomable=True) -%}
+{% set fx = d.photo_focus_x if d.photo_focus_x is not none else 50 %}
+{% set fy = d.photo_focus_y if d.photo_focus_y is not none else 50 %}
+{% set fz = d.photo_zoom if d.photo_zoom is not none else 1 %}
+<span class="pframe {{ size_class }}" {% if zoomable %}data-lightbox="{{ url_for('conductores.driver_photo', driver_id=d.id) }}" data-lightbox-caption="{{ d.name }}" title="Clic para ver la foto grande"{% endif %}>
+  <img src="{{ url_for('conductores.driver_photo', driver_id=d.id) }}" alt="Foto de {{ d.name }}"
+       style="object-position: {{ '%g'|format(fx) }}% {{ '%g'|format(fy) }}%; transform: scale({{ '%g'|format(fz) }}); transform-origin: {{ '%g'|format(fx) }}% {{ '%g'|format(fy) }}%;">
+</span>
+{%- endmacro %}

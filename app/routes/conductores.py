@@ -122,6 +122,19 @@ def _driver_fields_from_form(form):
     )
 
 
+def _photo_framing_from_form(form):
+    """Encuadre de la foto (punto de enfoque en % y zoom), acotado a valores
+    válidos. Si falta o viene mal, queda centrada y sin zoom."""
+    def num(name, default, low, high):
+        try:
+            value = float(form.get(name, default))
+        except (TypeError, ValueError):
+            return default
+        return min(max(value, low), high)
+
+    return (num("photo_focus_x", 50.0, 0.0, 100.0), num("photo_focus_y", 50.0, 0.0, 100.0), num("photo_zoom", 1.0, 1.0, 4.0))
+
+
 def _save_driver_photo(file_storage):
     """Guarda la foto de un conductor (comprimida vía compress_photo) y
     devuelve el nombre de archivo guardado, o None si no se subió nada
@@ -298,9 +311,10 @@ def new_driver():
                medical_exam_date, medical_exam_expiry,
                backus_driving_exam_date, backus_driving_exam_expiry,
                backus_training_date, backus_training_expiry,
-               dds_date, dds_expiry, phone, photo_filename, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (*fields[:-1], photo_filename, fields[-1]),
+               dds_date, dds_expiry, phone, photo_filename, status,
+               photo_focus_x, photo_focus_y, photo_zoom)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (*fields[:-1], photo_filename, fields[-1], *_photo_framing_from_form(request.form)),
         )
         # 22 sep, registro de actividad (ver app/audit.py).
         log_activity(
@@ -333,9 +347,10 @@ def edit_driver(driver_id):
                medical_exam_date=?, medical_exam_expiry=?,
                backus_driving_exam_date=?, backus_driving_exam_expiry=?,
                backus_training_date=?, backus_training_expiry=?,
-               dds_date=?, dds_expiry=?, phone=?, photo_filename=?, status=?
+               dds_date=?, dds_expiry=?, phone=?, photo_filename=?, status=?,
+               photo_focus_x=?, photo_focus_y=?, photo_zoom=?
                WHERE id=?""",
-            (*fields[:-1], photo_filename, fields[-1], driver_id),
+            (*fields[:-1], photo_filename, fields[-1], *_photo_framing_from_form(request.form), driver_id),
         )
         # 22 sep, registro de actividad (ver app/audit.py): un solo formulario
         # cubre datos generales, foto y estado -- se prioriza qué acción

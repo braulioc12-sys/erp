@@ -9,18 +9,69 @@
   </label>
 
   <div class="section-title">Foto</div>
-  {% if driver and driver.photo_filename %}
-  <div class="form-row" style="align-items:center;">
-    <img class="driver-photo" src="{{ url_for('conductores.driver_photo', driver_id=driver_id) }}" alt="Foto actual">
-    <label style="flex:1;">Reemplazar foto (opcional)
-      <input type="file" name="photo" accept="image/*">
-    </label>
+  {% set has_photo = driver and driver.photo_filename %}
+  {% set fx = (driver.photo_focus_x|float) if (driver and driver.photo_focus_x is defined and driver.photo_focus_x is not none) else 50 %}
+  {% set fy = (driver.photo_focus_y|float) if (driver and driver.photo_focus_y is defined and driver.photo_focus_y is not none) else 50 %}
+  {% set fz = (driver.photo_zoom|float) if (driver and driver.photo_zoom is defined and driver.photo_zoom is not none) else 1 %}
+  <div class="form-row" style="align-items:flex-start;">
+    <div id="ph-editor" style="{{ '' if has_photo else 'display:none;' }}">
+      <span class="pframe pframe-edit" id="ph-frame" title="Arrastra la foto para centrar la cara">
+        <img id="ph-img" alt="Foto" {% if has_photo %}src="{{ url_for('conductores.driver_photo', driver_id=driver_id) }}"{% endif %}>
+      </span>
+      <div style="margin-top:8px; max-width:240px;">
+        <label>Zoom <input type="range" id="ph-zoom" min="1" max="4" step="0.05" value="{{ '%g'|format(fz) }}"></label>
+        <button type="button" class="btn btn-secondary btn-sm" id="ph-reset">Centrar y quitar zoom</button>
+      </div>
+    </div>
+    <div style="flex:1;">
+      <label>{{ 'Reemplazar foto (opcional)' if has_photo else 'Subir foto (opcional)' }}
+        <input type="file" name="photo" id="ph-file" accept="image/*">
+      </label>
+      <p class="muted" style="margin-top:6px;">Arrastra la foto dentro del recuadro para dejar la cara en el centro y usa el zoom para acercarla. Solo cambia cómo se ve en la ficha y la lista; la foto original se guarda completa y se ve entera al hacerle clic.</p>
+    </div>
   </div>
-  {% else %}
-  <label>Subir foto (opcional)
-    <input type="file" name="photo" accept="image/*">
-  </label>
-  {% endif %}
+  <input type="hidden" name="photo_focus_x" id="ph-x" value="{{ '%g'|format(fx) }}">
+  <input type="hidden" name="photo_focus_y" id="ph-y" value="{{ '%g'|format(fy) }}">
+  <input type="hidden" name="photo_zoom" id="ph-z" value="{{ '%g'|format(fz) }}">
+  <script>
+  (function () {
+    var frame = document.getElementById('ph-frame'), img = document.getElementById('ph-img');
+    var hx = document.getElementById('ph-x'), hy = document.getElementById('ph-y'), hz = document.getElementById('ph-z');
+    var zoomEl = document.getElementById('ph-zoom'), file = document.getElementById('ph-file');
+    var x = parseFloat(hx.value) || 50, y = parseFloat(hy.value) || 50, z = parseFloat(hz.value) || 1;
+    function clamp(v, lo, hi) { return Math.min(Math.max(v, lo), hi); }
+    function apply() {
+      var pos = x + '% ' + y + '%';
+      img.style.objectPosition = pos; img.style.transformOrigin = pos; img.style.transform = 'scale(' + z + ')';
+      hx.value = x.toFixed(1); hy.value = y.toFixed(1); hz.value = z.toFixed(2); zoomEl.value = z;
+    }
+    var drag = null;
+    frame.addEventListener('pointerdown', function (e) {
+      drag = { px: e.clientX, py: e.clientY, x: x, y: y }; frame.classList.add('dragging');
+      frame.setPointerCapture(e.pointerId); e.preventDefault();
+    });
+    frame.addEventListener('pointermove', function (e) {
+      if (!drag || !img.naturalWidth) return;
+      var B = frame.clientWidth, s = Math.max(B / img.naturalWidth, B / img.naturalHeight);
+      var dx = (B - z * img.naturalWidth * s), dy = (B - z * img.naturalHeight * s);
+      if (Math.abs(dx) > 1) x = clamp(drag.x + (e.clientX - drag.px) / dx * 100, 0, 100);
+      if (Math.abs(dy) > 1) y = clamp(drag.y + (e.clientY - drag.py) / dy * 100, 0, 100);
+      apply();
+    });
+    function end() { drag = null; frame.classList.remove('dragging'); }
+    frame.addEventListener('pointerup', end); frame.addEventListener('pointercancel', end);
+    frame.addEventListener('wheel', function (e) { e.preventDefault(); z = clamp(z + (e.deltaY < 0 ? 0.1 : -0.1), 1, 4); apply(); }, { passive: false });
+    zoomEl.addEventListener('input', function () { z = clamp(parseFloat(zoomEl.value) || 1, 1, 4); apply(); });
+    document.getElementById('ph-reset').addEventListener('click', function () { x = 50; y = 50; z = 1; apply(); });
+    file.addEventListener('change', function () {
+      if (!file.files || !file.files[0]) return;
+      img.src = URL.createObjectURL(file.files[0]);
+      document.getElementById('ph-editor').style.display = '';
+      x = 50; y = 50; z = 1; apply();
+    });
+    apply();
+  })();
+  </script>
   <div class="form-row">
     <label>DNI
       <input type="text" name="document_number" value="{{ driver.document_number if driver else '' }}" placeholder="Se usa al generar guías de remisión">

@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% import 'partials/macros.html' as m %}
+{% import 'partials/driver_photo.html' as dp %}
 {% block title %}{{ driver.name }}{% endblock %}
 {% block content %}
 <div class="page-header">
@@ -19,7 +20,7 @@
 <div class="panel">
   <div class="form-row" style="align-items:flex-start;">
     {% if driver.photo_filename %}
-    <img class="driver-photo" src="{{ url_for('conductores.driver_photo', driver_id=driver.id) }}" alt="Foto de {{ driver.name }}">
+    {{ dp.driver_photo(driver, 'pframe-lg') }}
     {% else %}
     <div class="driver-photo-placeholder">Sin foto</div>
     {% endif %}

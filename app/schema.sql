@@ -204,6 +204,13 @@ CREATE TABLE IF NOT EXISTS drivers (
     -- mecanismo que los comprobantes de gastos (ver app/storage.py, bajo
     -- un prefijo/carpeta separada para no mezclarlos).
     photo_filename TEXT,
+    -- 6 oct, pedido de Braulio ("poder centrar la foto para que se vea la
+    -- cara"): encuadre de la foto en el recuadro -- punto de enfoque en %
+    -- (50/50 = centro) y zoom (1 = sin acercar). Solo cambia cómo se ve la
+    -- miniatura; la foto original se guarda completa.
+    photo_focus_x REAL NOT NULL DEFAULT 50,
+    photo_focus_y REAL NOT NULL DEFAULT 50,
+    photo_zoom REAL NOT NULL DEFAULT 1,
     -- 29 sep, pedido de Braulio ("quiero que se pueda subir y luego poder
     -- visualizar su brevete, DNI y examen medico ocupacional"): escaneo/foto
     -- (o PDF) de cada uno de estos 3 documentos -- mismo mecanismo que los
