@@ -609,6 +609,9 @@ COLUMN_MIGRATIONS = [
     # ida y vuelta... debemos tener 2 pantallas"): ver el comentario largo
     # junto a esta columna en schema.sql (CREATE TABLE trips).
     ("trips", "return_of_trip_id", "INTEGER"),
+    # 7 oct, pedido de Braulio (enlazar 2 viajes ya creados como ida/vuelta):
+    # ver el comentario junto a esta columna en schema.sql.
+    ("trips", "separate_liquidation", "INTEGER NOT NULL DEFAULT 0"),
     # 30 sep, pedido de Braulio ("quiero subir de manera manual, o en un
     # zip todas las facturas que antes he emitido como BRMS desde el portal
     # sunat"): ver el comentario largo junto a esta columna en schema.sql

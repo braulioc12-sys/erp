@@ -379,6 +379,13 @@ CREATE TABLE IF NOT EXISTS trips (
     -- detalle del viaje, además de que "invoiced" se sigue marcando solo al
     -- generar una factura desde Facturación.
     paid INTEGER NOT NULL DEFAULT 0,
+    -- 7 oct, pedido de Braulio ("enlazar 2 viajes ya creados, uno se convierta
+    -- en la vuelta"): 1 = esta VUELTA liquida por su cuenta aunque ida y
+    -- vuelta tengan el mismo único conductor (caso en que normalmente se
+    -- comparte una sola liquidación, ver liquidation_anchor_trip_id()). Se
+    -- marca al enlazar dos viajes que ya tenían gastos/anticipos propios,
+    -- para no mezclar ni mover liquidaciones ya hechas.
+    separate_liquidation INTEGER NOT NULL DEFAULT 0,
     created_by INTEGER REFERENCES users(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

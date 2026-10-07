@@ -92,6 +92,9 @@
          ni a uno cancelado. #}
       {% if not trip.return_of_trip_id and not return_trip and trip.status != 'CANCELADO' %}
       <a href="{{ url_for('viajes.new_return_trip', trip_id=trip.id) }}" class="btn btn-secondary">↩ Crear viaje de vuelta</a>
+      {# 7 oct, pedido de Braulio: enlazar dos viajes que ya existen. #}
+      <a href="{{ url_for('viajes.link_trips', trip_id=trip.id, rol='ida') }}" class="btn btn-secondary">🔗 Enlazar un viaje existente como su vuelta</a>
+      <a href="{{ url_for('viajes.link_trips', trip_id=trip.id, rol='vuelta') }}" class="btn btn-secondary">🔗 Este es la vuelta de otro viaje…</a>
       {% endif %}
     {% endif %}
     {# 29 sep, pedido de Braulio: borrado, solo para Administrador (permiso
@@ -113,9 +116,9 @@
 {# 29 sep, pedido de Braulio (ida/vuelta): rótulo/enlace entre el viaje de
    ida y su vuelta, en cualquiera de las 2 pantallas. #}
 {% if outbound_trip %}
-<p class="muted" style="margin-top:-12px; margin-bottom:16px;">Viaje de <strong>vuelta</strong> del viaje <a href="{{ url_for('viajes.detail', trip_id=outbound_trip.id) }}">{{ outbound_trip.code }}</a> ({{ outbound_trip.origin }} → {{ outbound_trip.destination }}).</p>
+<p class="muted" style="margin-top:-12px; margin-bottom:16px;">Viaje de <strong>vuelta</strong> del viaje <a href="{{ url_for('viajes.detail', trip_id=outbound_trip.id) }}">{{ outbound_trip.code }}</a> ({{ outbound_trip.origin }} → {{ outbound_trip.destination }}).{% if can(current_user.roles, 'viajes', 'edit') %} <form method="post" action="{{ url_for('viajes.unlink_trips', trip_id=trip.id) }}" style="display:inline;" onsubmit="return confirm('¿Deshacer el enlace? Los dos viajes quedarán independientes.');"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="btn btn-secondary btn-sm">Deshacer enlace</button></form>{% endif %}</p>
 {% elif return_trip %}
-<p class="muted" style="margin-top:-12px; margin-bottom:16px;">Tiene un viaje de <strong>vuelta</strong> enlazado: <a href="{{ url_for('viajes.detail', trip_id=return_trip.id) }}">{{ return_trip.code }}</a> {{ m.badge(return_trip.status) }}.</p>
+<p class="muted" style="margin-top:-12px; margin-bottom:16px;">Tiene un viaje de <strong>vuelta</strong> enlazado: <a href="{{ url_for('viajes.detail', trip_id=return_trip.id) }}">{{ return_trip.code }}</a> {{ m.badge(return_trip.status) }}.{% if can(current_user.roles, 'viajes', 'edit') %} <form method="post" action="{{ url_for('viajes.unlink_trips', trip_id=trip.id) }}" style="display:inline;" onsubmit="return confirm('¿Deshacer el enlace? Los dos viajes quedarán independientes.');"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="btn btn-secondary btn-sm">Deshacer enlace</button></form>{% endif %}</p>
 {% endif %}
 
 <div class="detail-grid">

@@ -31,11 +31,25 @@
       {% endfor %}
     </select>
   </label>
+  <label>Mes
+    <input type="month" name="month" value="{{ month }}">
+  </label>
+  <label>Conductor
+    <select name="driver">
+      <option value="">Todos</option>
+      {% for d in drivers %}<option value="{{ d.id }}" {{ 'selected' if driver == d.id }}>{{ d.name }}</option>{% endfor %}
+    </select>
+  </label>
   <label>Buscar
     <input type="text" name="q" value="{{ q }}" placeholder="Código, cliente, ruta">
   </label>
   <button class="btn btn-secondary" type="submit">Filtrar</button>
+  {% if status or month or driver or q %}<a href="{{ url_for('viajes.list_view', issuer=issuer) }}" class="btn btn-secondary">Quitar filtros</a>{% endif %}
+  <a href="{{ url_for('viajes.export_trips', issuer=issuer, scope='propia', status=status, month=month, driver=driver or '', q=q) }}" class="btn btn-secondary">⬇ Exportar resumen a Excel</a>
 </form>
+{% if trips %}
+<p class="muted" style="margin:0 0 8px;">{{ trips|length }} viaje(s){% if month %} de {{ month }}{% endif %}{% if driver %} del conductor elegido{% endif %}. El Excel respeta estos mismos filtros.</p>
+{% endif %}
 
 <div class="table-wrap">
   <table>
@@ -45,7 +59,7 @@
     <tbody>
       {% for t in trips %}
       <tr onclick="window.location='{{ url_for('viajes.detail', trip_id=t.id) }}'" style="cursor:pointer;">
-        <td><a href="{{ url_for('viajes.detail', trip_id=t.id) }}">{{ t.code }}</a></td>
+        <td><a href="{{ url_for('viajes.detail', trip_id=t.id) }}">{{ t.code }}</a>{% if t.outbound_code %}<div class="muted" style="font-size:0.8em;">↩ vuelta de {{ t.outbound_code }}</div>{% elif t.return_code %}<div class="muted" style="font-size:0.8em;">↪ vuelta: {{ t.return_code }}</div>{% endif %}</td>
         <td>{{ t.scheduled_date }}</td>
         <td>{{ t.client_name }}</td>
         <td>{{ t.origin }} → {{ t.destination }}</td>

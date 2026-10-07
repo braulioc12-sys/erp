@@ -1,5 +1,6 @@
 import functools
 import os
+import re
 import uuid
 
 from flask import (
@@ -175,6 +176,64 @@ def _billing_permission_required(view):
     return wrapped_view
 
 
+_MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+
+
+def _trip_filters(args):
+    """Filtros comunes de los listados de viajes (y de su exportación a Excel):
+    estado, búsqueda libre, mes (YYYY-MM sobre la fecha de salida) y conductor
+    (cualquiera de los dos en viajes de doble conductor)."""
+    month = (args.get("month") or "").strip()
+    return {
+        "status": args.get("status", ""),
+        "q": args.get("q", "").strip(),
+        "month": month if _MONTH_RE.match(month) else "",
+        "driver": args.get("driver", type=int),
+    }
+
+
+def _filtered_trips(issuer, scope, f):
+    """Viajes de `issuer` con unidad propia (scope='propia') o de terceros
+    (scope='tercero') que cumplen los filtros `f` (ver _trip_filters), más
+    nombres de cliente/unidad/conductores y el código de la ida o vuelta
+    enlazada. El mes se compara con substr() de la fecha (texto YYYY-MM-DD)
+    para que funcione igual en SQLite y Postgres."""
+    ownership = "PROPIA" if scope == "propia" else "TERCERO"
+    sql = """SELECT t.*, c.name as client_name, v.plate as vehicle_plate, tv.plate as trailer_plate,
+                     d.name as driver_name, d2.name as driver2_name,
+                     (SELECT o.code FROM trips o WHERE o.id = t.return_of_trip_id) AS outbound_code,
+                     (SELECT r.code FROM trips r WHERE r.return_of_trip_id = t.id) AS return_code
+              FROM trips t
+              JOIN clients c ON c.id = t.client_id
+              LEFT JOIN vehicles v ON v.id = t.vehicle_id
+              LEFT JOIN vehicles tv ON tv.id = t.trailer_vehicle_id
+              LEFT JOIN drivers d ON d.id = t.driver_id
+              LEFT JOIN drivers d2 ON d2.id = t.driver2_id
+              WHERE t.ownership = ? AND t.issuer = ?"""
+    params = [ownership, issuer]
+    if f["status"]:
+        sql += " AND t.status = ?"
+        params.append(f["status"])
+    if f["month"]:
+        sql += " AND substr(t.scheduled_date, 1, 7) = ?"
+        params.append(f["month"])
+    if f["driver"] and scope == "propia":
+        sql += " AND (t.driver_id = ? OR t.driver2_id = ?)"
+        params += [f["driver"], f["driver"]]
+    if f["q"]:
+        # LOWER() en ambos lados (patch 0066) -- ver el comentario completo en
+        # clientes.list_view().
+        sql += """ AND (LOWER(t.code) LIKE LOWER(?) OR LOWER(c.name) LIKE LOWER(?) OR LOWER(t.origin) LIKE LOWER(?)
+                         OR LOWER(t.destination) LIKE LOWER(?) OR LOWER(COALESCE(t.third_party_name, '')) LIKE LOWER(?))"""
+        params += [f"%{f['q']}%"] * 5
+    sql += " ORDER BY t.scheduled_date DESC, t.id DESC"
+    return query_all(sql, params)
+
+
+def _drivers_for_filter():
+    return query_all("SELECT id, name FROM drivers ORDER BY name")
+
+
 @bp.route("")
 @permission_required("viajes", "view")
 def list_view():
@@ -196,35 +255,14 @@ def list_view():
         terceros_count = query_one("SELECT COUNT(*) n FROM trips WHERE ownership = 'TERCERO'")["n"]
         return render_template("viajes/list.html", trips=None, issuer=None, terceros_count=terceros_count)
 
-    status = request.args.get("status", "")
-    q = request.args.get("q", "").strip()
-
-    sql = """SELECT t.*, c.name as client_name, v.plate as vehicle_plate, tv.plate as trailer_plate,
-                     d.name as driver_name, d2.name as driver2_name
-              FROM trips t
-              JOIN clients c ON c.id = t.client_id
-              LEFT JOIN vehicles v ON v.id = t.vehicle_id
-              LEFT JOIN vehicles tv ON tv.id = t.trailer_vehicle_id
-              LEFT JOIN drivers d ON d.id = t.driver_id
-              LEFT JOIN drivers d2 ON d2.id = t.driver2_id
-              WHERE t.ownership = 'PROPIA' AND t.issuer = ?"""
-    params = [issuer]
-    if status:
-        sql += " AND t.status = ?"
-        params.append(status)
-    if q:
-        # LOWER() en ambos lados (patch 0066) -- ver el comentario completo en
-        # clientes.list_view().
-        sql += " AND (LOWER(t.code) LIKE LOWER(?) OR LOWER(c.name) LIKE LOWER(?) OR LOWER(t.origin) LIKE LOWER(?) OR LOWER(t.destination) LIKE LOWER(?))"
-        params += [f"%{q}%"] * 4
-    sql += " ORDER BY t.scheduled_date DESC, t.id DESC"
-
-    trips = query_all(sql, params)
+    f = _trip_filters(request.args)
+    trips = _filtered_trips(issuer, "propia", f)
     terceros_count = query_one(
         "SELECT COUNT(*) n FROM trips WHERE ownership = 'TERCERO' AND issuer = ?", (issuer,)
     )["n"]
     return render_template(
-        "viajes/list.html", trips=trips, issuer=issuer, status=status, q=q, terceros_count=terceros_count
+        "viajes/list.html", trips=trips, issuer=issuer, status=f["status"], q=f["q"], month=f["month"],
+        driver=f["driver"], drivers=_drivers_for_filter(), terceros_count=terceros_count,
     )
 
 
@@ -245,33 +283,58 @@ def list_terceros():
             "viajes/list_terceros.html", trips=None, issuer=None, payment_term_labels=payment_term_labels
         )
 
-    status = request.args.get("status", "")
-    q = request.args.get("q", "").strip()
-
-    sql = """SELECT t.*, c.name as client_name
-              FROM trips t
-              JOIN clients c ON c.id = t.client_id
-              WHERE t.ownership = 'TERCERO' AND t.issuer = ?"""
-    params = [issuer]
-    if status:
-        sql += " AND t.status = ?"
-        params.append(status)
-    if q:
-        # LOWER() en ambos lados (patch 0066) -- ver el comentario completo en
-        # clientes.list_view().
-        sql += """ AND (LOWER(t.code) LIKE LOWER(?) OR LOWER(c.name) LIKE LOWER(?) OR LOWER(t.third_party_name) LIKE LOWER(?)
-                         OR LOWER(t.origin) LIKE LOWER(?) OR LOWER(t.destination) LIKE LOWER(?))"""
-        params += [f"%{q}%"] * 5
-    sql += " ORDER BY t.scheduled_date DESC, t.id DESC"
-
-    trips = query_all(sql, params)
+    f = _trip_filters(request.args)
+    trips = _filtered_trips(issuer, "tercero", f)
     return render_template(
         "viajes/list_terceros.html",
         trips=trips,
         issuer=issuer,
-        status=status,
-        q=q,
+        status=f["status"],
+        q=f["q"],
+        month=f["month"],
         payment_term_labels=payment_term_labels,
+    )
+
+
+@bp.route("/exportar")
+@permission_required("viajes", "view")
+def export_trips():
+    """7 oct, pedido de Braulio: "exportar a excel el resumen" -- mismo listado
+    y filtros que la pantalla (empresa obligatoria, estado, búsqueda, mes y
+    conductor), en un Excel con hoja Resumen y hoja Detalle."""
+    from flask import current_app
+
+    from app.reports import build_trips_workbook
+
+    issuer = request.args.get("issuer", "").strip().upper()
+    scope = "tercero" if request.args.get("scope") == "tercero" else "propia"
+    if issuer not in ISSUER_CHOICES:
+        flash("Elige primero la empresa (Harraso o BRMS) para exportar sus viajes.", "error")
+        return redirect(url_for("viajes.list_view"))
+    f = _trip_filters(request.args)
+    trips = _filtered_trips(issuer, scope, f)
+    parts = [f"Empresa: {'BRMS' if issuer == 'BRMS' else 'Harraso Transport'}"]
+    if f["month"]:
+        parts.append(f"Mes: {f['month']}")
+    if f["driver"] and scope == "propia":
+        drv = query_one("SELECT name FROM drivers WHERE id = ?", (f["driver"],))
+        parts.append(f"Conductor: {drv['name'] if drv else f['driver']}")
+    if f["status"]:
+        parts.append(f"Estado: {f['status'].replace('_', ' ').title()}")
+    if f["q"]:
+        parts.append(f"Búsqueda: {f['q']}")
+    if len(parts) == 1:
+        parts.append("Sin más filtros")
+    buffer = build_trips_workbook(
+        trips, scope, current_app.config["COMPANY_NAME"], " · ".join(parts),
+        driver_id=f["driver"] if scope == "propia" else None,
+    )
+    log_activity("viajes", "EXPORTAR", f"Resumen de viajes a Excel ({' · '.join(parts)}): {len(trips)} viaje(s)")
+    name = f"viajes_{'terceros_' if scope == 'tercero' else ''}{issuer.lower()}{'_' + f['month'] if f['month'] else ''}.xlsx"
+    return Response(
+        buffer.getvalue(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={name}"},
     )
 
 
@@ -494,12 +557,16 @@ def liquidation_anchor_trip_id(trip_id):
       (o falta alguno), la vuelta liquida por su cuenta: devuelve su propio
       id."""
     trip = query_one(
-        "SELECT id, return_of_trip_id, driver_id, double_driver FROM trips WHERE id = ?", (trip_id,)
+        "SELECT id, return_of_trip_id, driver_id, double_driver, separate_liquidation FROM trips WHERE id = ?", (trip_id,)
     )
     if trip is None:
         return trip_id
     outbound_id = trip["return_of_trip_id"]
     if not outbound_id:
+        return trip["id"]
+    if trip["separate_liquidation"]:
+        # 7 oct: vuelta enlazada a mano que ya traía su propia liquidación
+        # (ver link_trips()): sigue liquidando por su cuenta.
         return trip["id"]
     outbound = query_one("SELECT id, driver_id, double_driver FROM trips WHERE id = ?", (outbound_id,))
     if outbound is None:
@@ -1032,6 +1099,191 @@ def new_return_trip(trip_id):
         selected_route_id=default_route_id, cargo_types=_cargo_types(), payment_terms=PAYMENT_TERMS,
         open_maintenance_vehicle_ids=_vehicles_with_open_maintenance_orders(),
     )
+
+
+# --- Enlazar dos viajes ya creados como ida y vuelta -------------------------
+
+def _trip_has_liquidation_data(trip_id):
+    """¿Este viaje ya tiene anticipo de viáticos o gastos registrados a su
+    nombre? (Esa data vive en su propio trip_id, ver liquidation_anchor_trip_id.)"""
+    return bool(
+        query_one("SELECT id FROM expense_advances WHERE trip_id = ? LIMIT 1", (trip_id,))
+        or query_one("SELECT id FROM expenses WHERE trip_id = ? LIMIT 1", (trip_id,))
+    )
+
+
+def _would_share_liquidation(ida, vuelta):
+    """Con las reglas de liquidation_anchor_trip_id(): ¿ida y vuelta
+    compartirían UNA liquidación? (un solo conductor, el mismo en ambos)."""
+    if ida["double_driver"] or vuelta["double_driver"]:
+        return False
+    return bool(vuelta["driver_id"]) and vuelta["driver_id"] == ida["driver_id"]
+
+
+def _link_error(ida, vuelta):
+    """Motivo por el que `vuelta` no puede enlazarse como vuelta de `ida`
+    (None si sí se puede)."""
+    if ida is None or vuelta is None:
+        return "No se encontró uno de los viajes."
+    if ida["id"] == vuelta["id"]:
+        return "No puedes enlazar un viaje consigo mismo."
+    if ida["issuer"] != vuelta["issuer"]:
+        return "Los dos viajes deben ser de la misma empresa (Harraso o BRMS)."
+    if "CANCELADO" in (ida["status"], vuelta["status"]):
+        return "No se pueden enlazar viajes cancelados."
+    if ida["return_of_trip_id"]:
+        return f"{ida['code']} ya es la vuelta de otro viaje: no puede ser la ida."
+    if vuelta["return_of_trip_id"]:
+        return f"{vuelta['code']} ya es la vuelta de otro viaje."
+    existing = _return_trip_of(ida["id"])
+    if existing:
+        return f"{ida['code']} ya tiene un viaje de vuelta ({existing['code']})."
+    own_return = _return_trip_of(vuelta["id"])
+    if own_return:
+        return f"{vuelta['code']} ya tiene su propia vuelta ({own_return['code']}): no puede ser a la vez una vuelta."
+    return None
+
+
+def _day_gap(a, b):
+    from datetime import datetime
+
+    try:
+        return abs((datetime.strptime(a[:10], "%Y-%m-%d") - datetime.strptime(b[:10], "%Y-%m-%d")).days)
+    except (TypeError, ValueError):
+        return 9999
+
+
+@bp.route("/<int:trip_id>/enlazar", methods=["GET", "POST"])
+@permission_required("viajes", "edit")
+def link_trips(trip_id):
+    """7 oct, pedido de Braulio: "crear la opción de enlazar 2 viajes ya
+    creados, uno se convierta en la vuelta". `rol=ida` (por defecto): este
+    viaje es la ida y se elige cuál ya creado será su vuelta. `rol=vuelta`:
+    este viaje es la vuelta y se elige su ida. En ambos casos queda igual que
+    una vuelta creada con "Crear viaje de vuelta": return_of_trip_id en la
+    vuelta (ver schema.sql). La liquidación (anticipo y gastos) se comparte si
+    hay un solo conductor en ambos tramos; si la vuelta ya traía anticipo o
+    gastos propios (o se pide a mano) queda independiente
+    (trips.separate_liquidation) para no mover liquidaciones ya hechas."""
+    trip = query_one("SELECT * FROM trips WHERE id = ?", (trip_id,))
+    if trip is None:
+        abort(404)
+    role = (request.values.get("rol") or "ida").strip().lower()
+    if role not in ("ida", "vuelta"):
+        role = "ida"
+    back = redirect(url_for("viajes.detail", trip_id=trip_id))
+    if trip["return_of_trip_id"]:
+        flash(f"{trip['code']} ya es una vuelta: no se puede enlazar de nuevo.", "error")
+        return back
+    existing = _return_trip_of(trip_id)
+    if existing:
+        flash(f"{trip['code']} ya tiene un viaje de vuelta ({existing['code']}).", "info")
+        return back
+    if trip["status"] == "CANCELADO":
+        flash("No se pueden enlazar viajes cancelados.", "error")
+        return back
+
+    if request.method == "POST":
+        if not validate_csrf():
+            abort(400)
+        other = query_one("SELECT * FROM trips WHERE id = ?", (request.form.get("other_id", type=int),))
+        if other is None:
+            flash("Elige el viaje que quieres enlazar.", "error")
+            return redirect(url_for("viajes.link_trips", trip_id=trip_id, rol=role))
+        ida, vuelta = (trip, other) if role == "ida" else (other, trip)
+        err = _link_error(ida, vuelta)
+        if err:
+            flash(err, "error")
+            return redirect(url_for("viajes.link_trips", trip_id=trip_id, rol=role))
+        separate = 0
+        if _would_share_liquidation(ida, vuelta):
+            if _trip_has_liquidation_data(vuelta["id"]) or request.form.get("separate_liquidation"):
+                separate = 1
+        execute(
+            "UPDATE trips SET return_of_trip_id = ?, separate_liquidation = ? WHERE id = ?",
+            (ida["id"], separate, vuelta["id"]),
+        )
+        log_activity(
+            "viajes", "EDITAR", f"Viaje {vuelta['code']} enlazado como vuelta de {ida['code']}",
+            entity_type="viaje", entity_id=vuelta["id"], entity_url=url_for("viajes.detail", trip_id=vuelta["id"]),
+        )
+        msg = f"Listo: {vuelta['code']} quedó como la vuelta de {ida['code']}."
+        if separate:
+            msg += " Cada uno conserva su propia liquidación (anticipo y gastos)."
+        flash(msg, "success")
+        return back
+
+    q = request.args.get("q", "").strip()
+    show_all = bool(request.args.get("todos"))
+    sql = """SELECT t.*, c.name AS client_name, d.name AS driver_name, d2.name AS driver2_name, v.plate AS vehicle_plate
+             FROM trips t JOIN clients c ON c.id = t.client_id
+             LEFT JOIN drivers d ON d.id = t.driver_id LEFT JOIN drivers d2 ON d2.id = t.driver2_id
+             LEFT JOIN vehicles v ON v.id = t.vehicle_id
+             WHERE t.id != ? AND t.issuer = ? AND t.status != 'CANCELADO' AND t.return_of_trip_id IS NULL
+               AND NOT EXISTS (SELECT 1 FROM trips r WHERE r.return_of_trip_id = t.id)"""
+    params = [trip_id, trip["issuer"]]
+    if q:
+        sql += """ AND (LOWER(t.code) LIKE LOWER(?) OR LOWER(c.name) LIKE LOWER(?) OR LOWER(t.origin) LIKE LOWER(?)
+                        OR LOWER(t.destination) LIKE LOWER(?) OR LOWER(COALESCE(d.name, '')) LIKE LOWER(?))"""
+        params += [f"%{q}%"] * 5
+    sql += " ORDER BY t.scheduled_date DESC, t.id DESC LIMIT 400"
+    candidates = []
+    for t in query_all(sql, params):
+        gap = _day_gap(t["scheduled_date"], trip["scheduled_date"])
+        if not show_all and not q and gap > 45:
+            continue
+        ida, vuelta = (trip, t) if role == "ida" else (t, trip)
+        candidates.append({
+            "t": t, "gap": gap,
+            "reverse": t["origin"] == trip["destination"] and t["destination"] == trip["origin"],
+            "same_driver": bool(t["driver_id"]) and t["driver_id"] == trip["driver_id"],
+            "order_ok": vuelta["scheduled_date"] >= ida["scheduled_date"],
+            "has_liquidation": _trip_has_liquidation_data(t["id"]),
+            "share": _would_share_liquidation(ida, vuelta),
+        })
+    candidates.sort(key=lambda c: (not c["reverse"], not c["same_driver"], c["gap"]))
+    return render_template(
+        "viajes/enlazar.html", trip=trip, role=role, candidates=candidates[:80], q=q, show_all=show_all,
+        trip_has_liquidation=_trip_has_liquidation_data(trip_id),
+    )
+
+
+@bp.route("/<int:trip_id>/desenlazar", methods=["POST"])
+@permission_required("viajes", "edit")
+def unlink_trips(trip_id):
+    """Deshace el enlace ida/vuelta (se llama desde cualquiera de los dos
+    viajes). Si ida y vuelta comparten una liquidación que ya tiene anticipo
+    o gastos, no se deshace: esos gastos son de los dos tramos a la vez y no
+    se pueden repartir solos."""
+    if not validate_csrf():
+        abort(400)
+    trip = query_one("SELECT * FROM trips WHERE id = ?", (trip_id,))
+    if trip is None:
+        abort(404)
+    back = redirect(url_for("viajes.detail", trip_id=trip_id))
+    if trip["return_of_trip_id"]:
+        vuelta = trip
+        ida = query_one("SELECT * FROM trips WHERE id = ?", (trip["return_of_trip_id"],))
+    else:
+        ida = trip
+        vuelta = query_one("SELECT * FROM trips WHERE return_of_trip_id = ?", (trip_id,))
+    if ida is None or vuelta is None:
+        flash("Este viaje no está enlazado como ida/vuelta.", "info")
+        return back
+    if liquidation_anchor_trip_id(vuelta["id"]) == ida["id"] and _trip_has_liquidation_data(ida["id"]):
+        flash(
+            f"No se puede deshacer: {ida['code']} y {vuelta['code']} comparten una liquidación que ya tiene "
+            "anticipo o gastos, y esos montos son de los dos tramos. Elimina o separa esa liquidación primero.",
+            "error",
+        )
+        return back
+    execute("UPDATE trips SET return_of_trip_id = NULL, separate_liquidation = 0 WHERE id = ?", (vuelta["id"],))
+    log_activity(
+        "viajes", "EDITAR", f"Viaje {vuelta['code']} dejó de ser la vuelta de {ida['code']}",
+        entity_type="viaje", entity_id=vuelta["id"], entity_url=url_for("viajes.detail", trip_id=vuelta["id"]),
+    )
+    flash(f"Se deshizo el enlace: {vuelta['code']} y {ida['code']} ahora son viajes independientes.", "success")
+    return back
 
 
 @bp.route("/<int:trip_id>")

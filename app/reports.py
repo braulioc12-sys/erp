@@ -937,3 +937,198 @@ def build_staff_payments_by_person_workbook(rows, company_name, filter_descripti
     buffer.seek(0)
     return buffer
 
+
+
+# 7 oct, pedido de Braulio ("filtrar los viajes por mes o conductor y también
+# poder exportar a excel el resumen"): Excel del listado de viajes con los
+# mismos filtros que la pantalla -- hoja "Resumen" (totales, por conductor o
+# tercero, por mes) y hoja "Detalle" (una fila por viaje).
+def _header_row(ws, row, titles):
+    for idx, title in enumerate(titles, start=1):
+        cell = ws.cell(row=row, column=idx, value=title)
+        cell.font = Font(bold=True, color=COLOR_HEADER_TEXT)
+        cell.fill = PatternFill("solid", fgColor=COLOR_PRIMARY)
+        cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        cell.border = _thin_border("all")
+
+
+def _money(cell):
+    cell.number_format = CURRENCY_FORMAT
+    cell.alignment = Alignment(horizontal="right")
+    return cell
+
+
+def trips_summary(trips, scope, driver_id=None):
+    """Totales para la hoja Resumen. Los cancelados se cuentan por estado
+    pero no suman tarifa ni comisión. En viajes de doble conductor la
+    comisión (que ya es el monto completo de CADA conductor) suma dos veces
+    en el total y una por conductor, igual que el reporte de comisiones."""
+    active = [t for t in trips if t["status"] != "CANCELADO"]
+    by_status = {}
+    for t in trips:
+        by_status[t["status"]] = by_status.get(t["status"], 0) + 1
+    rate = sum(t["rate"] or 0 for t in active)
+    out = {
+        "count": len(trips), "active": len(active), "by_status": by_status, "rate": rate,
+        "invoiced": sum(1 for t in active if t["invoiced"]), "paid": sum(1 for t in active if t["paid"]),
+        "linked": sum(1 for t in trips if t["outbound_code"] or t["return_code"]),
+    }
+    months = {}
+    for t in active:
+        m = (t["scheduled_date"] or "")[:7]
+        e = months.setdefault(m, {"trips": 0, "rate": 0.0, "commission": 0.0, "freight": 0.0})
+        e["trips"] += 1
+        e["rate"] += t["rate"] or 0
+    if scope == "propia":
+        people = {}
+        total_commission = 0.0
+        for t in active:
+            commission = t["driver_commission"] or 0
+            slots = [(t["driver_id"], t["driver_name"])]
+            if t["double_driver"] and t["driver2_name"]:
+                slots.append((t["driver2_id"], t["driver2_name"]))
+            for did, name in slots:
+                if driver_id and did != driver_id:
+                    continue
+                e = people.setdefault(name or "(sin conductor)", {"trips": 0, "rate": 0.0, "commission": 0.0})
+                e["trips"] += 1
+                e["rate"] += t["rate"] or 0
+                e["commission"] += commission
+                total_commission += commission
+            months[(t["scheduled_date"] or "")[:7]]["commission"] += commission * len(slots)
+        out["commission"] = total_commission
+    else:
+        people = {}
+        freight = 0.0
+        for t in active:
+            f = t["third_party_rate"] or 0
+            freight += f
+            e = people.setdefault(t["third_party_name"] or "(sin tercero)", {"trips": 0, "rate": 0.0, "freight": 0.0})
+            e["trips"] += 1
+            e["rate"] += t["rate"] or 0
+            e["freight"] += f
+            months[(t["scheduled_date"] or "")[:7]]["freight"] += f
+        out["freight"] = freight
+    out["people"] = dict(sorted(people.items()))
+    out["months"] = dict(sorted(months.items()))
+    return out
+
+
+def build_trips_workbook(trips, scope, company_name, filter_description, driver_id=None):
+    """`trips`: filas de viajes con client_name, vehicle_plate, trailer_plate,
+    driver_name/driver2_name, outbound_code, return_code (ver
+    app/routes/viajes.py, _filtered_trips). scope: 'propia' | 'tercero'."""
+    propia = scope == "propia"
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Resumen"
+    s = trips_summary(trips, scope, driver_id)
+
+    ws["A1"] = f"{company_name} — Resumen de viajes ({'unidad propia' if propia else 'terceros'})"
+    ws["A1"].font = Font(bold=True, size=14, color=COLOR_PRIMARY)
+    ws["A2"] = f"Generado el {datetime.now().strftime('%d/%m/%Y %H:%M')}  ·  {filter_description}"
+    ws["A2"].font = Font(italic=True, size=10, color=COLOR_GRAY)
+
+    row = 4
+    _header_row(ws, row, ["Indicador", "Valor"])
+    rows = [("Viajes (todos los estados)", s["count"]), ("Viajes sin contar cancelados", s["active"])]
+    for status in ("PENDIENTE", "EN_CURSO", "ENTREGADO", "CANCELADO"):
+        rows.append((f"  {pretty_label(status)}", s["by_status"].get(status, 0)))
+    rows += [("Enlazados como ida/vuelta", s["linked"]), ("Facturados", s["invoiced"]), ("Pagados por el cliente", s["paid"])]
+    for label, value in rows:
+        row += 1
+        ws.cell(row=row, column=1, value=label)
+        ws.cell(row=row, column=2, value=value).alignment = Alignment(horizontal="right")
+    row += 1
+    ws.cell(row=row, column=1, value="Tarifa total (sin cancelados)")
+    _money(ws.cell(row=row, column=2, value=float(s["rate"])))
+    row += 1
+    if propia:
+        ws.cell(row=row, column=1, value="Comisión total a conductores")
+        _money(ws.cell(row=row, column=2, value=float(s["commission"])))
+    else:
+        ws.cell(row=row, column=1, value="Flete acordado con terceros")
+        _money(ws.cell(row=row, column=2, value=float(s["freight"])))
+        row += 1
+        ws.cell(row=row, column=1, value="Margen (tarifa − flete)")
+        _money(ws.cell(row=row, column=2, value=float(s["rate"] - s["freight"])))
+
+    row += 2
+    ws.cell(row=row, column=1, value="Por conductor" if propia else "Por tercero").font = Font(bold=True, color=COLOR_PRIMARY)
+    row += 1
+    titles = ["Conductor", "Viajes", "Tarifa de sus viajes", "Comisión"] if propia else ["Tercero", "Viajes", "Tarifa", "Flete acordado"]
+    _header_row(ws, row, titles)
+    for name, e in s["people"].items():
+        row += 1
+        ws.cell(row=row, column=1, value=name)
+        ws.cell(row=row, column=2, value=e["trips"]).alignment = Alignment(horizontal="right")
+        _money(ws.cell(row=row, column=3, value=float(e["rate"])))
+        _money(ws.cell(row=row, column=4, value=float(e["commission"] if propia else e["freight"])))
+    if not s["people"]:
+        row += 1
+        ws.cell(row=row, column=1, value="Sin viajes con los filtros elegidos.").font = Font(italic=True, color=COLOR_GRAY)
+    if propia:
+        row += 1
+        ws.cell(row=row, column=1, value="En viajes de doble conductor la tarifa aparece en ambos conductores; no la sumes por conductor.").font = Font(italic=True, size=9, color=COLOR_GRAY)
+
+    row += 2
+    ws.cell(row=row, column=1, value="Por mes").font = Font(bold=True, color=COLOR_PRIMARY)
+    row += 1
+    _header_row(ws, row, ["Mes", "Viajes", "Tarifa", "Comisión" if propia else "Flete acordado"])
+    for month, e in s["months"].items():
+        row += 1
+        ws.cell(row=row, column=1, value=month)
+        ws.cell(row=row, column=2, value=e["trips"]).alignment = Alignment(horizontal="right")
+        _money(ws.cell(row=row, column=3, value=float(e["rate"])))
+        _money(ws.cell(row=row, column=4, value=float(e["commission"] if propia else e["freight"])))
+    for col, width in zip("ABCD", (44, 14, 22, 22)):
+        ws.column_dimensions[col].width = width
+    ws.sheet_view.showGridLines = False
+
+    # ---- Detalle
+    dt = wb.create_sheet("Detalle")
+    if propia:
+        titles = ["Código", "Fecha", "Cliente", "Origen", "Destino", "Tracto", "Carreta", "Conductor", "Segundo conductor",
+                  "Estado", "Tarifa", "Comisión (c/u)", "Facturado", "Pagado", "Ida/Vuelta"]
+        widths = [12, 12, 30, 18, 18, 11, 11, 26, 26, 12, 14, 14, 10, 9, 18]
+    else:
+        titles = ["Código", "Fecha", "Cliente", "Origen", "Destino", "Tercero", "Unidad del tercero", "Estado",
+                  "Periodo de pago", "Flete acordado", "Tarifa", "Facturado", "Pagado", "Ida/Vuelta"]
+        widths = [12, 12, 30, 18, 18, 28, 16, 12, 14, 14, 14, 10, 9, 18]
+    _header_row(dt, 1, titles)
+    dt.freeze_panes = "B2"
+    for r, t in enumerate(trips, start=2):
+        link = f"vuelta de {t['outbound_code']}" if t["outbound_code"] else (f"ida de {t['return_code']}" if t["return_code"] else "")
+        if propia:
+            vals = [t["code"], t["scheduled_date"], t["client_name"], t["origin"], t["destination"], t["vehicle_plate"] or "",
+                    t["trailer_plate"] or "", t["driver_name"] or "", (t["driver2_name"] or "") if t["double_driver"] else "",
+                    pretty_label(t["status"]), float(t["rate"] or 0), float(t["driver_commission"] or 0),
+                    "Sí" if t["invoiced"] else "No", "Sí" if t["paid"] else "No", link]
+            money_cols = (11, 12)
+        else:
+            vals = [t["code"], t["scheduled_date"], t["client_name"], t["origin"], t["destination"], t["third_party_name"] or "",
+                    t["third_party_unit"] or "", pretty_label(t["status"]), (t["third_party_payment_term"] or "").replace("_", " ").title(),
+                    float(t["third_party_rate"] or 0), float(t["rate"] or 0), "Sí" if t["invoiced"] else "No",
+                    "Sí" if t["paid"] else "No", link]
+            money_cols = (10, 11)
+        for c, v in enumerate(vals, start=1):
+            cell = dt.cell(row=r, column=c, value=v)
+            cell.border = _thin_border("bottom")
+            if c in money_cols:
+                _money(cell)
+    last = 1 + len(trips)
+    if trips:
+        tr = last + 1
+        dt.cell(row=tr, column=1, value="TOTAL (con cancelados)").font = Font(bold=True)
+        for c in (11, 12) if propia else (10, 11):
+            col = get_column_letter(c)
+            cell = dt.cell(row=tr, column=c, value=f"=SUM({col}2:{col}{last})")
+            cell.font = Font(bold=True)
+            _money(cell)
+        dt.cell(row=tr + 1, column=1, value="El Resumen no suma los cancelados; este total sí los incluye.").font = Font(italic=True, size=9, color=COLOR_GRAY)
+    for idx, width in enumerate(widths, start=1):
+        dt.column_dimensions[get_column_letter(idx)].width = width
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer

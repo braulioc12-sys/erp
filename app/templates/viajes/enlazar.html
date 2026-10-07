@@ -1,0 +1,60 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% block title %}Enlazar viaje {{ trip.code }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Enlazar {{ trip.code }} {{ 'con su vuelta' if role == 'ida' else 'con su ida' }}</h1>
+  <div class="page-actions"><a href="{{ url_for('viajes.detail', trip_id=trip.id) }}" class="btn btn-secondary">← {{ trip.code }}</a></div>
+</div>
+<p class="muted mt-0">
+  {% if role == 'ida' %}
+  <strong>{{ trip.code }}</strong> ({{ trip.origin }} → {{ trip.destination }}, {{ trip.scheduled_date }}) será el viaje de <strong>ida</strong>. Elige abajo cuál de los viajes ya creados pasa a ser su <strong>vuelta</strong>.
+  {% else %}
+  <strong>{{ trip.code }}</strong> ({{ trip.origin }} → {{ trip.destination }}, {{ trip.scheduled_date }}) será el viaje de <strong>vuelta</strong>. Elige abajo cuál de los viajes ya creados es su <strong>ida</strong>.
+  {% endif %}
+  Solo aparecen viajes de la misma empresa, no cancelados y que aún no están enlazados. Cada viaje conserva su factura, tarifa y comisión.
+</p>
+
+<form class="filters" method="get">
+  <input type="hidden" name="rol" value="{{ role }}">
+  <label>Buscar <input type="text" name="q" value="{{ q }}" placeholder="Código, cliente, ruta, conductor"></label>
+  <label style="display:flex; flex-direction:row; gap:6px; align-items:center;"><input type="checkbox" name="todos" value="1" {{ 'checked' if show_all }}> Mostrar también viajes de otras fechas</label>
+  <button class="btn btn-secondary" type="submit">Buscar</button>
+</form>
+
+<form method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="rol" value="{{ role }}">
+  <div class="table-wrap"><table>
+    <thead><tr><th></th><th>Código</th><th>Fecha</th><th>Cliente</th><th>Ruta</th><th>Conductor</th><th>Estado</th><th>Notas</th></tr></thead>
+    <tbody>
+      {% for c in candidates %}{% set t = c.t %}
+      <tr>
+        <td><input type="radio" name="other_id" value="{{ t.id }}" required></td>
+        <td><a href="{{ url_for('viajes.detail', trip_id=t.id) }}" target="_blank">{{ t.code }}</a></td>
+        <td>{{ t.scheduled_date }}</td>
+        <td>{{ t.client_name }}</td>
+        <td>{{ t.origin }} → {{ t.destination }}</td>
+        <td>{{ t.driver_name or '—' }}{% if t.double_driver and t.driver2_name %} + {{ t.driver2_name }}{% endif %}</td>
+        <td>{{ m.badge(t.status) }}</td>
+        <td style="font-size:0.85em;">
+          {% if c.reverse %}<span class="badge badge-ok">ruta inversa</span> {% endif %}
+          {% if c.same_driver %}<span class="badge badge-ok">mismo conductor</span> {% endif %}
+          {% if not c.order_ok %}<span class="badge badge-pendiente">{{ 'la vuelta sale antes que la ida' }}</span> {% endif %}
+          {% if c.has_liquidation %}<span class="muted">ya tiene liquidación</span>{% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="table-empty">No hay viajes para enlazar con esos filtros. Prueba «Mostrar también viajes de otras fechas» o busca por código.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  {% if candidates %}
+  <div class="panel" style="margin-top:12px;">
+    <p class="muted" style="margin:0 0 8px;">Si ida y vuelta tienen el <strong>mismo único conductor</strong>, comparten una sola liquidación (anticipo y gastos). Si la vuelta ya tenía anticipo o gastos propios, se mantiene su liquidación aparte automáticamente; también puedes pedirlo tú:</p>
+    <label style="display:flex; flex-direction:row; gap:8px; align-items:center;"><input type="checkbox" name="separate_liquidation" value="1"> Que cada viaje liquide por separado</label>
+  </div>
+  <div class="btn-group" style="margin-top:12px;"><button type="submit" class="btn btn-primary">🔗 Enlazar como {{ 'vuelta' if role == 'ida' else 'ida' }}</button></div>
+  {% endif %}
+</form>
+{% endblock %}

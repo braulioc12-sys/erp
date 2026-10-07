@@ -30,10 +30,15 @@
       {% endfor %}
     </select>
   </label>
+  <label>Mes
+    <input type="month" name="month" value="{{ month }}">
+  </label>
   <label>Buscar
     <input type="text" name="q" value="{{ q }}" placeholder="Código, cliente, tercero, ruta">
   </label>
   <button class="btn btn-secondary" type="submit">Filtrar</button>
+  {% if status or month or q %}<a href="{{ url_for('viajes.list_terceros', issuer=issuer) }}" class="btn btn-secondary">Quitar filtros</a>{% endif %}
+  <a href="{{ url_for('viajes.export_trips', issuer=issuer, scope='tercero', status=status, month=month, q=q) }}" class="btn btn-secondary">⬇ Exportar resumen a Excel</a>
 </form>
 
 <div class="table-wrap">
@@ -44,7 +49,7 @@
     <tbody>
       {% for t in trips %}
       <tr onclick="window.location='{{ url_for('viajes.detail', trip_id=t.id) }}'" style="cursor:pointer;">
-        <td><a href="{{ url_for('viajes.detail', trip_id=t.id) }}">{{ t.code }}</a></td>
+        <td><a href="{{ url_for('viajes.detail', trip_id=t.id) }}">{{ t.code }}</a>{% if t.outbound_code %}<div class="muted" style="font-size:0.8em;">↩ vuelta de {{ t.outbound_code }}</div>{% elif t.return_code %}<div class="muted" style="font-size:0.8em;">↪ vuelta: {{ t.return_code }}</div>{% endif %}</td>
         <td>{{ t.scheduled_date }}</td>
         <td>{{ t.client_name }}</td>
         <td>{{ t.third_party_name or '—' }}</td>
