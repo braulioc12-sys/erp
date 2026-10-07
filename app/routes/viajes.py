@@ -1364,7 +1364,8 @@ def detail(trip_id):
     # aceptada. Un viaje puede tener más de una guía (p.ej. una incompleta
     # y luego la correcta) -- se listan todas, la más nueva primero.
     existing_waybills = query_all(
-        "SELECT id, series, series_number, sunat_status, sunat_pdf_url, shipper_name FROM waybills WHERE trip_id = ? ORDER BY id DESC",
+        "SELECT id, series, series_number, sunat_status, sunat_pdf_url, shipper_name, disregarded, disregarded_reason, disregarded_at "
+        "FROM waybills WHERE trip_id = ? ORDER BY disregarded, id DESC",
         (trip_id,),
     )
     # 22 sep, pedido de Braulio ("que usuario creo el viaje... etc"): quién

@@ -1540,6 +1540,17 @@ CREATE TABLE IF NOT EXISTS waybills (
     sunat_xml_filename TEXT,
     sunat_cdr_url TEXT,
     sunat_sent_at TEXT,
+    -- 7 oct, pedido de Braulio ("hay guias que fueron aceptadas por sunat
+    -- pero hubo error en datos, si le ponemos la opcion de no considerar...
+    -- para cuando en un futuro se revise un viaje se pueda saber cual es la
+    -- guia que si sirve"): una guía ACEPTADA no se puede borrar ni editar,
+    -- así que se marca "no válida" (disregarded=1) con un motivo obligatorio,
+    -- quién y cuándo. Es solo una marca local y reversible -- no anula nada
+    -- en SUNAT. La guía sigue en el viaje y en Guías, pero tachada.
+    disregarded INTEGER NOT NULL DEFAULT 0,
+    disregarded_reason TEXT,
+    disregarded_by INTEGER REFERENCES users(id),
+    disregarded_at TEXT,
     created_by INTEGER REFERENCES users(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

@@ -30,6 +30,31 @@
   </div>
 </div>
 
+{# 7 oct, pedido de Braulio: guía aceptada por SUNAT pero con datos errados -> "no válida"
+   (ver disregard() en app/routes/guias.py). Solo es una marca local y reversible. #}
+{% if waybill.disregarded %}
+<div class="flash flash-error" style="margin-bottom:12px;">
+  <strong>Esta guía está marcada como NO VÁLIDA</strong> — no se toma en cuenta para el viaje (sigue vigente en SUNAT, esto es solo una marca interna).
+  {% if waybill.disregarded_reason %}<br>Motivo: {{ waybill.disregarded_reason }}{% endif %}{% if waybill.disregarded_at %} · {{ waybill.disregarded_at[:16] }}{% endif %}
+  {% if can(current_user.roles, 'guias', 'edit') %}
+  <form method="post" action="{{ url_for('guias.regard', waybill_id=waybill.id) }}" style="display:inline;margin-left:10px;" onsubmit="return confirm('¿Volver a considerar esta guía como válida?');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-secondary btn-sm">Volver a considerar</button>
+  </form>
+  {% endif %}
+</div>
+{% elif waybill.sunat_status == 'ACEPTADO' and can(current_user.roles, 'guias', 'edit') %}
+<details style="margin-bottom:12px;">
+  <summary class="btn btn-secondary btn-sm" style="display:inline-block;cursor:pointer;">¿La guía salió con datos errados? No considerar esta guía</summary>
+  <form method="post" action="{{ url_for('guias.disregard', waybill_id=waybill.id) }}" style="margin-top:8px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <p class="muted" style="margin:0 0 6px;">Una guía aceptada por SUNAT no se puede editar ni borrar. Márcala como no válida para que, al revisar el viaje, se sepa cuál guía sí sirve. No anula nada en SUNAT y se puede revertir.</p>
+    <input type="text" name="reason" required maxlength="300" placeholder="Motivo (ej. error en la placa)" style="min-width:260px;">
+    <button type="submit" class="btn btn-danger btn-sm">Marcar como no válida</button>
+  </form>
+</details>
+{% endif %}
+
 <div class="detail-grid">
   {# 22 sep, pedido de Braulio ("que usuario... genero guias"): visible solo
      para quien tiene acceso al módulo de Actividad -- mismo criterio en el

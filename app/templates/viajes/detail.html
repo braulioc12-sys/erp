@@ -270,6 +270,7 @@
    segunda, correcta) -- se listan todas, la más nueva primero, cada una con
    su propio enlace a Guías de Remisión y, si ya fue aceptada por SUNAT, su
    PDF directo. #}
+{% set has_disregarded_waybill = existing_waybills|selectattr('disregarded')|list|length > 0 %}
 {% if existing_waybills %}
 <div class="panel" style="margin-bottom:16px;">
   <h2 class="mt-0">Guía{{ 's' if existing_waybills|length > 1 }} de transportista generada{{ 's' if existing_waybills|length > 1 }}</h2>
@@ -278,12 +279,50 @@
       <thead><tr><th>N°</th><th>Remitente</th><th>Estado SUNAT</th><th>PDF</th><th></th></tr></thead>
       <tbody>
         {% for w in existing_waybills %}
-        <tr>
-          <td>{{ w.series }}-{{ '%06d'|format(w.series_number) }}</td>
+        {# 7 oct, pedido de Braulio: guías aceptadas por SUNAT pero con datos errados se marcan
+           "no válida" (ver disregard() en app/routes/guias.py) -- quedan tachadas, con su motivo,
+           y la(s) vigente(s) se resaltan para saber cuál sí sirve. #}
+        <tr{% if w.disregarded %} style="opacity:.6;"{% endif %}>
+          <td{% if w.disregarded %} style="text-decoration:line-through;"{% endif %}>{{ w.series }}-{{ '%06d'|format(w.series_number) }}</td>
           <td>{{ w.shipper_name or trip.client_name or '—' }}</td>
-          <td>{{ m.badge(w.sunat_status) }}</td>
+          <td>{{ m.badge(w.sunat_status) }}
+            {% if w.disregarded %}<span class="badge badge-cancelado">NO VÁLIDA</span>
+            {% elif has_disregarded_waybill and w.sunat_status == 'ACEPTADO' %}<span class="badge badge-ok">✔ VIGENTE</span>{% endif %}
+            {% if w.disregarded and w.disregarded_reason %}<div class="muted" style="font-size:0.8em;">Motivo: {{ w.disregarded_reason }}{% if w.disregarded_at %} · {{ w.disregarded_at[:16] }}{% endif %}</div>{% endif %}
+          </td>
           <td>{% if w.sunat_pdf_url %}<a href="{{ w.sunat_pdf_url }}" target="_blank" rel="noopener">Descargar PDF</a>{% else %}—{% endif %}</td>
-          <td><a href="{{ url_for('guias.detail', waybill_id=w.id) }}">Ver guía</a></td>
+          <td>
+            <a href="{{ url_for('guias.detail', waybill_id=w.id) }}">Ver guía</a>
+            {# 7 oct, pedido de Braulio: borrar guías generadas por error. Solo con permiso
+               "delete" de Guías y nunca una ACEPTADA por SUNAT (ver _waybill_delete_block_reason()
+               en app/routes/guias.py). #}
+            {% if w.sunat_status != 'ACEPTADO' and can(current_user.roles, 'guias', 'delete') %}
+            <form method="post" action="{{ url_for('guias.delete', waybill_id=w.id) }}" style="display:inline;margin-left:10px;" onsubmit="return confirm('¿Eliminar la guía {{ w.series }}-{{ '%06d'|format(w.series_number) }} por completo? Esta acción no se puede deshacer.');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="next" value="viaje">
+              <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
+            </form>
+            {% endif %}
+            {% if w.sunat_status == 'ACEPTADO' and can(current_user.roles, 'guias', 'edit') %}
+              {% if w.disregarded %}
+              <form method="post" action="{{ url_for('guias.regard', waybill_id=w.id) }}" style="display:inline;margin-left:10px;" onsubmit="return confirm('¿Volver a considerar esta guía como válida?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="next" value="viaje">
+                <button type="submit" class="btn btn-secondary btn-sm">Volver a considerar</button>
+              </form>
+              {% else %}
+              <details style="display:inline-block;margin-left:10px;vertical-align:top;">
+                <summary class="btn btn-secondary btn-sm" style="display:inline-block;cursor:pointer;">No considerar</summary>
+                <form method="post" action="{{ url_for('guias.disregard', waybill_id=w.id) }}" style="margin-top:6px;">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="next" value="viaje">
+                  <input type="text" name="reason" required maxlength="300" placeholder="Motivo (ej. error en la placa)" style="min-width:220px;">
+                  <button type="submit" class="btn btn-danger btn-sm">Marcar no válida</button>
+                </form>
+              </details>
+              {% endif %}
+            {% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>

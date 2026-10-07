@@ -7,6 +7,7 @@ from flask import (
     abort,
     current_app,
     flash,
+    g,
     jsonify,
     redirect,
     render_template,
@@ -19,7 +20,7 @@ from openpyxl import load_workbook
 from app.audit import get_creator_info, log_activity
 from app.auth import permission_required, validate_csrf
 from app.db import execute, get_db, query_all, query_one
-from app.helpers import company_info_for_issuer, parse_date, parse_float, today_str
+from app.helpers import company_info_for_issuer, now_str, parse_date, parse_float, today_str
 from app.integrations.sunat_ose import (
     SunatOseError,
     build_client_from_config,
@@ -834,7 +835,7 @@ def _brms_trip_guide_index():
 
     waybills = query_all(
         """SELECT w.trip_id, w.series, w.series_number FROM waybills w
-           JOIN trips t ON t.id = w.trip_id WHERE t.issuer = 'BRMS'"""
+           JOIN trips t ON t.id = w.trip_id WHERE t.issuer = 'BRMS' AND w.disregarded = 0"""
     )
     electronic_index = _index_guia_values(
         (f"{w['series']}-{w['series_number']:06d}", w["trip_id"]) for w in waybills
@@ -853,7 +854,7 @@ def link_orders():
                     w.id as waybill_id, w.series, w.series_number, w.sunat_status
              FROM trips t
              JOIN clients c ON c.id = t.client_id
-             LEFT JOIN waybills w ON w.trip_id = t.id
+             LEFT JOIN waybills w ON w.trip_id = t.id AND w.disregarded = 0
              WHERE t.issuer = 'BRMS'
                AND (
                      w.id IS NOT NULL
@@ -1448,9 +1449,18 @@ def delete(waybill_id):
     waybill = query_one("SELECT * FROM waybills WHERE id = ?", (waybill_id,))
     if waybill is None:
         abort(404)
+    # 7 oct, pedido de Braulio ("tambien hay que poner opcion de poder
+    # borrar guias de transportista que se generaron por error"): el mismo
+    # borrado también se ofrece desde la lista "Guías de transportista
+    # generadas" del detalle del viaje (viajes/detail.html), con
+    # next=viaje para volver al viaje en vez de a la lista de guías. Misma
+    # regla de siempre: permiso "delete" y nada de borrar una ACEPTADA.
+    back_to_trip = request.form.get("next") == "viaje" and waybill["trip_id"]
     reason = _waybill_delete_block_reason(waybill)
     if reason:
         flash(reason, "error")
+        if back_to_trip:
+            return redirect(url_for("viajes.detail", trip_id=waybill["trip_id"]))
         return redirect(url_for("guias.detail", waybill_id=waybill_id))
     label = f"{waybill['series']}-{waybill['series_number']:06d}"
     execute("DELETE FROM waybills WHERE id = ?", (waybill_id,))
@@ -1458,8 +1468,77 @@ def delete(waybill_id):
         "guias", "ELIMINAR", f"Guía {label}",
         entity_type="guia", entity_id=waybill_id,
     )
-    flash("Guía eliminada.", "success")
+    flash(f"Guía eliminada. ({label})", "success")
+    if back_to_trip:
+        return redirect(url_for("viajes.detail", trip_id=waybill["trip_id"]))
     return redirect(url_for("guias.list_view"))
+
+
+# 7 oct, pedido de Braulio ("hay guias que fueron aceptadas por sunat pero
+# hubo error en datos, si le ponemos la opcion de no considerar o no tomar
+# en cuenta? Para cuando en un futuro se revise un viaje se pueda saber cual
+# es la guia que si sirve"): una guía ACEPTADA no se puede borrar ni editar,
+# así que se marca como "no válida" -- con motivo obligatorio, quién y
+# cuándo -- y queda tachada en el viaje y en Guías. Es solo una marca LOCAL
+# y reversible: no anula nada en SUNAT. Solo aplica a guías aceptadas (las
+# demás se editan o se eliminan).
+def _back_after_disregard(waybill_id, trip_id):
+    if request.form.get("next") == "viaje" and trip_id:
+        return redirect(url_for("viajes.detail", trip_id=trip_id))
+    return redirect(url_for("guias.detail", waybill_id=waybill_id))
+
+
+@bp.route("/<int:waybill_id>/no-considerar", methods=["POST"])
+@permission_required("guias", "edit")
+def disregard(waybill_id):
+    if not validate_csrf():
+        abort(400)
+    waybill = query_one("SELECT * FROM waybills WHERE id = ?", (waybill_id,))
+    if waybill is None:
+        abort(404)
+    label = f"{waybill['series']}-{waybill['series_number']:06d}"
+    back = _back_after_disregard(waybill_id, waybill["trip_id"])
+    if waybill["sunat_status"] != "ACEPTADO":
+        flash("Solo se puede marcar como no válida una guía ya aceptada por SUNAT. "
+              "Las demás se pueden editar o eliminar.", "error")
+        return back
+    reason = (request.form.get("reason") or "").strip()
+    if not reason:
+        flash("Escribe el motivo (por ejemplo: \"error en la placa\") para marcar la guía como no válida.", "error")
+        return back
+    execute(
+        """UPDATE waybills SET disregarded = 1, disregarded_reason = ?, disregarded_by = ?, disregarded_at = ?
+           WHERE id = ?""",
+        (reason[:300], g.user["id"], now_str(), waybill_id),
+    )
+    log_activity(
+        "guias", "EDITAR", f"Guía {label} marcada como no válida",
+        entity_type="guia", entity_id=waybill_id, details=reason[:300],
+    )
+    flash(f"La guía {label} quedó marcada como no válida. Sigue en el viaje, pero tachada.", "success")
+    return back
+
+
+@bp.route("/<int:waybill_id>/volver-a-considerar", methods=["POST"])
+@permission_required("guias", "edit")
+def regard(waybill_id):
+    if not validate_csrf():
+        abort(400)
+    waybill = query_one("SELECT * FROM waybills WHERE id = ?", (waybill_id,))
+    if waybill is None:
+        abort(404)
+    label = f"{waybill['series']}-{waybill['series_number']:06d}"
+    execute(
+        """UPDATE waybills SET disregarded = 0, disregarded_reason = NULL, disregarded_by = NULL, disregarded_at = NULL
+           WHERE id = ?""",
+        (waybill_id,),
+    )
+    log_activity(
+        "guias", "EDITAR", f"Guía {label} vuelve a considerarse como válida",
+        entity_type="guia", entity_id=waybill_id,
+    )
+    flash(f"La guía {label} vuelve a considerarse como válida.", "success")
+    return _back_after_disregard(waybill_id, waybill["trip_id"])
 
 
 @bp.route("/<int:waybill_id>/pdf-sunat")

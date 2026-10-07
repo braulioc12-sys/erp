@@ -480,6 +480,12 @@ COLUMN_MIGRATIONS = [
     # "VEHICULO Y CONDUCTOR SECUNDARIO" con la placa de la carreta -- ver
     # la nota larga en build_waybill_payload() y app/routes/guias.py.
     ("waybills", "trailer_plate", "TEXT"),
+    # 7 oct, pedido de Braulio: marca "no válida" para guías aceptadas por
+    # SUNAT con datos errados (ver la nota en schema.sql).
+    ("waybills", "disregarded", "INTEGER NOT NULL DEFAULT 0"),
+    ("waybills", "disregarded_reason", "TEXT"),
+    ("waybills", "disregarded_by", "INTEGER"),
+    ("waybills", "disregarded_at", "TEXT"),
     # 15 sep, pedido de Braulio ("hay que especificar remitente,
     # destinatario, subcontratado, pagador"): campos opcionales para los 3
     # bloques que no siempre coinciden con el cliente del viaje -- ver la

@@ -58,7 +58,7 @@
       <tbody>
         {% for w in waybills %}
         <tr>
-          <td><a href="{{ url_for('guias.detail', waybill_id=w.id) }}">{{ w.series }}-{{ '%06d'|format(w.series_number) }}</a></td>
+          <td{% if w.disregarded %} style="text-decoration:line-through;opacity:.6;"{% endif %}><a href="{{ url_for('guias.detail', waybill_id=w.id) }}">{{ w.series }}-{{ '%06d'|format(w.series_number) }}</a></td>
           <td><a href="{{ url_for('viajes.detail', trip_id=w.trip_id) }}">{{ w.trip_code }}</a></td>
           <td>{{ w.client_name }}</td>
           <td>{{ w.origin }} → {{ w.destination }}</td>
@@ -70,7 +70,7 @@
             {% else %}—{% endif %}
           </td>
           {% endif %}
-          <td>{{ m.badge(w.sunat_status) }}</td>
+          <td>{{ m.badge(w.sunat_status) }}{% if w.disregarded %} <span class="badge badge-cancelado" title="{{ w.disregarded_reason or '' }}">NO VÁLIDA</span>{% endif %}</td>
         </tr>
         {% else %}
         <tr><td colspan="{{ 7 if issuer == 'BRMS' else 6 }}" class="table-empty">No se encontraron guías de remisión{{ ' para esta búsqueda' if q else '' }}.</td></tr>
