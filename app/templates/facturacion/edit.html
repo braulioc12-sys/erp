@@ -68,7 +68,7 @@
         <tr>
           <th>Viaje</th><th>Descripción</th>
           <th style="width:10%;">Cantidad</th>
-          <th style="width:15%;">Monto (S/)</th>
+          <th style="width:15%;">Monto (S/){% if invoice.issuer == 'HARRASO' %} con IGV{% endif %}</th>
           <th style="width:8%;">Eliminar</th>
         </tr>
       </thead>

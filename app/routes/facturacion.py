@@ -252,6 +252,16 @@ def brms_e001_mark_paid():
     return redirect(url_for("facturacion.list_view", issuer="BRMS"))
 
 
+def _trip_invoice_amount(rate, issuer):
+    """7 oct: monto CON IGV que se guarda en invoice_items.amount para un
+    viaje. La tarifa del viaje se ingresa SIN IGV en Harraso (se le suma el
+    18%); BRMS está exonerada del IGV y su tarifa es el total."""
+    rate = float(rate or 0)
+    if issuer == "HARRASO":
+        return round(rate * (1 + IGV_RATE), 2)
+    return round(rate, 2)
+
+
 def _collect_manual_items(issuer=None):
     """21 sep, pedido de Braulio ("aparte de facturar los viajes, tambien
     se puedan emitir facturas no relacionadas a viajes, como alquileres...
@@ -1449,7 +1459,17 @@ def new():
             if round(float(t["rate"] or 0), 2) != new_rate:
                 rate_changes.append((t["id"], t["code"], float(t["rate"] or 0), new_rate))
                 t["rate"] = new_rate
-        total = sum(t["rate"] for t in trips) + sum(line_total for _, _, _, line_total in manual_items)
+        # 7 oct, pedido de Braulio ("cuando se pone la tarifa para crear la
+        # factura, ese monto es sin IGV... en este caso debió ser 15150 +
+        # IGV"): para Harraso la tarifa del viaje (trips.rate, editable acá)
+        # es el precio SIN IGV, igual que el "P. unitario" de los ítems
+        # adicionales (ver _collect_manual_items). invoice_items.amount sigue
+        # guardando el monto CON IGV (así lo asume todo lo demás: SUNAT,
+        # detracción, reportes), por eso se sube el 18% al guardarlo. BRMS
+        # (exonerada del IGV) no cambia: su tarifa es el total.
+        for t in trips:
+            t["invoice_amount"] = _trip_invoice_amount(t["rate"], issuer)
+        total = round(sum(t["invoice_amount"] for t in trips) + sum(line_total for _, _, _, line_total in manual_items), 2)
         number = next_code("F", "invoices", code_column="number")
         series = current_app.config["INVOICE_SERIES"]
         series_number = _next_series_number(series)
@@ -1536,7 +1556,7 @@ def new():
                 description = f"{t['code']}: {t['origin']} -> {t['destination']}"
             db.execute(
                 "INSERT INTO invoice_items (invoice_id, trip_id, description, amount) VALUES (?, ?, ?, ?)",
-                (invoice_id, t["id"], description, t["rate"]),
+                (invoice_id, t["id"], description, t["invoice_amount"]),
             )
             db.execute("UPDATE trips SET invoiced = 1 WHERE id = ?", (t["id"],))
         for desc, qty, _unit_amt, line_total in manual_items:
