@@ -482,6 +482,8 @@ COLUMN_MIGRATIONS = [
     ("waybills", "trailer_plate", "TEXT"),
     # 7 oct, pedido de Braulio: marca "no válida" para guías aceptadas por
     # SUNAT con datos errados (ver la nota en schema.sql).
+    # 7 oct, pedido de Braulio: descripción de la carga editable por guía.
+    ("waybills", "cargo_description", "TEXT"),
     ("waybills", "disregarded", "INTEGER NOT NULL DEFAULT 0"),
     ("waybills", "disregarded_reason", "TEXT"),
     ("waybills", "disregarded_by", "INTEGER"),

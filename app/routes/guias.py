@@ -187,6 +187,18 @@ def _related_document_series_error(series):
     return None
 
 
+# 7 oct, pedido de Braulio ("el campo de descripcion, a la hora de crear la
+# guia se pueda editar"): la descripción del bien trasladado (la que sale en
+# "INFORMACIÓN DE BIENES TRASLADADOS" del PDF) antes era siempre la de la
+# carga del viaje. Ahora se puede cambiar por guía (p.ej. "CONTENEDOR
+# EITU-1220425" en vez de "MERCADERIA VARIAS"). Vacío = se usa la del viaje.
+CARGO_DESCRIPTION_MAX = 250
+
+
+def _cargo_description_from_form():
+    return (request.form.get("cargo_description") or "").strip()[:CARGO_DESCRIPTION_MAX] or None
+
+
 def _shipper_from_form(form):
     """7 oct, pedido de Braulio: RUC y razón social del remitente de ESTA
     guía, cuando es otra razón social del mismo cliente (ej. Tottus y Tottus
@@ -410,8 +422,8 @@ def new(trip_id):
                recipient_ruc, recipient_name, subcontractor_ruc, subcontractor_name,
                payer_type, payer_ruc, payer_name, related_document_type, related_document_series,
                related_document_number, related_document_issuer_ruc,
-               notes, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               notes, cargo_description, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 trip_id,
                 series,
@@ -457,6 +469,7 @@ def new(trip_id):
                 related_document_number,
                 related_document_issuer_ruc,
                 request.form.get("notes", "").strip(),
+                _cargo_description_from_form(),
                 None,
             ),
         )
@@ -613,7 +626,7 @@ def edit(waybill_id):
                driver_license=?, recipient_ruc=?, recipient_name=?, subcontractor_ruc=?,
                subcontractor_name=?, payer_type=?, payer_ruc=?, payer_name=?,
                related_document_type=?, related_document_series=?, related_document_number=?,
-               related_document_issuer_ruc=?, notes=?
+               related_document_issuer_ruc=?, notes=?, cargo_description=?
                WHERE id=?""",
             (
                 issue_date_value,
@@ -644,6 +657,7 @@ def edit(waybill_id):
                 related_document_number,
                 related_document_issuer_ruc,
                 request.form.get("notes", "").strip(),
+                _cargo_description_from_form(),
                 waybill_id,
             ),
         )
@@ -671,7 +685,7 @@ def edit(waybill_id):
 @permission_required("guias", "view")
 def detail(waybill_id):
     waybill = query_one(
-        """SELECT w.*, t.code as trip_code, t.origin, t.destination, t.cargo_description,
+        """SELECT w.*, t.code as trip_code, t.origin, t.destination, t.cargo_description as cargo_description_trip,
                   t.client_order_number as client_order_number,
                   c.name as client_name
            FROM waybills w

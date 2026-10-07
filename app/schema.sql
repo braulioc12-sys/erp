@@ -1547,6 +1547,11 @@ CREATE TABLE IF NOT EXISTS waybills (
     -- así que se marca "no válida" (disregarded=1) con un motivo obligatorio,
     -- quién y cuándo. Es solo una marca local y reversible -- no anula nada
     -- en SUNAT. La guía sigue en el viaje y en Guías, pero tachada.
+    -- 7 oct, pedido de Braulio ("el campo de descripcion, a la hora de crear
+    -- la guia se pueda editar"): descripción del bien trasladado que sale en
+    -- el detalle de la guía (detalleGuia.descripcion). NULL/vacío = se usa la
+    -- de la carga del viaje (trips.cargo_description), como antes.
+    cargo_description TEXT,
     disregarded INTEGER NOT NULL DEFAULT 0,
     disregarded_reason TEXT,
     disregarded_by INTEGER REFERENCES users(id),

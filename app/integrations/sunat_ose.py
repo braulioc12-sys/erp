@@ -1356,6 +1356,12 @@ def build_waybill_payload(waybill, trip, company, client):
     elif payer_type == "TERCERO" and waybill["payer_ruc"]:
         tipo_flete = "FLETE_TERCERO"
 
+    # 7 oct, pedido de Braulio: la descripción del bien se puede editar por guía
+    # (waybills.cargo_description); si está vacía, la de la carga del viaje.
+    cargo_description = (
+        (waybill["cargo_description"] or "").strip() or (trip["cargo_description"] or "").strip() or "Carga general"
+    )
+
     payload = {
         "close2u": {
             "tipoIntegracion": "OFFLINE",
@@ -1365,7 +1371,7 @@ def build_waybill_payload(waybill, trip, company, client):
             "serie": waybill["series"],
             "numero": waybill["series_number"],
             "fechaEmision": waybill["issue_date"],
-            "glosa": waybill_glosa(trip["code"], waybill["notes"] or trip["cargo_description"]),
+            "glosa": waybill_glosa(trip["code"], waybill["notes"] or cargo_description),
         },
         "remitente": remitente,
         "destinatario": destinatario,
@@ -1457,7 +1463,7 @@ def build_waybill_payload(waybill, trip, company, client):
             {
                 "numeroOrden": 1,
                 "codigoProducto": f"CARGA-{trip['id']}",
-                "descripcion": trip["cargo_description"] or "Carga general",
+                "descripcion": cargo_description,
                 "unidadMedida": "KILOGRAMO",
                 "unidadNombre": "KILOGRAMO",
                 "cantidad": waybill["weight_kg"] or 1,

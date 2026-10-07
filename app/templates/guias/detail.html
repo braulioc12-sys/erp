@@ -82,6 +82,7 @@
   <div class="detail-item"><div class="label">Ruta</div><div class="value">{{ waybill.origin_address }} → {{ waybill.destination_address }}</div></div>
   <div class="detail-item"><div class="label">Fecha de emisión</div><div class="value">{{ waybill.issue_date }}</div></div>
   <div class="detail-item"><div class="label">Fecha de entrega</div><div class="value">{{ waybill.delivery_date or waybill.issue_date }}</div></div>
+  <div class="detail-item"><div class="label">Descripción de la carga</div><div class="value">{{ waybill.cargo_description or waybill.cargo_description_trip or '—' }}</div></div>
   <div class="detail-item"><div class="label">Peso / bultos</div><div class="value">{{ waybill.weight_kg or '—' }} kg / {{ waybill.packages or '—' }}</div></div>
   <div class="detail-item"><div class="label">Vehículo</div><div class="value">{{ waybill.vehicle_plate or '—' }}</div></div>
   <div class="detail-item"><div class="label">Carreta (vehículo secundario)</div><div class="value">{{ waybill.trailer_plate or '—' }}</div></div>
