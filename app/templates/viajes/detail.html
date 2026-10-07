@@ -62,8 +62,11 @@
   <h1>Viaje {{ trip.code }} {{ m.badge(trip.status) }}</h1>
   <div class="page-actions">
     {% if can(current_user.roles, 'viajes', 'edit') %}
-      {% if trip.status in ('PENDIENTE', 'EN_CURSO') %}
+      {% if trip.status in ('PENDIENTE', 'EN_CURSO') and not trip.paid %}
       <a href="{{ url_for('viajes.edit', trip_id=trip.id) }}" class="btn btn-secondary">Editar</a>
+      {# 7 oct, pedido de Braulio: los administradores (permiso "edit_closed") pueden editar viajes ya entregados, cancelados o pagados. #}
+      {% elif can(current_user.roles, 'viajes', 'edit_closed') %}
+      <a href="{{ url_for('viajes.edit', trip_id=trip.id) }}" class="btn btn-secondary" title="Viaje cerrado (entregado, cancelado o pagado): solo administradores">✎ Editar viaje {{ 'pagado' if trip.paid else 'cerrado' }}</a>
       {% endif %}
       {% for s in next_statuses %}
       {# 4 sep: "Entregado" ya no se marca con este botón genérico — hay
@@ -182,6 +185,45 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button type="submit" class="btn btn-secondary btn-sm">{{ 'Desmarcar pagado' if trip.paid else 'Marcar como pagado' }}</button>
   </form>
+</div>
+{% endif %}
+
+{# 7 oct, pedido de Braulio: "en cada viaje facturado hay que habilitar la opcion de subir la detraccion en pdf" #}
+{% if trip.invoiced %}
+<div class="panel" style="margin-bottom:16px;">
+  <h2 class="mt-0">Factura y detracción</h2>
+  {% for inv in trip_invoices %}
+  <div style="{{ 'margin-top:14px; padding-top:12px; border-top:1px solid var(--border, #e5e7eb);' if not loop.first }}">
+    <p class="mt-0" style="margin-bottom:6px;">
+      {% if can(current_user.roles, 'facturacion', 'view') %}<a href="{{ url_for('facturacion.detail', invoice_id=inv.id) }}"><strong>Factura {{ inv.number }}</strong></a>{% else %}<strong>Factura {{ inv.number }}</strong>{% endif %}
+      ({{ inv.series }}-{{ '%06d'|format(inv.series_number) }}) {{ m.badge(inv.status) }} · Total {{ inv.amount|invoice_money(inv.currency) }}
+      {% if inv.detraction_applies %}· Detracción {{ inv.detraction_amount|invoice_money(inv.currency) }}{% else %}· <span class="muted">sin detracción registrada</span>{% endif %}
+    </p>
+    <p class="mt-0" style="margin-bottom:6px;"><strong>PDF de la detracción:</strong>
+      {% if inv.detraction_pdf_filename %}
+      <a href="{{ url_for('facturacion.view_detraction_pdf', invoice_id=inv.id) }}" target="_blank">Ver PDF</a>
+      <span class="muted">(subido {{ (inv.detraction_pdf_uploaded_at or '')[:16] }})</span>
+      {% else %}<span class="muted">todavía no se subió.</span>{% endif %}
+    </p>
+    {% if can(current_user.roles, 'viajes', 'edit') or can(current_user.roles, 'facturacion', 'edit') %}
+    <form method="post" action="{{ url_for('facturacion.upload_detraction_pdf', invoice_id=inv.id) }}" enctype="multipart/form-data" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="next_trip" value="{{ trip.id }}">
+      <input type="file" name="detraction_pdf" accept=".pdf,application/pdf" required style="width:auto;">
+      <button type="submit" class="btn btn-secondary btn-sm">{{ 'Reemplazar PDF' if inv.detraction_pdf_filename else 'Subir PDF de la detracción' }}</button>
+    </form>
+    {% if inv.detraction_pdf_filename %}
+    <form method="post" action="{{ url_for('facturacion.delete_detraction_pdf', invoice_id=inv.id) }}" onsubmit="return confirm('¿Quitar el PDF de la detracción?');" style="margin-top:6px;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="next_trip" value="{{ trip.id }}">
+      <button type="submit" class="btn btn-danger btn-sm">Quitar PDF</button>
+    </form>
+    {% endif %}
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="mt-0 muted">Este viaje está marcado como facturado, pero no figura en ninguna factura generada en el sistema (se marcó a mano), así que no hay a qué factura asociarle el PDF de la detracción.</p>
+  {% endfor %}
 </div>
 {% endif %}
 

@@ -774,8 +774,8 @@ def build_trips_by_client_workbook(rows, company_name, filter_description):
     return buffer
 
 
-ACCOUNTS_RECEIVABLE_COLUMNS = ["Cliente", "N° factura", "Emisión", "Vencimiento", "Estado", "Días de atraso", "Monto"]
-ACCOUNTS_RECEIVABLE_COLUMN_WIDTHS = [32, 16, 14, 14, 12, 16, 16]
+ACCOUNTS_RECEIVABLE_COLUMNS = ["Cliente", "N° factura", "Emisión", "Vencimiento", "Estado", "Días de atraso", "Monto", "Adelantos", "Saldo"]
+ACCOUNTS_RECEIVABLE_COLUMN_WIDTHS = [32, 16, 14, 14, 12, 16, 16, 16, 16]
 ACCOUNTS_RECEIVABLE_STATUS_LABELS = {"PENDIENTE": "Pendiente", "VENCIDA": "Vencida"}
 
 
@@ -793,6 +793,8 @@ def build_accounts_receivable_workbook(rows, company_name, filter_description):
     )
 
     total = 0.0
+    total_advances = 0.0
+    total_balance = 0.0
     for r in rows:
         ws.cell(row=row, column=1, value=r["client_name"])
         ws.cell(row=row, column=2, value=r["number"])
@@ -805,9 +807,18 @@ def build_accounts_receivable_workbook(rows, company_name, filter_description):
         amount_cell = ws.cell(row=row, column=7, value=float(r["amount"] or 0))
         amount_cell.number_format = CURRENCY_FORMAT
         amount_cell.alignment = Alignment(horizontal="right")
+        # 7 oct: adelantos recibidos y saldo por cobrar (ver _accounts_receivable_rows).
+        advances = float(r.get("advances_total") or 0)
+        balance = float(r.get("balance", (r["amount"] or 0) - advances))
+        for col, value in ((8, advances), (9, balance)):
+            cell = ws.cell(row=row, column=col, value=value)
+            cell.number_format = CURRENCY_FORMAT
+            cell.alignment = Alignment(horizontal="right")
         for col in range(1, len(ACCOUNTS_RECEIVABLE_COLUMNS) + 1):
             ws.cell(row=row, column=col).border = _thin_border("bottom")
         total += r["amount"] or 0
+        total_advances += advances
+        total_balance += balance
         row += 1
 
     if not rows:
@@ -820,11 +831,83 @@ def build_accounts_receivable_workbook(rows, company_name, filter_description):
     total_label.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
     total_label.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
     total_label.alignment = Alignment(horizontal="right", vertical="center")
-    total_cell = ws.cell(row=row, column=7, value=total)
-    total_cell.number_format = CURRENCY_FORMAT
-    total_cell.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
-    total_cell.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
-    total_cell.alignment = Alignment(horizontal="right", vertical="center")
+    for col, value in ((7, total), (8, total_advances), (9, total_balance)):
+        total_cell = ws.cell(row=row, column=col, value=round(value, 2))
+        total_cell.number_format = CURRENCY_FORMAT
+        total_cell.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
+        total_cell.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
+        total_cell.alignment = Alignment(horizontal="right", vertical="center")
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+
+PENDING_BILLING_STATUS_LABELS = {"ENTREGADO": "Entregado", "EN_CURSO": "En curso"}
+
+
+def build_pending_billing_workbook(rows, company_name, issuer, filter_description):
+    """Reporte nuevo "Viajes pendientes de facturar" (Operación) -- 7 oct,
+    pedido de Braulio: viajes entregados y en curso que aún no se facturan.
+    La tarifa es SIN IGV en Harraso; se agrega la columna "Con IGV" (BRMS
+    está exonerada, no la lleva). `rows`: ver _pending_billing_rows() en
+    app/routes/reportes.py."""
+    with_igv = issuer != "BRMS"
+    columns = ["Viaje", "Cliente", "Se factura a", "Estado", "F. programada", "F. entrega",
+               "Días sin facturar", "Ruta", "Unidad", "Conductor", "Tarifa (sin IGV)" if with_igv else "Tarifa"]
+    widths = [12, 28, 28, 12, 14, 14, 16, 30, 12, 24, 16]
+    if with_igv:
+        columns.append("Con IGV (18%)")
+        widths.append(16)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Pendientes de facturar"
+    row = _report_header(ws, f"{company_name} — Viajes pendientes de facturar", filter_description, columns, widths)
+
+    total = 0.0
+    total_igv = 0.0
+    for r in rows:
+        values = [
+            r["code"], r["client_name"], r["bill_to_name"],
+            PENDING_BILLING_STATUS_LABELS.get(r["status"], r["status"]),
+            r["scheduled_date"] or "—", r["delivered_date"] or "—",
+            r["days_pending"] if r.get("days_pending") is not None else "—",
+            f"{r['origin']} → {r['destination']}", r["plate"] or "—", r["driver_name"] or "—",
+        ]
+        for col, value in enumerate(values, start=1):
+            ws.cell(row=row, column=col, value=value)
+        ws.cell(row=row, column=7).alignment = Alignment(horizontal="right")
+        rate_cell = ws.cell(row=row, column=11, value=float(r["rate"] or 0))
+        rate_cell.number_format = CURRENCY_FORMAT
+        rate_cell.alignment = Alignment(horizontal="right")
+        if with_igv:
+            igv_cell = ws.cell(row=row, column=12, value=float(r["rate_with_igv"] or 0))
+            igv_cell.number_format = CURRENCY_FORMAT
+            igv_cell.alignment = Alignment(horizontal="right")
+        for col in range(1, len(columns) + 1):
+            ws.cell(row=row, column=col).border = _thin_border("bottom")
+        total += float(r["rate"] or 0)
+        total_igv += float(r["rate_with_igv"] or 0)
+        row += 1
+
+    if not rows:
+        ws.cell(row=row, column=1, value="No hay viajes pendientes de facturar con estos filtros.").font = Font(italic=True, color=COLOR_GRAY)
+        row += 1
+
+    row += 1
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=10)
+    label = ws.cell(row=row, column=1, value=f"TOTAL ({len(rows)} viaje(s))")
+    label.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
+    label.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
+    label.alignment = Alignment(horizontal="right", vertical="center")
+    totals = [(11, total)] + ([(12, total_igv)] if with_igv else [])
+    for col, value in totals:
+        cell = ws.cell(row=row, column=col, value=round(value, 2))
+        cell.number_format = CURRENCY_FORMAT
+        cell.font = Font(bold=True, size=12, color=COLOR_HEADER_TEXT)
+        cell.fill = PatternFill("solid", fgColor=COLOR_TOTAL_FILL)
+        cell.alignment = Alignment(horizontal="right", vertical="center")
 
     buffer = io.BytesIO()
     wb.save(buffer)

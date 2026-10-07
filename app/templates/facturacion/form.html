@@ -290,6 +290,28 @@
     <textarea name="notes"></textarea>
   </label>
 
+  {# 7 oct, pedido de Braulio: "se ha recibido un adelanto por esa factura" -- fecha, monto y medio de pago (ver _parse_advance() en app/routes/facturacion.py). Dato interno de cobranza: no cambia el comprobante. #}
+  <h2>Adelanto recibido</h2>
+  <label style="display:flex; align-items:center; gap:8px; font-weight:normal;">
+    <input type="checkbox" name="advance_received" id="advance-received" style="width:auto;">
+    Se recibió un adelanto por esta factura
+  </label>
+  <div class="form-row" id="advance-fields" style="display:none;">
+    <label>Fecha del adelanto
+      <input type="date" name="advance_date" id="advance-date" value="{{ today }}">
+    </label>
+    <label>Monto (con IGV)
+      <input type="number" name="advance_amount" id="advance-amount" step="0.01" min="0" placeholder="0.00">
+    </label>
+    <label>Medio de pago
+      <select name="advance_method" id="advance-method">
+        {% for method in advance_methods %}
+        <option value="{{ method }}">{{ method }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+
   <div class="btn-group">
     <button type="submit" class="btn btn-primary">Generar factura</button>
     <a href="{{ url_for('facturacion.list_view', issuer=issuer) }}" class="btn btn-secondary">Cancelar</a>
@@ -513,6 +535,16 @@
     dueDateInput.required = isCredito;
     if (!isCredito) { dueDateInput.value = ''; }
   }
+  // 7 oct: adelanto recibido -- muestra/oculta fecha, monto y medio de pago.
+  var advanceCheck = document.getElementById('advance-received');
+  var advanceFields = document.getElementById('advance-fields');
+  var advanceAmount = document.getElementById('advance-amount');
+  function updateAdvanceFields() {
+    advanceFields.style.display = advanceCheck.checked ? 'flex' : 'none';
+    advanceAmount.required = advanceCheck.checked;
+  }
+  advanceCheck.addEventListener('change', updateAdvanceFields);
+  updateAdvanceFields();
   paymentConditionSelect.addEventListener('change', updatePaymentCondition);
   if (dueDateInput.value) { paymentConditionSelect.value = 'CREDITO'; }
   updatePaymentCondition();

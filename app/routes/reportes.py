@@ -37,6 +37,7 @@ from app.helpers import parse_date, today_str
 # Mantenimiento/Neumáticos. El dashboard (index(), arriba) y "Pagos por
 # persona" (más abajo) NO se tocan -- Braulio los dejó explícitamente fuera
 # de este alcance.
+from app.integrations.sunat_ose import IGV_RATE
 from app.routes.viajes import ISSUER_CHOICES
 
 bp = Blueprint("reportes", __name__, url_prefix="/reportes")
@@ -250,6 +251,123 @@ def viajes_por_cliente_export():
 
 
 # ---------------------------------------------------------------------------
+# Nuevo — Operación: Viajes pendientes de facturar
+# ---------------------------------------------------------------------------
+
+PENDING_TRIP_STATUS_LABELS = {"ENTREGADO": "Entregado", "EN_CURSO": "En curso"}
+
+
+def _pending_billing_rows(args):
+    """7 oct, pedido de Braulio ("en reportes hay que incluir los viajes
+    pendientes de facturar, que incluya los entregados y los que están en
+    curso"): viajes de la empresa elegida que todavía NO se facturan
+    (trips.invoiced = 0) y están ENTREGADOS o EN CURSO. Un viaje de un
+    cliente que se factura a otra razón social (clients.billing_client_id,
+    ej. Honda -> A&S) trae también "Se factura a"."""
+    issuer = args.get("issuer", "").strip().upper()
+    client_id = args.get("client_id", type=int)
+    status = args.get("status", "").strip().upper()
+    from_date = parse_date(args.get("from_date", ""))
+    to_date = parse_date(args.get("to_date", ""))
+
+    sql = """SELECT t.id, t.code, t.status, t.scheduled_date, t.delivered_date, t.origin,
+                    t.destination, t.rate, t.issuer, c.name as client_name,
+                    COALESCE(bc.name, c.name) as bill_to_name,
+                    v.plate as plate, d.name as driver_name
+             FROM trips t
+             JOIN clients c ON c.id = t.client_id
+             LEFT JOIN clients bc ON bc.id = c.billing_client_id
+             LEFT JOIN vehicles v ON v.id = t.vehicle_id
+             LEFT JOIN drivers d ON d.id = t.driver_id
+             WHERE t.invoiced = 0 AND t.status IN ('ENTREGADO', 'EN_CURSO')"""
+    params = []
+    if issuer in ("HARRASO", "BRMS"):
+        sql += " AND t.issuer = ?"
+        params.append(issuer)
+    if status in PENDING_TRIP_STATUS_LABELS:
+        sql += " AND t.status = ?"
+        params.append(status)
+    if client_id:
+        sql += " AND (c.id = ? OR c.billing_client_id = ?)"
+        params.extend([client_id, client_id])
+    if from_date:
+        sql += " AND t.scheduled_date >= ?"
+        params.append(from_date)
+    if to_date:
+        sql += " AND t.scheduled_date <= ?"
+        params.append(to_date)
+    sql += " ORDER BY t.status ASC, t.delivered_date IS NULL, t.delivered_date ASC, t.scheduled_date ASC, t.id ASC"
+    rows = query_all(sql, params)
+
+    today = datetime.now().date()
+    igv_exonerado = issuer == "BRMS"
+    result = []
+    for r in rows:
+        row = dict(r)
+        days = None
+        if row["status"] == "ENTREGADO" and row["delivered_date"]:
+            try:
+                days = (today - datetime.strptime(row["delivered_date"], "%Y-%m-%d").date()).days
+            except ValueError:
+                days = None
+        row["days_pending"] = days
+        rate = float(row["rate"] or 0)
+        # La tarifa del viaje es SIN IGV en Harraso (ver Generar factura); BRMS
+        # está exonerada y su tarifa es el total.
+        row["rate_with_igv"] = rate if igv_exonerado else round(rate * (1 + IGV_RATE), 2)
+        result.append(row)
+    return result, issuer, client_id, status, from_date, to_date
+
+
+def _pending_billing_filter_description(issuer, status, from_date, to_date):
+    parts = [f"Empresa: {'BRMS' if issuer == 'BRMS' else 'Harraso Transport'}"]
+    parts.append(f"Estado: {PENDING_TRIP_STATUS_LABELS[status]}" if status in PENDING_TRIP_STATUS_LABELS else "Entregados y en curso")
+    if from_date or to_date:
+        parts.append(f"Programados: {from_date or 'inicio'} a {to_date or 'hoy'}")
+    return "  ·  ".join(parts)
+
+
+@bp.route("/viajes-pendientes-facturar")
+@report_required("viajes_pendientes_facturar")
+def viajes_pendientes_facturar():
+    issuer = request.args.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        return render_template("reportes/viajes_pendientes_facturar.html", rows=None, issuer=None)
+    rows, issuer, client_id, status, from_date, to_date = _pending_billing_rows(request.args)
+    clients = query_all("SELECT id, name FROM clients ORDER BY name")
+    total = round(sum(float(r["rate"] or 0) for r in rows), 2)
+    total_with_igv = round(sum(r["rate_with_igv"] for r in rows), 2)
+    return render_template(
+        "reportes/viajes_pendientes_facturar.html", rows=rows, issuer=issuer, clients=clients,
+        client_id=client_id, status=status, from_date=from_date or "", to_date=to_date or "",
+        status_labels=PENDING_TRIP_STATUS_LABELS, total=total, total_with_igv=total_with_igv,
+        count_delivered=sum(1 for r in rows if r["status"] == "ENTREGADO"),
+        count_in_progress=sum(1 for r in rows if r["status"] == "EN_CURSO"),
+    )
+
+
+@bp.route("/viajes-pendientes-facturar/exportar")
+@report_required("viajes_pendientes_facturar")
+def viajes_pendientes_facturar_export():
+    issuer = request.args.get("issuer", "").strip().upper()
+    if issuer not in ISSUER_CHOICES:
+        flash("Elige una empresa para exportar este reporte.", "error")
+        return redirect(url_for("reportes.viajes_pendientes_facturar"))
+    from app.reports import build_pending_billing_workbook
+
+    rows, issuer, _client_id, status, from_date, to_date = _pending_billing_rows(request.args)
+    buffer = build_pending_billing_workbook(
+        rows, company_name=current_app.config["COMPANY_NAME"], issuer=issuer,
+        filter_description=_pending_billing_filter_description(issuer, status, from_date, to_date),
+    )
+    return Response(
+        buffer.getvalue(),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="viajes_pendientes_facturar_{today_str()}.xlsx"'},
+    )
+
+
+# ---------------------------------------------------------------------------
 # Nuevo — Finanzas: Cuentas por cobrar
 # ---------------------------------------------------------------------------
 
@@ -259,8 +377,11 @@ def _accounts_receivable_rows(args):
     issuer = args.get("issuer", "").strip().upper()
     only_overdue = args.get("only_overdue") == "1"
 
+    # 7 oct: se descuentan los adelantos recibidos (invoice_advances) -- "Saldo"
+    # es lo que realmente falta cobrar de la factura.
     sql = """SELECT i.id, i.number, i.issue_date, i.due_date, i.amount, i.status, i.issuer,
-                     c.name as client_name
+                     c.name as client_name,
+                     (SELECT COALESCE(SUM(a.amount), 0) FROM invoice_advances a WHERE a.invoice_id = i.id) as advances_total
               FROM invoices i JOIN clients c ON c.id = i.client_id
               WHERE i.status IN ('PENDIENTE', 'VENCIDA')"""
     params = []
@@ -287,6 +408,7 @@ def _accounts_receivable_rows(args):
         if only_overdue and not (days_overdue and days_overdue > 0):
             continue
         row["days_overdue"] = days_overdue
+        row["balance"] = round(float(row["amount"] or 0) - float(row["advances_total"] or 0), 2)
         result.append(row)
     return result, client_id, issuer, only_overdue
 
@@ -306,7 +428,7 @@ def cuentas_por_cobrar():
         """SELECT DISTINCT c.id, c.name FROM clients c JOIN invoices i ON i.client_id = c.id
            WHERE i.status IN ('PENDIENTE', 'VENCIDA') ORDER BY c.name"""
     )
-    total = sum(r["amount"] or 0 for r in rows)
+    total = round(sum(r["balance"] for r in rows), 2)
     return render_template(
         "reportes/cuentas_por_cobrar.html", rows=rows, clients=clients, client_id=client_id,
         issuer=issuer, only_overdue=only_overdue, total=total,

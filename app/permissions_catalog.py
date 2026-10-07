@@ -104,7 +104,13 @@ PERMISSION_CATALOG = {
     # acá para poder dársela puntualmente a otro usuario desde Usuarios >
     # Permisos específicos, si Braulio lo pide más adelante -- mismo
     # patrón ya usado para "campo"/"inventario" en Neumáticos.
-    "viajes": [("view", "Ver"), ("edit", "Crear y editar"), ("delete", "Eliminar")],
+    "viajes": [
+        ("view", "Ver"),
+        ("edit", "Crear y editar"),
+        # 7 oct, pedido de Braulio: solo administradores por defecto.
+        ("edit_closed", "Editar viajes ya entregados, cancelados o pagados"),
+        ("delete", "Eliminar"),
+    ],
     "guias": [("view", "Ver"), ("edit", "Crear y editar"), ("delete", "Eliminar")],
     "inspecciones": [("view", "Ver"), ("edit", "Registrar"), ("delete", "Eliminar")],
     "flota": [("view", "Ver"), ("edit", "Crear y editar")],
@@ -148,6 +154,7 @@ PERMISSION_CATALOG = {
 # también se respeta en su propia ruta (report_required).
 REPORTS = [
     ("viajes_por_cliente", "Viajes por cliente", "viajes", True),
+    ("viajes_pendientes_facturar", "Viajes pendientes de facturar", "viajes", True),
     ("comisiones_conductor", "Comisiones por conductor", "viajes", False),
     ("gps_diario", "Reporte diario GPS", "integraciones", False),
     ("cuentas_por_cobrar", "Cuentas por cobrar", "facturacion", True),

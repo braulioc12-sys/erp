@@ -785,12 +785,34 @@ def new():
     )
 
 
+def trip_is_closed(trip):
+    """7 oct, pedido de Braulio ("los administradores que tengan la opción de
+    tener el botón de editar viajes pagados"): un viaje está "cerrado" cuando
+    ya se entregó, se canceló o se marcó como pagado. Editarlo requiere el
+    permiso "viajes > edit_closed" (solo Administrador por defecto, ver
+    Usuarios > Permisos específicos)."""
+    return trip["status"] in ("ENTREGADO", "CANCELADO") or bool(trip["paid"])
+
+
 @bp.route("/<int:trip_id>/editar", methods=["GET", "POST"])
 @permission_required("viajes", "edit")
 def edit(trip_id):
     trip = query_one("SELECT * FROM trips WHERE id = ?", (trip_id,))
     if trip is None:
         abort(404)
+    closed = trip_is_closed(trip)
+    if closed and not can(g.user["roles"], "viajes", "edit_closed"):
+        flash(
+            "Este viaje ya está entregado, cancelado o pagado: solo un administrador puede editarlo.",
+            "error",
+        )
+        return redirect(url_for("viajes.detail", trip_id=trip_id))
+    if closed and request.method == "GET":
+        flash(
+            "Estás editando un viaje cerrado (entregado, cancelado o pagado)."
+            + (" Ojo: ya está facturado — cambiar la tarifa aquí NO modifica la factura ya generada." if trip["invoiced"] else ""),
+            "info",
+        )
     clients = query_all("SELECT * FROM clients WHERE active = 1 ORDER BY name")
     vehicles = _active_vehicles(trip["vehicle_id"])
     trailers = _active_trailers(trip["trailer_vehicle_id"])
@@ -906,7 +928,8 @@ def edit(trip_id):
             ),
         )
         log_activity(
-            "viajes", "EDITAR", f"Viaje {trip['code']} ({origin} → {destination})",
+            "viajes", "EDITAR",
+            f"Viaje {trip['code']} ({origin} → {destination})" + (" — editado estando cerrado/pagado" if closed else ""),
             entity_type="viaje", entity_id=trip_id,
             entity_url=url_for("viajes.detail", trip_id=trip_id),
         )
@@ -1399,6 +1422,18 @@ def detail(trip_id):
         liquidacion_compartida = liquidation_anchor_trip_id(return_trip["id"]) == trip["id"]
     else:
         liquidacion_compartida = False
+    # 7 oct, pedido de Braulio ("en cada viaje facturado hay que habilitar la
+    # opcion de subir la detraccion en pdf"): facturas vigentes de este viaje,
+    # con su constancia de detracción (PDF) -- se sube desde acá, ver
+    # facturacion.upload_detraction_pdf().
+    trip_invoices = query_all(
+        """SELECT DISTINCT i.id, i.number, i.series, i.series_number, i.status, i.amount, i.currency,
+                  i.detraction_applies, i.detraction_amount, i.detraction_pdf_filename,
+                  i.detraction_pdf_uploaded_at
+           FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
+           WHERE ii.trip_id = ? AND i.status != 'ANULADA' ORDER BY i.id DESC""",
+        (trip_id,),
+    )
     return render_template(
         "viajes/detail.html", trip=trip, expenses=expenses,
         total_expenses=total_expenses, next_statuses=next_statuses, advance=advance, advance2=advance2,
@@ -1407,7 +1442,7 @@ def detail(trip_id):
         existing_waybills=existing_waybills, creator=creator,
         outbound_trip=outbound_trip, return_trip=return_trip, conformidad_opcional=conformidad_opcional,
         liquidacion_trip_id=liquidacion_trip_id, liquidacion_compartida=liquidacion_compartida,
-        guides=trip_guides(trip_id),
+        guides=trip_guides(trip_id), trip_invoices=trip_invoices,
     )
 
 

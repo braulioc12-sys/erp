@@ -10,6 +10,7 @@ from flask import (
     abort,
     current_app,
     flash,
+    g,
     jsonify,
     redirect,
     render_template,
@@ -22,7 +23,7 @@ from flask import (
 # saber quién generó/editó/envió cada factura, get_creator_info() para el
 # "Creado por" de facturacion/detail.html (mismo patrón que app/routes/viajes.py).
 from app.audit import get_creator_info, log_activity
-from app.auth import permission_required, validate_csrf
+from app.auth import can, login_required, permission_required, validate_csrf
 from app.db import execute, get_db, query_all, query_one
 from app.helpers import (
     company_info_for_issuer,
@@ -31,6 +32,7 @@ from app.helpers import (
     get_detraction_goods_codes,
     get_detraction_tefacturo_code,
     next_code,
+    now_str,
     parse_date,
     parse_float,
     today_str,
@@ -1470,6 +1472,12 @@ def new():
         for t in trips:
             t["invoice_amount"] = _trip_invoice_amount(t["rate"], issuer)
         total = round(sum(t["invoice_amount"] for t in trips) + sum(line_total for _, _, _, line_total in manual_items), 2)
+        # 7 oct, pedido de Braulio: "se recibió un adelanto por esta factura"
+        # (fecha, monto y medio de pago) -- ver _parse_advance().
+        advance, advance_error = _parse_advance(request.form, total)
+        if advance_error:
+            flash(advance_error, "error")
+            return redirect(url_for("facturacion.new", issuer=issuer, client_id=client_id))
         number = next_code("F", "invoices", code_column="number")
         series = current_app.config["INVOICE_SERIES"]
         series_number = _next_series_number(series)
@@ -1564,6 +1572,11 @@ def new():
                 "INSERT INTO invoice_items (invoice_id, trip_id, description, amount, quantity) VALUES (?, NULL, ?, ?, ?)",
                 (invoice_id, desc, line_total, qty),
             )
+        if advance:
+            db.execute(
+                "INSERT INTO invoice_advances (invoice_id, received_date, amount, payment_method, created_by) VALUES (?, ?, ?, ?, ?)",
+                (invoice_id, advance["received_date"], advance["amount"], advance["payment_method"], g.user["id"]),
+            )
         db.commit()
 
         # 22 sep, registro de actividad (ver app/audit.py): quién generó esta
@@ -1581,6 +1594,14 @@ def new():
             entity_type="factura", entity_id=invoice_id,
             entity_url=url_for("facturacion.detail", invoice_id=invoice_id),
         )
+
+        if advance:
+            log_activity(
+                "facturacion", "ADELANTO",
+                f"Factura {number}: adelanto {advance['amount']:,.2f} ({advance['payment_method']}, {advance['received_date']})",
+                entity_type="factura", entity_id=invoice_id,
+                entity_url=url_for("facturacion.detail", invoice_id=invoice_id),
+            )
 
         if issuer == "HARRASO" and manual_items and total > 400 and not detraction["applies"]:
             flash(
@@ -1634,7 +1655,7 @@ def new():
         "facturacion/form.html", clients=clients, selected_client=selected_client,
         client_names={c["id"]: c["name"] for c in clients},
         pending_trips=pending_trips, billed_clients=billed_clients, trip_descriptions=trip_descriptions,
-        today=today_str(), issuer=issuer,
+        today=today_str(), issuer=issuer, advance_methods=ADVANCE_PAYMENT_METHODS,
         default_detraction_account=company.get("bank_nacion_detraction_account", ""),
         detraction_goods_catalog=get_detraction_goods_catalog(),
     )
@@ -1682,8 +1703,11 @@ def detail(invoice_id):
     credit_notes = query_all(
         "SELECT * FROM credit_notes WHERE invoice_id = ? ORDER BY id DESC", (invoice_id,)
     )
+    advances, advances_total = _invoice_advances(invoice_id)
     return render_template(
         "facturacion/detail.html", invoice=invoice, items=items,
+        advances=advances, advances_total=advances_total, advance_methods=ADVANCE_PAYMENT_METHODS,
+        today=today_str(),
         default_detraction_account=company.get("bank_nacion_detraction_account", ""),
         detraction_goods_catalog=get_detraction_goods_catalog(),
         detraction_goods_codes=get_detraction_goods_codes(),
@@ -1779,6 +1803,202 @@ def preview(invoice_id):
         problems=problems, warnings=warnings,
         payment_form="Crédito" if invoice["due_date"] else "Contado",
     )
+
+
+# --- Adelantos recibidos por una factura (7 oct, pedido de Braulio) --------
+#
+# "A la hora de facturar un viaje, incluir la opción que diga que se ha
+# recibido un adelanto por esa factura, en el cual se indique la fecha,
+# monto y medio de pago." Dato interno de cobranza (tabla invoice_advances):
+# no cambia el total de la factura ni se manda a SUNAT.
+ADVANCE_PAYMENT_METHODS = [
+    "Transferencia bancaria",
+    "Depósito en cuenta",
+    "Efectivo",
+    "Cheque",
+    "Yape / Plin",
+    "Otro",
+]
+
+
+def _parse_advance(form, total, required=False):
+    """Lee el adelanto del formulario (campos advance_date / advance_amount /
+    advance_method). Devuelve (advance, error): advance es None si no se
+    marcó "Se recibió un adelanto" (en Generar factura; con required=True,
+    como en "Registrar adelanto", siempre se lee). `total` es el total de la
+    factura, con IGV: un adelanto no puede ser mayor."""
+    if not required and form.get("advance_received") != "on":
+        return None, None
+    amount = parse_float(form.get("advance_amount"), default=0.0)
+    received_date = parse_date(form.get("advance_date")) or today_str()
+    method = (form.get("advance_method") or "").strip()
+    if amount <= 0:
+        return None, "Indica el monto del adelanto recibido (mayor a 0)."
+    if method not in ADVANCE_PAYMENT_METHODS:
+        return None, "Elige el medio de pago del adelanto."
+    if total is not None and round(amount, 2) > round(float(total), 2) + 0.005:
+        return None, f"El adelanto ({amount:,.2f}) no puede ser mayor al total de la factura ({float(total):,.2f})."
+    return {"amount": round(amount, 2), "received_date": received_date, "payment_method": method}, None
+
+
+def _invoice_advances(invoice_id):
+    rows = query_all(
+        """SELECT a.*, u.name as created_by_name FROM invoice_advances a
+           LEFT JOIN users u ON u.id = a.created_by
+           WHERE a.invoice_id = ? ORDER BY a.received_date, a.id""",
+        (invoice_id,),
+    )
+    return rows, round(sum(float(r["amount"] or 0) for r in rows), 2)
+
+
+@bp.route("/<int:invoice_id>/adelantos", methods=["POST"])
+@permission_required("facturacion", "edit")
+def add_advance(invoice_id):
+    """Registra un adelanto recibido por una factura ya generada (varios
+    adelantos por factura son posibles)."""
+    if not validate_csrf():
+        abort(400)
+    invoice = query_one("SELECT id, number, amount, status FROM invoices WHERE id = ?", (invoice_id,))
+    if invoice is None:
+        abort(404)
+    if invoice["status"] == "ANULADA":
+        flash("La factura está anulada: no se pueden registrar adelantos.", "error")
+        return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
+    _rows, already = _invoice_advances(invoice_id)
+    advance, error = _parse_advance(request.form, float(invoice["amount"] or 0) - already, required=True)
+    if error:
+        flash(error.replace("al total de la factura", "al saldo pendiente de la factura"), "error")
+        return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
+    execute(
+        "INSERT INTO invoice_advances (invoice_id, received_date, amount, payment_method, created_by) VALUES (?, ?, ?, ?, ?)",
+        (invoice_id, advance["received_date"], advance["amount"], advance["payment_method"], g.user["id"]),
+    )
+    log_activity(
+        "facturacion", "ADELANTO",
+        f"Factura {invoice['number']}: adelanto {advance['amount']:,.2f} ({advance['payment_method']}, {advance['received_date']})",
+        entity_type="factura", entity_id=invoice_id,
+        entity_url=url_for("facturacion.detail", invoice_id=invoice_id),
+    )
+    flash("Adelanto registrado.", "success")
+    return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
+
+
+@bp.route("/<int:invoice_id>/adelantos/<int:advance_id>/eliminar", methods=["POST"])
+@permission_required("facturacion", "edit")
+def delete_advance(invoice_id, advance_id):
+    if not validate_csrf():
+        abort(400)
+    advance = query_one(
+        "SELECT a.*, i.number FROM invoice_advances a JOIN invoices i ON i.id = a.invoice_id WHERE a.id = ? AND a.invoice_id = ?",
+        (advance_id, invoice_id),
+    )
+    if advance is None:
+        abort(404)
+    execute("DELETE FROM invoice_advances WHERE id = ?", (advance_id,))
+    log_activity(
+        "facturacion", "EDITAR",
+        f"Factura {advance['number']}: se eliminó el adelanto de {float(advance['amount']):,.2f} ({advance['received_date']})",
+        entity_type="factura", entity_id=invoice_id,
+        entity_url=url_for("facturacion.detail", invoice_id=invoice_id),
+    )
+    flash("Adelanto eliminado.", "success")
+    return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
+
+
+# --- PDF de la detracción (7 oct, pedido de Braulio) -----------------------
+#
+# "En cada viaje facturado hay que habilitar la opción de subir la detracción
+# en pdf." La constancia de depósito de la detracción es por FACTURA; se
+# guarda en invoices.detraction_pdf_filename y se sube desde el detalle del
+# viaje facturado o desde la factura (parámetro next_trip para volver al viaje).
+
+def _can_manage_detraction_pdf():
+    roles = g.user["roles"]
+    return can(roles, "facturacion", "edit") or can(roles, "viajes", "edit")
+
+
+def _after_detraction_pdf(invoice_id):
+    next_trip = request.form.get("next_trip", type=int) or request.args.get("next_trip", type=int)
+    if next_trip:
+        return redirect(url_for("viajes.detail", trip_id=next_trip))
+    return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
+
+
+@bp.route("/<int:invoice_id>/detraccion-pdf", methods=["POST"])
+@login_required
+def upload_detraction_pdf(invoice_id):
+    if not validate_csrf():
+        abort(400)
+    if not _can_manage_detraction_pdf():
+        flash("No tienes permiso para subir la constancia de detracción.", "error")
+        return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
+    invoice = query_one("SELECT id, number, status FROM invoices WHERE id = ?", (invoice_id,))
+    if invoice is None:
+        abort(404)
+    upload = request.files.get("detraction_pdf")
+    if upload is None or not upload.filename:
+        flash("Elige el archivo PDF de la detracción.", "error")
+        return _after_detraction_pdf(invoice_id)
+    raw = upload.read()
+    if not upload.filename.lower().endswith(".pdf") or not raw.startswith(b"%PDF"):
+        flash("El archivo debe ser un PDF (.pdf).", "error")
+        return _after_detraction_pdf(invoice_id)
+    if len(raw) > 15 * 1024 * 1024:
+        flash("El PDF pesa más de 15 MB; súbelo comprimido.", "error")
+        return _after_detraction_pdf(invoice_id)
+    filename = f"detraccion-{invoice_id}-{uuid.uuid4().hex}.pdf"
+    save_sunat_document(filename, raw)
+    execute(
+        "UPDATE invoices SET detraction_pdf_filename = ?, detraction_pdf_uploaded_at = ? WHERE id = ?",
+        (filename, now_str(), invoice_id),
+    )
+    log_activity(
+        "facturacion", "EDITAR", f"Factura {invoice['number']}: se subió el PDF de la detracción",
+        entity_type="factura", entity_id=invoice_id,
+        entity_url=url_for("facturacion.detail", invoice_id=invoice_id),
+    )
+    flash("PDF de la detracción guardado.", "success")
+    return _after_detraction_pdf(invoice_id)
+
+
+@bp.route("/<int:invoice_id>/detraccion-pdf/ver")
+@login_required
+def view_detraction_pdf(invoice_id):
+    if not (can(g.user["roles"], "facturacion", "view") or can(g.user["roles"], "viajes", "view")):
+        flash("No tienes permiso para acceder a esta sección.", "error")
+        return redirect(url_for("dashboard.index"))
+    invoice = query_one(
+        "SELECT detraction_pdf_filename, series, series_number FROM invoices WHERE id = ?", (invoice_id,)
+    )
+    if invoice is None or not invoice["detraction_pdf_filename"]:
+        abort(404)
+    download_name = f"detraccion-{invoice['series']}-{invoice['series_number']:06d}.pdf"
+    if using_s3():
+        return redirect(sunat_document_url(invoice["detraction_pdf_filename"], download_name=download_name))
+    return send_from_directory(
+        local_sunat_documents_dir(), invoice["detraction_pdf_filename"], download_name=download_name
+    )
+
+
+@bp.route("/<int:invoice_id>/detraccion-pdf/eliminar", methods=["POST"])
+@login_required
+def delete_detraction_pdf(invoice_id):
+    if not validate_csrf():
+        abort(400)
+    if not _can_manage_detraction_pdf():
+        flash("No tienes permiso para quitar la constancia de detracción.", "error")
+        return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
+    invoice = query_one("SELECT id, number FROM invoices WHERE id = ?", (invoice_id,))
+    if invoice is None:
+        abort(404)
+    execute("UPDATE invoices SET detraction_pdf_filename = NULL, detraction_pdf_uploaded_at = NULL WHERE id = ?", (invoice_id,))
+    log_activity(
+        "facturacion", "EDITAR", f"Factura {invoice['number']}: se quitó el PDF de la detracción",
+        entity_type="factura", entity_id=invoice_id,
+        entity_url=url_for("facturacion.detail", invoice_id=invoice_id),
+    )
+    flash("PDF de la detracción quitado.", "success")
+    return _after_detraction_pdf(invoice_id)
 
 
 def _invoice_is_locked(invoice):

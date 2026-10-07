@@ -112,6 +112,65 @@
   <div class="detail-item"><div class="label">Total</div><div class="value">{{ invoice.amount|invoice_money(invoice.currency) }}</div></div>
 </div>
 
+{# 7 oct, pedido de Braulio: adelantos recibidos por esta factura (fecha, monto, medio de pago). Dato interno de cobranza -- no se manda a SUNAT. #}
+<div class="panel">
+  <h2 class="mt-0">Adelantos recibidos</h2>
+  {% if advances %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Fecha</th><th>Medio de pago</th><th class="text-right">Monto</th><th>Registrado por</th><th></th></tr></thead>
+      <tbody>
+        {% for a in advances %}
+        <tr>
+          <td>{{ a.received_date }}</td>
+          <td>{{ a.payment_method or '—' }}</td>
+          <td class="text-right">{{ a.amount|invoice_money(invoice.currency) }}</td>
+          <td class="muted">{{ a.created_by_name or '—' }}</td>
+          <td class="text-right">
+            {% if can(current_user.roles, 'facturacion', 'edit') %}
+            <form method="post" action="{{ url_for('facturacion.delete_advance', invoice_id=invoice.id, advance_id=a.id) }}" onsubmit="return confirm('¿Eliminar este adelanto?');" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="detail-grid" style="margin-top:8px;">
+    <div class="detail-item"><div class="label">Total de la factura</div><div class="value">{{ invoice.amount|invoice_money(invoice.currency) }}</div></div>
+    <div class="detail-item"><div class="label">Adelantos recibidos</div><div class="value">{{ advances_total|invoice_money(invoice.currency) }}</div></div>
+    <div class="detail-item"><div class="label">Saldo pendiente</div><div class="value"><strong>{{ (invoice.amount - advances_total)|invoice_money(invoice.currency) }}</strong></div></div>
+  </div>
+  {% else %}
+  <p class="mt-0 muted">No se registró ningún adelanto por esta factura.</p>
+  {% endif %}
+  {% if invoice.status != 'ANULADA' and can(current_user.roles, 'facturacion', 'edit') %}
+  <details style="margin-top:12px;">
+    <summary style="cursor:pointer; font-weight:600;">+ Registrar adelanto</summary>
+    <form method="post" action="{{ url_for('facturacion.add_advance', invoice_id=invoice.id) }}" style="margin-top:12px;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="form-row">
+        <label>Fecha
+          <input type="date" name="advance_date" value="{{ today }}">
+        </label>
+        <label>Monto (con IGV)
+          <input type="number" name="advance_amount" step="0.01" min="0.01" required>
+        </label>
+        <label>Medio de pago
+          <select name="advance_method">
+            {% for method in advance_methods %}<option value="{{ method }}">{{ method }}</option>{% endfor %}
+          </select>
+        </label>
+      </div>
+      <div class="btn-group"><button type="submit" class="btn btn-primary btn-sm">Guardar adelanto</button></div>
+    </form>
+  </details>
+  {% endif %}
+</div>
+
 <div class="panel">
   <h2 class="mt-0">Concepto de Detracción</h2>
   {% if invoice.detraction_applies %}
@@ -133,6 +192,30 @@
   <p class="mt-0"><strong>⚠ Pendiente:</strong> por ahora "Enviar a SUNAT" NO incluye este dato en el comprobante electrónico real (por eso el PDF que emite tefacturo.pe no trae la tabla "Concepto de Detracción", aunque acá arriba sí esté todo bien calculado y guardado). tefacturo.pe confirmó (23 sep) el formato del campo, pero usa una palabra clave propia de ellos para el bien/servicio (ej. "AZUCAR") distinta de nuestro código SUNAT ("{{ invoice.detraction_code }}") — falta que Braulio se la pida a tefacturo.pe para este concepto y la cargue en <a href="{{ url_for('catalogos.detraccion_list') }}">Catálogos → Conceptos de detracción</a>. Una vez cargada, esta factura (y cualquier otra que use el mismo concepto) se envía completa desde el próximo "Enviar a SUNAT".</p>
   {% endif %}
   {% endif %}
+
+  {# 7 oct, pedido de Braulio: constancia de depósito de la detracción en PDF (se sube también desde el viaje facturado). #}
+  <div style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border, #e5e7eb);">
+    <strong>PDF de la detracción</strong>
+    {% if invoice.detraction_pdf_filename %}
+    — <a href="{{ url_for('facturacion.view_detraction_pdf', invoice_id=invoice.id) }}" target="_blank">Ver PDF</a>
+    <span class="muted">(subido {{ (invoice.detraction_pdf_uploaded_at or '')[:16] }})</span>
+    {% else %}
+    <span class="muted">— todavía no se subió.</span>
+    {% endif %}
+    {% if can(current_user.roles, 'facturacion', 'edit') or can(current_user.roles, 'viajes', 'edit') %}
+    <form method="post" action="{{ url_for('facturacion.upload_detraction_pdf', invoice_id=invoice.id) }}" enctype="multipart/form-data" style="display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="file" name="detraction_pdf" accept=".pdf,application/pdf" required style="width:auto;">
+      <button type="submit" class="btn btn-secondary btn-sm">{{ 'Reemplazar PDF' if invoice.detraction_pdf_filename else 'Subir PDF' }}</button>
+    </form>
+    {% if invoice.detraction_pdf_filename %}
+    <form method="post" action="{{ url_for('facturacion.delete_detraction_pdf', invoice_id=invoice.id) }}" onsubmit="return confirm('¿Quitar el PDF de la detracción?');" style="margin-top:6px;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-danger btn-sm">Quitar PDF</button>
+    </form>
+    {% endif %}
+    {% endif %}
+  </div>
 
   <!-- 22 sep, pedido de Braulio ("recuerda que solo Harraso emite con
        detraccion, BRMS no"): esta sección editable ya no se ofrece para

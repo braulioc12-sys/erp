@@ -1,0 +1,89 @@
+{% extends 'base.html' %}
+{% import 'partials/macros.html' as m %}
+{% import 'partials/company_gate.html' as cg %}
+{% block title %}Viajes pendientes de facturar{% endblock %}
+{% block content %}
+{# 7 oct, pedido de Braulio: viajes entregados y en curso que todavía no se facturan. Ver _pending_billing_rows() en app/routes/reportes.py. #}
+<div class="page-header">
+  <h1>Viajes pendientes de facturar{% if issuer %} — {{ 'BRMS' if issuer == 'BRMS' else 'Harraso Transport' }}{% endif %}</h1>
+  {% if issuer %}
+  <div class="page-actions">
+    <a href="{{ url_for('reportes.viajes_pendientes_facturar_export', issuer=issuer, client_id=client_id, status=status, from_date=from_date, to_date=to_date) }}" class="btn btn-secondary">⬇ Exportar a Excel</a>
+    {% if can(current_user.roles, 'facturacion', 'edit') %}
+    <a href="{{ url_for('facturacion.new', issuer=issuer) }}" class="btn btn-primary">Generar factura</a>
+    {% endif %}
+    <a href="{{ url_for('reportes.centro') }}" class="btn btn-secondary">← Centro de reportes</a>
+  </div>
+  {% endif %}
+</div>
+
+{% if not issuer %}
+{{ cg.company_gate('reportes.viajes_pendientes_facturar', 'para ver sus viajes pendientes de facturar') }}
+{% else %}
+<p class="company-switch"><a href="{{ url_for('reportes.viajes_pendientes_facturar') }}">↺ Cambiar de empresa</a></p>
+<p class="muted mt-0">Viajes <strong>entregados</strong> y <strong>en curso</strong> que todavía no tienen factura. {% if issuer == 'BRMS' %}BRMS está exonerada del IGV: la tarifa es el total.{% else %}La tarifa del viaje es sin IGV; la columna "Con IGV" suma el 18%.{% endif %}</p>
+
+<form class="filters" method="get">
+  <input type="hidden" name="issuer" value="{{ issuer }}">
+  <label>Estado
+    <select name="status">
+      <option value="">Entregados y en curso</option>
+      {% for value, label in status_labels.items() %}
+      <option value="{{ value }}" {{ 'selected' if status == value }}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Cliente
+    <select name="client_id">
+      <option value="">Todos</option>
+      {% for c in clients %}
+      <option value="{{ c.id }}" {{ 'selected' if client_id == c.id }}>{{ c.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Programados desde
+    <input type="date" name="from_date" value="{{ from_date }}">
+  </label>
+  <label>Hasta
+    <input type="date" name="to_date" value="{{ to_date }}">
+  </label>
+  <button class="btn btn-secondary" type="submit">Filtrar</button>
+  <div class="muted" style="margin-left:auto;">
+    {{ rows|length }} viaje(s) ({{ count_delivered }} entregado(s), {{ count_in_progress }} en curso) ·
+    Total{% if issuer != 'BRMS' %} sin IGV{% endif %}: <strong>{{ total|money }}</strong>{% if issuer != 'BRMS' %} · Con IGV: <strong>{{ total_with_igv|money }}</strong>{% endif %}
+  </div>
+</form>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Viaje</th><th>Cliente</th><th>Estado</th><th>F. programada</th><th>F. entrega</th>
+        <th class="text-right">Días sin facturar</th><th>Ruta</th><th>Unidad</th><th>Conductor</th>
+        <th class="text-right">Tarifa{% if issuer != 'BRMS' %} (sin IGV){% endif %}</th>
+        {% if issuer != 'BRMS' %}<th class="text-right">Con IGV</th>{% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td><a href="{{ url_for('viajes.detail', trip_id=r.id) }}">{{ r.code }}</a></td>
+        <td>{{ r.client_name }}{% if r.bill_to_name != r.client_name %}<br><span class="muted">se factura a {{ r.bill_to_name }}</span>{% endif %}</td>
+        <td>{{ m.badge(r.status) }}</td>
+        <td>{{ r.scheduled_date or '—' }}</td>
+        <td>{{ r.delivered_date or '—' }}</td>
+        <td class="text-right">{{ r.days_pending if r.days_pending is not none else '—' }}</td>
+        <td>{{ r.origin }} → {{ r.destination }}</td>
+        <td>{{ r.plate or '—' }}</td>
+        <td>{{ r.driver_name or '—' }}</td>
+        <td class="text-right">{{ (r.rate or 0)|money }}</td>
+        {% if issuer != 'BRMS' %}<td class="text-right">{{ r.rate_with_igv|money }}</td>{% endif %}
+      </tr>
+      {% else %}
+      <tr><td colspan="{{ 10 if issuer == 'BRMS' else 11 }}" class="table-empty">No hay viajes pendientes de facturar con estos filtros.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

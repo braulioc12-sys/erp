@@ -21,6 +21,9 @@
   {% if can_report(current_user.roles, 'viajes_por_cliente') %}
   {{ report_card(url_for('reportes.viajes_por_cliente'), '🆕', 'Viajes por cliente', 'Cantidad y monto de viajes por cliente en un rango de fechas.') }}
   {% endif %}
+  {% if can_report(current_user.roles, 'viajes_pendientes_facturar') %}
+  {{ report_card(url_for('reportes.viajes_pendientes_facturar'), '🆕', 'Viajes pendientes de facturar', 'Viajes entregados y en curso que todavía no se facturan, con su tarifa y días sin facturar.') }}
+  {% endif %}
   {% if can_report(current_user.roles, 'comisiones_conductor') %}
   {{ report_card(url_for('viajes.commissions_report'), '📄', 'Comisiones por conductor', 'Comisiones ganadas por cada conductor en un mes.') }}
   {% endif %}

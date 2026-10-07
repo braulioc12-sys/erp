@@ -1327,6 +1327,13 @@ CREATE TABLE IF NOT EXISTS invoices (
     detraction_percentage REAL,
     detraction_amount REAL,
     detraction_bank_account TEXT,
+    -- 7 oct, pedido de Braulio ("en cada viaje facturado hay que habilitar la
+    -- opcion de subir la detraccion en pdf"): constancia de depósito de la
+    -- detracción (PDF), subida a mano. Se guarda en la factura (la detracción
+    -- es por factura) y se sube también desde el viaje facturado. Mismo
+    -- almacenamiento que los PDF de SUNAT (app/storage.py save_sunat_document).
+    detraction_pdf_filename TEXT,
+    detraction_pdf_uploaded_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -1357,6 +1364,24 @@ CREATE TABLE IF NOT EXISTS invoice_items (
     -- app/db.py.
     quantity REAL NOT NULL DEFAULT 1
 );
+
+-- 7 oct, pedido de Braulio ("a la hora de facturar un viaje, incluir la
+-- opcion que diga que se ha recibido un adelanto por esa factura, en el cual
+-- se indique la fecha, monto y medio de pago"): adelantos (pagos a cuenta)
+-- que el cliente entregó por una factura. Tabla propia, no columnas en
+-- invoices, porque una misma factura puede recibir varios adelantos. Es un
+-- dato INTERNO de cobranza: no se manda a SUNAT ni cambia el total del
+-- comprobante -- solo permite ver cuánto se ha cobrado y cuánto falta.
+CREATE TABLE IF NOT EXISTS invoice_advances (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_id INTEGER NOT NULL REFERENCES invoices(id),
+    received_date TEXT NOT NULL,
+    amount REAL NOT NULL DEFAULT 0,
+    payment_method TEXT,
+    created_by INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_invoice_advances_invoice ON invoice_advances(invoice_id);
 
 -- Notas de crédito electrónicas -- 1 oct, pedido de Braulio ("hay que
 -- incluir en facturacion la emision de notas de credito"). Corrigen o
