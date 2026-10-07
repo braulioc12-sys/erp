@@ -1072,6 +1072,28 @@ RELATED_DOCUMENT_TIPO_DOCUMENTO = {
 }
 
 
+# 7 oct, pedido de Braulio ("en las guias de transportista, hay manera de
+# poner en algun lado cuando se emite el numero de viaje (que se creo en
+# harris) a la que esta asociado?"): el único campo de texto libre
+# confirmado de la guía es `datosDocumento.glosa` (las "Observaciones" que
+# ya se llenaban a mano o con la descripción de la carga) -- ahí se antepone
+# "Viaje H-0053". Si el texto ya menciona ese código no se repite, y se
+# recorta a 250 caracteres (el largo máximo de la nota de una guía
+# electrónica en SUNAT). Solo afecta lo que se manda: waybills.notes en la
+# base queda tal cual lo escribió el usuario.
+WAYBILL_GLOSA_MAX = 250
+
+
+def waybill_glosa(trip_code, text):
+    text = (text or "").strip()
+    code = (trip_code or "").strip()
+    if not code or code.lower() in text.lower():
+        return text[:WAYBILL_GLOSA_MAX]
+    prefix = f"Viaje {code}"
+    glosa = f"{prefix} - {text}" if text else prefix
+    return glosa[:WAYBILL_GLOSA_MAX]
+
+
 def build_waybill_payload(waybill, trip, company, client):
     """Arma el JSON de una GUÍA DE REMISIÓN — TRANSPORTISTA en el formato
     real de tefacturo.pe. `company` es quien transporta (Harraso o BRMS, el
@@ -1343,7 +1365,7 @@ def build_waybill_payload(waybill, trip, company, client):
             "serie": waybill["series"],
             "numero": waybill["series_number"],
             "fechaEmision": waybill["issue_date"],
-            "glosa": waybill["notes"] or trip["cargo_description"] or "",
+            "glosa": waybill_glosa(trip["code"], waybill["notes"] or trip["cargo_description"]),
         },
         "remitente": remitente,
         "destinatario": destinatario,

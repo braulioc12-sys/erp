@@ -225,6 +225,9 @@
   <label>Observaciones
     <textarea name="notes">{{ form_values.notes if form_values else (waybill.notes if waybill else '') }}</textarea>
   </label>
+  {# 7 oct, pedido de Braulio: el código del viaje se manda en las observaciones de la guía
+     (ver waybill_glosa() en app/integrations/sunat_ose.py). #}
+  <p class="muted" style="margin-top:-8px;">Al enviar a SUNAT se agrega solo el número de viaje de Harris{% if trip %} (<strong>Viaje {{ trip.code }}</strong>){% endif %} al inicio de las observaciones, para identificar a qué viaje pertenece la guía.</p>
 
   <div class="btn-group">
     <button type="submit" class="btn btn-primary">{{ 'Guardar cambios' if waybill else 'Guardar guía' }}</button>
