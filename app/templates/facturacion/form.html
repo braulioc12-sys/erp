@@ -117,7 +117,7 @@
 </script>
 
 {% if selected_client %}
-<form class="panel" method="post" id="invoice-form">
+<form class="panel" method="post" id="invoice-form" enctype="multipart/form-data">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <input type="hidden" name="client_id" value="{{ selected_client }}">
   <!-- 22 sep, pedido de Braulio ("la primera pantalla debe ser elegir
@@ -309,6 +309,9 @@
         <option value="{{ method }}">{{ method }}</option>
         {% endfor %}
       </select>
+    </label>
+    <label>Archivo del pago <span class="muted" style="font-weight:400;">(opcional: voucher, captura o PDF)</span>
+      <input type="file" name="advance_file" accept=".pdf,.png,.jpg,.jpeg,.webp,.heic,.heif,application/pdf,image/*">
     </label>
   </div>
 

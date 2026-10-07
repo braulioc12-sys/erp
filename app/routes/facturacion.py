@@ -1475,6 +1475,9 @@ def new():
         # 7 oct, pedido de Braulio: "se recibió un adelanto por esta factura"
         # (fecha, monto y medio de pago) -- ver _parse_advance().
         advance, advance_error = _parse_advance(request.form, total)
+        advance_file = None
+        if advance and not advance_error:
+            advance_file, advance_error = _read_advance_attachment()
         if advance_error:
             flash(advance_error, "error")
             return redirect(url_for("facturacion.new", issuer=issuer, client_id=client_id))
@@ -1573,9 +1576,13 @@ def new():
                 (invoice_id, desc, line_total, qty),
             )
         if advance:
+            attachment_filename, attachment_original = _save_advance_attachment(advance_file)
             db.execute(
-                "INSERT INTO invoice_advances (invoice_id, received_date, amount, payment_method, created_by) VALUES (?, ?, ?, ?, ?)",
-                (invoice_id, advance["received_date"], advance["amount"], advance["payment_method"], g.user["id"]),
+                """INSERT INTO invoice_advances
+                   (invoice_id, received_date, amount, payment_method, attachment_filename, attachment_original_name, created_by)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (invoice_id, advance["received_date"], advance["amount"], advance["payment_method"],
+                 attachment_filename, attachment_original, g.user["id"]),
             )
         db.commit()
 
@@ -1821,6 +1828,42 @@ ADVANCE_PAYMENT_METHODS = [
 ]
 
 
+ADVANCE_ATTACHMENT_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".heic", ".heif"}
+ADVANCE_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
+
+
+def _read_advance_attachment():
+    """7 oct, pedido de Braulio ("para el caso de adelanto de pago de
+    facturas, poner la opción de adjuntar archivo, no es obligatorio"):
+    lee el archivo opcional del campo "advance_file" (voucher, captura o
+    PDF del pago). Devuelve (archivo|None, error): archivo es
+    (bytes, extensión, nombre original) o None si no se adjuntó nada."""
+    upload = request.files.get("advance_file")
+    if upload is None or not upload.filename:
+        return None, None
+    ext = os.path.splitext(upload.filename)[1].lower()
+    if ext not in ADVANCE_ATTACHMENT_EXTENSIONS:
+        return None, "El archivo del adelanto debe ser PDF o imagen (png, jpg, webp, heic)."
+    raw = upload.read()
+    if not raw:
+        return None, None
+    if len(raw) > ADVANCE_ATTACHMENT_MAX_BYTES:
+        return None, "El archivo del adelanto pesa más de 10 MB; súbelo comprimido."
+    if ext == ".pdf" and not raw.startswith(b"%PDF"):
+        return None, "El archivo del adelanto no es un PDF válido."
+    return (raw, ext, upload.filename), None
+
+
+def _save_advance_attachment(attachment):
+    """Guarda el archivo ya validado; devuelve (nombre guardado, nombre original)."""
+    if not attachment:
+        return None, None
+    raw, ext, original = attachment
+    filename = f"adelanto-{uuid.uuid4().hex}{ext}"
+    save_sunat_document(filename, raw)
+    return filename, original[:200]
+
+
 def _parse_advance(form, total, required=False):
     """Lee el adelanto del formulario (campos advance_date / advance_amount /
     advance_method). Devuelve (advance, error): advance es None si no se
@@ -1866,12 +1909,19 @@ def add_advance(invoice_id):
         return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
     _rows, already = _invoice_advances(invoice_id)
     advance, error = _parse_advance(request.form, float(invoice["amount"] or 0) - already, required=True)
+    attachment = None
+    if not error:
+        attachment, error = _read_advance_attachment()
     if error:
         flash(error.replace("al total de la factura", "al saldo pendiente de la factura"), "error")
         return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
+    attachment_filename, attachment_original = _save_advance_attachment(attachment)
     execute(
-        "INSERT INTO invoice_advances (invoice_id, received_date, amount, payment_method, created_by) VALUES (?, ?, ?, ?, ?)",
-        (invoice_id, advance["received_date"], advance["amount"], advance["payment_method"], g.user["id"]),
+        """INSERT INTO invoice_advances
+           (invoice_id, received_date, amount, payment_method, attachment_filename, attachment_original_name, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (invoice_id, advance["received_date"], advance["amount"], advance["payment_method"],
+         attachment_filename, attachment_original, g.user["id"]),
     )
     log_activity(
         "facturacion", "ADELANTO",
@@ -1881,6 +1931,24 @@ def add_advance(invoice_id):
     )
     flash("Adelanto registrado.", "success")
     return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
+
+
+@bp.route("/<int:invoice_id>/adelantos/<int:advance_id>/archivo")
+@permission_required("facturacion", "view")
+def view_advance_file(invoice_id, advance_id):
+    """Sirve el archivo adjunto de un adelanto (disco local o URL firmada en S3)."""
+    advance = query_one(
+        "SELECT attachment_filename, attachment_original_name FROM invoice_advances WHERE id = ? AND invoice_id = ?",
+        (advance_id, invoice_id),
+    )
+    if advance is None or not advance["attachment_filename"]:
+        abort(404)
+    download_name = advance["attachment_original_name"] or advance["attachment_filename"]
+    if using_s3():
+        return redirect(sunat_document_url(advance["attachment_filename"], download_name=download_name))
+    return send_from_directory(
+        local_sunat_documents_dir(), advance["attachment_filename"], download_name=download_name
+    )
 
 
 @bp.route("/<int:invoice_id>/adelantos/<int:advance_id>/eliminar", methods=["POST"])

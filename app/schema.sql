@@ -1378,6 +1378,10 @@ CREATE TABLE IF NOT EXISTS invoice_advances (
     received_date TEXT NOT NULL,
     amount REAL NOT NULL DEFAULT 0,
     payment_method TEXT,
+    -- Comprobante del adelanto (voucher, captura, PDF) -- opcional. Se guarda con
+    -- app/storage.py save_sunat_document(), igual que el PDF de la detracción.
+    attachment_filename TEXT,
+    attachment_original_name TEXT,
     created_by INTEGER,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

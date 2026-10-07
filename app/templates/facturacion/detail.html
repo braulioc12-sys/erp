@@ -118,13 +118,14 @@
   {% if advances %}
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Fecha</th><th>Medio de pago</th><th class="text-right">Monto</th><th>Registrado por</th><th></th></tr></thead>
+      <thead><tr><th>Fecha</th><th>Medio de pago</th><th class="text-right">Monto</th><th>Archivo</th><th>Registrado por</th><th></th></tr></thead>
       <tbody>
         {% for a in advances %}
         <tr>
           <td>{{ a.received_date }}</td>
           <td>{{ a.payment_method or '—' }}</td>
           <td class="text-right">{{ a.amount|invoice_money(invoice.currency) }}</td>
+          <td>{% if a.attachment_filename %}<a href="{{ url_for('facturacion.view_advance_file', invoice_id=invoice.id, advance_id=a.id) }}" target="_blank">📎 {{ a.attachment_original_name or 'Ver archivo' }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
           <td class="muted">{{ a.created_by_name or '—' }}</td>
           <td class="text-right">
             {% if can(current_user.roles, 'facturacion', 'edit') %}
@@ -150,7 +151,7 @@
   {% if invoice.status != 'ANULADA' and can(current_user.roles, 'facturacion', 'edit') %}
   <details style="margin-top:12px;">
     <summary style="cursor:pointer; font-weight:600;">+ Registrar adelanto</summary>
-    <form method="post" action="{{ url_for('facturacion.add_advance', invoice_id=invoice.id) }}" style="margin-top:12px;">
+    <form method="post" action="{{ url_for('facturacion.add_advance', invoice_id=invoice.id) }}" enctype="multipart/form-data" style="margin-top:12px;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="form-row">
         <label>Fecha
@@ -163,6 +164,9 @@
           <select name="advance_method">
             {% for method in advance_methods %}<option value="{{ method }}">{{ method }}</option>{% endfor %}
           </select>
+        </label>
+        <label>Archivo del pago <span class="muted" style="font-weight:400;">(opcional)</span>
+          <input type="file" name="advance_file" accept=".pdf,.png,.jpg,.jpeg,.webp,.heic,.heif,application/pdf,image/*">
         </label>
       </div>
       <div class="btn-group"><button type="submit" class="btn btn-primary btn-sm">Guardar adelanto</button></div>
