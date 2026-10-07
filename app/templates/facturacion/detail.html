@@ -2,6 +2,17 @@
 {% import 'partials/macros.html' as m %}
 {% block title %}Factura {{ invoice.number }}{% endblock %}
 {% block content %}
+{# 7 oct, pedido de Braulio: facturas que ya estaban ANULADAS antes de que anular liberara los viajes
+   -- sus viajes siguen marcados como facturados. Ver release_trips() en app/routes/facturacion.py. #}
+{% if stuck_trips and can(current_user.roles, 'facturacion', 'edit') %}
+<div class="flash flash-info" style="margin-bottom:12px;">
+  Esta factura está anulada, pero sus viajes (<strong>{% for t in stuck_trips %}{{ t.code }}{{ ', ' if not loop.last }}{% endfor %}</strong>) siguen marcados como facturados.
+  <form method="post" action="{{ url_for('facturacion.release_trips', invoice_id=invoice.id) }}" style="display:inline;margin-left:10px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-primary btn-sm">Liberar viajes para facturarlos de nuevo</button>
+  </form>
+</div>
+{% endif %}
 <div class="page-header">
   <h1>Factura {{ invoice.number }} {{ m.badge(invoice.status) }}</h1>
   <div class="page-actions">

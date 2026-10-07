@@ -1382,6 +1382,25 @@ def new():
                 )
                 return redirect(url_for("facturacion.new", issuer=issuer, client_id=client_id))
 
+        # 7 oct, pedido de Braulio ("cuando se jalen los viajes, a la hora de
+        # facturar que se permita poder editar la tarifa del viaje"): cada
+        # viaje marcado trae su tarifa en un campo editable (rate_<id>); si se
+        # cambia, se actualiza la tarifa del propio viaje (trips.rate) y la
+        # factura sale con el monto nuevo.
+        trips = [dict(t) for t in trips]
+        rate_changes = []
+        for t in trips:
+            raw = (request.form.get(f"rate_{t['id']}") or "").strip()
+            if not raw:
+                continue
+            new_rate = parse_float(raw, default=None)
+            if new_rate is None or new_rate < 0:
+                flash(f"La tarifa del viaje {t['code']} no es válida — se usó la que ya tenía ({t['rate']:.2f}).", "error")
+                continue
+            new_rate = round(new_rate, 2)
+            if round(float(t["rate"] or 0), 2) != new_rate:
+                rate_changes.append((t["id"], t["code"], float(t["rate"] or 0), new_rate))
+                t["rate"] = new_rate
         total = sum(t["rate"] for t in trips) + sum(line_total for _, _, _, line_total in manual_items)
         number = next_code("F", "invoices", code_column="number")
         series = current_app.config["INVOICE_SERIES"]
@@ -1461,6 +1480,8 @@ def new():
             ),
         )
         invoice_id = cur.lastrowid
+        for trip_id, _code, _old_rate, new_rate in rate_changes:
+            db.execute("UPDATE trips SET rate = ? WHERE id = ?", (new_rate, trip_id))
         for t in trips:
             db.execute(
                 "INSERT INTO invoice_items (invoice_id, trip_id, description, amount) VALUES (?, ?, ?, ?)",
@@ -1477,6 +1498,12 @@ def new():
         # 22 sep, registro de actividad (ver app/audit.py): quién generó esta
         # factura -- el nombre del cliente se toma de la lista `clients` ya
         # cargada arriba (evita una consulta aparte solo para el label).
+        for trip_id, code, old_rate, new_rate in rate_changes:
+            log_activity(
+                "viajes", "EDITAR", f"Viaje {code}: tarifa S/{old_rate:.2f} → S/{new_rate:.2f} (al facturar {number})",
+                entity_type="viaje", entity_id=trip_id,
+                entity_url=url_for("viajes.detail", trip_id=trip_id),
+            )
         client_name = next((c["name"] for c in clients if str(c["id"]) == str(client_id)), "")
         log_activity(
             "facturacion", "CREAR", f"Factura {number} — {client_name} — S/{total:.2f}",
@@ -1567,6 +1594,7 @@ def detail(invoice_id):
     # cuándo se generó, según activity_log (ver app/audit.py) -- None para
     # facturas de antes de que existiera este registro.
     creator = get_creator_info("factura", invoice_id)
+    stuck_trips = _stuck_trips_of_annulled_invoice(invoice)
     # 23 sep: si esta factura tiene detracción, ¿ya se puede reportar a
     # SUNAT de verdad (ver build_invoice_payload en app/integrations/
     # sunat_ose.py), o todavía falta cargarle a este concepto su código de
@@ -1584,7 +1612,7 @@ def detail(invoice_id):
         default_detraction_account=company.get("bank_nacion_detraction_account", ""),
         detraction_goods_catalog=get_detraction_goods_catalog(),
         detraction_goods_codes=get_detraction_goods_codes(),
-        creator=creator, detraction_tefacturo_code=detraction_tefacturo_code,
+        creator=creator, detraction_tefacturo_code=detraction_tefacturo_code, stuck_trips=stuck_trips,
         credit_notes=credit_notes, credit_note_reason_labels=CREDIT_NOTE_REASON_LABELS,
     )
 
@@ -1715,7 +1743,10 @@ def edit(invoice_id):
             if item_id_str in delete_ids:
                 db.execute("DELETE FROM invoice_items WHERE id = ?", (item["id"],))
                 if item["trip_id"]:
-                    db.execute("UPDATE trips SET invoiced = 0 WHERE id = ?", (item["trip_id"],))
+                    db.execute(
+                        f"UPDATE trips SET invoiced = 0 WHERE id = ? AND NOT {_TRIP_IN_OTHER_ACTIVE_INVOICE}",
+                        (item["trip_id"], invoice_id),
+                    )
         for desc, qty, _unit_amt, line_total in new_manual_items:
             db.execute(
                 "INSERT INTO invoice_items (invoice_id, trip_id, description, amount, quantity) VALUES (?, NULL, ?, ?, ?)",
@@ -1833,6 +1864,37 @@ def update_detraction(invoice_id):
     return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
 
 
+# 7 oct, pedido de Braulio ("a la hora de facturar cuando una factura ha sido
+# anulada debe liberar el viaje para poder facturarlo"): al pasar una factura
+# a ANULADA, sus viajes vuelven a quedar disponibles en "Generar factura". Los
+# ítems de la factura anulada se conservan (historial); por eso un viaje puede
+# figurar en una factura anulada y en una vigente -- y todo lo que "libera"
+# viajes (anular, eliminar, quitar un ítem) solo toca los que NO estén en otra
+# factura vigente.
+_TRIP_IN_OTHER_ACTIVE_INVOICE = """EXISTS (
+    SELECT 1 FROM invoice_items ii2 JOIN invoices i2 ON i2.id = ii2.invoice_id
+    WHERE ii2.trip_id = trips.id AND i2.id != ? AND i2.status != 'ANULADA')"""
+
+
+def _invoice_trip_ids(invoice_id):
+    return [r["trip_id"] for r in query_all(
+        "SELECT trip_id FROM invoice_items WHERE invoice_id = ? AND trip_id IS NOT NULL", (invoice_id,)
+    )]
+
+
+def _release_trips(invoice_id, trip_ids):
+    """Marca como no facturados los viajes dados, salvo los que están en otra factura vigente."""
+    freed = 0
+    for trip_id in trip_ids:
+        cur = get_db().execute(
+            f"UPDATE trips SET invoiced = 0 WHERE id = ? AND invoiced = 1 AND NOT {_TRIP_IN_OTHER_ACTIVE_INVOICE}",
+            (trip_id, invoice_id),
+        )
+        freed += cur.rowcount or 0
+    get_db().commit()
+    return freed
+
+
 @bp.route("/<int:invoice_id>/estado", methods=["POST"])
 @permission_required("facturacion", "edit")
 def change_status(invoice_id):
@@ -1841,10 +1903,33 @@ def change_status(invoice_id):
     new_status = request.form.get("status")
     if new_status not in ("PENDIENTE", "PAGADA", "VENCIDA", "ANULADA"):
         abort(400)
-    invoice = query_one("SELECT number, status FROM invoices WHERE id = ?", (invoice_id,))
+    invoice = query_one("SELECT number, status, sunat_status FROM invoices WHERE id = ?", (invoice_id,))
     if invoice is None:
         abort(404)
+    trip_ids = _invoice_trip_ids(invoice_id)
+    # 7 oct, pedido de Braulio: salir de ANULADA (se anuló por error) vuelve
+    # a marcar sus viajes como facturados -- salvo que alguno ya se haya
+    # vuelto a facturar en otra factura vigente: ahí no se puede, habría dos.
+    if invoice["status"] == "ANULADA" and new_status != "ANULADA" and trip_ids:
+        taken = query_all(
+            f"""SELECT DISTINCT t.code FROM trips t
+                WHERE t.id IN ({','.join('?' * len(trip_ids))}) AND t.invoiced = 1""",
+            tuple(trip_ids),
+        )
+        if taken:
+            flash(
+                "No se puede reactivar esta factura: los viajes " + ", ".join(r["code"] for r in taken)
+                + " ya están facturados en otra factura.",
+                "error",
+            )
+            return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
     execute("UPDATE invoices SET status = ? WHERE id = ?", (new_status, invoice_id))
+    freed = 0
+    if new_status == "ANULADA" and invoice["status"] != "ANULADA":
+        freed = _release_trips(invoice_id, trip_ids)
+    elif invoice["status"] == "ANULADA" and new_status != "ANULADA":
+        for trip_id in trip_ids:
+            execute("UPDATE trips SET invoiced = 1 WHERE id = ?", (trip_id,))
     # 22 sep, registro de actividad (ver app/audit.py).
     log_activity(
         "facturacion", "ESTADO", f"Factura {invoice['number']}: {invoice['status']} → {new_status}",
@@ -1852,6 +1937,56 @@ def change_status(invoice_id):
         entity_url=url_for("facturacion.detail", invoice_id=invoice_id),
     )
     flash("Estado de factura actualizado.", "success")
+    if freed:
+        flash(
+            f"Se liberaron {freed} viaje(s) de esta factura: ya pueden facturarse de nuevo desde Generar factura.",
+            "success",
+        )
+        if invoice["sunat_status"] == "ACEPTADO":
+            flash(
+                "Ojo: esta factura sigue ACEPTADA en SUNAT. Anularla aquí no la anula ante SUNAT — emite la "
+                "nota de crédito correspondiente antes de volver a facturar esos viajes.",
+                "info",
+            )
+    return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
+
+
+def _stuck_trips_of_annulled_invoice(invoice):
+    """Viajes de una factura ANULADA que siguen marcados como facturados (anuladas
+    de antes de que anular liberara los viajes) y no están en otra factura vigente."""
+    if invoice["status"] != "ANULADA":
+        return []
+    return query_all(
+        f"""SELECT t.id, t.code FROM trips t
+            WHERE t.invoiced = 1
+              AND t.id IN (SELECT trip_id FROM invoice_items WHERE invoice_id = ? AND trip_id IS NOT NULL)
+              AND NOT {_TRIP_IN_OTHER_ACTIVE_INVOICE.replace('trips.id', 't.id')}
+            ORDER BY t.code""",
+        (invoice["id"], invoice["id"]),
+    )
+
+
+@bp.route("/<int:invoice_id>/liberar-viajes", methods=["POST"])
+@permission_required("facturacion", "edit")
+def release_trips(invoice_id):
+    """7 oct, pedido de Braulio: para facturas que ya estaban ANULADAS antes de que
+    anular liberara los viajes -- libera los que quedaron marcados como facturados."""
+    if not validate_csrf():
+        abort(400)
+    invoice = query_one("SELECT * FROM invoices WHERE id = ?", (invoice_id,))
+    if invoice is None:
+        abort(404)
+    stuck = _stuck_trips_of_annulled_invoice(invoice)
+    if not stuck:
+        flash("No hay viajes por liberar en esta factura.", "info")
+        return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
+    freed = _release_trips(invoice_id, [t["id"] for t in stuck])
+    log_activity(
+        "facturacion", "ESTADO", f"Factura {invoice['number']}: se liberaron {freed} viaje(s) de la factura anulada",
+        entity_type="factura", entity_id=invoice_id,
+        entity_url=url_for("facturacion.detail", invoice_id=invoice_id),
+    )
+    flash(f"Se liberaron {freed} viaje(s): ya pueden facturarse de nuevo desde Generar factura.", "success")
     return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
 
 
@@ -2041,13 +2176,17 @@ def delete(invoice_id):
     # Los viajes facturados en esta factura vuelven a quedar disponibles
     # para facturarse en otra (mismo criterio que al quitar un ítem desde
     # editar factura -- ver edit()).
-    trip_ids = [r["trip_id"] for r in query_all(
-        "SELECT trip_id FROM invoice_items WHERE invoice_id = ? AND trip_id IS NOT NULL", (invoice_id,)
-    )]
+    trip_ids = _invoice_trip_ids(invoice_id)
+    # 7 oct: solo se liberan los viajes que no estén en otra factura vigente
+    # (una factura ANULADA ya los había liberado, y pueden estar facturados de nuevo).
+    to_free = [] if invoice["status"] == "ANULADA" else trip_ids
     execute("DELETE FROM invoice_items WHERE invoice_id = ?", (invoice_id,))
     execute("DELETE FROM invoices WHERE id = ?", (invoice_id,))
-    for trip_id in trip_ids:
-        execute("UPDATE trips SET invoiced = 0 WHERE id = ?", (trip_id,))
+    for trip_id in to_free:
+        execute(
+            f"UPDATE trips SET invoiced = 0 WHERE id = ? AND NOT {_TRIP_IN_OTHER_ACTIVE_INVOICE}",
+            (trip_id, invoice_id),
+        )
     log_activity(
         "facturacion", "ELIMINAR", f"Factura {invoice['number']}",
         entity_type="factura", entity_id=invoice_id,

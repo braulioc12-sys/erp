@@ -131,6 +131,7 @@
   <input type="hidden" name="issuer" value="{{ issuer }}">
 
   <h2 class="mt-0">Viajes entregados pendientes de facturar</h2>
+  {% if pending_trips %}<p class="muted mt-0">Puedes corregir la <strong>tarifa</strong> de cada viaje aquí mismo: al generar la factura se guarda también en el viaje.</p>{% endif %}
   {# 7 oct, pedido de Braulio: razones sociales que se facturan a este cliente (ver
      clients.billing_client_id). #}
   {% if billed_clients %}
@@ -148,7 +149,8 @@
           {% if billed_clients %}<td>{{ t.trip_client_name }}</td>{% endif %}
           <td>{{ t.delivered_date }}</td>
           <td>{{ t.origin }} → {{ t.destination }}</td>
-          <td class="text-right">{{ t.rate|money }}</td>
+          {# 7 oct, pedido de Braulio: tarifa editable al facturar (ver rate_<id> en new(), app/routes/facturacion.py) #}
+          <td class="text-right"><input type="number" step="0.01" min="0" name="rate_{{ t.id }}" value="{{ '%.2f'|format(t.rate or 0) }}" style="width:120px;text-align:right;"></td>
         </tr>
         {% endfor %}
       </tbody>
