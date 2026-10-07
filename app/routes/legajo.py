@@ -67,6 +67,49 @@ DOCUMENT_TYPE_LABELS = dict(DOCUMENT_TYPES)
 ALERT_DAYS = 30
 
 
+# 6 oct, pedido de Braulio ("en los documentos de RRHH, en el caso de brevete
+# y dni no puedes jalar los que ya se subieron en conductores?"): si la
+# persona es también conductor, su brevete, DNI y examen médico que ya están
+# en Conductores se MUESTRAN en el legajo (no se copian: así hay un solo
+# archivo y una sola fecha de vencimiento, y si se actualiza en Conductores el
+# legajo ya lo ve). (clave en la URL, columna del archivo en `drivers`, tipo de
+# documento del legajo, columna de vencimiento o None).
+DRIVER_LEGAJO_DOCS = [
+    ("brevete", "license_filename", "LICENCIA", "license_expiry"),
+    ("dni", "dni_filename", "DNI", None),
+    ("examen-medico", "medical_exam_filename", "EXAMEN_MEDICO", "medical_exam_expiry"),
+]
+_DRIVER_DOC_BY_KEY = {d[0]: d for d in DRIVER_LEGAJO_DOCS}
+
+
+def linked_driver(staff):
+    """El conductor de esta persona: el enlazado en Personal (driver_id) o, si
+    no hay enlace, el que tenga el mismo número de DNI."""
+    if staff["driver_id"]:
+        row = query_one("SELECT * FROM drivers WHERE id = ?", (staff["driver_id"],))
+        if row:
+            return row
+    number = (staff["document_number"] or "").strip()
+    if number and (staff["document_type"] or "DNI") == "DNI":
+        return query_one("SELECT * FROM drivers WHERE TRIM(document_number) = ? ORDER BY id LIMIT 1", (number,))
+    return None
+
+
+def driver_documents_for(staff):
+    """(conductor, [documentos]) con los archivos que el conductor ya tiene
+    subidos en Conductores y que el legajo puede mostrar."""
+    driver = linked_driver(staff)
+    docs = []
+    if driver:
+        for key, column, doc_type, expiry_col in DRIVER_LEGAJO_DOCS:
+            if driver[column]:
+                docs.append({
+                    "key": key, "doc_type": doc_type, "label": DOCUMENT_TYPE_LABELS[doc_type],
+                    "expiry": driver[expiry_col] if expiry_col else None,
+                })
+    return driver, docs
+
+
 def _get_staff_or_404(staff_id):
     staff = query_one("SELECT * FROM staff WHERE id = ?", (staff_id,))
     if staff is None:
@@ -186,8 +229,9 @@ def detail(staff_id):
            WHERE d.staff_id = ? ORDER BY d.doc_type, d.id""",
         (staff_id,),
     )
+    driver, driver_docs = driver_documents_for(staff)
     return render_template(
-        "legajo/detail.html", staff=staff, contracts=contracts, documents=documents,
+        "legajo/detail.html", staff=staff, contracts=contracts, documents=documents, driver=driver, driver_docs=driver_docs,
         contract_types=CONTRACT_TYPES, contract_type_labels=CONTRACT_TYPE_LABELS,
         document_types=DOCUMENT_TYPES, document_type_labels=DOCUMENT_TYPE_LABELS,
         expiry_state=_expiry_state, current_contract_id=(contracts[0]["id"] if contracts else None),
@@ -335,6 +379,23 @@ def document_file(staff_id, document_id):
         "SELECT filename FROM staff_documents WHERE id = ? AND staff_id = ?", (document_id, staff_id)
     )
     return _serve(row)
+
+
+@bp.route("/<int:staff_id>/documentos/conductor/<key>")
+@permission_required("pagos_personal", "view")
+def driver_document_file(staff_id, key):
+    """Sirve el archivo (brevete / DNI / examen médico) que el conductor
+    ligado a esta persona ya subió en Conductores — con el permiso de RRHH,
+    para que no haga falta tener acceso al módulo Conductores."""
+    staff = _get_staff_or_404(staff_id)
+    spec = _DRIVER_DOC_BY_KEY.get(key)
+    driver = linked_driver(staff)
+    if spec is None or driver is None or not driver[spec[1]]:
+        abort(404)
+    filename = driver[spec[1]]
+    if storage.using_s3():
+        return redirect(storage.driver_document_url(filename))
+    return send_from_directory(storage.local_driver_documents_dir(), filename)
 
 
 @bp.route("/<int:staff_id>/documentos/<int:document_id>/eliminar", methods=["POST"])

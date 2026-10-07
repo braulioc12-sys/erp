@@ -107,11 +107,25 @@
 
 <div class="panel">
   <h2 class="mt-0">Documentos</h2>
-  {% if documents %}
+  {% if documents or driver_docs %}
   <div class="table-wrap" style="margin-bottom:12px;">
     <table>
       <thead><tr><th>Tipo</th><th>Detalle</th><th>Emitido</th><th>Vence</th><th>Archivo</th><th>Subido</th><th></th></tr></thead>
       <tbody>
+        {% for d in driver_docs %}
+        {% set st = expiry_state(d.expiry) %}
+        <tr>
+          <td>{{ d.label }}</td>
+          <td><span class="badge badge-activo" style="font-size:0.75em;">Desde Conductores</span>{% if driver %} <a href="{{ url_for('conductores.driver_detail', driver_id=driver.id) if can(current_user.roles, 'conductores', 'view') else '#' }}" class="muted" style="font-size:0.85em;">{{ driver.name }}</a>{% endif %}</td>
+          <td>—</td>
+          <td>{{ d.expiry or '—' }}
+            {% if st == 'VENCIDO' %}<span class="badge badge-cancelado" style="font-size:0.75em;">Vencido</span>{% elif st == 'POR_VENCER' %}<span class="badge badge-pendiente" style="font-size:0.75em;">Por vencer</span>{% endif %}
+          </td>
+          <td><a href="{{ url_for('legajo.driver_document_file', staff_id=staff.id, key=d.key) }}" target="_blank">Ver documento</a></td>
+          <td class="muted">Se actualiza en Conductores</td>
+          <td></td>
+        </tr>
+        {% endfor %}
         {% for d in documents %}
         {% set st = expiry_state(d.expiry_date) %}
         <tr>
@@ -139,8 +153,9 @@
   {% else %}
   <p class="muted mt-0" style="margin-bottom:12px;">Todavía no hay documentos en el legajo.</p>
   {% endif %}
+  {% if driver_docs %}<p class="muted" style="margin-top:0;">El brevete, el DNI y el examen médico que ya están en Conductores se muestran aquí automáticamente; no hace falta subirlos otra vez.</p>{% endif %}
   {% if can_edit %}
-  {% if documents %}<details><summary class="btn btn-secondary btn-sm" style="cursor:pointer; display:inline-block;">+ Agregar documento</summary><div style="margin-top:10px;">{% endif %}
+  {% if documents or driver_docs %}<details><summary class="btn btn-secondary btn-sm" style="cursor:pointer; display:inline-block;">+ Agregar documento</summary><div style="margin-top:10px;">{% endif %}
   <form method="post" action="{{ url_for('legajo.add_document', staff_id=staff.id) }}" enctype="multipart/form-data" class="form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="form-row">
@@ -159,7 +174,7 @@
     </div>
     <div class="btn-group"><button type="submit" class="btn btn-secondary btn-sm">Guardar documento</button></div>
   </form>
-  {% if documents %}</div></details>{% endif %}
+  {% if documents or driver_docs %}</div></details>{% endif %}
   {% endif %}
 </div>
 {% endblock %}
