@@ -25,7 +25,7 @@
     <tbody>
       {% for c in clients %}
       <tr>
-        <td>{{ c.name }}</td>
+        <td>{{ c.name }}{% if c.billing_client_id %}<div class="muted" style="font-size:0.8em;">Se factura a: {{ client_names.get(c.billing_client_id, '—') }}</div>{% endif %}</td>
         <td>{{ c.ruc or '—' }}</td>
         <td>{{ c.phone or '—' }}</td>
         <td>{{ c.email or '—' }}</td>

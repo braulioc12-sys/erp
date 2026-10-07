@@ -1352,10 +1352,13 @@ def new():
 
         trips = []
         if trip_ids:
+            # 7 oct, pedido de Braulio: además de los viajes del propio cliente,
+            # valen los de los clientes que se facturan a él (clients.billing_client_id).
             trips = query_all(
                 f"""SELECT * FROM trips WHERE id IN ({','.join('?' * len(trip_ids))})
-                    AND client_id = ? AND status = 'ENTREGADO' AND invoiced = 0""",
-                (*trip_ids, client_id),
+                    AND (client_id = ? OR client_id IN (SELECT id FROM clients WHERE billing_client_id = ?))
+                    AND status = 'ENTREGADO' AND invoiced = 0""",
+                (*trip_ids, client_id, client_id),
             )
             if not trips:
                 flash("Los viajes seleccionados ya no están disponibles para facturar.", "error")
@@ -1493,20 +1496,43 @@ def new():
 
     selected_client = request.args.get("client_id", type=int)
     pending_trips = []
+    billed_clients = []
+    # 7 oct, pedido de Braulio ("cuando el cliente es Ripley o Honda la
+    # facturacion es con A&S"): si el cliente elegido se factura a otra razón
+    # social (clients.billing_client_id), se cambia solo a esa razón social --
+    # ahí aparecen sus viajes pendientes junto con los del cliente elegido.
+    if selected_client:
+        chosen = query_one("SELECT id, name, billing_client_id FROM clients WHERE id = ?", (selected_client,))
+        if chosen and chosen["billing_client_id"]:
+            target = query_one("SELECT id, name FROM clients WHERE id = ?", (chosen["billing_client_id"],))
+            if target:
+                flash(
+                    f"{chosen['name']} se factura a {target['name']} — se eligió {target['name']}; "
+                    f"abajo aparecen los viajes pendientes de {chosen['name']}.",
+                    "info",
+                )
+                return redirect(url_for("facturacion.new", issuer=issuer, client_id=target["id"]))
     if selected_client:
         # 22 sep: solo viajes de la empresa ya elegida arriba (issuer) --
         # antes se mostraban los del cliente sin importar la empresa, y el
         # aviso de "factúralos por separado" cubría el resto; ahora que la
         # empresa se fija primero, ni siquiera aparecen los de la otra.
         pending_trips = query_all(
-            """SELECT * FROM trips WHERE client_id = ? AND issuer = ? AND status = 'ENTREGADO' AND invoiced = 0
-               ORDER BY delivered_date""",
-            (selected_client, issuer),
+            """SELECT t.*, c.name AS trip_client_name FROM trips t
+               JOIN clients c ON c.id = t.client_id
+               WHERE (t.client_id = ? OR c.billing_client_id = ?) AND t.issuer = ?
+                 AND t.status = 'ENTREGADO' AND t.invoiced = 0
+               ORDER BY t.delivered_date""",
+            (selected_client, selected_client, issuer),
+        )
+        billed_clients = query_all(
+            "SELECT id, name FROM clients WHERE billing_client_id = ? AND active = 1 ORDER BY name", (selected_client,)
         )
     company = company_info_for_issuer(issuer, current_app.config)
     return render_template(
         "facturacion/form.html", clients=clients, selected_client=selected_client,
-        pending_trips=pending_trips, today=today_str(), issuer=issuer,
+        client_names={c["id"]: c["name"] for c in clients},
+        pending_trips=pending_trips, billed_clients=billed_clients, today=today_str(), issuer=issuer,
         default_detraction_account=company.get("bank_nacion_detraction_account", ""),
         detraction_goods_catalog=get_detraction_goods_catalog(),
     )

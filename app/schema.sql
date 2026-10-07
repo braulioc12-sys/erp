@@ -55,6 +55,14 @@ CREATE TABLE IF NOT EXISTS clients (
     email TEXT,
     address TEXT,
     active INTEGER NOT NULL DEFAULT 1,
+    -- 7 oct, pedido de Braulio ("tengo clientes que la facturacion no es al
+    -- cliente del viaje sino otra razon social... cuando el cliente es
+    -- Ripley o Honda la facturacion es con A&S"): si está lleno, los viajes
+    -- de este cliente se FACTURAN a ese otro cliente (la razón social de
+    -- facturación). El viaje sigue siendo de este cliente; solo cambia a
+    -- quién se emite la factura (ver facturacion.new()). Sin cadenas: el
+    -- cliente de facturación no puede, a su vez, facturarse a otro.
+    billing_client_id INTEGER REFERENCES clients(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

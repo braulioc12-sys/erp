@@ -23,6 +23,25 @@
   <label>Dirección
     <textarea name="address">{{ client.address if client else '' }}</textarea>
   </label>
+  {# 7 oct, pedido de Braulio: razón social a la que se factura (ver clients.billing_client_id
+     en schema.sql y facturacion.new()). #}
+  {% if billed_through %}
+  <div class="panel" style="margin-bottom:12px;">
+    <strong>Se le facturan los viajes de:</strong>
+    {% for b in billed_through %}<a href="{{ url_for('clientes.edit', client_id=b.id) }}">{{ b.name }}</a>{{ ', ' if not loop.last }}{% endfor %}
+    <p class="muted" style="margin:4px 0 0;">Al generar una factura a este cliente, aparecen también los viajes pendientes de esas razones sociales.</p>
+  </div>
+  {% else %}
+  <label>Se factura a (otra razón social)
+    <select name="billing_client_id">
+      <option value="">— A su propio nombre —</option>
+      {% for c in billing_candidates %}
+      <option value="{{ c.id }}" {{ 'selected' if client and (client.billing_client_id or '')|string == c.id|string }}>{{ c.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <p class="muted" style="margin-top:-8px;">Úsalo cuando los viajes de este cliente se facturan a otra razón social (por ejemplo, Honda o Ripley se facturan a A&amp;S). Los viajes siguen siendo de este cliente; al generar la factura de la otra razón social aparecen sus viajes pendientes.</p>
+  {% endif %}
   <div class="btn-group">
     <button type="submit" class="btn btn-primary">Guardar</button>
     <a href="{{ url_for('clientes.list_view') }}" class="btn btn-secondary">Cancelar</a>
