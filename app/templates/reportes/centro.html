@@ -7,7 +7,7 @@
     <a href="{{ url_for('reportes.index') }}" class="btn btn-secondary">📊 Ver dashboard</a>
   </div>
 </div>
-<p class="muted mt-0">Todos los reportes del sistema en un solo lugar, agrupados por área. Cada tarjeta solo aparece si tienes acceso a esa área.</p>
+<p class="muted mt-0">Todos los reportes del sistema en un solo lugar, agrupados por área. Cada tarjeta solo aparece si tienes acceso a ese reporte (lo define tu rol y, si hace falta, el administrador en Usuarios → Permisos específicos).</p>
 
 {% macro report_card(url, icon, title, description) -%}
 <a href="{{ url }}" class="panel" style="text-decoration:none; color:inherit; display:block;">
@@ -18,37 +18,43 @@
 
 <h2 style="margin-top:24px;">🚚 Operación / Viajes</h2>
 <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:16px; margin-top:8px;">
-  {% if can(current_user.roles, 'reportes', 'view') and can(current_user.roles, 'viajes', 'view') %}
+  {% if can_report(current_user.roles, 'viajes_por_cliente') %}
   {{ report_card(url_for('reportes.viajes_por_cliente'), '🆕', 'Viajes por cliente', 'Cantidad y monto de viajes por cliente en un rango de fechas.') }}
+  {% endif %}
+  {% if can_report(current_user.roles, 'comisiones_conductor') %}
   {{ report_card(url_for('viajes.commissions_report'), '📄', 'Comisiones por conductor', 'Comisiones ganadas por cada conductor en un mes.') }}
   {% endif %}
-  {% if can(current_user.roles, 'integraciones', 'view') %}
+  {% if can_report(current_user.roles, 'gps_diario') %}
   {{ report_card(url_for('integraciones.daily_report'), '📄', 'Reporte diario GPS', 'Horas y kilómetros recorridos por unidad, por día.') }}
   {% endif %}
 </div>
 
 <h2 style="margin-top:24px;">💰 Finanzas / Facturación</h2>
 <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:16px; margin-top:8px;">
-  {% if can(current_user.roles, 'facturacion', 'view') %}
+  {% if can_report(current_user.roles, 'cuentas_por_cobrar') %}
   {{ report_card(url_for('reportes.cuentas_por_cobrar'), '🆕', 'Cuentas por cobrar', 'Facturas pendientes y vencidas por cliente, con días de atraso.') }}
   {% endif %}
-  {% if can(current_user.roles, 'liquidaciones', 'view') %}
+  {% if can_report(current_user.roles, 'resumen_contable') %}
   {{ report_card(url_for('liquidaciones.resumen_view'), '📄', 'Resumen contable', 'Resumen de liquidaciones por mes y oficina.') }}
+  {% endif %}
+  {% if can_report(current_user.roles, 'historial_gastos') %}
   {{ report_card(url_for('liquidaciones.historial'), '📄', 'Historial de gastos', 'Todos los gastos registrados, con filtros por concepto y fecha.') }}
   {% endif %}
 </div>
 
 <h2 style="margin-top:24px;">🔧 Flota / Mantenimiento</h2>
 <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:16px; margin-top:8px;">
-  {% if can(current_user.roles, 'mantenimiento', 'view') %}
+  {% if can_report(current_user.roles, 'costos_mantenimiento') %}
   {{ report_card(url_for('reportes.costos_mantenimiento'), '🆕', 'Costos de mantenimiento por unidad', 'Gasto total y cantidad de mantenimientos por vehículo.') }}
   {% endif %}
 </div>
 
 <h2 style="margin-top:24px;">👥 RRHH / Personal</h2>
 <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:16px; margin-top:8px;">
-  {% if can(current_user.roles, 'pagos_personal', 'view') %}
+  {% if can_report(current_user.roles, 'pagos_por_persona') %}
   {{ report_card(url_for('reportes.pagos_por_persona'), '🆕', 'Pagos por persona', 'Total pagado (planilla + honorarios) por persona en un periodo.') }}
+  {% endif %}
+  {% if can_report(current_user.roles, 'export_pagos_personal') %}
   {{ report_card(url_for('pagos_personal.export_excel'), '📄', 'Export de pagos personal', 'Todos los comprobantes de pago del periodo, con datos bancarios.') }}
   {% endif %}
   {% if can(current_user.roles, 'rrhh', 'view') %}

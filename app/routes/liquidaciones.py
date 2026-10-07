@@ -31,7 +31,7 @@ from app.accounting import (
     voucher_label,
 )
 from app.audit import get_creator_info, log_activity
-from app.auth import permission_required, validate_csrf
+from app.auth import permission_required, report_required, validate_csrf
 from app.db import execute, query_all, query_one
 from app.helpers import now_str, parse_date, parse_float, pretty_label, today_str
 from app.integrations.sunat_exchange_rate import get_rate_for_date
@@ -1902,7 +1902,7 @@ def _filtered_expenses(args):
 
 
 @bp.route("/historial")
-@permission_required("liquidaciones", "view")
+@report_required("historial_gastos")
 def historial():
     expenses, type_filter, from_date, to_date = _filtered_expenses(request.args)
     total = sum(e["amount"] for e in expenses)
@@ -1914,7 +1914,7 @@ def historial():
 
 
 @bp.route("/historial/exportar")
-@permission_required("liquidaciones", "view")
+@report_required("historial_gastos")
 def export_excel():
     expenses, type_filter, from_date, to_date = _filtered_expenses(request.args)
 
@@ -2200,7 +2200,7 @@ def _liquidacion_rows(month, office_filter):
 
 
 @bp.route("/resumen")
-@permission_required("liquidaciones", "view")
+@report_required("resumen_contable")
 def resumen_view():
     month = request.args.get("month") or today_str()[:7]
     office = request.args.get("office", "")
@@ -2214,7 +2214,7 @@ def resumen_view():
 
 
 @bp.route("/resumen/exportar")
-@permission_required("liquidaciones", "view")
+@report_required("resumen_contable")
 def resumen_export():
     month = request.args.get("month") or today_str()[:7]
     office = request.args.get("office", "")

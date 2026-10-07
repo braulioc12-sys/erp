@@ -100,7 +100,7 @@ from flask import Blueprint, Response, abort, current_app, flash, g, redirect, r
 
 from app import storage
 from app.audit import get_creator_info, log_activity
-from app.auth import permission_required, validate_csrf
+from app.auth import permission_required, report_required, validate_csrf
 from app.bulk_import import (
     HONORARIOS_TEMPLATE_COLUMNS,
     HONORARIOS_TEMPLATE_EXAMPLE,
@@ -428,7 +428,7 @@ def payment_receipt_file(payment_id):
 
 
 @bp.route("/exportar")
-@permission_required("pagos_personal", "view")
+@report_required("export_pagos_personal")
 def export_excel():
     from app.reports import build_staff_payments_workbook
 

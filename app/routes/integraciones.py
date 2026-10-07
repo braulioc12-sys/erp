@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, Response, current_app, flash, redirect, render_template, request, url_for
 
 from app.audit import log_activity
-from app.auth import permission_required, validate_csrf
+from app.auth import permission_required, report_required, validate_csrf
 from app.db import execute, get_db, query_all, query_one
 from app.gps_stats import combined_daily_stats, daily_stats_all
 from app.helpers import parse_date, today_str
@@ -398,7 +398,7 @@ def sync_frotcom():
 
 
 @bp.route("/reportes")
-@permission_required("integraciones", "view")
+@report_required("gps_diario")
 def daily_report():
     """Reporte diario de horas manejadas y km avanzados por unidad (31 ago,
     pedido de Braulio). Preferimos los viajes ya calculados por Frotcom
@@ -422,7 +422,7 @@ def daily_report():
 
 
 @bp.route("/reportes/exportar")
-@permission_required("integraciones", "view")
+@report_required("gps_diario")
 def daily_report_export():
     from app.reports import build_gps_daily_workbook
 

@@ -73,6 +73,14 @@ MODULE_LABELS = {
     # otro usuario desde Usuarios > Permisos específicos, igual que
     # cualquier otro módulo.
     "actividad": "Actividad",
+    # 7 oct, pedido de Braulio ("en usuarios y permisos hay que actualizar los
+    # nuevos modulos, como por ejemplo el de reportes para ver que reportes
+    # puede ver cada usuario"): Reportes se chequeaba en el código pero no
+    # estaba en esta lista -- por eso no aparecía en Usuarios > Permisos
+    # específicos. Ver REPORTS más abajo. (El módulo "gastos"/"viaticos" de
+    # app/routes/gastos.py y viaticos.py NO va acá a propósito: esos
+    # blueprints no están registrados en app/__init__.py, son código sin uso.)
+    "reportes": "Reportes",
     # 1 oct: herramienta de borrado definitivo de viajes/facturas de prueba
     # (ver app/routes/admin_reset.py) -- NO lleva fila en PERMISSION_CATALOG
     # de abajo a propósito (nunca debe poder otorgarse como "permiso
@@ -121,3 +129,39 @@ PERMISSION_CATALOG = {
     "descansos": [("view", "Ver"), ("edit", "Registrar y editar"), ("delete", "Eliminar")],
     "actividad": [("view", "Ver")],
 }
+
+# 7 oct, pedido de Braulio: permiso POR REPORTE. Cada reporte del Centro de
+# reportes (app/routes/reportes.py) tiene su propia acción dentro del módulo
+# "reportes", para poder dar o quitarle a UNA persona un reporte puntual
+# desde Usuarios > Permisos específicos (Permitir siempre / Bloquear siempre).
+#
+# Sin ninguna excepción guardada, nada cambia respecto a como funcionaba:
+# cada reporte se ve si el usuario tiene acceso al área a la que pertenece
+# (Facturación, Mantenimiento, etc.) -- y, para los reportes que viven dentro
+# del módulo Reportes, además "Reportes > Ver". Ver report_access() en
+# app/auth.py.
+#
+# (clave, nombre, área/módulo al que pertenece, ¿vive dentro del módulo Reportes?)
+# Los que NO viven dentro de Reportes (comisiones, GPS, resumen contable,
+# historial de gastos, export de pagos) siguen siendo pantallas de su módulo
+# de siempre; el Centro solo los enlaza. Para estos el permiso por reporte
+# también se respeta en su propia ruta (report_required).
+REPORTS = [
+    ("viajes_por_cliente", "Viajes por cliente", "viajes", True),
+    ("comisiones_conductor", "Comisiones por conductor", "viajes", False),
+    ("gps_diario", "Reporte diario GPS", "integraciones", False),
+    ("cuentas_por_cobrar", "Cuentas por cobrar", "facturacion", True),
+    ("resumen_contable", "Resumen contable", "liquidaciones", False),
+    ("historial_gastos", "Historial de gastos", "liquidaciones", False),
+    ("costos_mantenimiento", "Costos de mantenimiento por unidad", "mantenimiento", True),
+    ("pagos_por_persona", "Pagos por persona", "pagos_personal", True),
+    ("export_pagos_personal", "Export de pagos personal", "pagos_personal", False),
+]
+REPORT_LABELS = {key: label for key, label, _area, _inside in REPORTS}
+REPORT_AREAS = {key: area for key, _label, area, _inside in REPORTS}
+REPORT_INSIDE_MODULE = {key for key, _label, _area, inside in REPORTS if inside}
+
+PERMISSION_CATALOG["reportes"] = [("view", "Entrar a Reportes (Centro de reportes y dashboard)")] + [
+    (key, f"Reporte: {label} (área {MODULE_LABELS.get(area, area)})")
+    for key, label, area, _inside in REPORTS
+]

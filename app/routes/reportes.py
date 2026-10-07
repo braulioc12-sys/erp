@@ -26,7 +26,7 @@ from datetime import datetime, timedelta
 
 from flask import Blueprint, Response, current_app, flash, redirect, render_template, request, url_for
 
-from app.auth import can, permission_required
+from app.auth import can, permission_required, report_required
 from app.db import query_all, query_one
 from app.helpers import parse_date, today_str
 # 30 sep, pedido de Braulio ("los reportes tienen que estar separados como
@@ -203,11 +203,8 @@ def _trips_by_client_rows(args):
 
 
 @bp.route("/viajes-por-cliente")
-@permission_required("reportes", "view")
+@report_required("viajes_por_cliente")
 def viajes_por_cliente():
-    redirect_resp = _require_section("viajes")
-    if redirect_resp:
-        return redirect_resp
     # 30 sep: selector obligatorio de empresa (ya no existe la opción "Ambas
     # empresas") -- sin ?issuer=HARRASO|BRMS en la URL solo se muestra el
     # selector, mismo patrón que viajes.list_view()/flota.list_view().
@@ -227,11 +224,8 @@ def viajes_por_cliente():
 
 
 @bp.route("/viajes-por-cliente/exportar")
-@permission_required("reportes", "view")
+@report_required("viajes_por_cliente")
 def viajes_por_cliente_export():
-    redirect_resp = _require_section("viajes")
-    if redirect_resp:
-        return redirect_resp
     # 30 sep: el botón "Exportar a Excel" de la pantalla gateada arriba
     # siempre manda ?issuer=... -- esto es solo defensa contra un link
     # armado a mano sin empresa.
@@ -298,11 +292,8 @@ def _accounts_receivable_rows(args):
 
 
 @bp.route("/cuentas-por-cobrar")
-@permission_required("reportes", "view")
+@report_required("cuentas_por_cobrar")
 def cuentas_por_cobrar():
-    redirect_resp = _require_section("facturacion")
-    if redirect_resp:
-        return redirect_resp
     # 30 sep: selector obligatorio de empresa (ya no existe "Ambas empresas").
     issuer = request.args.get("issuer", "").strip().upper()
     if issuer not in ISSUER_CHOICES:
@@ -323,11 +314,8 @@ def cuentas_por_cobrar():
 
 
 @bp.route("/cuentas-por-cobrar/exportar")
-@permission_required("reportes", "view")
+@report_required("cuentas_por_cobrar")
 def cuentas_por_cobrar_export():
-    redirect_resp = _require_section("facturacion")
-    if redirect_resp:
-        return redirect_resp
     issuer = request.args.get("issuer", "").strip().upper()
     if issuer not in ISSUER_CHOICES:
         flash("Elige una empresa para exportar este reporte.", "error")
@@ -381,11 +369,8 @@ def _maintenance_costs_rows(args, issuer):
 
 
 @bp.route("/costos-mantenimiento")
-@permission_required("reportes", "view")
+@report_required("costos_mantenimiento")
 def costos_mantenimiento():
-    redirect_resp = _require_section("mantenimiento")
-    if redirect_resp:
-        return redirect_resp
     # 30 sep: selector obligatorio de empresa, ahora que vehicles.issuer
     # existe (ver flota.list_view()/mantenimiento.list_view()) -- este
     # reporte es, en el fondo, un reporte de Mantenimiento, así que queda
@@ -407,11 +392,8 @@ def costos_mantenimiento():
 
 
 @bp.route("/costos-mantenimiento/exportar")
-@permission_required("reportes", "view")
+@report_required("costos_mantenimiento")
 def costos_mantenimiento_export():
-    redirect_resp = _require_section("mantenimiento")
-    if redirect_resp:
-        return redirect_resp
     issuer = request.args.get("issuer", "").strip().upper()
     if issuer not in ISSUER_CHOICES:
         flash("Elige una empresa para exportar este reporte.", "error")
@@ -464,11 +446,8 @@ def _staff_payments_by_person_rows(args):
 
 
 @bp.route("/pagos-por-persona")
-@permission_required("reportes", "view")
+@report_required("pagos_por_persona")
 def pagos_por_persona():
-    redirect_resp = _require_section("pagos_personal")
-    if redirect_resp:
-        return redirect_resp
     rows, from_period, to_period, staff_id = _staff_payments_by_person_rows(request.args)
     staff = query_all("SELECT id, name FROM staff ORDER BY name")
     total_general = sum(r["total_general"] or 0 for r in rows)
@@ -479,11 +458,8 @@ def pagos_por_persona():
 
 
 @bp.route("/pagos-por-persona/exportar")
-@permission_required("reportes", "view")
+@report_required("pagos_por_persona")
 def pagos_por_persona_export():
-    redirect_resp = _require_section("pagos_personal")
-    if redirect_resp:
-        return redirect_resp
     from app.reports import build_staff_payments_by_person_workbook
 
     rows, from_period, to_period, staff_id = _staff_payments_by_person_rows(request.args)

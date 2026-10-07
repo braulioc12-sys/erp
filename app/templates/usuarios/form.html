@@ -60,15 +60,22 @@
     excepción puntual solo para esta persona, sin afectar a nadie más que tenga el mismo rol — por
     ejemplo, dejarla operar en campo en Neumáticos pero bloquearle la gestión de inventario.
   </p>
+  {# 7 oct, pedido de Braulio: Reportes (un permiso por reporte) y Gastos/Viáticos ahora están en esta lista. #}
+  <p class="muted" style="margin-top:-4px;">
+    <strong>Reportes:</strong> para que {{ user.name }} vea cualquier reporte necesita <em>Reportes → Entrar</em>; además,
+    cada reporte aparece solo si sus roles dan acceso a su área (o si aquí se le permite ese reporte en particular).
+    "Resultado" muestra el acceso real con lo ya guardado (se actualiza al guardar).
+  </p>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Módulo</th><th>Acción</th><th>Acceso</th></tr></thead>
+      <thead><tr><th>Módulo</th><th>Acción</th><th style="text-align:center;">Según sus roles</th><th>Acceso</th><th style="text-align:center;">Resultado</th></tr></thead>
       <tbody>
         {% for module, actions in permission_catalog.items() %}
         {% for action, label in actions %}
         <tr>
           <td>{{ module_labels.get(module, module) }}</td>
           <td>{{ label }}</td>
+          <td style="text-align:center;">{{ '✔' if access_by_role.get((module, action)) else '✘' }}</td>
           <td>
             {% set current = current_overrides.get((module, action), 'inherit') %}
             <select name="{{ override_field_name(module, action) }}">
@@ -77,6 +84,7 @@
               <option value="deny" {{ 'selected' if current == 'deny' }}>Bloquear siempre</option>
             </select>
           </td>
+          <td style="text-align:center; font-weight:600; color:{{ '#0f9d58' if access_final.get((module, action)) else '#c0392b' }};">{{ '✔ Sí' if access_final.get((module, action)) else '✘ No' }}</td>
         </tr>
         {% endfor %}
         {% endfor %}

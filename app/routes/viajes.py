@@ -18,7 +18,7 @@ from flask import (
 
 from app import storage
 from app.audit import get_creator_info, log_activity
-from app.auth import can, login_required, permission_required, validate_csrf
+from app.auth import can, login_required, permission_required, report_required, validate_csrf
 from app.db import execute, query_all, query_one
 from app.helpers import compress_photo, now_str, parse_date, parse_float, today_str
 from app.routes.rutas import find_route
@@ -2074,7 +2074,7 @@ def _commissions_by_driver(month):
 
 
 @bp.route("/comisiones")
-@permission_required("viajes", "view")
+@report_required("comisiones_conductor")
 def commissions_report():
     month = request.args.get("month") or today_str()[:7]
     drivers = _commissions_by_driver(month)
@@ -2087,7 +2087,7 @@ def commissions_report():
 
 
 @bp.route("/comisiones/exportar")
-@permission_required("viajes", "view")
+@report_required("comisiones_conductor")
 def commissions_export():
     from flask import current_app
 

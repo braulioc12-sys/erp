@@ -4,7 +4,7 @@ from flask import Blueprint, abort, flash, redirect, render_template, request, u
 from werkzeug.security import generate_password_hash
 
 from app.audit import get_creator_info, log_activity
-from app.auth import ROLE_LABELS, permission_required, validate_csrf
+from app.auth import ROLE_LABELS, access_for, permission_required, report_access, validate_csrf
 from app.db import USER_ROLES, execute, get_db, query_all, query_one
 from app.permissions_catalog import MODULE_LABELS, PERMISSION_CATALOG
 
@@ -86,6 +86,29 @@ def _save_user_overrides(user_id, form):
                 (user_id, module, action, 1 if value == "allow" else 0),
             )
     db.commit()
+
+
+def _access_matrix(roles, overrides):
+    """7 oct, pedido de Braulio ("para ver que reportes puede ver cada
+    usuario"): para cada (módulo, acción) del catálogo, devuelve dos dict
+    {(módulo, acción): bool} --
+      - `by_role`: lo que le dan SOLO sus roles (sin excepciones),
+      - `final`: el acceso real tras aplicar sus excepciones guardadas.
+    `overrides` es {(módulo, acción): 'allow'|'deny'} (como _current_overrides).
+    Los reportes individuales (módulo "reportes", cualquier acción que no sea
+    "view") usan report_access(), igual que el Centro de reportes."""
+    override_bools = {key: value == "allow" for key, value in overrides.items()}
+    by_role = {}
+    final = {}
+    for module, actions in PERMISSION_CATALOG.items():
+        for action, _label in actions:
+            if module == "reportes" and action != "view":
+                by_role[(module, action)] = report_access(roles, {}, action)
+                final[(module, action)] = report_access(roles, override_bools, action)
+            else:
+                by_role[(module, action)] = access_for(roles, {}, module, action)
+                final[(module, action)] = access_for(roles, override_bools, module, action)
+    return by_role, final
 
 
 @bp.route("")
@@ -208,6 +231,8 @@ def edit(user_id):
                 role_choices=ROLE_CHOICES, selected_roles=current_roles,
                 permission_catalog=PERMISSION_CATALOG, module_labels=MODULE_LABELS,
                 current_overrides=current_overrides, override_field_name=_override_field_name,
+                access_by_role=_access_matrix(current_roles, current_overrides)[0],
+                access_final=_access_matrix(current_roles, current_overrides)[1],
             )
 
         if new_password and len(new_password) < 6:
@@ -217,6 +242,8 @@ def edit(user_id):
                 role_choices=ROLE_CHOICES, selected_roles=current_roles,
                 permission_catalog=PERMISSION_CATALOG, module_labels=MODULE_LABELS,
                 current_overrides=current_overrides, override_field_name=_override_field_name,
+                access_by_role=_access_matrix(current_roles, current_overrides)[0],
+                access_final=_access_matrix(current_roles, current_overrides)[1],
             )
 
         db = get_db()
@@ -266,5 +293,7 @@ def edit(user_id):
         role_choices=ROLE_CHOICES, selected_roles=current_roles,
         permission_catalog=PERMISSION_CATALOG, module_labels=MODULE_LABELS,
         current_overrides=existing_overrides, override_field_name=_override_field_name,
+        access_by_role=_access_matrix(current_roles, existing_overrides)[0],
+        access_final=_access_matrix(current_roles, existing_overrides)[1],
         creator=creator,
     )

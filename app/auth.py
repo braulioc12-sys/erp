@@ -6,6 +6,7 @@ from flask import Blueprint, current_app, flash, g, redirect, render_template, r
 from werkzeug.security import check_password_hash
 
 from app.db import query_all, query_one
+from app.permissions_catalog import REPORT_AREAS, REPORT_INSIDE_MODULE
 
 bp = Blueprint("auth", __name__, url_prefix="/auth")
 
@@ -291,18 +292,21 @@ def can(roles, module, action):
     `can()` siempre se llama con los roles del usuario logueado
     (current_user.roles / g.user["roles"]) — no hay ningún llamado que
     evalúe el permiso de OTRO usuario distinto al que hizo la petición."""
-    if isinstance(roles, str):
-        roles = (roles,)
-
     try:
         current = g.user
     except RuntimeError:
         current = None  # fuera de un contexto de petición (ej. algún script)
-    if current is not None:
-        override = current.get("permission_overrides", {}).get((module, action))
-        if override is not None:
-            return override
+    overrides = current.get("permission_overrides", {}) if current is not None else {}
+    return access_for(roles, overrides, module, action)
 
+
+def role_allows(roles, module, action):
+    """Solo la parte de ROLES de can(): ¿alguno de estos roles da el
+    permiso? (sin mirar excepciones por usuario). 7 oct: separada de can()
+    para poder calcular también el acceso de OTRO usuario -- Usuarios >
+    editar muestra qué da su rol y qué queda tras sus excepciones."""
+    if isinstance(roles, str):
+        roles = (roles,)
     for role in roles or ():
         role_perms = PERMISSIONS.get(role, {})
         if "*" in role_perms:
@@ -314,6 +318,45 @@ def can(roles, module, action):
         if action in role_perms.get(module, set()):
             return True
     return False
+
+
+def access_for(roles, overrides, module, action):
+    """Acceso final: la excepción puntual del usuario (si la hay) GANA sobre
+    sus roles, tanto para permitir como para bloquear. `overrides` es el
+    dict {(module, action): bool} de user_permission_overrides."""
+    override = (overrides or {}).get((module, action))
+    if override is not None:
+        return override
+    return role_allows(roles, module, action)
+
+
+def report_access(roles, overrides, key):
+    """7 oct, pedido de Braulio ("ver que reportes puede ver cada usuario"):
+    acceso a UN reporte (clave de REPORTS en app/permissions_catalog.py).
+
+    - Si el usuario tiene una excepción guardada para ("reportes", clave),
+      esa decide (Permitir/Bloquear siempre).
+    - Si no, el reporte se ve cuando tiene acceso al área a la que pertenece
+      (exactamente como funcionaba antes de existir este permiso).
+    - Los reportes que viven dentro del módulo Reportes además exigen
+      "Reportes > Ver" (la puerta de entrada, igual que antes)."""
+    overrides = overrides or {}
+    own = overrides.get(("reportes", key))
+    base = own if own is not None else access_for(roles, overrides, REPORT_AREAS[key], "view")
+    if key in REPORT_INSIDE_MODULE:
+        return bool(access_for(roles, overrides, "reportes", "view") and base)
+    return bool(base)
+
+
+def can_report(roles, key):
+    """report_access() para el usuario logueado (se usa desde templates y
+    rutas, igual que can())."""
+    try:
+        current = g.user
+    except RuntimeError:
+        current = None
+    overrides = current.get("permission_overrides", {}) if current is not None else {}
+    return report_access(roles, overrides, key)
 
 
 @bp.before_app_request
@@ -378,6 +421,26 @@ def permission_required(module, action="view"):
         def wrapped_view(**kwargs):
             if not can(g.user["roles"], module, action):
                 flash("No tienes permiso para acceder a esta sección.", "error")
+                return redirect(url_for("dashboard.index"))
+            return view(**kwargs)
+
+        return wrapped_view
+
+    return decorator
+
+
+def report_required(key):
+    """Como permission_required(), pero para UN reporte (ver report_access()):
+    respeta el permiso por reporte que se configura en Usuarios > Permisos
+    específicos."""
+    def decorator(view):
+        @functools.wraps(view)
+        @login_required
+        def wrapped_view(**kwargs):
+            if not can_report(g.user["roles"], key):
+                flash("No tienes permiso para acceder a este reporte.", "error")
+                if can(g.user["roles"], "reportes", "view"):
+                    return redirect(url_for("reportes.centro"))
                 return redirect(url_for("dashboard.index"))
             return view(**kwargs)
 

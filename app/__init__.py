@@ -107,11 +107,12 @@ def create_app(config_object=Config):
 
     @app.context_processor
     def inject_globals():
-        from app.auth import ROLE_LABELS, can, get_csrf_token
+        from app.auth import ROLE_LABELS, can, can_report, get_csrf_token
 
         return {
             "current_user": g.get("user"),
             "can": can,
+            "can_report": can_report,  # 7 oct: permiso por reporte (Usuarios > Permisos específicos)
             # 3 sep, multi-rol: para mostrar los roles del usuario logueado
             # en el sidebar (base.html) sin tener que pasarlo desde cada
             # vista — ver también usuarios/list.html y form.html, que lo
