@@ -1145,7 +1145,16 @@ def build_waybill_payload(waybill, trip, company, client):
       obligatorio, el próximo envío real lo va a decir con un error
       puntual — recién ahí se agrega un campo real al formulario."""
     missing = []
-    if not client["ruc"]:
+    shipper_ruc = (waybill["shipper_ruc"] or "").strip() if "shipper_ruc" in waybill.keys() else ""
+    shipper_name = (waybill["shipper_name"] or "").strip() if "shipper_name" in waybill.keys() else ""
+    if shipper_ruc:
+        # 7 oct: remitente propio de esta guía (otra razón social del mismo
+        # cliente) -- se exige el RUC completo y el nombre.
+        if len(shipper_ruc) != 11 or not shipper_ruc.isdigit():
+            missing.append(f"el RUC del remitente ('{shipper_ruc}') debe tener 11 dígitos")
+        if not shipper_name:
+            missing.append("falta la razón social del remitente")
+    elif not client["ruc"]:
         missing.append(f"el cliente '{client['name']}' no tiene RUC registrado")
     if not company.get("mtc_registration"):
         missing.append(f"falta el registro MTC de {company.get('name')} (HARRASO_MTC_REGISTRATION/BRMS_MTC_REGISTRATION)")
@@ -1186,6 +1195,19 @@ def build_waybill_payload(waybill, trip, company, client):
         "numeroDocumentoIdentidad": client["ruc"],
         "tipoDocumentoIdentidad": "RUC",
     }
+    if shipper_ruc:
+        # 7 oct, pedido de Braulio: el remitente de ESTA guía es otra razón
+        # social del cliente (ej. Tottus Oriente) -- se manda su RUC/nombre
+        # en vez de los del cliente del viaje. Sin correo (no se tiene el
+        # de esa razón social). Si el destinatario no se completó a mano,
+        # sigue cayendo al remitente (más abajo), o sea a esta razón social.
+        remitente = {
+            "correo": "",
+            "nombreComercial": shipper_name,
+            "nombreLegal": shipper_name,
+            "numeroDocumentoIdentidad": shipper_ruc,
+            "tipoDocumentoIdentidad": "RUC",
+        }
     if waybill["recipient_ruc"]:
         destinatario = {
             "correo": "",

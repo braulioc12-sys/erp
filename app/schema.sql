@@ -1466,6 +1466,12 @@ CREATE TABLE IF NOT EXISTS waybills (
     -- build_waybill_payload() sobre qué tan confirmado está cada uno contra
     -- el servidor real de tefacturo.pe (destinatario sí, subcontratado y
     -- pagador NO todavía).
+    -- 7 oct, pedido de Braulio (cliente con 2 razones sociales, ej. Tottus y Tottus
+    -- Oriente, que hace 2 guías de remisión remitente en el mismo viaje): RUC y
+    -- razón social del REMITENTE de ESTA guía cuando es distinto del cliente del
+    -- viaje. NULL/vacío = el remitente es el cliente del viaje (lo de siempre).
+    shipper_ruc TEXT,
+    shipper_name TEXT,
     recipient_ruc TEXT,
     recipient_name TEXT,
     subcontractor_ruc TEXT,

@@ -200,7 +200,7 @@
      que antes. #}
   {% if trip.ownership == 'TERCERO' or existing_waybills or trip.shipper_waybill_shows_carrier == 'NO' %}
   {% if can(current_user.roles, 'guias', 'edit') and trip.status != 'CANCELADO' %}
-  <a href="{{ url_for('guias.new', trip_id=trip.id) }}" class="btn btn-secondary btn-sm">📄 Generar guía de remisión (SUNAT)</a>
+  <a href="{{ url_for('guias.new', trip_id=trip.id) }}" class="btn btn-secondary btn-sm">{% if existing_waybills %}➕ Generar otra guía (otro remitente / razón social){% else %}📄 Generar guía de remisión (SUNAT){% endif %}</a>
   {% endif %}
   {% endif %}
   {# 4 sep, pedido de Braulio: los viajes con terceros no registran
@@ -269,14 +269,15 @@
    PDF directo. #}
 {% if existing_waybills %}
 <div class="panel" style="margin-bottom:16px;">
-  <h2 class="mt-0">Guía{{ 's' if existing_waybills|length > 1 }} de remisión generada{{ 's' if existing_waybills|length > 1 }}</h2>
+  <h2 class="mt-0">Guía{{ 's' if existing_waybills|length > 1 }} de transportista generada{{ 's' if existing_waybills|length > 1 }}</h2>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>N°</th><th>Estado SUNAT</th><th>PDF</th><th></th></tr></thead>
+      <thead><tr><th>N°</th><th>Remitente</th><th>Estado SUNAT</th><th>PDF</th><th></th></tr></thead>
       <tbody>
         {% for w in existing_waybills %}
         <tr>
           <td>{{ w.series }}-{{ '%06d'|format(w.series_number) }}</td>
+          <td>{{ w.shipper_name or trip.client_name or '—' }}</td>
           <td>{{ m.badge(w.sunat_status) }}</td>
           <td>{% if w.sunat_pdf_url %}<a href="{{ w.sunat_pdf_url }}" target="_blank" rel="noopener">Descargar PDF</a>{% else %}—{% endif %}</td>
           <td><a href="{{ url_for('guias.detail', waybill_id=w.id) }}">Ver guía</a></td>
@@ -407,7 +408,7 @@
    remision del cliente"): este panel se llamaba "Guía de transportista" y
    decía ser "documento propio del transportista" -- al revés de lo que es
    en realidad. Las guías DE TRANSPORTISTA son las que ya se listan arriba
-   en el panel "Guía(s) de remisión generada(s)" (las reales, emitidas ante
+   en el panel "Guía(s) de transportista generada(s)" (las reales, emitidas ante
    SUNAT). Este campo (carrier_waybill_number/carrier_waybill_filename, sin
    cambios de fondo -- Braulio pidió solo corregir el nombre, no fusionarlo
    con el flujo de la guía del remitente de arriba) es donde se adjunta la

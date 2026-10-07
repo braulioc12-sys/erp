@@ -484,6 +484,9 @@ COLUMN_MIGRATIONS = [
     # destinatario, subcontratado, pagador"): campos opcionales para los 3
     # bloques que no siempre coinciden con el cliente del viaje -- ver la
     # nota larga en build_waybill_payload() y schema.sql.
+    # 7 oct: remitente propio de la guía (cliente con 2 razones sociales).
+    ("waybills", "shipper_ruc", "TEXT"),
+    ("waybills", "shipper_name", "TEXT"),
     ("waybills", "recipient_ruc", "TEXT"),
     ("waybills", "recipient_name", "TEXT"),
     ("waybills", "subcontractor_ruc", "TEXT"),

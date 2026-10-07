@@ -186,6 +186,22 @@ def _related_document_series_error(series):
     return None
 
 
+def _shipper_from_form(form):
+    """7 oct, pedido de Braulio: RUC y razón social del remitente de ESTA
+    guía, cuando es otra razón social del mismo cliente (ej. Tottus y Tottus
+    Oriente en un mismo viaje). Vacío = el remitente es el cliente del viaje.
+    Devuelve (ruc, nombre, error)."""
+    ruc = "".join(ch for ch in (form.get("shipper_ruc") or "") if ch.isdigit())
+    name = (form.get("shipper_name") or "").strip()
+    if not ruc:
+        return None, None, None
+    if len(ruc) != 11:
+        return None, None, "El RUC del remitente debe tener 11 dígitos."
+    if not name:
+        return None, None, "Escribe la razón social del remitente (o espera a que se complete sola al escribir el RUC)."
+    return ruc, name, None
+
+
 def _next_series_number(series):
     row = query_one("SELECT COUNT(*) as n FROM waybills WHERE series = ?", (series,))
     return (row["n"] if row else 0) + 1
@@ -372,16 +388,29 @@ def new(trip_id):
                 ubigeo_catalog=UBIGEO_CATALOG,
                 related_document_types=RELATED_DOCUMENT_TYPES,
             )
+        shipper_ruc, shipper_name, shipper_error = _shipper_from_form(request.form)
+        if shipper_error:
+            flash(shipper_error, "error")
+            return render_template(
+                "guias/form.html",
+                trip=trip,
+                today=today_str(),
+                transfer_reasons=TRANSFER_REASONS,
+                form_values=request.form,
+                ubigeo_catalog=UBIGEO_CATALOG,
+                related_document_types=RELATED_DOCUMENT_TYPES,
+                other_waybills=_other_waybills(trip_id),
+            )
         waybill_id = execute(
             """INSERT INTO waybills (trip_id, series, series_number, issuer, issue_date, delivery_date,
-               weight_kg, packages,
+               weight_kg, packages, shipper_ruc, shipper_name,
                origin_address, destination_address, origin_ubigeo, destination_ubigeo, transfer_reason,
                vehicle_plate, trailer_plate, driver_document, driver_name, driver_license,
                recipient_ruc, recipient_name, subcontractor_ruc, subcontractor_name,
                payer_type, payer_ruc, payer_name, related_document_type, related_document_series,
                related_document_number, related_document_issuer_ruc,
                notes, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 trip_id,
                 series,
@@ -394,6 +423,8 @@ def new(trip_id):
                 delivery_date_value,
                 parse_float(request.form.get("weight_kg"), None),
                 int(parse_float(request.form.get("packages"), 1)),
+                shipper_ruc,
+                shipper_name,
                 request.form.get("origin_address", "").strip() or trip["origin"],
                 request.form.get("destination_address", "").strip() or trip["destination"],
                 # 7 sep, segunda ronda: campos que exige el formato real de
@@ -447,7 +478,19 @@ def new(trip_id):
         transfer_reasons=TRANSFER_REASONS,
         ubigeo_catalog=UBIGEO_CATALOG,
         related_document_types=RELATED_DOCUMENT_TYPES,
+        other_waybills=_other_waybills(trip_id),
     )
+
+
+def _other_waybills(trip_id, exclude_id=None):
+    """Las guías que este viaje ya tiene (7 oct: un viaje puede llevar varias,
+    cada una con su remitente). Sirve para avisar en el formulario y para no
+    repetir en la nueva el documento relacionado de la anterior."""
+    return [
+        w for w in query_all(
+            "SELECT id, series, series_number, shipper_ruc, shipper_name FROM waybills WHERE trip_id = ? ORDER BY id", (trip_id,)
+        ) if w["id"] != exclude_id
+    ]
 
 
 def _waybill_edit_block_reason(waybill):
@@ -548,8 +591,22 @@ def edit(waybill_id):
                 related_document_types=RELATED_DOCUMENT_TYPES,
             )
 
+        shipper_ruc, shipper_name, shipper_error = _shipper_from_form(request.form)
+        if shipper_error:
+            flash(shipper_error, "error")
+            return render_template(
+                "guias/form.html",
+                trip=trip,
+                waybill=waybill,
+                today=today_str(),
+                transfer_reasons=TRANSFER_REASONS,
+                form_values=request.form,
+                ubigeo_catalog=UBIGEO_CATALOG,
+                related_document_types=RELATED_DOCUMENT_TYPES,
+                other_waybills=_other_waybills(waybill["trip_id"], waybill_id),
+            )
         execute(
-            """UPDATE waybills SET issue_date=?, delivery_date=?, weight_kg=?, packages=?,
+            """UPDATE waybills SET issue_date=?, delivery_date=?, weight_kg=?, packages=?, shipper_ruc=?, shipper_name=?,
                origin_address=?, destination_address=?, origin_ubigeo=?, destination_ubigeo=?,
                transfer_reason=?, vehicle_plate=?, trailer_plate=?, driver_document=?, driver_name=?,
                driver_license=?, recipient_ruc=?, recipient_name=?, subcontractor_ruc=?,
@@ -562,6 +619,8 @@ def edit(waybill_id):
                 delivery_date_value,
                 parse_float(request.form.get("weight_kg"), None),
                 int(parse_float(request.form.get("packages"), 1)),
+                shipper_ruc,
+                shipper_name,
                 request.form.get("origin_address", "").strip() or trip["origin"],
                 request.form.get("destination_address", "").strip() or trip["destination"],
                 origin_ubigeo,
@@ -603,6 +662,7 @@ def edit(waybill_id):
         transfer_reasons=TRANSFER_REASONS,
         ubigeo_catalog=UBIGEO_CATALOG,
         related_document_types=RELATED_DOCUMENT_TYPES,
+        other_waybills=_other_waybills(waybill["trip_id"], waybill_id),
     )
 
 

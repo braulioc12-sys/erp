@@ -44,13 +44,13 @@
   </div>
   {% endif %}
   <div class="detail-item"><div class="label">Viaje</div><div class="value"><a href="{{ url_for('viajes.detail', trip_id=waybill.trip_id) }}">{{ waybill.trip_code }}</a></div></div>
-  <div class="detail-item"><div class="label">Cliente / Remitente</div><div class="value">{{ waybill.client_name }}</div></div>
-  <div class="detail-item"><div class="label">Destinatario</div><div class="value">{% if waybill.recipient_ruc %}{{ waybill.recipient_name }} ({{ waybill.recipient_ruc }}){% else %}{{ waybill.client_name }} (igual al remitente){% endif %}</div></div>
+  <div class="detail-item"><div class="label">Cliente / Remitente</div><div class="value">{% if waybill.shipper_ruc %}{{ waybill.shipper_name }} ({{ waybill.shipper_ruc }}) <span class="muted">· cliente del viaje: {{ waybill.client_name }}</span>{% else %}{{ waybill.client_name }}{% endif %}</div></div>
+  <div class="detail-item"><div class="label">Destinatario</div><div class="value">{% if waybill.recipient_ruc %}{{ waybill.recipient_name }} ({{ waybill.recipient_ruc }}){% elif waybill.shipper_ruc %}{{ waybill.shipper_name }} (igual al remitente){% else %}{{ waybill.client_name }} (igual al remitente){% endif %}</div></div>
   <div class="detail-item"><div class="label">Subcontratado</div><div class="value">{% if waybill.subcontractor_ruc %}{{ waybill.subcontractor_name }} ({{ waybill.subcontractor_ruc }}){% else %}—{% endif %}</div></div>
   <div class="detail-item"><div class="label">Pagador del flete</div><div class="value">
     {%- if waybill.payer_type == 'TERCERO' and waybill.payer_ruc %}{{ waybill.payer_name }} ({{ waybill.payer_ruc }})
-    {%- elif waybill.payer_type == 'REMITENTE' %}Remitente — {{ waybill.client_name }}
-    {%- else %}Destinatario — {{ waybill.recipient_name or waybill.client_name }}
+    {%- elif waybill.payer_type == 'REMITENTE' %}Remitente — {{ waybill.shipper_name or waybill.client_name }}
+    {%- else %}Destinatario — {{ waybill.recipient_name or waybill.shipper_name or waybill.client_name }}
     {%- endif %}
   </div></div>
   <div class="detail-item"><div class="label">Empresa que emite</div><div class="value">{{ 'BRMS' if waybill.issuer == 'BRMS' else 'Harraso Transport' }}</div></div>
