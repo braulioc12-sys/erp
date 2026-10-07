@@ -650,6 +650,19 @@ COLUMN_MIGRATIONS = [
     # nueva schema.sql ya las declara con su FK.
     ("staff", "company_id", "INTEGER"),
     ("payroll_periods", "company_id", "INTEGER"),
+    # 7 oct, planilla estilo Buk: bases y detalle de 5ta en la boleta,
+    # casillas de base por concepto y panel del periodo (ver el comentario
+    # junto a payroll_concepts / payroll_exports en schema.sql).
+    ("payroll_periods", "calculated_at", "TEXT"),
+    ("payroll_items", "concept_id", "INTEGER"),
+    ("payroll_items", "afecto_pension", "INTEGER"),
+    ("payroll_items", "afecto_essalud", "INTEGER"),
+    ("payroll_items", "afecto_quinta", "INTEGER"),
+    ("payroll_lines", "essalud_base", "REAL NOT NULL DEFAULT 0"),
+    ("payroll_lines", "pension_aporte", "REAL NOT NULL DEFAULT 0"),
+    ("payroll_lines", "pension_seguro", "REAL NOT NULL DEFAULT 0"),
+    ("payroll_lines", "pension_comision", "REAL NOT NULL DEFAULT 0"),
+    ("payroll_lines", "fifth_detail", "TEXT"),
 ]
 
 
@@ -1696,6 +1709,34 @@ def _seed_payroll_params_postgres(conn):
         )
 
 
+def _seed_payroll_concepts_sqlite(conn):
+    """Siembra el catálogo de conceptos de planilla solo si está vacío."""
+    from app.payroll_concepts import DEFAULT_CONCEPTS
+
+    if conn.execute("SELECT COUNT(*) FROM payroll_concepts").fetchone()[0]:
+        return
+    for name, kind, pen, ess, qui in DEFAULT_CONCEPTS:
+        conn.execute(
+            "INSERT INTO payroll_concepts (name, kind, afecto_pension, afecto_essalud, afecto_quinta) VALUES (?, ?, ?, ?, ?)",
+            (name, kind, pen, ess, qui),
+        )
+
+
+def _seed_payroll_concepts_postgres(conn):
+    from app.payroll_concepts import DEFAULT_CONCEPTS
+
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM payroll_concepts")
+    row = cur.fetchone()
+    if (row[0] if not hasattr(row, "keys") else list(row.values())[0]):
+        return
+    for name, kind, pen, ess, qui in DEFAULT_CONCEPTS:
+        cur.execute(
+            "INSERT INTO payroll_concepts (name, kind, afecto_pension, afecto_essalud, afecto_quinta) VALUES (%s, %s, %s, %s, %s)",
+            (name, kind, pen, ess, qui),
+        )
+
+
 # 6 oct, pedido de Braulio: "los trabajadores pueden pertenecer a diferentes
 # empresas. Hay que crear un catálogo de empresas y cuando se crean las
 # planillas son por empresa". Tres pasos, todos idempotentes (corren en cada
@@ -2008,6 +2049,7 @@ def init_db(app):
             _backfill_vehicle_owner_issuer_postgres(conn)
             _backfill_trip_waybill_files_postgres(conn)
             _seed_payroll_params_postgres(conn)
+            _seed_payroll_concepts_postgres(conn)
             _migrate_payroll_periods_per_company_postgres(conn)
             conn.commit()
         finally:
@@ -2036,6 +2078,7 @@ def init_db(app):
         _backfill_vehicle_owner_issuer_sqlite(conn)
         _backfill_trip_waybill_files_sqlite(conn)
         _seed_payroll_params_sqlite(conn)
+        _seed_payroll_concepts_sqlite(conn)
         _migrate_payroll_periods_per_company_sqlite(conn)
         conn.commit()
         conn.close()

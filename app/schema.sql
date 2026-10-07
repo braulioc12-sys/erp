@@ -2196,7 +2196,28 @@ CREATE TABLE IF NOT EXISTS payroll_periods (
     status TEXT NOT NULL DEFAULT 'ABIERTO',
     closed_at TEXT,
     closed_by INTEGER REFERENCES users(id),
+    -- Cuándo se calcularon las boletas por última vez (sirve al panel del
+    -- periodo para saber si un archivo generado quedó desactualizado).
+    calculated_at TEXT,
     created_by INTEGER REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Catálogo de conceptos de planilla (7 oct, idea tomada de Buk): ingresos y
+-- descuentos que se repiten (comisión por viajes, bonos, movilidad...). Cada
+-- uno dice a qué bases afecta: pensión (ONP/AFP), EsSalud del empleador y
+-- renta de 5ta categoría. Al agregar un concepto a un mes se COPIAN esas
+-- casillas al payroll_items, así cambiar el catálogo después no mueve
+-- boletas ya hechas. Los conceptos no se borran, se desactivan.
+CREATE TABLE IF NOT EXISTS payroll_concepts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('INGRESO', 'DESCUENTO')),
+    afecto_pension INTEGER NOT NULL DEFAULT 1,
+    afecto_essalud INTEGER NOT NULL DEFAULT 1,
+    afecto_quinta INTEGER NOT NULL DEFAULT 1,
+    active INTEGER NOT NULL DEFAULT 1,
+    notes TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -2211,6 +2232,12 @@ CREATE TABLE IF NOT EXISTS payroll_items (
     concept TEXT NOT NULL,
     amount REAL NOT NULL,
     taxable INTEGER NOT NULL DEFAULT 1,
+    -- 7 oct: casillas de base copiadas del catálogo (NULL en conceptos viejos:
+    -- ahí vale `taxable` para las tres). Ver app/payroll_calc.item_afecto().
+    concept_id INTEGER REFERENCES payroll_concepts(id),
+    afecto_pension INTEGER,
+    afecto_essalud INTEGER,
+    afecto_quinta INTEGER,
     created_by INTEGER REFERENCES users(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -2250,9 +2277,29 @@ CREATE TABLE IF NOT EXISTS payroll_lines (
     essalud_employer REAL NOT NULL DEFAULT 0,
     employer_cost REAL NOT NULL DEFAULT 0,
     warnings TEXT,
+    -- 7 oct: bases y detalle que se muestran al pie de la boleta. fifth_detail
+    -- es un JSON con el paso a paso de la 5ta (ver payroll_calc.compute_line).
+    essalud_base REAL NOT NULL DEFAULT 0,
+    pension_aporte REAL NOT NULL DEFAULT 0,
+    pension_seguro REAL NOT NULL DEFAULT 0,
+    pension_comision REAL NOT NULL DEFAULT 0,
+    fifth_detail TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (period_id, staff_id)
 );
+
+-- Archivos generados desde el panel del periodo (7 oct): una fila por cada
+-- vez que se descarga/genera uno (kind = BOLETAS | EXCEL | PLAME | AFPNET).
+-- El panel compara la última con payroll_periods.calculated_at para decir
+-- "Actualizado" o "Desactualizado".
+CREATE TABLE IF NOT EXISTS payroll_exports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    period_id INTEGER NOT NULL REFERENCES payroll_periods(id),
+    kind TEXT NOT NULL,
+    generated_at TEXT NOT NULL,
+    generated_by INTEGER REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_payroll_exports_period ON payroll_exports(period_id, kind);
 CREATE INDEX IF NOT EXISTS idx_payroll_lines_staff ON payroll_lines(staff_id);
 
 -- Préstamos, adelantos y reconocimientos de deuda del personal: se descuentan

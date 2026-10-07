@@ -22,6 +22,14 @@
   .tot td { border-top: 1px solid #111827; font-weight: 700; }
   .net { margin-top: 14px; padding: 10px 12px; background: #ecfdf3; border: 1px solid #a6f4c5; font-size: 16px; font-weight: 700; display: flex; justify-content: space-between; }
   .emp { margin-top: 12px; font-size: 12px; color: #4b5563; }
+  .bases { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+  .bases span { flex: 1; min-width: 150px; background: #f3f4f6; border: 1px solid #e5e7eb; padding: 6px 8px; border-radius: 4px; }
+  .bases b { display: block; font-size: 14px; }
+  details.fifth { margin-top: 10px; font-size: 12px; border: 1px solid #e5e7eb; border-radius: 4px; padding: 6px 10px; }
+  details.fifth summary { cursor: pointer; font-weight: 700; color: #1d4ed8; }
+  details.fifth table { margin-top: 6px; }
+  details.fifth td { padding: 2px 4px; }
+  details.fifth tr.sub td { border-top: 1px solid #9ca3af; font-weight: 700; }
   .sign { display: flex; justify-content: space-between; margin-top: 54px; font-size: 12px; }
   .sign div { width: 40%; border-top: 1px solid #111827; text-align: center; padding-top: 4px; }
   @media print { body { background: #fff; } .bar { display: none; } .sheet { box-shadow: none; margin: 0 auto; width: 100%; max-width: 100%; } }
@@ -69,6 +77,32 @@
     </div>
   </div>
   <div class="net"><span>NETO A PAGAR</span><span>S/ {{ '%.2f'|format(l.net_pay) }}</span></div>
+  {% set fi = b.fifth %}
+  <div class="bases">
+    <span>Base pensión (ONP/AFP)<b>S/ {{ '%.2f'|format(l.pension_base) }}</b></span>
+    <span>Base EsSalud / SIS (empleador)<b>S/ {{ '%.2f'|format(l.essalud_base or l.pension_base) }}</b></span>
+    <span>Base 5ta categoría del mes<b>S/ {{ '%.2f'|format(l.fifth_base_income) }}</b></span>
+  </div>
+  {% if fi %}
+  <details class="fifth">
+    <summary>Cómo se calculó la renta de 5ta categoría (S/ {{ '%.2f'|format(l.fifth_deduction) }})</summary>
+    <table>
+      <tr><td>Ingresos de los meses anteriores del año{% if fi.estimated %} <em>(estimados con el sueldo actual)</em>{% endif %}</td><td class="num">{{ '%.2f'|format(fi.prior_income) }}</td></tr>
+      <tr><td>+ Ingresos afectos de este mes (con gratificación si corresponde)</td><td class="num">{{ '%.2f'|format(fi.this_month) }}</td></tr>
+      <tr><td>+ Proyección de los meses que faltan (sueldo y gratificaciones)</td><td class="num">{{ '%.2f'|format(fi.future) }}</td></tr>
+      <tr class="sub"><td>= Renta bruta anual proyectada</td><td class="num">{{ '%.2f'|format(fi.annual_total) }}</td></tr>
+      <tr><td>− Deducción de {{ '%g'|format(fi.deduction_uit) }} UIT (UIT = S/ {{ '%.2f'|format(fi.uit) }})</td><td class="num">{{ '%.2f'|format(fi.deduction) }}</td></tr>
+      <tr class="sub"><td>= Renta neta anual</td><td class="num">{{ '%.2f'|format(fi.net_taxable) }}</td></tr>
+      {% for br in fi.brackets %}
+      <tr><td>&nbsp;&nbsp;Tramo {{ br.from_uit }}{% if br.to_uit %}–{{ br.to_uit }}{% else %}+{% endif %} UIT al {{ '%g'|format(br.rate * 100) }}% sobre {{ '%.2f'|format(br.amount) }}</td><td class="num">{{ '%.2f'|format(br.tax) }}</td></tr>
+      {% endfor %}
+      <tr class="sub"><td>Impuesto anual</td><td class="num">{{ '%.2f'|format(fi.annual_tax) }}</td></tr>
+      <tr><td>− Retenido en los meses anteriores</td><td class="num">{{ '%.2f'|format(fi.prior_withheld) }}</td></tr>
+      <tr><td>÷ {{ fi.divisor }} (meses que faltan para cerrar el año, según el mes {{ fi.month }})</td><td class="num"></td></tr>
+      <tr class="sub"><td>= Retención de este mes</td><td class="num">{{ '%.2f'|format(fi.withholding) }}</td></tr>
+    </table>
+  </details>
+  {% endif %}
   <div class="emp">Aportes del empleador (no se descuentan al trabajador): {{ 'Seguro SIS' if l.regime == 'MYPE_MICRO' else 'EsSalud' }} S/ {{ '%.2f'|format(l.essalud_employer) }}</div>
   <div class="sign"><div>Empleador</div><div>Trabajador</div></div>
 </div>

@@ -26,6 +26,7 @@ Esta primera parte trae lo que la planilla necesita antes de calcular:
   días de vacaciones por año de la persona (30 general, 15 MYPE).
 """
 import io
+import json
 import re
 from datetime import date
 
@@ -41,7 +42,8 @@ from app.auth import permission_required, validate_csrf
 from app.bulk_import import XLSX_MIME
 from app.db import execute, query_all, query_one
 from app.helpers import now_str, parse_float, today_str
-from app.payroll_calc import cts_for, compute_line, loan_installments, loan_remaining, r2
+from app.payroll_calc import cts_for, compute_line, item_afecto, loan_installments, loan_remaining, r2
+from app.payroll_panel import period_panel, record_export
 from app.payroll_params import AFP_NAMES, get_param_rows, get_params, set_param
 from app.routes.legajo import current_contract
 from app.routes.viajes import _save_binary_attachment
@@ -291,7 +293,7 @@ def period_open(company_id):
 
 def _lines_for(period_id):
     return query_all(
-        """SELECT l.*, s.name AS staff_name, s.document_number, s.position FROM payroll_lines l
+        """SELECT l.*, s.name AS staff_name, s.document_type, s.document_number, s.position, s.cuspp, s.account_number, s.cci FROM payroll_lines l
            JOIN staff s ON s.id = l.staff_id WHERE l.period_id = ? ORDER BY s.name""",
         (period_id,),
     )
@@ -316,11 +318,22 @@ def period_view(period_id):
     people = query_all(
         "SELECT id, name FROM staff WHERE in_payroll = 1 AND status = 'ACTIVO' AND company_id = ? ORDER BY name", (p["company_id"],)
     )
+    items = [dict(i, afecta=_afecta_text(i)) for i in items]
+    concepts = query_all("SELECT * FROM payroll_concepts WHERE active = 1 ORDER BY kind DESC, name")
     return render_template(
         "planilla/periodo.html", p=p, lines=lines, items=items, totals=totals, people=people, title=period_label(period),
+        panel=period_panel(p, lines), concepts=concepts,
         unassigned=_unassigned_count(), assigned=query_one(
             "SELECT COUNT(*) AS n FROM staff WHERE status = 'ACTIVO' AND company_id = ?", (p["company_id"],))["n"],
     )
+
+
+def _afecta_text(item):
+    """Texto corto de a qué bases afecta un concepto manual del mes."""
+    if item["kind"] != "INGRESO":
+        return ""
+    names = [label for base, label in (("pension", "pensión"), ("essalud", "EsSalud"), ("quinta", "5ta")) if item_afecto(item, base)]
+    return "afecta: " + ", ".join(names) if names else "no afecto"
 
 
 def _calculate_period(p):
@@ -346,6 +359,7 @@ def _calculate_period(p):
             f"INSERT INTO payroll_lines ({', '.join(cols)}) VALUES ({', '.join('?' for _ in cols)})", tuple(vals)
         )
         count += 1
+    execute("UPDATE payroll_periods SET calculated_at = ? WHERE id = ?", (now_str(), p["id"]))
     return count
 
 
@@ -479,8 +493,16 @@ def item_add(period_id):
         return back
     f = request.form
     staff = query_one("SELECT * FROM staff WHERE id = ?", (f.get("staff_id", type=int),))
-    kind = f.get("kind")
-    concept = (f.get("concept") or "").strip()
+    concept_row = None
+    if f.get("concept_id", type=int):
+        concept_row = query_one("SELECT * FROM payroll_concepts WHERE id = ? AND active = 1", (f.get("concept_id", type=int),))
+        if concept_row is None:
+            flash("Ese concepto ya no está activo en el catálogo.", "error")
+            return back
+        kind, concept = concept_row["kind"], concept_row["name"]
+    else:
+        kind = f.get("kind")
+        concept = (f.get("concept") or "").strip()
     amount = parse_float(f.get("amount"), None)
     if staff is not None and staff["company_id"] != p["company_id"]:
         flash("Esa persona no pertenece a la empresa de esta planilla.", "error")
@@ -489,10 +511,17 @@ def item_add(period_id):
         flash("Elige la persona, el tipo, escribe el concepto y un monto mayor a cero.", "error")
         return back
     user = getattr(g, "user", None)
+    if concept_row is not None:
+        flags = (concept_row["afecto_pension"], concept_row["afecto_essalud"], concept_row["afecto_quinta"]) if kind == "INGRESO" else (0, 0, 0)
+    else:
+        flag = 0 if (kind == "INGRESO" and f.get("nontaxable")) else 1
+        flags = (flag, flag, flag)
     execute(
-        """INSERT INTO payroll_items (period_id, staff_id, kind, concept, amount, taxable, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (p["id"], staff["id"], kind, concept, amount, 0 if (kind == "INGRESO" and f.get("nontaxable")) else 1, user["id"] if user else None),
+        """INSERT INTO payroll_items (period_id, staff_id, kind, concept, amount, taxable, concept_id,
+                                      afecto_pension, afecto_essalud, afecto_quinta, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (p["id"], staff["id"], kind, concept, amount, 1 if any(flags) else 0, concept_row["id"] if concept_row else None,
+         flags[0], flags[1], flags[2], user["id"] if user else None),
     )
     log_activity("pagos_personal", "CREAR", f"Planilla {p['company_name']} {period_label(period)} — {'ingreso' if kind == 'INGRESO' else 'descuento'} {concept} S/ {amount:.2f}: {staff['name']}",
                  entity_type="planilla", entity_id=p["id"], entity_url=url_for("planilla.period_view", period_id=p["id"]))
@@ -521,8 +550,12 @@ def item_delete(period_id, item_id):
 def _boleta_context(p, line):
     staff = query_one("SELECT * FROM staff WHERE id = ?", (line["staff_id"],))
     items = query_all("SELECT * FROM payroll_items WHERE period_id = ? AND staff_id = ? ORDER BY id", (p["id"], line["staff_id"]))
+    try:
+        fifth = json.loads(line["fifth_detail"]) if line["fifth_detail"] else None
+    except (TypeError, ValueError):
+        fifth = None
     return {
-        "p": p, "l": line, "s": staff, "extra": items, "company": p, "title": period_label(p["period"]), "regime_labels": REGIME_LABELS,
+        "p": p, "l": line, "s": staff, "extra": items, "fifth": fifth, "company": p, "title": period_label(p["period"]), "regime_labels": REGIME_LABELS,
         "pension_labels": PENSION_LABELS,
     }
 
@@ -550,6 +583,7 @@ def boletas(period_id):
     )
     if not lines:
         abort(404)
+    record_export(p, "BOLETAS", getattr(g, "user", None))
     return render_template("planilla/boleta.html", boletas=[_boleta_context(p, l) for l in lines])
 
 
@@ -595,9 +629,201 @@ def period_excel(period_id):
     ws.freeze_panes = "B4"
     buf = io.BytesIO()
     wb.save(buf)
+    record_export(p, "EXCEL", getattr(g, "user", None))
     log_activity("pagos_personal", "EXPORTAR", f"Planilla {p['company_name']} {period_label(period)}: Excel", entity_type="planilla", entity_id=p["id"])
     fname = f"planilla_{_slug(p['company_name'])}_{period}.xlsx"
     return Response(buf.getvalue(), mimetype=XLSX_MIME, headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+def _styled_sheet(title, heading, heads, note):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = title[:31]
+    ws["A1"] = heading
+    ws["A1"].font = Font(bold=True, size=14, color="1D4ED8")
+    ws["A2"] = note
+    ws["A2"].font = Font(italic=True, color="6B7280")
+    for c, h in enumerate(heads, start=1):
+        cell = ws.cell(row=4, column=c, value=h)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="1D4ED8")
+        cell.alignment = Alignment(wrap_text=True, vertical="center")
+    ws.column_dimensions["A"].width = 14
+    ws.column_dimensions["B"].width = 16
+    ws.column_dimensions["C"].width = 34
+    for c in range(4, len(heads) + 1):
+        ws.column_dimensions[ws.cell(row=4, column=c).column_letter].width = 16
+    ws.freeze_panes = "D5"
+    return wb, ws
+
+
+def _sheet_response(wb, fname):
+    buf = io.BytesIO()
+    wb.save(buf)
+    return Response(buf.getvalue(), mimetype=XLSX_MIME, headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+@bp.route("/periodo/<int:period_id>/plame")
+@permission_required("pagos_personal", "view")
+def period_plame(period_id):
+    """Hoja de apoyo con lo que se digita/valida en el PDT PLAME de la empresa
+    (NO es el archivo de importación oficial de SUNAT)."""
+    p = _period_or_404(period_id)
+    lines = _lines_for(p["id"])
+    if not lines:
+        flash("Calcula la planilla antes de generar el resumen para PLAME.", "error")
+        return redirect(url_for("planilla.period_view", period_id=p["id"]))
+    wb, ws = _styled_sheet(
+        "PLAME", f"Resumen PLAME — {p['company_name']} — {period_label(p['period'])}",
+        ["Tipo doc.", "N° documento", "Apellidos y nombres", "Pensión", "CUSPP", "Días", "Remuneración computable (pensión)",
+         "Base EsSalud", "Total ingresos", "Aporte ONP/AFP del trabajador", "Renta 5ta retenida", "Aporte del empleador (EsSalud/SIS)", "Neto pagado"],
+        "Hoja de apoyo para digitar o validar en el PDT PLAME; no es el archivo de importación oficial de SUNAT.",
+    )
+    sys_label = {"ONP": "ONP", "AFP": "AFP", "NINGUNO": "Sin pensión"}
+    for r, l in enumerate(lines, start=5):
+        vals = [
+            l["document_type"] or "DNI", l["document_number"] or "", l["staff_name"],
+            (sys_label.get(l["pension_system"], l["pension_system"]) + (f" {l['afp_name'].title()}" if l["afp_name"] else "")),
+            l["cuspp"] or "", l["days_worked"], l["pension_base"], l["essalud_base"] or l["pension_base"], l["gross_total"],
+            l["pension_deduction"], l["fifth_deduction"], l["essalud_employer"], l["net_pay"],
+        ]
+        for c, v in enumerate(vals, start=1):
+            ws.cell(row=r, column=c, value=v)
+    tr = 5 + len(lines)
+    ws.cell(row=tr, column=1, value="TOTAL").font = Font(bold=True)
+    for c in range(7, 14):
+        col = ws.cell(row=4, column=c).column_letter
+        ws.cell(row=tr, column=c, value=f"=SUM({col}5:{col}{tr - 1})").font = Font(bold=True)
+    record_export(p, "PLAME", getattr(g, "user", None))
+    log_activity("pagos_personal", "EXPORTAR", f"Planilla {p['company_name']} {period_label(p['period'])}: resumen PLAME", entity_type="planilla", entity_id=p["id"])
+    return _sheet_response(wb, f"plame_{_slug(p['company_name'])}_{p['period']}.xlsx")
+
+
+@bp.route("/periodo/<int:period_id>/afpnet")
+@permission_required("pagos_personal", "view")
+def period_afpnet(period_id):
+    """Hoja de apoyo con los aportes a AFP de cada afiliado (para cargarlos o
+    validarlos en AFPnet). Solo personas con AFP."""
+    p = _period_or_404(period_id)
+    lines = [l for l in _lines_for(p["id"]) if l["pension_system"] == "AFP"]
+    if not lines:
+        flash("No hay personas con AFP en esta planilla (o aún no está calculada).", "error")
+        return redirect(url_for("planilla.period_view", period_id=p["id"]))
+    wb, ws = _styled_sheet(
+        "AFPnet", f"Aportes AFP — {p['company_name']} — {period_label(p['period'])}",
+        ["AFP", "CUSPP", "Apellidos y nombres", "N° documento", "Remuneración asegurable", "Aporte obligatorio", "Prima de seguro",
+         "Comisión sobre la remuneración", "Total a depositar"],
+        "Hoja de apoyo para AFPnet; verifica contra el archivo que genere AFPnet. Planillas calculadas antes del 7 oct no traen el desglose (solo el total).",
+    )
+    for r, l in enumerate(lines, start=5):
+        vals = [
+            (l["afp_name"] or "").title(), l["cuspp"] or "", l["staff_name"], l["document_number"] or "", l["pension_base"],
+            l["pension_aporte"], l["pension_seguro"], l["pension_comision"], l["pension_deduction"],
+        ]
+        for c, v in enumerate(vals, start=1):
+            ws.cell(row=r, column=c, value=v)
+    tr = 5 + len(lines)
+    ws.cell(row=tr, column=1, value="TOTAL").font = Font(bold=True)
+    for c in range(5, 10):
+        col = ws.cell(row=4, column=c).column_letter
+        ws.cell(row=tr, column=c, value=f"=SUM({col}5:{col}{tr - 1})").font = Font(bold=True)
+    record_export(p, "AFPNET", getattr(g, "user", None))
+    log_activity("pagos_personal", "EXPORTAR", f"Planilla {p['company_name']} {period_label(p['period'])}: resumen AFPnet", entity_type="planilla", entity_id=p["id"])
+    return _sheet_response(wb, f"afpnet_{_slug(p['company_name'])}_{p['period']}.xlsx")
+
+
+# --- Catálogo de conceptos de planilla --------------------------------------
+
+def _concept_form(f):
+    return {
+        "name": (f.get("name") or "").strip(),
+        "kind": f.get("kind") if f.get("kind") in ("INGRESO", "DESCUENTO") else "INGRESO",
+        "pension": 1 if f.get("afecto_pension") else 0,
+        "essalud": 1 if f.get("afecto_essalud") else 0,
+        "quinta": 1 if f.get("afecto_quinta") else 0,
+        "notes": (f.get("notes") or "").strip() or None,
+    }
+
+
+def _concept_error(v, exclude_id=None):
+    if not v["name"]:
+        return "Escribe el nombre del concepto."
+    dup = query_one(
+        "SELECT id FROM payroll_concepts WHERE LOWER(name) = LOWER(?) AND id != ?", (v["name"], exclude_id or 0)
+    )
+    if dup:
+        return f"Ya existe un concepto llamado «{v['name']}»."
+    return None
+
+
+@bp.route("/conceptos")
+@permission_required("pagos_personal", "view")
+def concepts():
+    rows = query_all(
+        """SELECT c.*, (SELECT COUNT(*) FROM payroll_items i WHERE i.concept_id = c.id) AS uses
+           FROM payroll_concepts c ORDER BY c.active DESC, c.kind DESC, c.name"""
+    )
+    return render_template("planilla/conceptos.html", concepts=rows)
+
+
+@bp.route("/conceptos/nuevo", methods=["POST"])
+@permission_required("pagos_personal", "edit")
+def concept_add():
+    if not validate_csrf():
+        abort(400)
+    v = _concept_form(request.form)
+    err = _concept_error(v)
+    if err:
+        flash(err, "error")
+        return redirect(url_for("planilla.concepts"))
+    if v["kind"] == "DESCUENTO":
+        v["pension"] = v["essalud"] = v["quinta"] = 0
+    cid = execute(
+        """INSERT INTO payroll_concepts (name, kind, afecto_pension, afecto_essalud, afecto_quinta, notes)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (v["name"], v["kind"], v["pension"], v["essalud"], v["quinta"], v["notes"]),
+    )
+    log_activity("pagos_personal", "CREAR", f"Concepto de planilla: {v['name']}", entity_type="planilla_concepto", entity_id=cid)
+    flash(f"Concepto «{v['name']}» creado.", "success")
+    return redirect(url_for("planilla.concepts"))
+
+
+@bp.route("/conceptos/<int:concept_id>/guardar", methods=["POST"])
+@permission_required("pagos_personal", "edit")
+def concept_save(concept_id):
+    if not validate_csrf():
+        abort(400)
+    row = query_one("SELECT * FROM payroll_concepts WHERE id = ?", (concept_id,))
+    if row is None:
+        abort(404)
+    v = _concept_form(request.form)
+    err = _concept_error(v, exclude_id=concept_id)
+    if err:
+        flash(err, "error")
+        return redirect(url_for("planilla.concepts"))
+    if v["kind"] == "DESCUENTO":
+        v["pension"] = v["essalud"] = v["quinta"] = 0
+    execute(
+        """UPDATE payroll_concepts SET name = ?, kind = ?, afecto_pension = ?, afecto_essalud = ?, afecto_quinta = ?, notes = ?
+           WHERE id = ?""",
+        (v["name"], v["kind"], v["pension"], v["essalud"], v["quinta"], v["notes"], concept_id),
+    )
+    log_activity("pagos_personal", "EDITAR", f"Concepto de planilla: {v['name']}", entity_type="planilla_concepto", entity_id=concept_id)
+    flash("Concepto guardado. Los meses ya cargados conservan las casillas con las que se agregaron.", "success")
+    return redirect(url_for("planilla.concepts"))
+
+
+@bp.route("/conceptos/<int:concept_id>/alternar", methods=["POST"])
+@permission_required("pagos_personal", "edit")
+def concept_toggle(concept_id):
+    if not validate_csrf():
+        abort(400)
+    row = query_one("SELECT * FROM payroll_concepts WHERE id = ?", (concept_id,))
+    if row is None:
+        abort(404)
+    execute("UPDATE payroll_concepts SET active = ? WHERE id = ?", (0 if row["active"] else 1, concept_id))
+    flash(f"Concepto «{row['name']}» {'desactivado' if row['active'] else 'activado'}.", "success")
+    return redirect(url_for("planilla.concepts"))
 
 
 # --- Préstamos, adelantos y reconocimientos de deuda -----------------------

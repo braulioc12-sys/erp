@@ -1,0 +1,61 @@
+{% extends 'base.html' %}
+{% block title %}Conceptos de planilla{% endblock %}
+{% block content %}
+{% set can_edit = can(current_user.roles, 'pagos_personal', 'edit') %}
+<div class="page-header">
+  <h1>Conceptos de planilla</h1>
+  <div class="page-actions"><a href="{{ url_for('planilla.index') }}" class="btn btn-secondary">← Planilla</a></div>
+</div>
+<p class="muted mt-0">Ingresos y descuentos que se repiten cada mes. Cada ingreso indica a qué bases afecta: <strong>pensión</strong> (ONP/AFP), <strong>EsSalud</strong> del empleador y <strong>renta de 5ta</strong>. Al agregarlo a un mes se copian esas casillas, así que cambiar el catálogo no mueve las boletas ya hechas. Hoy la CTS y la gratificación no promedian conceptos variables, por eso no hay casilla para ellas.</p>
+
+{% if can_edit %}
+<div class="panel">
+  <h2 class="mt-0">Nuevo concepto</h2>
+  <form method="post" action="{{ url_for('planilla.concept_add') }}" class="form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <label>Nombre <input type="text" name="name" placeholder="Ej. Bono por puntualidad" required></label>
+      <label>Tipo
+        <select name="kind"><option value="INGRESO">Ingreso</option><option value="DESCUENTO">Descuento</option></select>
+      </label>
+    </div>
+    <div style="display:flex; gap:18px; flex-wrap:wrap; margin-top:6px;">
+      <label style="display:flex; flex-direction:row; gap:6px; align-items:center;"><input type="checkbox" name="afecto_pension" value="1" checked> Afecto a pensión (ONP/AFP)</label>
+      <label style="display:flex; flex-direction:row; gap:6px; align-items:center;"><input type="checkbox" name="afecto_essalud" value="1" checked> Afecto a EsSalud</label>
+      <label style="display:flex; flex-direction:row; gap:6px; align-items:center;"><input type="checkbox" name="afecto_quinta" value="1" checked> Afecto a 5ta categoría</label>
+    </div>
+    <label style="margin-top:8px;">Notas <input type="text" name="notes" placeholder="Opcional"></label>
+    <div class="btn-group" style="margin-top:12px;"><button type="submit" class="btn btn-primary">Crear concepto</button></div>
+  </form>
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2 class="mt-0">Catálogo</h2>
+  <div class="table-wrap"><table style="font-size:0.9em;">
+    <thead><tr><th>Concepto</th><th>Tipo</th><th>Pensión</th><th>EsSalud</th><th>5ta</th><th>Usos</th><th></th></tr></thead>
+    <tbody>
+      {% for c in concepts %}
+      <tr {% if not c.active %}style="opacity:.55;"{% endif %}>
+        {% if can_edit %}
+        <td><input form="cf{{ c.id }}" type="text" name="name" value="{{ c.name }}" required style="min-width:200px;">{% if not c.active %} <span class="muted">(inactivo)</span>{% endif %}</td>
+        <td><select form="cf{{ c.id }}" name="kind"><option value="INGRESO" {{ 'selected' if c.kind == 'INGRESO' }}>Ingreso</option><option value="DESCUENTO" {{ 'selected' if c.kind == 'DESCUENTO' }}>Descuento</option></select></td>
+        <td><input form="cf{{ c.id }}" type="checkbox" name="afecto_pension" value="1" {{ 'checked' if c.afecto_pension }}></td>
+        <td><input form="cf{{ c.id }}" type="checkbox" name="afecto_essalud" value="1" {{ 'checked' if c.afecto_essalud }}></td>
+        <td><input form="cf{{ c.id }}" type="checkbox" name="afecto_quinta" value="1" {{ 'checked' if c.afecto_quinta }}></td>
+        <td>{{ c.uses }}</td>
+        <td style="white-space:nowrap;">
+          <button form="cf{{ c.id }}" type="submit" class="btn btn-primary btn-sm">Guardar</button>
+          <form method="post" action="{{ url_for('planilla.concept_toggle', concept_id=c.id) }}" style="display:inline;"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="btn btn-secondary btn-sm">{{ 'Desactivar' if c.active else 'Activar' }}</button></form>
+        </td>
+        {% else %}
+        <td>{{ c.name }}</td><td>{{ 'Ingreso' if c.kind == 'INGRESO' else 'Descuento' }}</td>
+        <td>{{ '✓' if c.afecto_pension else '—' }}</td><td>{{ '✓' if c.afecto_essalud else '—' }}</td><td>{{ '✓' if c.afecto_quinta else '—' }}</td><td>{{ c.uses }}</td><td></td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody></table></div>
+  {% if can_edit %}{% for c in concepts %}<form method="post" action="{{ url_for('planilla.concept_save', concept_id=c.id) }}" id="cf{{ c.id }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"></form>{% endfor %}{% endif %}
+  <p class="muted" style="margin-bottom:0;">Los descuentos no usan las casillas (se restan del neto). Un concepto no se borra: se desactiva y deja de aparecer al cargar un mes.</p>
+</div>
+{% endblock %}

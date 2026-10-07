@@ -49,6 +49,46 @@
 
 {% if lines %}
 <div class="panel">
+  <h2 class="mt-0">Panel del periodo</h2>
+  <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:12px; margin-bottom:12px;">
+    <div><div class="muted">Neto a pagar</div><strong style="font-size:1.3em;">S/ {{ '%.2f'|format(panel.kpis.net) }}</strong></div>
+    <div><div class="muted">Costo empresa</div><strong style="font-size:1.3em;">S/ {{ '%.2f'|format(panel.kpis.cost) }}</strong></div>
+    <div><div class="muted">Renta 5ta retenida</div><strong style="font-size:1.3em;">S/ {{ '%.2f'|format(panel.kpis.fifth) }}</strong></div>
+    <div><div class="muted">Aporte del empleador</div><strong style="font-size:1.3em;">S/ {{ '%.2f'|format(panel.kpis.employer) }}</strong></div>
+    <div><div class="muted">Boletas</div><strong style="font-size:1.3em;">{{ panel.kpis.people }}</strong></div>
+  </div>
+  <h3>Archivos</h3>
+  <div class="table-wrap"><table style="font-size:0.9em;">
+    <thead><tr><th>Archivo</th><th>Estado</th><th></th></tr></thead>
+    <tbody>
+      {% for f in panel.files %}
+      <tr>
+        <td>{{ f.label }}</td>
+        <td>{% if f.state == 'OK' %}<span class="badge badge-ok">{{ f.text }}</span>{% elif f.state == 'STALE' %}<span class="badge badge-pendiente">{{ f.text }}</span>{% else %}<span class="muted">{{ f.text }}</span>{% endif %}</td>
+        <td>{% if f.kind == 'BOLETAS' %}<a href="{{ url_for('planilla.boletas', period_id=p.id) }}" target="_blank" class="btn btn-secondary btn-sm">Abrir</a>
+            {% elif f.kind == 'EXCEL' %}<a href="{{ url_for('planilla.period_excel', period_id=p.id) }}" class="btn btn-secondary btn-sm">Descargar</a>
+            {% elif f.kind == 'PLAME' %}<a href="{{ url_for('planilla.period_plame', period_id=p.id) }}" class="btn btn-secondary btn-sm">Descargar</a>
+            {% elif f.kind == 'AFPNET' %}<a href="{{ url_for('planilla.period_afpnet', period_id=p.id) }}" class="btn btn-secondary btn-sm">Descargar</a>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      <tr>
+        <td>Transferencia bancaria (Telecrédito)</td>
+        <td>{% if panel.transfer.state == 'OK' %}<span class="badge badge-ok">{{ panel.transfer.text }}</span>{% else %}<span class="muted">{{ panel.transfer.text }}</span>{% endif %}</td>
+        <td>{% if not open %}<a href="{{ url_for('pagos_personal.hub') }}" class="btn btn-secondary btn-sm">Ir a Pagos</a>{% endif %}</td>
+      </tr>
+    </tbody></table></div>
+  <p class="muted" style="margin:6px 0 12px;">Los resúmenes de PLAME y AFPnet son hojas de apoyo en Excel para digitar o validar; no son los archivos oficiales de importación.</p>
+  <h3>Alertas <span class="badge {{ 'badge-pendiente' if panel.errors else 'badge-ok' }}">{{ panel.errors|length }} error(es)</span> <span class="badge {{ 'badge-pendiente' if panel.warnings else 'badge-ok' }}">{{ panel.warnings|length }} advertencia(s)</span></h3>
+  {% if not panel.errors and not panel.warnings %}
+  <p class="muted" style="margin:0;">Sin alertas: todo en orden para esta planilla.</p>
+  {% endif %}
+  {% for a in panel.errors %}<p style="margin:4px 0; color:#b42318;">✖ {{ a.text }}{% if a.url %} <a href="{{ a.url }}">Revisar</a>{% endif %}</p>{% endfor %}
+  {% for a in panel.warnings %}<p style="margin:4px 0; color:#b45309;">⚠ {{ a.text }}{% if a.url %} <a href="{{ a.url }}">Revisar</a>{% endif %}</p>{% endfor %}
+</div>
+{% endif %}
+
+{% if lines %}
+<div class="panel">
   <h2 class="mt-0">Boletas</h2>
   <div class="table-wrap"><table style="font-size:0.9em;">
     <thead><tr>
@@ -89,7 +129,7 @@
 {% endif %}
 
 <div class="panel">
-  <h2 class="mt-0">Comisiones, bonos y descuentos del mes</h2>
+  <h2 class="mt-0">Comisiones, bonos y descuentos del mes <a href="{{ url_for('planilla.concepts') }}" class="btn btn-secondary btn-sm" style="font-weight:400;">Catálogo de conceptos</a></h2>
   {% if open and can_edit %}
   <form method="post" action="{{ url_for('planilla.item_add', period_id=p.id) }}" class="form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -97,13 +137,36 @@
       <label>Persona
         <select name="staff_id" required><option value="">{{ '— elige —' if people else '— nadie en planilla en esta empresa —' }}</option>{% for s in people %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}</select>
       </label>
-      <label>Tipo
-        <select name="kind"><option value="INGRESO">Ingreso (comisión, bono...)</option><option value="DESCUENTO">Descuento</option></select>
+      <label>Concepto del catálogo
+        <select name="concept_id" id="concept_id">
+          <option value="">— Otro (lo escribo abajo) —</option>
+          {% for c in concepts %}<option value="{{ c.id }}">{{ c.name }} ({{ 'ingreso' if c.kind == 'INGRESO' else 'descuento' }}{% if c.kind == 'INGRESO' and not (c.afecto_pension or c.afecto_essalud or c.afecto_quinta) %}, no afecto{% endif %})</option>{% endfor %}
+        </select>
       </label>
-      <label>Concepto <input type="text" name="concept" placeholder="Ej. Comisión por viajes" required></label>
       <label>Monto (S/) <input type="number" step="0.01" min="0.01" name="amount" required></label>
     </div>
-    <label style="display:flex; gap:8px; align-items:center;"><input type="checkbox" name="nontaxable" value="1"> Ingreso no afecto (no descuenta AFP/ONP, EsSalud ni 5ta; ej. movilidad por condiciones de trabajo)</label>
+    <div id="manual">
+      <div class="form-row">
+        <label>Tipo
+          <select name="kind"><option value="INGRESO">Ingreso (comisión, bono...)</option><option value="DESCUENTO">Descuento</option></select>
+        </label>
+        <label>Concepto <input type="text" name="concept" placeholder="Ej. Comisión por viajes"></label>
+      </div>
+      <label style="display:flex; flex-direction:row; gap:8px; align-items:center;"><input type="checkbox" name="nontaxable" value="1"> Ingreso no afecto (no descuenta AFP/ONP, EsSalud ni 5ta; ej. movilidad por condiciones de trabajo)</label>
+    </div>
+    <p class="muted" style="margin:6px 0 0;">Elige un concepto del <a href="{{ url_for('planilla.concepts') }}">catálogo</a> (ya trae a qué bases afecta) o usa «Otro» para uno de una sola vez.</p>
+    <script>
+      (function () {
+        var sel = document.getElementById('concept_id'), box = document.getElementById('manual');
+        function sync() {
+          var manual = !sel.value;
+          box.style.display = manual ? '' : 'none';
+          box.querySelectorAll('input, select').forEach(function (el) { el.disabled = !manual; });
+          var c = box.querySelector('input[name=concept]'); if (c) c.required = manual;
+        }
+        sel.addEventListener('change', sync); sync();
+      })();
+    </script>
     <div class="btn-group" style="margin-top:12px;"><button type="submit" class="btn btn-primary">Agregar concepto</button></div>
   </form>
   {% endif %}
@@ -113,8 +176,8 @@
       {% for i in items %}
       <tr>
         <td>{{ i.staff_name }}</td>
-        <td>{{ 'Ingreso' if i.kind == 'INGRESO' else 'Descuento' }}{% if i.kind == 'INGRESO' and not i.taxable %} (no afecto){% endif %}</td>
-        <td>{{ i.concept }}</td><td>S/ {{ '%.2f'|format(i.amount) }}</td>
+        <td>{{ 'Ingreso' if i.kind == 'INGRESO' else 'Descuento' }}</td>
+        <td>{{ i.concept }}{% if i.afecta %}<div class="muted" style="font-size:0.85em;">{{ i.afecta }}</div>{% endif %}</td><td>S/ {{ '%.2f'|format(i.amount) }}</td>
         <td>{% if open and can_edit %}
           <form method="post" action="{{ url_for('planilla.item_delete', period_id=p.id, item_id=i.id) }}" style="display:inline;" onsubmit="return confirm('¿Eliminar este concepto?');">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="btn btn-danger btn-sm">Eliminar</button></form>{% endif %}</td>

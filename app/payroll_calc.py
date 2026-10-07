@@ -10,6 +10,7 @@ descuenta faltas de la gratificación, no calcula liquidaciones por cese
 (solo las 7 UIT).
 """
 import calendar
+import json
 from datetime import date, datetime, timedelta
 
 from app.db import query_all, query_one
@@ -67,6 +68,44 @@ def fifth_tax(annual_net_taxable, uit):
             break
         prev = limit
     return tax
+
+
+def fifth_brackets_detail(net_taxable, uit):
+    """Impuesto anual por tramo (para mostrarlo en la boleta): lista de
+    dicts con desde/hasta en UIT, tasa, monto gravado en el tramo e impuesto."""
+    out = []
+    if net_taxable <= 0:
+        return out
+    prev = 0.0
+    prev_uit = 0
+    for upto, rate in FIFTH_BRACKETS:
+        limit = upto * uit if upto is not None else None
+        top = net_taxable if limit is None else min(net_taxable, limit)
+        if top > prev:
+            out.append({
+                "from_uit": prev_uit, "to_uit": upto, "rate": rate,
+                "amount": r2(top - prev), "tax": r2((top - prev) * rate),
+            })
+        if limit is None or net_taxable <= limit:
+            break
+        prev, prev_uit = limit, upto
+    return out
+
+
+def item_afecto(item, base):
+    """¿El concepto manual `item` afecta la base `base` ('pension', 'essalud'
+    o 'quinta')? Los conceptos viejos (sin casillas) usan `taxable` para las
+    tres, como antes del catálogo de conceptos."""
+    try:
+        value = item[f"afecto_{base}"]
+    except (KeyError, IndexError):
+        value = None
+    if value is None:
+        try:
+            return bool(item["taxable"])
+        except (KeyError, IndexError):
+            return True
+    return bool(value)
 
 
 def grati_months(staff, period):
@@ -145,8 +184,18 @@ def compute_line(staff, period, params, items, salary_fn, period_id=None):
     family_full = params["rmv"] * params["asig_fam_pct"] / 100.0 if staff["family_allowance"] else 0.0
     family = family_full * days / dias_mes
 
-    other_taxable = sum(i["amount"] for i in items if i["kind"] == "INGRESO" and i["taxable"])
-    other_nontax = sum(i["amount"] for i in items if i["kind"] == "INGRESO" and not i["taxable"])
+    # Ingresos manuales: cada uno afecta (o no) la pensión, el EsSalud y la 5ta
+    # según sus casillas (catálogo de conceptos). "Afecto" a efectos de la
+    # boleta = afecta al menos una base; el resto es "no afecto".
+    ingresos = [i for i in items if i["kind"] == "INGRESO"]
+    other_pension = sum(i["amount"] for i in ingresos if item_afecto(i, "pension"))
+    other_essalud = sum(i["amount"] for i in ingresos if item_afecto(i, "essalud"))
+    other_fifth = sum(i["amount"] for i in ingresos if item_afecto(i, "quinta"))
+    other_taxable = sum(
+        i["amount"] for i in ingresos
+        if item_afecto(i, "pension") or item_afecto(i, "essalud") or item_afecto(i, "quinta")
+    )
+    other_nontax = sum(i["amount"] for i in ingresos) - other_taxable
     other_ded = sum(i["amount"] for i in items if i["kind"] == "DESCUENTO")
 
     # Gratificación (julio / diciembre) y bonificación extraordinaria
@@ -157,12 +206,15 @@ def compute_line(staff, period, params, items, salary_fn, period_id=None):
         grati = (basic + family_full) * factor * gm / 6.0
         bonif = grati * params["grati_bonif_pct"] / 100.0
 
-    pension_base = max(salary_earned - absence - tard - sub_ded + family + other_taxable, 0.0)
+    pension_base = max(salary_earned - absence - tard - sub_ded + family + other_pension, 0.0)
+    essalud_base = max(salary_earned - absence - tard - sub_ded + family + other_essalud, 0.0)
     pension = 0.0
+    pension_aporte = pension_seguro = pension_comision = 0.0
     pension_detail = ""
     system = staff["pension_system"] or "ONP"
     if system == "ONP":
         pension = pension_base * params["onp_pct"] / 100.0
+        pension_aporte = pension
         pension_detail = f"ONP {params['onp_pct']:g}%"
     elif system == "AFP":
         afp = staff["afp_name"]
@@ -174,13 +226,14 @@ def compute_line(staff, period, params, items, salary_fn, period_id=None):
             flujo_pct = params.get(f"afp_flujo_{afp}", 0.0) if staff["afp_commission_type"] != "MIXTA" else 0.0
             comision = pension_base * flujo_pct / 100.0
             pension = aporte + seguro + comision
+            pension_aporte, pension_seguro, pension_comision = aporte, seguro, comision
             pension_detail = (
                 f"AFP {afp.title()}: aporte {params['afp_aporte_pct']:g}% {r2(aporte):.2f} + seguro {params['afp_seguro_pct']:g}% "
                 f"{r2(seguro):.2f} + comisión {flujo_pct:g}% {r2(comision):.2f}"
             )
 
     # --- Renta de 5ta categoría (retención mensual) ---
-    this_month_taxable = salary_earned - absence - tard - sub_ded + family + other_taxable + grati + bonif
+    this_month_taxable = salary_earned - absence - tard - sub_ded + family + other_fifth + grati + bonif
     fixed_monthly = basic + family_full
     prior = query_all(
         """SELECT l.fifth_base_income, l.fifth_deduction FROM payroll_lines l JOIN payroll_periods p ON p.id = l.period_id
@@ -210,6 +263,13 @@ def compute_line(staff, period, params, items, salary_fn, period_id=None):
     fifth = 0.0
     if annual_tax > 0:
         fifth = max((annual_tax - prior_withheld) / FIFTH_DIVISOR[month], 0.0)
+    fifth_detail = json.dumps({
+        "month": month, "prior_income": r2(prior_income), "prior_withheld": r2(prior_withheld),
+        "this_month": r2(this_month_taxable), "future": r2(future), "annual_total": r2(annual_total),
+        "uit": r2(uit), "deduction_uit": params["quinta_deduccion_uit"], "deduction": r2(params["quinta_deduccion_uit"] * uit),
+        "net_taxable": r2(max(net_taxable, 0)), "annual_tax": r2(annual_tax), "divisor": FIFTH_DIVISOR[month],
+        "estimated": estimated, "withholding": r2(fifth), "brackets": fifth_brackets_detail(net_taxable, uit),
+    })
     if estimated and fifth > 0:
         warnings.append("5ta: no había ingresos previos del año registrados; se estimaron con el sueldo actual (puedes corregirlo en el perfil).")
 
@@ -233,7 +293,7 @@ def compute_line(staff, period, params, items, salary_fn, period_id=None):
     if regime == "MYPE_MICRO":
         essalud = params["sis_micro_monto"]
     else:
-        essalud = max(pension_base, params["rmv"]) * params["essalud_pct"] / 100.0
+        essalud = max(essalud_base, params["rmv"]) * params["essalud_pct"] / 100.0
     paid_gross = gross - absence - tard - sub_ded
     return {
         "regime": regime, "pension_system": system, "afp_name": staff["afp_name"],
@@ -246,6 +306,8 @@ def compute_line(staff, period, params, items, salary_fn, period_id=None):
         "advance_deduction": r2(adv_d), "debt_deduction": r2(debt_d), "other_deduction": r2(other_ded),
         "total_deductions": r2(total_ded), "net_pay": r2(net), "essalud_employer": r2(essalud),
         "employer_cost": r2(paid_gross + essalud), "warnings": " | ".join(warnings) or None,
+        "essalud_base": r2(essalud_base), "pension_aporte": r2(pension_aporte), "pension_seguro": r2(pension_seguro),
+        "pension_comision": r2(pension_comision), "fifth_detail": fifth_detail,
     }
 
 
