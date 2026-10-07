@@ -1295,6 +1295,53 @@ def from_image_create():
     return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
 
 
+# 7 oct, pedido de Braulio ("hay que agregar el campo de descripcion, para
+# cuando se cree la factura de ese viaje poder escribir los detalles de la
+# guia, fechas y ruta"): cada viaje marcado en "Generar factura" trae su
+# descripción editable (desc_<id>), que es el texto del ítem de la factura
+# (y lo que sale en la factura enviada a SUNAT). Se precarga con ruta, viaje,
+# guía(s) de transportista vigentes y fecha(s) -- Braulio la ajusta o la
+# reescribe. Vacía = el texto de siempre ("H-0042: Lima -> Pucallpa").
+TRIP_ITEM_DESCRIPTION_MAX = 500
+
+
+def _fmt_date(value):
+    value = (value or "")[:10]
+    parts = value.split("-")
+    return f"{parts[2]}/{parts[1]}/{parts[0]}" if len(parts) == 3 else value
+
+
+def default_trip_item_description(trip, waybill_labels=()):
+    """Descripción sugerida para el ítem de factura de un viaje."""
+    text = f"Servicio de transporte de carga {trip['origin']} - {trip['destination']}, viaje {trip['code']}"
+    if waybill_labels:
+        label = "guía" if len(waybill_labels) == 1 else "guías"
+        text += f", {label} de transportista {', '.join(waybill_labels)}"
+    start, end = _fmt_date(trip["scheduled_date"]), _fmt_date(trip["delivered_date"])
+    if start and end and start != end:
+        text += f", fecha {start} al {end}"
+    elif end or start:
+        text += f", fecha {end or start}"
+    return text
+
+
+def _waybill_labels_by_trip(trip_ids):
+    """{trip_id: ['V002-000020', ...]} con las guías vigentes (no marcadas como no válidas) de cada viaje."""
+    if not trip_ids:
+        return {}
+    rows = query_all(
+        f"""SELECT trip_id, series, series_number FROM waybills
+            WHERE trip_id IN ({','.join('?' * len(trip_ids))}) AND disregarded = 0
+              AND sunat_status IN ('ACEPTADO', 'NO_ENVIADA')
+            ORDER BY id""",
+        tuple(trip_ids),
+    )
+    out = {}
+    for r in rows:
+        out.setdefault(r["trip_id"], []).append(f"{r['series']}-{r['series_number']:06d}")
+    return out
+
+
 @bp.route("/nuevo", methods=["GET", "POST"])
 @permission_required("facturacion", "edit")
 def new():
@@ -1483,9 +1530,12 @@ def new():
         for trip_id, _code, _old_rate, new_rate in rate_changes:
             db.execute("UPDATE trips SET rate = ? WHERE id = ?", (new_rate, trip_id))
         for t in trips:
+            description = (request.form.get(f"desc_{t['id']}") or "").strip()[:TRIP_ITEM_DESCRIPTION_MAX]
+            if not description:
+                description = f"{t['code']}: {t['origin']} -> {t['destination']}"
             db.execute(
                 "INSERT INTO invoice_items (invoice_id, trip_id, description, amount) VALUES (?, ?, ?, ?)",
-                (invoice_id, t["id"], f"{t['code']}: {t['origin']} -> {t['destination']}", t["rate"]),
+                (invoice_id, t["id"], description, t["rate"]),
             )
             db.execute("UPDATE trips SET invoiced = 1 WHERE id = ?", (t["id"],))
         for desc, qty, _unit_amt, line_total in manual_items:
@@ -1524,6 +1574,7 @@ def new():
     selected_client = request.args.get("client_id", type=int)
     pending_trips = []
     billed_clients = []
+    trip_descriptions = {}
     # 7 oct, pedido de Braulio ("cuando el cliente es Ripley o Honda la
     # facturacion es con A&S"): si el cliente elegido se factura a otra razón
     # social (clients.billing_client_id), se cambia solo a esa razón social --
@@ -1555,11 +1606,14 @@ def new():
         billed_clients = query_all(
             "SELECT id, name FROM clients WHERE billing_client_id = ? AND active = 1 ORDER BY name", (selected_client,)
         )
+        labels = _waybill_labels_by_trip([t["id"] for t in pending_trips])
+        trip_descriptions = {t["id"]: default_trip_item_description(t, labels.get(t["id"], [])) for t in pending_trips}
     company = company_info_for_issuer(issuer, current_app.config)
     return render_template(
         "facturacion/form.html", clients=clients, selected_client=selected_client,
         client_names={c["id"]: c["name"] for c in clients},
-        pending_trips=pending_trips, billed_clients=billed_clients, today=today_str(), issuer=issuer,
+        pending_trips=pending_trips, billed_clients=billed_clients, trip_descriptions=trip_descriptions,
+        today=today_str(), issuer=issuer,
         default_detraction_account=company.get("bank_nacion_detraction_account", ""),
         detraction_goods_catalog=get_detraction_goods_catalog(),
     )

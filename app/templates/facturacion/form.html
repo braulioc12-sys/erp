@@ -131,7 +131,7 @@
   <input type="hidden" name="issuer" value="{{ issuer }}">
 
   <h2 class="mt-0">Viajes entregados pendientes de facturar</h2>
-  {% if pending_trips %}<p class="muted mt-0">Puedes corregir la <strong>tarifa</strong> de cada viaje aquí mismo: al generar la factura se guarda también en el viaje.</p>{% endif %}
+  {% if pending_trips %}<p class="muted mt-0">Puedes corregir la <strong>tarifa</strong> de cada viaje aquí mismo: al generar la factura se guarda también en el viaje. Debajo de cada viaje está la <strong>descripción</strong> que saldrá en la factura (ruta, guía y fechas); puedes escribirla como prefieras.</p>{% endif %}
   {# 7 oct, pedido de Braulio: razones sociales que se facturan a este cliente (ver
      clients.billing_client_id). #}
   {% if billed_clients %}
@@ -151,6 +151,15 @@
           <td>{{ t.origin }} → {{ t.destination }}</td>
           {# 7 oct, pedido de Braulio: tarifa editable al facturar (ver rate_<id> en new(), app/routes/facturacion.py) #}
           <td class="text-right"><input type="number" step="0.01" min="0" name="rate_{{ t.id }}" value="{{ '%.2f'|format(t.rate or 0) }}" style="width:120px;text-align:right;"></td>
+        </tr>
+        {# 7 oct, pedido de Braulio: descripción editable del ítem (guía, fechas y ruta), ver desc_<id> en new() #}
+        <tr>
+          <td></td>
+          <td colspan="{{ 5 if billed_clients else 4 }}" style="padding-top:0;">
+            <label style="font-weight:normal;font-size:0.85em;" class="muted">Descripción en la factura — {{ t.code }}
+              <input type="text" name="desc_{{ t.id }}" maxlength="500" value="{{ trip_descriptions.get(t.id, '') }}" style="width:100%;">
+            </label>
+          </td>
         </tr>
         {% endfor %}
       </tbody>
