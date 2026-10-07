@@ -318,7 +318,8 @@ def period_view(period_id):
     )
     return render_template(
         "planilla/periodo.html", p=p, lines=lines, items=items, totals=totals, people=people, title=period_label(period),
-        unassigned=_unassigned_count(),
+        unassigned=_unassigned_count(), assigned=query_one(
+            "SELECT COUNT(*) AS n FROM staff WHERE status = 'ACTIVO' AND company_id = ?", (p["company_id"],))["n"],
     )
 
 
@@ -797,6 +798,43 @@ def profiles():
         "planilla/personal.html", rows=rows, show=show, company_filter=company_filter, companies=companies_all, regime_labels=REGIME_LABELS, pension_labels=PENSION_LABELS,
         afp_labels=AFP_LABELS, salary_of=effective_salary,
     )
+
+
+@bp.route("/personal/masivo", methods=["POST"])
+@permission_required("pagos_personal", "edit")
+def profiles_bulk():
+    """Marca o quita de la planilla a varias personas a la vez (los datos de
+    régimen/pensión/sueldo se completan después en el perfil de cada una).
+    Solo entra en planilla quien ya tiene empresa."""
+    if not validate_csrf():
+        abort(400)
+    ids = [int(x) for x in request.form.getlist("staff_ids") if x.isdigit()]
+    action = request.form.get("action")
+    back = redirect(url_for("planilla.profiles", ver=request.form.get("ver") or None, empresa=request.form.get("empresa") or None))
+    if not ids or action not in ("add", "remove"):
+        flash("Marca al menos una persona y elige qué hacer.", "error")
+        return back
+    done, no_company = [], []
+    for sid in ids:
+        st = query_one("SELECT id, name, company_id, in_payroll FROM staff WHERE id = ?", (sid,))
+        if st is None:
+            continue
+        if action == "add":
+            if st["company_id"] is None:
+                no_company.append(st["name"])
+                continue
+            execute("UPDATE staff SET in_payroll = 1 WHERE id = ?", (sid,))
+        else:
+            execute("UPDATE staff SET in_payroll = 0 WHERE id = ?", (sid,))
+        done.append(st["name"])
+    if done:
+        log_activity("pagos_personal", "EDITAR",
+                     f"{'Entran en' if action == 'add' else 'Salen de'} la planilla: {', '.join(done[:10])}{'…' if len(done) > 10 else ''} ({len(done)})")
+        flash(f"{len(done)} persona(s) {'marcadas en planilla' if action == 'add' else 'quitadas de la planilla'}."
+              + (" Completa su régimen, pensión y sueldo en el perfil de cada una." if action == "add" else ""), "success")
+    if no_company:
+        flash("Sin empresa (asígnala primero en su perfil): " + ", ".join(no_company[:8]) + ("…" if len(no_company) > 8 else ""), "error")
+    return back
 
 
 @bp.route("/personal/<int:staff_id>")

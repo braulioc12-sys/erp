@@ -19,13 +19,28 @@
   </div>
 </form>
 <p class="muted mt-0">Marca quién entra en la planilla mensual y completa su régimen y su sistema de pensiones. Los que cobran por recibo por honorarios no entran en planilla.</p>
+{% set can_edit = can(current_user.roles, 'pagos_personal', 'edit') %}
+<form method="post" action="{{ url_for('planilla.profiles_bulk') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="ver" value="{{ show or '' }}"><input type="hidden" name="empresa" value="{{ company_filter or '' }}">
+{% if can_edit %}
+<div class="panel" style="padding:12px 16px;">
+  <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+    <span class="muted">Con los marcados:</span>
+    <button type="submit" name="action" value="add" class="btn btn-primary btn-sm">Marcar en planilla</button>
+    <button type="submit" name="action" value="remove" class="btn btn-secondary btn-sm">Quitar de planilla</button>
+    <span class="muted" style="font-size:0.85em;">Solo entra en planilla quien ya tiene empresa. El régimen, la pensión y el sueldo se completan en el perfil de cada persona.</span>
+  </div>
+</div>
+{% endif %}
 <div class="panel">
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Persona</th><th>Empresa</th><th>En planilla</th><th>Régimen</th><th>Pensión</th><th>Sueldo básico</th><th></th></tr></thead>
+      <thead><tr>{% if can_edit %}<th style="width:32px;"><input type="checkbox" onclick="document.querySelectorAll('.js-pick').forEach(c => c.checked = this.checked)" title="Marcar todos"></th>{% endif %}<th>Persona</th><th>Empresa</th><th>En planilla</th><th>Régimen</th><th>Pensión</th><th>Sueldo básico</th><th></th></tr></thead>
       <tbody>
         {% for s in rows %}
         <tr>
+          {% if can_edit %}<td><input type="checkbox" class="js-pick" name="staff_ids" value="{{ s.id }}"></td>{% endif %}
           <td><a href="{{ url_for('planilla.profile', staff_id=s.id) }}">{{ s.name }}</a><div class="muted" style="font-size:0.85em;">{{ s.position or '' }}</div></td>
           <td>{{ s.company_name or '—' }}</td>
           <td>{% if s.in_payroll %}<span class="badge badge-activo">Sí</span>{% else %}<span class="badge badge-inactivo">No</span>{% endif %}</td>
@@ -35,10 +50,11 @@
           <td><a href="{{ url_for('planilla.profile', staff_id=s.id) }}" class="btn btn-secondary btn-sm">Abrir</a></td>
         </tr>
         {% else %}
-        <tr><td colspan="7" class="muted">No hay personas.</td></tr>
+        <tr><td colspan="8" class="muted">No hay personas.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
+</form>
 {% endblock %}

@@ -1745,11 +1745,25 @@ def _migrate_payroll_periods_per_company_sqlite(conn):
     )
 
 
+# Textos que en Personal quedaron como "empresa" pero no son una empresa
+# (ej. el literal "None" de una importación): no entran al catálogo, y si ya
+# entraron (6 oct, se vio una empresa "None") se quitan mientras no tengan
+# ninguna planilla.
+_JUNK_COMPANY_SQL = "('none', 'null', 'n/a', 'na', '-', '--', '—', 'sin empresa')"
+
+
 def _backfill_companies_sqlite(conn):
+    for (cid,) in conn.execute(
+        f"""SELECT id FROM companies WHERE LOWER(TRIM(name)) IN {_JUNK_COMPANY_SQL}
+            AND id NOT IN (SELECT company_id FROM payroll_periods WHERE company_id IS NOT NULL)"""
+    ).fetchall():
+        conn.execute("UPDATE staff SET company_id = NULL, company = NULL WHERE company_id = ?", (cid,))
+        conn.execute("DELETE FROM companies WHERE id = ?", (cid,))
     # 2) empresas escritas como texto en Personal -> catálogo
     texts = conn.execute(
-        """SELECT DISTINCT TRIM(company) FROM staff
-           WHERE company_id IS NULL AND company IS NOT NULL AND TRIM(company) != '' ORDER BY 1"""
+        f"""SELECT DISTINCT TRIM(company) FROM staff
+           WHERE company_id IS NULL AND company IS NOT NULL AND TRIM(company) != ''
+             AND LOWER(TRIM(company)) NOT IN {_JUNK_COMPANY_SQL} ORDER BY 1"""
     ).fetchall()
     for (text,) in texts:
         row = conn.execute("SELECT id FROM companies WHERE LOWER(name) = LOWER(?)", (text,)).fetchone()
@@ -1803,8 +1817,16 @@ def _migrate_payroll_periods_per_company_postgres(conn):
 def _backfill_companies_postgres(conn):
     cur = conn.cursor()
     cur.execute(
-        """SELECT DISTINCT TRIM(company) FROM staff
-           WHERE company_id IS NULL AND company IS NOT NULL AND TRIM(company) != '' ORDER BY 1"""
+        f"""SELECT id FROM companies WHERE LOWER(TRIM(name)) IN {_JUNK_COMPANY_SQL}
+            AND id NOT IN (SELECT company_id FROM payroll_periods WHERE company_id IS NOT NULL)"""
+    )
+    for (cid,) in cur.fetchall():
+        cur.execute("UPDATE staff SET company_id = NULL, company = NULL WHERE company_id = %s", (cid,))
+        cur.execute("DELETE FROM companies WHERE id = %s", (cid,))
+    cur.execute(
+        f"""SELECT DISTINCT TRIM(company) FROM staff
+           WHERE company_id IS NULL AND company IS NOT NULL AND TRIM(company) != ''
+             AND LOWER(TRIM(company)) NOT IN {_JUNK_COMPANY_SQL} ORDER BY 1"""
     )
     for (text,) in cur.fetchall():
         cur.execute("SELECT id FROM companies WHERE LOWER(name) = LOWER(%s)", (text,))

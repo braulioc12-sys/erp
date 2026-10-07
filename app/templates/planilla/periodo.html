@@ -81,7 +81,11 @@
   <p class="muted" style="margin-bottom:0;">Costo total para la empresa este mes: <strong>S/ {{ '%.2f'|format(totals.employer_cost) }}</strong> (sueldos pagados + aporte EsSalud/SIS del empleador: S/ {{ '%.2f'|format(totals.essalud_employer) }}). Pasa el mouse por la pensión para ver el detalle de la AFP.</p>
 </div>
 {% elif open %}
+{% if not people %}
+<div class="panel" style="border-left:4px solid #d97706;"><p style="margin:0;">⚠ Nadie de <strong>{{ p.company_name }}</strong> está marcado en planilla{% if assigned %} (hay {{ assigned }} persona(s) con esta empresa, pero ninguna marcada «En planilla»){% else %} (ninguna persona tiene asignada esta empresa){% endif %}. <a href="{{ url_for('planilla.profiles', empresa=p.company_id) }}">Ve al Perfil de planilla de esta empresa</a>{% if not assigned %} (o asígnale la empresa a cada persona en su ficha){% endif %}, márcalos con «Marcar en planilla» y vuelve aquí.</p></div>
+{% else %}
 <div class="panel"><p class="muted" style="margin:0;">Todavía no se calculó. Revisa el perfil de planilla de cada persona y las incidencias del mes y pulsa "Calcular planilla".</p></div>
+{% endif %}
 {% endif %}
 
 <div class="panel">
@@ -91,7 +95,7 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="form-row">
       <label>Persona
-        <select name="staff_id" required><option value="">— elige —</option>{% for s in people %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}</select>
+        <select name="staff_id" required><option value="">{{ '— elige —' if people else '— nadie en planilla en esta empresa —' }}</option>{% for s in people %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}</select>
       </label>
       <label>Tipo
         <select name="kind"><option value="INGRESO">Ingreso (comisión, bono...)</option><option value="DESCUENTO">Descuento</option></select>
