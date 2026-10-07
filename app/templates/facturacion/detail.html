@@ -47,6 +47,10 @@
        tefacturo.pe, así que "Enviar a SUNAT" no se ofrece para ella (send_sunat()
        intentaría emitir un comprobante nuevo con esa misma serie-número, que
        SUNAT rechazaría por duplicado). #}
+    {# 7 oct, pedido de Braulio: ver cómo quedará el comprobante ANTES de mandarlo a SUNAT -- ver preview() en app/routes/facturacion.py. #}
+    {% if not invoice.manual_upload and invoice.sunat_status != 'ACEPTADO' and invoice.status != 'ANULADA' %}
+    <a href="{{ url_for('facturacion.preview', invoice_id=invoice.id) }}" class="btn btn-secondary">👁 Vista previa</a>
+    {% endif %}
     {% if not invoice.manual_upload %}
     <form method="post" action="{{ url_for('facturacion.send_sunat', invoice_id=invoice.id) }}" style="display:inline;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

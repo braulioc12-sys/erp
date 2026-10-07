@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vista previa — Factura {{ invoice.number }}</title>
+  {# 7 oct, pedido de Braulio ("poder visualizarla antes de enviarla"): página
+     independiente (sin el menú del ERP) para que se parezca a un comprobante
+     y se pueda imprimir/guardar como PDF para revisar. Ver preview() en
+     app/routes/facturacion.py. #}
+  <style>
+    :root { --primary:#1d4ed8; --text:#1c2430; --muted:#667085; --border:#d0d5dd; --soft:#e8edfc; --danger:#c0392b; --warn:#b45309; }
+    * { box-sizing: border-box; }
+    html, body { margin:0; padding:0; }
+    body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; color:var(--text); font-size:13px; line-height:1.5; background:#f3f4f6; }
+    .toolbar { max-width:820px; margin:0 auto; padding:16px 16px 0; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+    .toolbar .spacer { flex:1; }
+    .btn { display:inline-block; border:1px solid var(--border); background:#fff; color:var(--text); border-radius:8px; padding:9px 16px; font-size:14px; font-weight:600; cursor:pointer; text-decoration:none; }
+    .btn-primary { background:var(--primary); border-color:var(--primary); color:#fff; }
+    .btn[disabled] { opacity:.45; cursor:not-allowed; }
+    .notice { max-width:820px; margin:12px auto 0; padding:10px 16px; border-radius:8px; font-size:13px; }
+    .notice ul { margin:4px 0 0 18px; padding:0; }
+    .notice-error { background:#fdecea; border:1px solid #f5c2bd; color:var(--danger); }
+    .notice-warn { background:#fff4e5; border:1px solid #f3d19e; color:var(--warn); }
+    .notice-ok { background:#e8f5ee; border:1px solid #b9dfc9; color:#0f7a43; }
+    .sheet { position:relative; max-width:820px; margin:14px auto 40px; background:#fff; border:1px solid var(--border); border-radius:6px; padding:30px 34px; overflow:hidden; }
+    .watermark { position:absolute; top:42%; left:50%; transform:translate(-50%,-50%) rotate(-24deg); font-size:84px; font-weight:800; letter-spacing:.08em; color:rgba(29,78,216,.08); white-space:nowrap; pointer-events:none; user-select:none; }
+    .head { display:flex; justify-content:space-between; gap:20px; border-bottom:3px solid var(--primary); padding-bottom:14px; margin-bottom:16px; }
+    .head h1 { margin:0 0 4px; font-size:20px; color:var(--primary); }
+    .head .emisor-meta { color:var(--muted); font-size:12px; }
+    .ruc-box { border:2px solid var(--primary); border-radius:6px; padding:10px 18px; text-align:center; min-width:220px; }
+    .ruc-box .ruc { font-weight:700; font-size:14px; }
+    .ruc-box .doc { font-weight:800; color:var(--primary); font-size:14px; margin:4px 0; }
+    .ruc-box .num { font-weight:700; font-size:15px; }
+    .grid { display:grid; grid-template-columns:repeat(2,1fr); gap:8px 24px; margin-bottom:16px; }
+    .grid .l { font-size:11px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); }
+    .grid .v { font-weight:600; }
+    table { width:100%; border-collapse:collapse; margin:6px 0 10px; }
+    th, td { border:1px solid var(--border); padding:7px 10px; text-align:left; font-size:12.5px; vertical-align:top; }
+    th { background:var(--soft); color:var(--primary); }
+    .r { text-align:right; white-space:nowrap; }
+    .totals { margin-left:auto; width:320px; }
+    .totals td { border:none; border-bottom:1px solid #eef0f3; padding:5px 4px; }
+    .totals tr.grand td { font-weight:800; font-size:15px; border-top:2px solid var(--text); border-bottom:none; }
+    .box { border:1px solid var(--border); border-radius:6px; padding:10px 14px; margin-top:12px; background:#fafbfc; }
+    .box h3 { margin:0 0 6px; font-size:13px; color:var(--primary); }
+    .foot { margin-top:18px; font-size:11.5px; color:var(--muted); text-align:center; }
+    @media (max-width:640px) { .head { flex-direction:column; } .grid { grid-template-columns:1fr; } .watermark { font-size:48px; } .sheet { padding:18px; } }
+    @media print { body { background:#fff; } .toolbar, .notice { display:none; } .sheet { border:none; margin:0; max-width:none; padding:0; } }
+  </style>
+</head>
+<body>
+<div class="toolbar">
+  <a class="btn" href="{{ url_for('facturacion.detail', invoice_id=invoice.id) }}">← Volver a la factura</a>
+  {% if can(current_user.roles, 'facturacion', 'edit') %}
+  <a class="btn" href="{{ url_for('facturacion.edit', invoice_id=invoice.id) }}">✎ Editar factura</a>
+  {% endif %}
+  <button type="button" class="btn" onclick="window.print()">🖨 Imprimir / PDF</button>
+  <span class="spacer"></span>
+  <form method="post" action="{{ url_for('facturacion.send_sunat', invoice_id=invoice.id) }}" style="margin:0;"
+        onsubmit="return confirm('¿Enviar la factura {{ invoice.series }}-{{ '%06d'|format(invoice.series_number) }} a SUNAT? Una vez aceptada ya no se puede editar.');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-primary" {% if problems %}disabled title="Corrige los avisos en rojo antes de enviar"{% endif %}>📤 Enviar a SUNAT</button>
+  </form>
+</div>
+
+{% if problems %}
+<div class="notice notice-error"><strong>Falta corregir antes de enviar:</strong>
+  <ul>{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ul></div>
+{% else %}
+<div class="notice notice-ok">Los datos están completos: la factura se puede enviar a SUNAT.</div>
+{% endif %}
+{% if warnings %}
+<div class="notice notice-warn"><strong>Revisa:</strong>
+  <ul>{% for w in warnings %}<li>{{ w }}</li>{% endfor %}</ul></div>
+{% endif %}
+
+<div class="sheet">
+  <div class="watermark">VISTA PREVIA</div>
+  <div class="head">
+    <div>
+      <h1>{{ company.legal_name or company.name }}</h1>
+      <div class="emisor-meta">
+        {% if company.address %}{{ company.address }}<br>{% endif %}
+        {% if company.email %}{{ company.email }}{% endif %}
+      </div>
+    </div>
+    <div class="ruc-box">
+      <div class="ruc">RUC {{ company.ruc or '— sin configurar —' }}</div>
+      <div class="doc">FACTURA ELECTRÓNICA</div>
+      <div class="num">{{ invoice.series }}-{{ '%06d'|format(invoice.series_number) }}</div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div><div class="l">Cliente</div><div class="v">{{ client.name if client else '—' }}</div></div>
+    <div><div class="l">RUC del cliente</div><div class="v">{{ (client.ruc if client else '') or '—' }}</div></div>
+    <div><div class="l">Dirección</div><div class="v">{{ (client.address if client else '') or '—' }}</div></div>
+    <div><div class="l">Fecha de emisión</div><div class="v">{{ invoice.issue_date }}</div></div>
+    <div><div class="l">Forma de pago</div><div class="v">{{ payment_form }}{% if invoice.due_date %} — vence {{ invoice.due_date }}{% endif %}</div></div>
+    <div><div class="l">Moneda</div><div class="v">{{ 'Dólares (US$)' if invoice.currency == 'DOLARES' else 'Soles (S/)' }}</div></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th style="width:36px;">#</th><th>Descripción</th><th class="r">Cant.</th><th class="r">Valor de venta</th><th class="r">Importe</th></tr>
+    </thead>
+    <tbody>
+    {% for ln in lines %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ ln.item.description or 'Servicio de transporte de carga' }}{% if ln.item.trip_code %} <span style="color:var(--muted);">({{ ln.item.trip_code }})</span>{% endif %}</td>
+        <td class="r">1</td>
+        <td class="r">{{ ln.valor_venta|invoice_money(invoice.currency) }}</td>
+        <td class="r">{{ ln.importe|invoice_money(invoice.currency) }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" style="color:var(--muted);">Sin ítems.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <table class="totals">
+    {% if igv_exonerado %}
+    <tr><td>Op. exonerada</td><td class="r">{{ subtotal|invoice_money(invoice.currency) }}</td></tr>
+    <tr><td>IGV</td><td class="r">{{ 0|invoice_money(invoice.currency) }}</td></tr>
+    {% else %}
+    <tr><td>Op. gravada</td><td class="r">{{ subtotal|invoice_money(invoice.currency) }}</td></tr>
+    <tr><td>IGV (18%)</td><td class="r">{{ igv|invoice_money(invoice.currency) }}</td></tr>
+    {% endif %}
+    <tr class="grand"><td>Importe total</td><td class="r">{{ total|invoice_money(invoice.currency) }}</td></tr>
+  </table>
+  {% if igv_exonerado %}
+  <div class="foot" style="text-align:right;">Operación exonerada del IGV (Régimen de la Amazonía, Ley 27037).</div>
+  {% endif %}
+
+  {% if invoice.detraction_applies %}
+  <div class="box">
+    <h3>Detracción (SPOT)</h3>
+    Porcentaje: {{ '%g'|format(invoice.detraction_percentage or 0) }}% —
+    Monto a depositar: <strong>{{ detraction_amount|invoice_money(invoice.currency) }}</strong> —
+    Cuenta Banco de la Nación: {{ invoice.detraction_bank_account or '—' }}<br>
+    Neto a cobrar del cliente: <strong>{{ net_to_collect|invoice_money(invoice.currency) }}</strong>
+  </div>
+  {% endif %}
+
+  {% if invoice.notes %}
+  <div class="box"><h3>Observaciones (glosa)</h3>{{ invoice.notes }}</div>
+  {% endif %}
+
+  <div class="foot">Vista previa informativa — no es un comprobante válido. El PDF oficial lo genera tefacturo.pe al enviarse a SUNAT y puede variar en el diseño.</div>
+</div>
+</body>
+</html>

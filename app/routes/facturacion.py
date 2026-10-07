@@ -41,6 +41,7 @@ from app.integrations.sunat_ose import (
     SunatOseError,
     build_client_from_config,
     build_credit_note_payload,
+    _split_igv,
     build_invoice_payload,
     is_duplicate_comprobante_error,
     parse_ose_response,
@@ -1668,6 +1669,95 @@ def detail(invoice_id):
         detraction_goods_codes=get_detraction_goods_codes(),
         creator=creator, detraction_tefacturo_code=detraction_tefacturo_code, stuck_trips=stuck_trips,
         credit_notes=credit_notes, credit_note_reason_labels=CREDIT_NOTE_REASON_LABELS,
+    )
+
+
+@bp.route("/<int:invoice_id>/vista-previa")
+@permission_required("facturacion", "view")
+def preview(invoice_id):
+    """7 oct, pedido de Braulio ("antes de emitir la factura aceptada por
+    sunat, puedes poner una opcion de poder visualizarla antes de
+    enviarla?"): pantalla de solo lectura que muestra el comprobante tal
+    como se va a mandar a SUNAT (emisor, cliente, ítems, IGV, detracción,
+    forma de pago), con la marca "VISTA PREVIA". NO llama a tefacturo.pe ni
+    cambia nada: solo arma el mismo payload que send_sunat() para detectar
+    por adelantado lo que haría fallar el envío (RUC faltante, ítem en
+    S/ 0.00, etc.) y mostrarlo como aviso. Desde acá se puede enviar de
+    verdad, editar o volver."""
+    invoice = query_one("SELECT * FROM invoices WHERE id = ?", (invoice_id,))
+    if invoice is None:
+        abort(404)
+    if invoice["manual_upload"] or _invoice_is_locked(invoice):
+        flash(
+            "Esta factura ya fue emitida (o está anulada / cargada a mano): "
+            "la vista previa solo aplica antes de enviarla a SUNAT.",
+            "error",
+        )
+        return redirect(url_for("facturacion.detail", invoice_id=invoice_id))
+    client_row = query_one("SELECT * FROM clients WHERE id = ?", (invoice["client_id"],))
+    items = query_all(
+        """SELECT ii.*, t.code as trip_code FROM invoice_items ii
+           LEFT JOIN trips t ON t.id = ii.trip_id WHERE ii.invoice_id = ? ORDER BY ii.id""",
+        (invoice_id,),
+    )
+    company = company_info_for_issuer(invoice["issuer"], current_app.config)
+    igv_exonerado = bool(company.get("igv_exonerado"))
+
+    # Mismo cálculo que build_invoice_payload(): cada ítem guarda su monto
+    # CON IGV; tefacturo.pe recibe el valor sin IGV y calcula el IGV por su
+    # cuenta sobre la suma.
+    lines = []
+    subtotal = 0.0
+    for it in items:
+        monto = round(float(it["amount"] or 0), 2)
+        valor = monto if igv_exonerado else _split_igv(monto)[0]
+        subtotal += valor
+        lines.append({"item": it, "valor_venta": valor, "importe": monto})
+    subtotal = round(subtotal, 2)
+    igv = 0.0 if igv_exonerado else round(subtotal * IGV_RATE, 2)
+    total = round(subtotal + igv, 2)
+    detraction_amount = (
+        float(invoice["detraction_amount"] or 0) if invoice["detraction_applies"] else 0.0
+    )
+    net_to_collect = round(total - detraction_amount, 2)
+
+    problems = []
+    warnings = []
+    if not company["ruc"]:
+        problems.append(
+            f"Falta configurar el RUC de {company['name']} (variable de entorno "
+            f"{'BRMS_RUC' if invoice['issuer'] == 'BRMS' else 'COMPANY_RUC'})."
+        )
+    if client_row is None or not (client_row["ruc"] or "").strip():
+        problems.append("El cliente no tiene RUC registrado.")
+    if not items:
+        problems.append("La factura no tiene ítems.")
+    if not problems:
+        try:
+            build_invoice_payload(invoice, items, client_row, company)
+        except SunatOseError as exc:
+            problems.append(str(exc))
+        except Exception as exc:  # no romper la vista previa por un dato raro
+            problems.append(f"{type(exc).__name__}: {exc}")
+    if invoice["detraction_applies"] and invoice["detraction_code"] and not get_detraction_tefacturo_code(
+        invoice["detraction_code"]
+    ):
+        warnings.append(
+            "Esta factura lleva detracción, pero ese concepto aún no tiene su código de "
+            "tefacturo.pe (Catálogos → Conceptos de detracción): se enviaría SIN el bloque de detracción."
+        )
+    if total and abs(total - float(invoice["amount"] or 0)) > 0.05:
+        warnings.append(
+            f"El total calculado ({total:,.2f}) difiere del importe guardado de la factura "
+            f"({float(invoice['amount'] or 0):,.2f}). Revisa los ítems."
+        )
+    return render_template(
+        "facturacion/preview.html",
+        invoice=invoice, client=client_row, company=company, lines=lines,
+        subtotal=subtotal, igv=igv, total=total, igv_exonerado=igv_exonerado,
+        detraction_amount=detraction_amount, net_to_collect=net_to_collect,
+        problems=problems, warnings=warnings,
+        payment_form="Crédito" if invoice["due_date"] else "Contado",
     )
 
 
