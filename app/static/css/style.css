@@ -110,7 +110,14 @@ p { margin: 0 0 1em 0; }
 /* position/z-index acá (no en .brand-watermark) para que el contenido de
    CUALQUIER pantalla siempre pinte por encima del logo de fondo -- ver el
    comentario de .brand-watermark, arriba. */
-.content { flex: 1; padding: 28px 36px; max-width: 1200px; position: relative; z-index: 1; }
+/* 7 oct, pedido de Braulio: las tablas (Viajes, Clientes, etc.) se cortaban
+   a la derecha porque .content tenía max-width:1200px y sobraba una franja
+   vacía junto al logo de Harris. Ahora el contenido ocupa TODO el ancho
+   disponible a la derecha del menú (max-width: none). El logo de fondo queda
+   detrás (z-index 0 < 1) y los paneles/tablas lo tapan cuando hace falta.
+   min-width: 0 evita que una tabla muy ancha empuje la página fuera de la
+   pantalla: el scroll lateral queda solo dentro de .table-wrap. */
+.content { flex: 1; min-width: 0; padding: 28px 36px; max-width: none; position: relative; z-index: 1; }
 
 /* Splash de carga con la marca de Harris (16 sep) — se muestra un instante
    sobre la pantalla de login (ver auth/login.html), luego se desvanece
