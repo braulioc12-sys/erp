@@ -4,6 +4,9 @@
 <div class="page-header">
   <h1>Legajo del personal{% if show_inactive %} — Inactivos{% endif %}</h1>
   <div class="page-actions">
+    {% if can(current_user.roles, 'pagos_personal', 'edit') %}
+    <a href="{{ url_for('legajo.import_staff') }}" class="btn btn-primary">⬆ Importar personal desde Excel</a>
+    {% endif %}
     <a href="{{ url_for('pagos_personal.hub') }}" class="btn btn-secondary">← Volver a RRHH</a>
   </div>
 </div>
@@ -47,13 +50,14 @@
 <div class="panel">
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Nombre</th><th>Cargo / Área</th><th>Ingreso</th><th>Contrato vigente</th><th>Vence</th><th>Docs</th><th></th></tr></thead>
+      <thead><tr><th>Nombre</th><th>Empresa</th><th>Cargo / Área</th><th>Ingreso</th><th>Contrato vigente</th><th>Vence</th><th>Docs</th><th></th></tr></thead>
       <tbody>
         {% for r in rows %}
         <tr>
           <td><a href="{{ url_for('legajo.detail', staff_id=r.staff.id) }}">{{ r.staff.name }}</a>
             {% if r.alerts %}<span class="badge badge-pendiente" style="font-size:0.75em;" title="Tiene contratos o documentos por vencer">⚠ {{ r.alerts|length }}</span>{% endif %}
           </td>
+          <td>{{ r.staff.company or '—' }}</td>
           <td>{{ r.contract.position if r.contract and r.contract.position else (r.staff.position or '—') }}{% if r.staff.area %} · {{ r.staff.area }}{% endif %}</td>
           <td>{{ r.staff.hire_date or '—' }}</td>
           <td>{{ contract_type_labels.get(r.contract.contract_type, r.contract.contract_type) if r.contract else 'Sin contrato' }}</td>
@@ -62,7 +66,7 @@
           <td><a href="{{ url_for('legajo.detail', staff_id=r.staff.id) }}" class="btn btn-secondary btn-sm">Abrir legajo</a></td>
         </tr>
         {% else %}
-        <tr><td colspan="7" class="table-empty">No hay personas {{ 'inactivas' if show_inactive else 'registradas' }}.</td></tr>
+        <tr><td colspan="8" class="table-empty">No hay personas {{ 'inactivas' if show_inactive else 'registradas' }}.</td></tr>
         {% endfor %}
       </tbody>
     </table>

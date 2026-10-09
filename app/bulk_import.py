@@ -51,9 +51,9 @@ class ImportColumn:
         contra el código y sus alias.
     """
 
-    __slots__ = ("key", "header", "kind", "required", "choices", "note", "width")
+    __slots__ = ("key", "header", "kind", "required", "choices", "note", "width", "force_text")
 
-    def __init__(self, key, header, kind="text", required=False, choices=None, note="", width=22):
+    def __init__(self, key, header, kind="text", required=False, choices=None, note="", width=22, force_text=False):
         self.key = key
         self.header = header
         self.kind = kind
@@ -61,6 +61,10 @@ class ImportColumn:
         self.choices = choices or []
         self.note = note
         self.width = width
+        # 7 oct: True para códigos numéricos largos (DNI, teléfono, cuenta,
+        # CCI): la plantilla deja esas celdas en formato Texto para que Excel
+        # no les quite el cero inicial ni las pase a notación científica.
+        self.force_text = force_text
 
 
 def _strip_accents(value):
@@ -302,19 +306,30 @@ def build_import_template(title, columns, example_values):
 
     for idx, col in enumerate(columns, start=1):
         ws.column_dimensions[get_column_letter(idx)].width = col.width
+        if col.force_text:
+            for r in range(DATA_START_ROW, DATA_START_ROW + TEMPLATE_DATA_ROWS + 1):
+                ws.cell(row=r, column=idx).number_format = "@"
         if col.kind == "choice" and col.choices:
-            valid_values = [code for code, _ in col.choices]
-            dv = DataValidation(
-                type="list",
-                formula1='"' + ",".join(valid_values) + '"',
-                allow_blank=True,
-                showErrorMessage=True,
-                errorTitle="Valor no válido",
-                error="Usa uno de: " + ", ".join(valid_values),
-            )
-            col_letter = get_column_letter(idx)
-            dv.add(f"{col_letter}{DATA_START_ROW}:{col_letter}{DATA_START_ROW + TEMPLATE_DATA_ROWS}")
-            ws.add_data_validation(dv)
+            # 7 oct: Excel solo acepta hasta 255 caracteres en una lista
+            # desplegable escrita en la propia validación (si se pasa, abre
+            # el archivo "dañado") y las comas separan opciones. Con listas
+            # dinámicas (ej. las empresas del sistema) se dejan fuera los
+            # valores con coma y, si aun así no cabe, no se pone el
+            # desplegable (la importación igual valida el valor).
+            valid_values = [code for code, _ in col.choices if "," not in code and '"' not in code]
+            formula = '"' + ",".join(valid_values) + '"'
+            if valid_values and len(formula) <= 255:
+                dv = DataValidation(
+                    type="list",
+                    formula1=formula,
+                    allow_blank=True,
+                    showErrorMessage=True,
+                    errorTitle="Valor no válido",
+                    error="Usa uno de: " + ", ".join(valid_values),
+                )
+                col_letter = get_column_letter(idx)
+                dv.add(f"{col_letter}{DATA_START_ROW}:{col_letter}{DATA_START_ROW + TEMPLATE_DATA_ROWS}")
+                ws.add_data_validation(dv)
 
     ws.sheet_view.showGridLines = False
 

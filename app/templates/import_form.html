@@ -11,6 +11,7 @@
 <div class="panel" style="max-width:760px;">
   <h2>Paso 1 — Descarga la plantilla</h2>
   <p class="muted mt-0">Descarga el archivo Excel, complétalo con los datos de {{ module_label }} (una fila por registro, sin borrar ni cambiar los encabezados) y guárdalo. La hoja "Instrucciones" del archivo explica cada columna.</p>
+  {% if extra_note %}<p class="muted mt-0">{{ extra_note }}</p>{% endif %}
   <a href="{{ template_url }}" class="btn btn-primary">⬇ Descargar plantilla Excel</a>
 </div>
 

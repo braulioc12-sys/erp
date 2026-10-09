@@ -18,10 +18,12 @@ SIEMPRE agrega uno más, nunca reemplaza al anterior, y se puede eliminar uno
 subido por error. La pantalla "Vencimientos" junta lo que vence pronto (o ya
 venció): contratos a plazo fijo y documentos con fecha de vencimiento.
 """
+import re
 from datetime import datetime, timedelta
 
 from flask import (
     Blueprint,
+    Response,
     abort,
     flash,
     g,
@@ -35,6 +37,7 @@ from flask import (
 from app import storage
 from app.audit import log_activity
 from app.auth import permission_required, validate_csrf
+from app.bulk_import import XLSX_MIME, ImportColumn, build_import_template, read_import_rows
 from app.db import execute, query_all, query_one
 from app.helpers import parse_date, parse_float, today_str
 from app.routes.viajes import _save_binary_attachment
@@ -212,6 +215,250 @@ def index():
     return render_template(
         "legajo/index.html", rows=rows, q=q, show_inactive=show_inactive, alerts=alerts,
         contract_type_labels=CONTRACT_TYPE_LABELS,
+    )
+
+
+# --- Importación masiva del personal desde Excel (7 oct, pedido de Braulio:
+# "crear la opción de importar masivamente a través de un Excel el personal, y
+# que haya una columna Empresa donde se registre la empresa que lo contrata y
+# a la que pertenece la planilla"). Mismo motor que Flota/Conductores/Rutas
+# (app/bulk_import.py). Crea a la persona o, si ya existe (mismo documento, o
+# mismo nombre si la que está cargada no tiene documento), la ACTUALIZA: solo
+# se pisan los campos que vienen llenos en el Excel -- una celda vacía nunca
+# borra un dato ya cargado. ---
+
+_YES_NO_CHOICES = [("SI", ["SÍ", "SI", "S", "1", "X", "YES", "Y"]), ("NO", ["NO", "N", "0"])]
+
+_STAFF_IMPORT_EXAMPLE = {
+    "name": "Nombre de Ejemplo", "document_type": "DNI", "document_number": "00000000", "company": "",
+    "position": "Asistente administrativo", "area": "Administración", "hire_date": "2026-01-15",
+    "birth_date": "1990-05-20", "phone": "999999999", "email": "ejemplo@correo.com", "address": "Av. Ejemplo 123, Lima",
+    "in_payroll": "SI", "labor_regime": "GENERAL", "basic_salary": 1500, "family_allowance": "NO",
+    "pension_system": "AFP", "afp_name": "PRIMA", "cuspp": "", "bank_name": "BCP",
+    "account_number": "1931234567890", "cci": "",
+}
+
+
+def _company_choices():
+    """Empresas activas del sistema como opciones de la columna Empresa: se
+    acepta el nombre, la razón social o el RUC."""
+    choices = []
+    for c in query_all("SELECT name, legal_name, ruc FROM companies WHERE active = 1 ORDER BY name"):
+        aliases = [a for a in (c["legal_name"], c["ruc"]) if a and a.strip()]
+        choices.append((c["name"], aliases))
+    return choices
+
+
+def staff_import_columns():
+    from app.payroll_params import AFP_NAMES
+    from app.routes.planilla import PENSION_SYSTEMS, REGIMES
+
+    companies = _company_choices()
+    names = ", ".join(c for c, _ in companies) or "(aún no hay empresas creadas)"
+    return [
+        ImportColumn("name", "Nombre", kind="text", required=True, width=30,
+                     note="Apellidos y nombres. Se usa para emparejar con una persona ya cargada cuando no se da N° de documento."),
+        ImportColumn("document_type", "Tipo de documento", kind="choice", width=16,
+                     choices=[("DNI", ["DNI"]), ("CE", ["CE", "CARNET DE EXTRANJERIA", "CARNÉ DE EXTRANJERÍA"]), ("RUC", ["RUC"])],
+                     note="Si se deja vacío, se usa DNI."),
+        ImportColumn("document_number", "N° de documento", kind="text", width=16, force_text=True,
+                     note="Si ya existe una persona con este documento, se actualizan sus datos en vez de crear otra."),
+        ImportColumn("company", "Empresa", kind="choice", width=26, choices=companies,
+                     note="Empresa que contrata a la persona y a cuya planilla pertenece (se acepta el nombre, la razón social "
+                          "o el RUC). Debe estar creada en el sistema. Empresas disponibles: " + names + "."),
+        ImportColumn("position", "Cargo", kind="text", width=24),
+        ImportColumn("area", "Área", kind="text", width=20),
+        ImportColumn("hire_date", "Fecha de ingreso", kind="date", width=16),
+        ImportColumn("birth_date", "Fecha de nacimiento", kind="date", width=18),
+        ImportColumn("phone", "Teléfono", kind="text", width=14, force_text=True),
+        ImportColumn("email", "Correo", kind="text", width=26),
+        ImportColumn("address", "Dirección", kind="text", width=32),
+        ImportColumn("in_payroll", "En planilla", kind="choice", width=12, choices=_YES_NO_CHOICES,
+                     note="SI = entra en la planilla mensual (requiere Empresa). NO = no entra (ej. recibo por honorarios). "
+                          "Si se deja vacío, no se cambia."),
+        ImportColumn("labor_regime", "Régimen laboral", kind="choice", width=22,
+                     choices=[(code, [label]) for code, label in REGIMES],
+                     note="Define vacaciones, CTS y gratificación. Se puede escribir el código o el nombre."),
+        ImportColumn("basic_salary", "Sueldo básico", kind="float", width=14),
+        ImportColumn("family_allowance", "Asignación familiar", kind="choice", width=18, choices=_YES_NO_CHOICES),
+        ImportColumn("pension_system", "Sistema de pensiones", kind="choice", width=20,
+                     choices=[(code, [label]) for code, label in PENSION_SYSTEMS],
+                     note="Si se llena la AFP y esta columna está vacía, se toma como AFP."),
+        ImportColumn("afp_name", "AFP", kind="choice", width=16,
+                     choices=[(code, [label]) for code, label in AFP_NAMES],
+                     note="Solo si el sistema de pensiones es AFP."),
+        ImportColumn("cuspp", "CUSPP", kind="text", width=16),
+        ImportColumn("bank_name", "Banco", kind="text", width=16),
+        ImportColumn("account_number", "N° de cuenta", kind="text", width=22, force_text=True),
+        ImportColumn("cci", "CCI (cuenta interbancaria)", kind="text", width=24, force_text=True),
+    ]
+
+
+def _clean_code(value):
+    """Documento/teléfono/cuenta como texto limpio: un número que Excel
+    guardó como 45270106.0 vuelve a 45270106."""
+    text = (value or "").strip() if isinstance(value, str) else ("" if value is None else str(value).strip())
+    if re.fullmatch(r"\d+\.0+", text):
+        text = text.split(".")[0]
+    return text
+
+
+def _find_staff_for_import(name, document_number):
+    """Por documento si viene uno; si no (o no está), por nombre exacto SOLO
+    si la persona cargada no tiene documento (así dos personas distintas con
+    el mismo nombre y distinto DNI nunca se confunden)."""
+    if document_number:
+        row = query_one("SELECT * FROM staff WHERE TRIM(document_number) = ?", (document_number,))
+        if row:
+            return row
+    row = query_one(
+        "SELECT * FROM staff WHERE LOWER(TRIM(name)) = LOWER(?) AND COALESCE(TRIM(document_number), '') = '' ORDER BY id LIMIT 1",
+        (name.strip(),),
+    )
+    if row:
+        return row
+    if not document_number:
+        return query_one("SELECT * FROM staff WHERE LOWER(TRIM(name)) = LOWER(?) ORDER BY id LIMIT 1", (name.strip(),))
+    return None
+
+
+def _apply_staff_import(rows, example_skips):
+    from app.routes.pagos_personal import _has_valid_document_number
+    from app.routes.planilla import REGIME_VACATION_DAYS
+
+    created, updated, errors = 0, 0, []
+    skipped = [
+        {"row": r, "message": "Fila de ejemplo de la plantilla; se omitió automáticamente."} for r in example_skips
+    ]
+    for row in rows:
+        n = row["_row_number"]
+        for warn in row["_warnings"]:
+            errors.append({"row": n, "message": warn})
+        name = (row.get("name") or "").strip()
+        if not name:
+            errors.append({"row": n, "message": "Falta el nombre; la fila no se importó."})
+            continue
+        doc_type = row.get("document_type") or None
+        doc_number = _clean_code(row.get("document_number"))
+        existing = _find_staff_for_import(name, doc_number)
+        if doc_number and not _has_valid_document_number(doc_type or (existing["document_type"] if existing else "DNI"), doc_number):
+            errors.append({"row": n, "message": "El DNI debe tener 8 dígitos; se importó igual, pero corrígelo antes de pagar por Telecrédito."})
+
+        vals = {}
+        if doc_type:
+            vals["document_type"] = doc_type
+        if doc_number:
+            vals["document_number"] = doc_number
+        for key in ("position", "area", "email", "address", "bank_name", "cuspp", "hire_date", "birth_date"):
+            if row.get(key):
+                vals[key] = row[key]
+        for key in ("phone", "account_number", "cci"):
+            clean = _clean_code(row.get(key))
+            if clean:
+                vals[key] = clean
+
+        company = None
+        if row.get("company"):
+            company = query_one("SELECT id, name FROM companies WHERE active = 1 AND LOWER(name) = LOWER(?)", (row["company"],))
+            if company:
+                vals["company_id"], vals["company"] = company["id"], company["name"]
+        has_company = bool(company) or bool(existing and existing["company_id"])
+
+        regime = row.get("labor_regime")
+        if regime:
+            vals["labor_regime"] = regime
+            if regime in REGIME_VACATION_DAYS and (existing is None or existing["labor_regime"] != regime):
+                vals["vacation_days_per_year"] = REGIME_VACATION_DAYS[regime]
+
+        salary = row.get("basic_salary")
+        if salary is not None:
+            if salary < 0:
+                errors.append({"row": n, "message": "El sueldo básico no puede ser negativo; se dejó sin cambiar."})
+            else:
+                vals["basic_salary"] = salary
+
+        if row.get("family_allowance"):
+            vals["family_allowance"] = 1 if row["family_allowance"] == "SI" else 0
+
+        pension = row.get("pension_system") or ("AFP" if row.get("afp_name") else None)
+        if pension == "AFP":
+            afp = row.get("afp_name") or (existing["afp_name"] if existing else None)
+            if afp:
+                vals["pension_system"], vals["afp_name"] = "AFP", afp
+            else:
+                errors.append({"row": n, "message": "Sistema de pensiones AFP sin indicar cuál AFP; no se cambió el sistema de pensiones."})
+        elif pension:
+            vals["pension_system"], vals["afp_name"] = pension, None
+
+        if row.get("in_payroll") == "SI":
+            if has_company:
+                vals["in_payroll"] = 1
+            else:
+                errors.append({"row": n, "message": "Para entrar en planilla necesita Empresa; no se marcó \"En planilla\"."})
+        elif row.get("in_payroll") == "NO":
+            vals["in_payroll"] = 0
+
+        if existing:
+            if vals:
+                sets = ", ".join(f"{k} = ?" for k in vals)
+                execute(f"UPDATE staff SET {sets} WHERE id = ?", list(vals.values()) + [existing["id"]])
+            updated += 1
+        else:
+            cols = ["name"] + list(vals)
+            execute(
+                f"INSERT INTO staff ({', '.join(cols)}) VALUES ({', '.join('?' for _ in cols)})",
+                [name] + list(vals.values()),
+            )
+            created += 1
+    return {"created": created, "updated": updated, "skipped": skipped, "errors": errors}
+
+
+@bp.route("/importar/plantilla")
+@permission_required("pagos_personal", "edit")
+def import_template():
+    buffer = build_import_template("Personal", staff_import_columns(), _staff_import_example())
+    return Response(
+        buffer.getvalue(), mimetype=XLSX_MIME,
+        headers={"Content-Disposition": 'attachment; filename="plantilla_personal.xlsx"'},
+    )
+
+
+def _staff_import_example():
+    example = dict(_STAFF_IMPORT_EXAMPLE)
+    first = query_one("SELECT name FROM companies WHERE active = 1 ORDER BY name LIMIT 1")
+    example["company"] = first["name"] if first else ""
+    return example
+
+
+@bp.route("/importar", methods=["GET", "POST"])
+@permission_required("pagos_personal", "edit")
+def import_staff():
+    columns = staff_import_columns()
+    if request.method == "POST":
+        if not validate_csrf():
+            abort(400)
+        rows, file_error, example_skips = read_import_rows(request.files.get("file"), columns, _staff_import_example())
+        if file_error:
+            flash(file_error, "error")
+            return redirect(url_for("legajo.import_staff"))
+        result = _apply_staff_import(rows, example_skips)
+        if result["created"] or result["updated"]:
+            log_activity(
+                "pagos_personal", "SUBIR",
+                f"Importó personal desde Excel ({result['created']} creado(s), {result['updated']} actualizado(s))",
+                entity_type="empleado",
+            )
+        return render_template(
+            "import_result.html", result=result,
+            back_url=url_for("legajo.index"), retry_url=url_for("legajo.import_staff"),
+        )
+    return render_template(
+        "import_form.html", title="Importar personal desde Excel", module_label="el personal",
+        template_url=url_for("legajo.import_template"), upload_url=url_for("legajo.import_staff"),
+        back_url=url_for("legajo.index"), columns=columns,
+        extra_note="Si la persona ya existe (mismo N° de documento), se actualizan solo los datos que traiga el Excel; "
+                   "las celdas vacías no borran nada. La columna Empresa asigna la empresa que contrata a la persona y "
+                   "a cuya planilla pertenece.",
     )
 
 
