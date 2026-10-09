@@ -21,9 +21,12 @@
   <p class="muted mt-0">Sube una captura de Yape, Plin o de una transferencia, el voucher de la tarjeta, la foto de una boleta o factura, o un listado de movimientos del banco. La IA lee fecha, a quién se pagó, monto y medio de pago, y <strong>te lo muestra para revisarlo antes de guardar nada</strong>.</p>
   <form method="post" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <label>Fotos o capturas (hasta {{ max_images }})
-      <input type="file" name="images" accept="image/*" multiple required>
-    </label>
+    <label>Fotos o capturas (hasta {{ max_images }})</label>
+    <div id="cg-drop" tabindex="0" style="border:2px dashed var(--border, #d0d5dd); border-radius:8px; padding:22px; text-align:center; cursor:pointer; outline:none; margin-bottom:8px;">
+      <div id="cg-drop-text"><strong>Pega aquí la captura (Ctrl+V)</strong>, arrástrala hasta este recuadro, o haz clic para elegir archivos.</div>
+    </div>
+    <input type="file" id="cg-files" name="images" accept="image/*" multiple required style="display:none;">
+    <div id="cg-thumbs" style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px;"></div>
     <label>Empresa de estos gastos (opcional, la puedes cambiar fila por fila)
       <input type="text" name="company" list="cg-companies" placeholder="harraso, brms...">
       <datalist id="cg-companies">{% for c in companies %}<option value="{{ c }}">{% endfor %}</datalist>
@@ -34,6 +37,80 @@
     </div>
   </form>
 </div>
+<script>
+(function () {
+  var MAX = {{ max_images }};
+  var input = document.getElementById('cg-files');
+  var drop = document.getElementById('cg-drop');
+  var thumbs = document.getElementById('cg-thumbs');
+  var text = document.getElementById('cg-drop-text');
+  if (!input || !drop) return;
+  var files = [];
+  var counter = 0;
+
+  function sync() {
+    var dt = new DataTransfer();
+    files.forEach(function (f) { dt.items.add(f); });
+    input.files = dt.files;
+    thumbs.innerHTML = '';
+    files.forEach(function (f, i) {
+      var box = document.createElement('div');
+      box.style.cssText = 'position:relative; border:1px solid var(--border, #d0d5dd); border-radius:6px; padding:4px; background:#fff;';
+      var img = document.createElement('img');
+      img.src = URL.createObjectURL(f);
+      img.style.cssText = 'display:block; height:90px; max-width:160px; object-fit:cover; border-radius:4px;';
+      img.title = f.name;
+      var x = document.createElement('button');
+      x.type = 'button'; x.textContent = '×'; x.title = 'Quitar';
+      x.style.cssText = 'position:absolute; top:-8px; right:-8px; width:22px; height:22px; border-radius:50%; border:none; background:#c0392b; color:#fff; cursor:pointer; line-height:20px; padding:0;';
+      x.addEventListener('click', function (ev) { ev.stopPropagation(); files.splice(i, 1); sync(); });
+      box.appendChild(img); box.appendChild(x); thumbs.appendChild(box);
+    });
+    text.innerHTML = files.length
+      ? '<strong>' + files.length + ' imagen(es) lista(s)</strong> — pega, arrastra o elige más (máx. ' + MAX + ').'
+      : '<strong>Pega aquí la captura (Ctrl+V)</strong>, arrástrala hasta este recuadro, o haz clic para elegir archivos.';
+  }
+
+  function add(list) {
+    var added = 0;
+    Array.prototype.forEach.call(list, function (f) {
+      if (!f || !f.type || f.type.indexOf('image/') !== 0) return;
+      if (files.length >= MAX) return;
+      if (!f.name || /^image\.\w+$/i.test(f.name)) {   // las capturas pegadas llegan como "image.png"
+        counter += 1;
+        var ext = (f.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+        f = new File([f], 'captura-' + counter + '.' + ext, { type: f.type });
+      }
+      files.push(f); added += 1;
+    });
+    if (added) sync();
+    return added;
+  }
+
+  drop.addEventListener('click', function () { input.click(); });
+  drop.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } });
+  input.addEventListener('change', function () { var chosen = Array.prototype.slice.call(input.files); files = []; add(chosen); sync(); });
+  ['dragenter', 'dragover'].forEach(function (ev) {
+    drop.addEventListener(ev, function (e) { e.preventDefault(); drop.style.background = 'var(--soft, #e8edfc)'; });
+  });
+  ['dragleave', 'drop'].forEach(function (ev) {
+    drop.addEventListener(ev, function (e) { e.preventDefault(); drop.style.background = ''; });
+  });
+  drop.addEventListener('drop', function (e) { if (e.dataTransfer) add(e.dataTransfer.files); });
+
+  // Ctrl+V en cualquier parte de la pagina (salvo dentro de un campo de texto)
+  document.addEventListener('paste', function (e) {
+    var t = e.target;
+    if (t && (t.tagName === 'INPUT' && t.type !== 'file' || t.tagName === 'TEXTAREA')) return;
+    var items = (e.clipboardData && e.clipboardData.items) || [];
+    var got = [];
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].kind === 'file' && items[i].type.indexOf('image/') === 0) got.push(items[i].getAsFile());
+    }
+    if (got.length) { e.preventDefault(); add(got); }
+  });
+})();
+</script>
 {% else %}
 <form method="post" action="{{ url_for('control_gastos.gasto_from_image_confirm') }}" class="panel">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
