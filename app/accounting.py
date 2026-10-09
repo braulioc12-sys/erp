@@ -39,10 +39,26 @@ DOCUMENT_TYPES = [
     ("02", "Recibo por Honorario"),
     ("03", "Boleta de Venta"),
     ("RI", "Recibo de Ingreso"),
+    ("RE", "Recibo de Egreso (por devolver)"),
     ("PL", "Por Liquidar (vale)"),
 ]
 
 VALE_DOCUMENT_TYPE = "PL"
+
+# Recibo que cierra una liquidación con saldo (advance_receipts, ver
+# liquidate() en app/routes/liquidaciones.py). Para que la liquidación
+# cuadre en 0 en el export, cada recibo genera una fila contra la cuenta de
+# caja:
+#   - INGRESO (saldo a favor de la empresa; el conductor devuelve dinero):
+#     fila DEBE en caja, documento "RI" (Recibo de Ingreso).
+#   - DEVOLUCION (saldo en contra; la empresa le devuelve al conductor):
+#     fila HABER en caja, documento "RE" (Recibo de Egreso / por devolver).
+# AJUSTAR: la cuenta de caja (1011) y el código "RE" son supuestos —
+# confirmar con contabilidad y cambiarlos acá si son otros.
+RECEIPT_ROWS = {
+    "INGRESO": {"side": "debe", "cuenta": "1011", "doc": "RI", "glosa": "RECIBO DE INGRESO"},
+    "DEVOLUCION": {"side": "haber", "cuenta": "1011", "doc": "RE", "glosa": "RECIBO POR DEVOLVER"},
+}
 
 # Tipo de comprobante elegido por gasto (10 sep, pedido de Braulio: "antes
 # de concepto hay que elegir el tipo de comprobante puede ser factura o

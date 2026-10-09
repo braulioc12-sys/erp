@@ -122,16 +122,17 @@
 
   <h2>Anticipos entregados</h2>
   <table>
-    <thead><tr><th>Fecha</th><th class="text-right">Monto</th><th>Notas</th></tr></thead>
+    <thead><tr><th>Fecha</th><th>N° recibo</th><th class="text-right">Monto</th><th>Notas</th></tr></thead>
     <tbody>
       {% for p in payments %}
       <tr>
         <td>{{ p.payment_date }}</td>
+        <td>{{ p.receipt_number or (advance.code ~ ('-' ~ loop.index if payments|length > 1 else '')) }}</td>
         <td class="text-right">{{ p.amount|money }}</td>
         <td>{{ p.notes or '—' }}</td>
       </tr>
       {% else %}
-      <tr><td colspan="3">Sin anticipos registrados.</td></tr>
+      <tr><td colspan="4">Sin anticipos registrados.</td></tr>
       {% endfor %}
     </tbody>
   </table>

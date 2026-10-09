@@ -1072,6 +1072,11 @@ CREATE TABLE IF NOT EXISTS advance_payments (
     amount REAL NOT NULL,
     payment_date TEXT NOT NULL,
     notes TEXT,
+    -- N° del vale/recibo físico de ESTE anticipo (opcional). El export
+    -- contable genera una fila Haber por anticipo con este número en
+    -- "Num.Doc"; si está vacío usa el código de la liquidación (H-0001, con
+    -- sufijo -1, -2... cuando hay varios anticipos).
+    receipt_number TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

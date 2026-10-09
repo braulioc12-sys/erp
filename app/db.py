@@ -667,6 +667,7 @@ COLUMN_MIGRATIONS = [
     # nueva schema.sql ya las declara con su FK.
     ("staff", "company_id", "INTEGER"),
     ("maintenance_records", "reopened_at", "TEXT"),
+    ("advance_payments", "receipt_number", "TEXT"),
     ("payroll_periods", "company_id", "INTEGER"),
     # 7 oct, planilla estilo Buk: bases y detalle de 5ta en la boleta,
     # casillas de base por concepto y panel del periodo (ver el comentario

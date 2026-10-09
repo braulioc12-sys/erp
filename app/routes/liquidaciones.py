@@ -24,6 +24,7 @@ from PIL import Image, ImageOps
 from app.accounting import (
     DEFAULT_CURRENCY,
     DOCUMENT_TYPES,
+    RECEIPT_ROWS,
     VALE_DOCUMENT_TYPE,
     office_choices,
     office_info,
@@ -378,8 +379,8 @@ def new_advance(trip_id, driver_slot):
         # pedido de Braulio del 28 ago de poder dar más de un anticipo por
         # liquidación: uno al inicio del viaje, otro a mitad de camino).
         execute(
-            "INSERT INTO advance_payments (advance_id, amount, payment_date, notes) VALUES (?, ?, ?, ?)",
-            (advance_id, amount, given_date, notes),
+            "INSERT INTO advance_payments (advance_id, amount, payment_date, notes, receipt_number) VALUES (?, ?, ?, ?, ?)",
+            (advance_id, amount, given_date, notes, request.form.get("receipt_number", "").strip()),
         )
         # 22 sep, registro de actividad (ver app/audit.py): la liquidación
         # nace acá (una por viaje, o una por conductor si el viaje es doble
@@ -429,8 +430,9 @@ def add_payment(advance_id):
         return redirect(url_for("liquidaciones.detail", advance_id=advance_id))
     payment_date = parse_date(request.form.get("payment_date")) or today_str()
     execute(
-        "INSERT INTO advance_payments (advance_id, amount, payment_date, notes) VALUES (?, ?, ?, ?)",
-        (advance_id, amount, payment_date, request.form.get("notes", "").strip()),
+        "INSERT INTO advance_payments (advance_id, amount, payment_date, notes, receipt_number) VALUES (?, ?, ?, ?, ?)",
+        (advance_id, amount, payment_date, request.form.get("notes", "").strip(),
+         request.form.get("receipt_number", "").strip()),
     )
     _recalc_advance_total(advance_id)
     # 22 sep, registro de actividad: un anticipo adicional edita el total de
@@ -507,8 +509,8 @@ def edit_payment(payment_id):
     payment_date = parse_date(request.form.get("payment_date")) or payment["payment_date"]
     notes = request.form.get("notes", "").strip()
     execute(
-        "UPDATE advance_payments SET amount = ?, payment_date = ?, notes = ? WHERE id = ?",
-        (amount, payment_date, notes, payment_id),
+        "UPDATE advance_payments SET amount = ?, payment_date = ?, notes = ?, receipt_number = ? WHERE id = ?",
+        (amount, payment_date, notes, request.form.get("receipt_number", "").strip(), payment_id),
     )
     _recalc_advance_total(advance["id"])
     log_activity(
@@ -2140,17 +2142,47 @@ def _rows_for_advance(a):
     origen = info.get("origen_code", "")
     num_voucher = voucher_label(a["voucher_number"])
     fecha_liq = (a["liquidated_at"] or "")[:10]
-    tipo_cambio_vale = _fetch_exchange_rate(a["given_date"])
 
-    rows = [{
+    # 9 oct, pedido de Braulio: antes los anticipos salían sumados en UNA sola
+    # fila Haber (num_doc "AV-<id>"). Ahora sale una fila Haber por cada
+    # anticipo entregado (advance_payments), con el N° de recibo de ese
+    # anticipo en Num.Doc; si no se registró ninguno, se usa el código de la
+    # liquidación (H-0001; con sufijo -1, -2... si hay varios anticipos).
+    payments = query_all(
+        "SELECT * FROM advance_payments WHERE advance_id = ? ORDER BY payment_date, id", (a["id"],)
+    )
+    if not payments:
+        # Liquidaciones muy antiguas sin historial de anticipos: una sola fila
+        # con el total entregado.
+        payments = [{
+            "amount": a["amount_given"], "payment_date": a["given_date"], "receipt_number": "",
+        }]
+    rate_cache = {}
+
+    def _rate(date_str):
+        if date_str not in rate_cache:
+            rate_cache[date_str] = _fetch_exchange_rate(date_str)
+        return rate_cache[date_str]
+
+    base = {
         "advance_id": a["id"], "trip_code": a["trip_code"], "driver_name": a["driver_name"],
         "origen": origen, "num_voucher": num_voucher, "fecha_liquidacion": fecha_liq,
-        "cuenta": info.get("cuenta_vale", ""), "monto_debe": None, "monto_haber": a["amount_given"],
-        "moneda": DEFAULT_CURRENCY, "tipo_cambio": tipo_cambio_vale, "doc": VALE_DOCUMENT_TYPE,
-        "num_doc": f"AV-{a['id']}", "fec_doc": a["given_date"], "fec_ven": a["given_date"],
-        "ruc_dni": a["driver_dni"], "glosa": "DOCUMENTO POR LIQUIDAR",
-        "ruc_dni2": a["driver_dni"], "razon_social": a["driver_name"],
-    }]
+        "moneda": DEFAULT_CURRENCY, "ruc_dni": a["driver_dni"], "ruc_dni2": a["driver_dni"],
+        "razon_social": a["driver_name"],
+    }
+    rows = []
+    for idx, p in enumerate(payments, start=1):
+        num_doc = (p["receipt_number"] or "").strip()
+        if not num_doc:
+            code = a["code"] or f"AV-{a['id']}"
+            num_doc = code if len(payments) == 1 else f"{code}-{idx}"
+        rows.append({
+            **base,
+            "cuenta": info.get("cuenta_vale", ""), "monto_debe": None, "monto_haber": p["amount"],
+            "tipo_cambio": _rate(p["payment_date"]), "doc": VALE_DOCUMENT_TYPE,
+            "num_doc": num_doc, "fec_doc": p["payment_date"], "fec_ven": p["payment_date"],
+            "glosa": "DOCUMENTO POR LIQUIDAR",
+        })
 
     expenses = query_all(
         """SELECT e.*, c.name as concept_name, c.account_code, c.document_type_code
@@ -2174,6 +2206,24 @@ def _rows_for_advance(a):
             "fec_doc": e["expense_date"], "fec_ven": e["due_date"] or e["expense_date"],
             "ruc_dni": e["provider_ruc"], "glosa": e["concept_name"] or pretty_label(e["type"]),
             "ruc_dni2": e["provider_ruc"], "razon_social": e["provider_name"],
+        })
+
+    # Recibo de cierre (ingreso / por devolver): sin esta fila la liquidación
+    # queda descuadrada por el saldo (entregado - gastado). Ver RECEIPT_ROWS
+    # en app/accounting.py para las cuentas/documentos usados.
+    for rc in query_all("SELECT * FROM advance_receipts WHERE advance_id = ? ORDER BY id", (a["id"],)):
+        spec = RECEIPT_ROWS.get(rc["type"])
+        if spec is None:
+            continue
+        side_debe = spec["side"] == "debe"
+        rows.append({
+            **base,
+            "cuenta": spec["cuenta"],
+            "monto_debe": rc["amount"] if side_debe else None,
+            "monto_haber": None if side_debe else rc["amount"],
+            "tipo_cambio": _rate(rc["receipt_date"]), "doc": spec["doc"],
+            "num_doc": rc["receipt_number"], "fec_doc": rc["receipt_date"], "fec_ven": rc["receipt_date"],
+            "glosa": spec["glosa"],
         })
     return rows
 
