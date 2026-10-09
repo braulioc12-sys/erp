@@ -40,12 +40,18 @@
       {% for d in drivers %}<option value="{{ d.id }}" {{ 'selected' if driver == d.id }}>{{ d.name }}</option>{% endfor %}
     </select>
   </label>
+  <label>Liquidación
+    <select name="liq">
+      <option value="">Todas</option>
+      {% for code, label in liquidation_labels.items() %}<option value="{{ code }}" {{ 'selected' if liq == code }}>{{ label }}</option>{% endfor %}
+    </select>
+  </label>
   <label>Buscar
     <input type="text" name="q" value="{{ q }}" placeholder="Código, cliente, ruta">
   </label>
   <button class="btn btn-secondary" type="submit">Filtrar</button>
-  {% if status or month or driver or q %}<a href="{{ url_for('viajes.list_view', issuer=issuer) }}" class="btn btn-secondary">Quitar filtros</a>{% endif %}
-  <a href="{{ url_for('viajes.export_trips', issuer=issuer, scope='propia', status=status, month=month, driver=driver or '', q=q) }}" class="btn btn-secondary">⬇ Exportar resumen a Excel</a>
+  {% if status or month or driver or q or liq %}<a href="{{ url_for('viajes.list_view', issuer=issuer) }}" class="btn btn-secondary">Quitar filtros</a>{% endif %}
+  <a href="{{ url_for('viajes.export_trips', issuer=issuer, scope='propia', status=status, month=month, driver=driver or '', q=q, liq=liq) }}" class="btn btn-secondary">⬇ Exportar resumen a Excel</a>
 </form>
 {% if trips %}
 <p class="muted" style="margin:0 0 8px;">{{ trips|length }} viaje(s){% if month %} de {{ month }}{% endif %}{% if driver %} del conductor elegido{% endif %}. El Excel respeta estos mismos filtros.</p>
@@ -54,7 +60,7 @@
 <div class="table-wrap">
   <table>
     <thead>
-      <tr><th>Código</th><th>Fecha</th><th>Cliente</th><th>Ruta</th><th>Tracto</th><th>Carreta</th><th>Conductor</th><th>Estado</th><th>Tarifa</th><th>Comisión</th></tr>
+      <tr><th>Código</th><th>Fecha</th><th>Cliente</th><th>Ruta</th><th>Tracto</th><th>Carreta</th><th>Conductor</th><th>Estado</th><th>Liquidación</th><th>Comisión</th></tr>
     </thead>
     <tbody>
       {% for t in trips %}
@@ -67,7 +73,7 @@
         <td>{{ t.trailer_plate or '—' }}</td>
         <td>{{ t.driver_name or '—' }}{% if t.double_driver and t.driver2_name %} + {{ t.driver2_name }}{% endif %}</td>
         <td>{{ m.badge(t.status) }}</td>
-        <td>{{ t.rate|money }}</td>
+        <td>{% if t.liquidation_status %}<span class="badge badge-liq_{{ t.liquidation_status|lower }}">{{ liquidation_labels[t.liquidation_status] }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
         <td>{{ t.driver_commission|money }}</td>
       </tr>
       {% else %}

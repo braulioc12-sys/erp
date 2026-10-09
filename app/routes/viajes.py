@@ -179,17 +179,69 @@ def _billing_permission_required(view):
 _MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 
+# 9 oct, pedido de Braulio ("en viajes quitemos la columna tarifa, y pongamos
+# una que muestre el estado de la liquidación del viaje"): estado de la
+# liquidación (anticipo + gastos, tabla expense_advances) de un viaje de
+# unidad propia.
+LIQUIDATION_LABELS = {
+    "SIN_APERTURAR": "Sin aperturar",
+    "PENDIENTE": "Pendiente",
+    "CERRADA": "Cerrada",
+}
+
+
 def _trip_filters(args):
     """Filtros comunes de los listados de viajes (y de su exportación a Excel):
-    estado, búsqueda libre, mes (YYYY-MM sobre la fecha de salida) y conductor
-    (cualquiera de los dos en viajes de doble conductor)."""
+    estado, búsqueda libre, mes (YYYY-MM sobre la fecha de salida), conductor
+    (cualquiera de los dos en viajes de doble conductor) y estado de la
+    liquidación."""
     month = (args.get("month") or "").strip()
+    liq = (args.get("liq") or "").strip().upper()
     return {
         "status": args.get("status", ""),
         "q": args.get("q", "").strip(),
         "month": month if _MONTH_RE.match(month) else "",
         "driver": args.get("driver", type=int),
+        "liq": liq if liq in LIQUIDATION_LABELS else "",
     }
+
+
+def _attach_liquidation_status(trips, issuer):
+    """Devuelve los viajes (como dicts) con `liquidation_status`:
+    - None: viaje cancelado (no se liquida).
+    - SIN_APERTURAR: todavía no hay liquidación (anticipo) abierta.
+    - PENDIENTE: hay liquidación abierta sin cerrar (o falta la del segundo
+      conductor en un viaje de doble conductor).
+    - CERRADA: todas las liquidaciones del viaje están cerradas (LIQUIDADO).
+    La liquidación de una vuelta que comparte la de la ida (un solo conductor)
+    se busca en el viaje "ancla" -- ver liquidation_anchor_trip_id()."""
+    by_trip = {}
+    for a in query_all(
+        """SELECT a.trip_id, a.status FROM expense_advances a JOIN trips t ON t.id = a.trip_id WHERE t.issuer = ?""",
+        (issuer,),
+    ):
+        by_trip.setdefault(a["trip_id"], []).append(a["status"])
+    out = []
+    for row in trips:
+        t = dict(row)
+        if t["status"] == "CANCELADO":
+            t["liquidation_status"] = None
+            out.append(t)
+            continue
+        anchor_id = liquidation_anchor_trip_id(t["id"]) if t.get("return_of_trip_id") else t["id"]
+        anchor = t if anchor_id == t["id"] else query_one(
+            "SELECT driver2_id, double_driver FROM trips WHERE id = ?", (anchor_id,)
+        )
+        expected = 2 if anchor and anchor["double_driver"] and anchor["driver2_id"] else 1
+        statuses = by_trip.get(anchor_id, [])
+        if not statuses:
+            t["liquidation_status"] = "SIN_APERTURAR"
+        elif len(statuses) < expected or any(s != "LIQUIDADO" for s in statuses):
+            t["liquidation_status"] = "PENDIENTE"
+        else:
+            t["liquidation_status"] = "CERRADA"
+        out.append(t)
+    return out
 
 
 def _filtered_trips(issuer, scope, f):
@@ -227,7 +279,12 @@ def _filtered_trips(issuer, scope, f):
                          OR LOWER(t.destination) LIKE LOWER(?) OR LOWER(COALESCE(t.third_party_name, '')) LIKE LOWER(?))"""
         params += [f"%{f['q']}%"] * 5
     sql += " ORDER BY t.scheduled_date DESC, t.id DESC"
-    return query_all(sql, params)
+    trips = query_all(sql, params)
+    if scope == "propia":
+        trips = _attach_liquidation_status(trips, issuer)
+        if f.get("liq"):
+            trips = [t for t in trips if t["liquidation_status"] == f["liq"]]
+    return trips
 
 
 def _drivers_for_filter():
@@ -263,6 +320,7 @@ def list_view():
     return render_template(
         "viajes/list.html", trips=trips, issuer=issuer, status=f["status"], q=f["q"], month=f["month"],
         driver=f["driver"], drivers=_drivers_for_filter(), terceros_count=terceros_count,
+        liq=f["liq"], liquidation_labels=LIQUIDATION_LABELS,
     )
 
 
@@ -321,6 +379,8 @@ def export_trips():
         parts.append(f"Conductor: {drv['name'] if drv else f['driver']}")
     if f["status"]:
         parts.append(f"Estado: {f['status'].replace('_', ' ').title()}")
+    if f["liq"] and scope == "propia":
+        parts.append(f"Liquidación: {LIQUIDATION_LABELS[f['liq']]}")
     if f["q"]:
         parts.append(f"Búsqueda: {f['q']}")
     if len(parts) == 1:

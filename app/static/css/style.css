@@ -233,6 +233,10 @@ td.truncate { display: table-cell; }
 .badge-retirado { background: var(--text-muted-soft, #eee); color: var(--text-muted); }
 .badge-autorizada { background: var(--primary-soft); color: var(--primary-dark); }
 .badge-parcial { background: var(--warning-soft); color: var(--warning); }
+/* 9 oct: estado de la liquidación de un viaje (listado de Viajes). */
+.badge-liq_sin_aperturar { background: var(--text-muted-soft, #eee); color: var(--text-muted); }
+.badge-liq_pendiente { background: var(--warning-soft); color: var(--warning); }
+.badge-liq_cerrada { background: var(--success-soft); color: var(--success); }
 /* Cotizaciones (1 sep) */
 .badge-borrador { background: var(--text-muted-soft, #eee); color: var(--text-muted); }
 .badge-enviada { background: var(--primary-soft); color: var(--primary-dark); }

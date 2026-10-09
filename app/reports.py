@@ -1172,8 +1172,8 @@ def build_trips_workbook(trips, scope, company_name, filter_description, driver_
     dt = wb.create_sheet("Detalle")
     if propia:
         titles = ["Código", "Fecha", "Cliente", "Origen", "Destino", "Tracto", "Carreta", "Conductor", "Segundo conductor",
-                  "Estado", "Tarifa", "Comisión (c/u)", "Facturado", "Pagado", "Ida/Vuelta"]
-        widths = [12, 12, 30, 18, 18, 11, 11, 26, 26, 12, 14, 14, 10, 9, 18]
+                  "Estado", "Tarifa", "Comisión (c/u)", "Facturado", "Pagado", "Ida/Vuelta", "Liquidación"]
+        widths = [12, 12, 30, 18, 18, 11, 11, 26, 26, 12, 14, 14, 10, 9, 18, 16]
     else:
         titles = ["Código", "Fecha", "Cliente", "Origen", "Destino", "Tercero", "Unidad del tercero", "Estado",
                   "Periodo de pago", "Flete acordado", "Tarifa", "Facturado", "Pagado", "Ida/Vuelta"]
@@ -1186,7 +1186,8 @@ def build_trips_workbook(trips, scope, company_name, filter_description, driver_
             vals = [t["code"], t["scheduled_date"], t["client_name"], t["origin"], t["destination"], t["vehicle_plate"] or "",
                     t["trailer_plate"] or "", t["driver_name"] or "", (t["driver2_name"] or "") if t["double_driver"] else "",
                     pretty_label(t["status"]), float(t["rate"] or 0), float(t["driver_commission"] or 0),
-                    "Sí" if t["invoiced"] else "No", "Sí" if t["paid"] else "No", link]
+                    "Sí" if t["invoiced"] else "No", "Sí" if t["paid"] else "No", link,
+                    {"SIN_APERTURAR": "Sin aperturar", "PENDIENTE": "Pendiente", "CERRADA": "Cerrada"}.get((t["liquidation_status"] if "liquidation_status" in t.keys() else None) or "", "")]
             money_cols = (11, 12)
         else:
             vals = [t["code"], t["scheduled_date"], t["client_name"], t["origin"], t["destination"], t["third_party_name"] or "",
