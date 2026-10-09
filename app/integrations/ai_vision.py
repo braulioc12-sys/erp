@@ -240,3 +240,136 @@ def _clean_float(value):
         return round(float(value), 2)
     except (TypeError, ValueError):
         return None
+
+
+# --- Gastos personales desde foto o captura (Control de gastos) ---------------
+# 9 oct, pedido de Braulio: "que se registre el gasto desde un screenshot o una
+# foto". Lee comprobantes de pago (captura de Yape/Plin/transferencia bancaria,
+# voucher de tarjeta, foto de una boleta o factura, o un listado de movimientos
+# del banco) y devuelve los gastos que ve. SIEMPRE se revisa a mano antes de
+# guardar (ver app/routes/control_gastos.py, gasto_from_image).
+PAY_METHODS = ("tarjeta", "transferencia", "yape", "efectivo", "otro")
+
+_EXPENSE_PROMPT = """Esta imagen es un comprobante de pago o un listado de movimientos: una \
+captura de Yape, Plin o de una transferencia bancaria (BCP, Interbank, BBVA, Scotiabank...), \
+un voucher o estado de cuenta de tarjeta, o la foto de una boleta, factura o recibo. Extrae \
+cada GASTO (cada pago o consumo) que se vea en la imagen. Si es una sola operación, devuelve un \
+solo elemento; si es un listado de movimientos, un elemento por movimiento.
+
+Para cada gasto devuelve estas claves:
+- fecha: la fecha del pago en formato AAAA-MM-DD. Si no aparece el año, usa el año {year}. Si no \
+se ve la fecha, null.
+- proveedor: a quién se pagó. En una transferencia o Yape es el DESTINATARIO (a quien se le \
+envió el dinero), no quien envía; en una boleta o factura es el nombre del comercio o razón \
+social; en un voucher de tarjeta es el comercio. Si no se ve, null.
+- monto: el importe pagado como número plano, SIN separador de miles y con punto decimal \
+(si dice "1.234,50" o "1,234.50" el valor es 1234.50), siempre positivo.
+- moneda: "PEN" para soles (S/) o "USD" para dólares ($ / US$), o null si no se ve.
+- medio: uno de "tarjeta", "transferencia", "yape", "efectivo", "otro", o null si no se puede \
+saber. Una captura de Yape o Plin es "yape"; una transferencia o pago por banca móvil es \
+"transferencia"; un voucher de POS o consumo con tarjeta es "tarjeta".
+- referencia: el número de operación o de comprobante si aparece, o null.
+
+Responde ÚNICAMENTE con un objeto JSON de la forma {{"gastos": [...]}}, sin texto antes ni \
+después y sin bloque de código markdown. Si la imagen no es un comprobante de pago ni un \
+listado de movimientos, responde {{"gastos": []}}. Si no puedes leer un dato con confianza, \
+ponlo en null: nunca inventes ni adivines un monto, una fecha o un nombre."""
+
+
+def _strip_code_fence(text):
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:]
+        cleaned = cleaned.strip()
+    return cleaned
+
+
+def _norm_iso_date(value):
+    import re
+    from datetime import datetime
+
+    text = str(value or "").strip()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        return None
+    try:
+        datetime.strptime(text, "%Y-%m-%d")
+    except ValueError:
+        return None
+    return text
+
+
+def extract_expense_rows_from_image(raw_bytes, mime_type, api_key, timeout=60):
+    """Manda la imagen a Anthropic (Claude con visión) y devuelve una lista de
+    dicts {fecha, proveedor, monto, moneda, medio, referencia} -- uno por cada
+    gasto que la IA vio (puede ser una lista vacía si la imagen no es un
+    comprobante). Los datos que no se leyeron con confianza llegan como None.
+    Lanza AiVisionError si falta la API key, no se pudo contactar a Anthropic o
+    la respuesta no se pudo interpretar."""
+    from datetime import date as _date
+
+    if not api_key:
+        raise AiVisionError(
+            "La lectura automática de imágenes no está configurada todavía "
+            "(falta ANTHROPIC_API_KEY en Render). Registra el gasto a mano mientras tanto."
+        )
+    compressed_bytes, compressed_mime = _compress_image(raw_bytes)
+    body = {
+        "model": ANTHROPIC_MODEL,
+        "max_tokens": 2048,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "image", "source": {
+                    "type": "base64", "media_type": compressed_mime,
+                    "data": base64.b64encode(compressed_bytes).decode("ascii")}},
+                {"type": "text", "text": _EXPENSE_PROMPT.format(year=_date.today().year)},
+            ],
+        }],
+    }
+    req = urllib.request.Request(
+        ANTHROPIC_API_URL, data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json", "x-api-key": api_key, "anthropic-version": ANTHROPIC_API_VERSION},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+            result = json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as exc:
+        raise AiVisionError(f"Anthropic respondió {exc.code}: {exc.read().decode('utf-8', 'ignore')}")
+    except urllib.error.URLError as exc:
+        raise AiVisionError(f"No se pudo conectar con Anthropic: {exc.reason}")
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise AiVisionError(f"Respuesta inesperada de Anthropic: {exc}")
+    try:
+        text = result["content"][0]["text"]
+    except (KeyError, IndexError, TypeError):
+        raise AiVisionError(f"Anthropic no devolvió el texto esperado: {result}")
+    try:
+        data = json.loads(_strip_code_fence(text))
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise AiVisionError(f"No se pudo interpretar el JSON devuelto por la IA: {exc} -- texto: {text[:300]}")
+    items = data.get("gastos") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        raise AiVisionError(f"La IA no devolvió la lista de gastos esperada: {text[:300]}")
+
+    rows = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        monto = _clean_float(item.get("monto"))
+        if monto is not None:
+            monto = abs(monto)
+        medio = (_clean_str(item.get("medio")) or "").lower()
+        moneda = (_clean_str(item.get("moneda")) or "").upper()
+        rows.append({
+            "fecha": _norm_iso_date(item.get("fecha")),
+            "proveedor": _clean_str(item.get("proveedor")),
+            "monto": monto,
+            "moneda": moneda if moneda in ("PEN", "USD") else None,
+            "medio": medio if medio in PAY_METHODS else None,
+            "referencia": _clean_str(item.get("referencia")),
+        })
+    return rows

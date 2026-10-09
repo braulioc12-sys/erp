@@ -1,0 +1,74 @@
+{% extends 'base.html' %}
+{% block title %}Registrar gastos desde una foto{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Registrar gastos desde una foto o captura</h1>
+  <div class="page-actions"><a href="{{ url_for('control_gastos.index') }}" class="btn btn-secondary">← Volver</a></div>
+</div>
+
+{% if errors %}
+<div class="panel" style="border-left:4px solid var(--warning);">
+  <p class="mt-0"><strong>Avisos</strong></p>
+  <ul style="margin:0;">{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+{% if rows is none %}
+<div class="panel" style="max-width:760px;">
+  {% if not api_ready %}
+  <div class="notes-box" style="margin-bottom:14px;">La lectura con IA todavía no está activada: falta la variable <strong>ANTHROPIC_API_KEY</strong> en Render (la misma que usa "Facturar desde imagen"). Mientras tanto registra los gastos a mano.</div>
+  {% endif %}
+  <p class="muted mt-0">Sube una captura de Yape, Plin o de una transferencia, el voucher de la tarjeta, la foto de una boleta o factura, o un listado de movimientos del banco. La IA lee fecha, a quién se pagó, monto y medio de pago, y <strong>te lo muestra para revisarlo antes de guardar nada</strong>.</p>
+  <form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Fotos o capturas (hasta {{ max_images }})
+      <input type="file" name="images" accept="image/*" multiple required>
+    </label>
+    <label>Empresa de estos gastos (opcional, la puedes cambiar fila por fila)
+      <input type="text" name="company" list="cg-companies" placeholder="harraso, brms...">
+      <datalist id="cg-companies">{% for c in companies %}<option value="{{ c }}">{% endfor %}</datalist>
+    </label>
+    <div class="btn-group" style="margin-top:14px;">
+      <button type="submit" class="btn btn-primary" {{ 'disabled' if not api_ready }}>Leer imagen(es)</button>
+      <a href="{{ url_for('control_gastos.gasto_new') }}" class="btn btn-secondary">Registrar a mano</a>
+    </div>
+  </form>
+</div>
+{% else %}
+<form method="post" action="{{ url_for('control_gastos.gasto_from_image_confirm') }}" class="panel">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="n" value="{{ rows|length }}">
+  <h2 style="margin-top:0;">Revisa lo que leyó la IA</h2>
+  <p class="muted mt-0">Corrige lo que haga falta y deja marcados los que quieres guardar. Los marcados en amarillo ya parecen estar registrados (misma fecha y monto) y vienen sin marcar. Si pagaste en dólares, el monto en soles se calcula con el tipo de cambio.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Guardar</th><th>Fecha</th><th>Proveedor</th><th>Medio</th><th>Empresa</th><th>Monto S/</th><th>US$</th><th>T.C.</th><th>Nota</th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr {% if r.duplicate %}style="background:var(--warning-soft);"{% elif not r.complete %}style="background:var(--danger-soft, #fdecea);"{% endif %}>
+          <td>
+            <input type="hidden" name="source_{{ loop.index0 }}" value="{{ r.source }}">
+            <input type="hidden" name="dup_{{ loop.index0 }}" value="{{ '1' if r.duplicate else '0' }}">
+            <input type="checkbox" name="include_{{ loop.index0 }}" value="1" {{ 'checked' if r.include }}>
+          </td>
+          <td><input type="date" name="fecha_{{ loop.index0 }}" value="{{ r.fecha }}"></td>
+          <td><input type="text" name="proveedor_{{ loop.index0 }}" value="{{ r.proveedor }}" style="min-width:170px;"></td>
+          <td><select name="medio_{{ loop.index0 }}"><option value="">—</option>{% for m in methods %}<option value="{{ m }}" {{ 'selected' if r.medio == m }}>{{ m|capitalize }}</option>{% endfor %}</select></td>
+          <td><input type="text" name="company_{{ loop.index0 }}" list="cg-companies" value="{{ r.company }}" style="max-width:110px;"></td>
+          <td><input type="number" step="0.01" min="0" name="monto_{{ loop.index0 }}" value="{{ r.monto }}" style="max-width:120px;"></td>
+          <td><input type="number" step="0.01" min="0" name="usd_{{ loop.index0 }}" value="{{ r.usd }}" style="max-width:100px;"></td>
+          <td><input type="number" step="0.001" min="0" name="rate_{{ loop.index0 }}" value="{{ r.rate }}" style="max-width:80px;"></td>
+          <td><input type="text" name="notes_{{ loop.index0 }}" value="{{ r.notes }}" title="Imagen: {{ r.source }}"></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <datalist id="cg-companies">{% for c in companies %}<option value="{{ c }}">{% endfor %}</datalist>
+  </div>
+  <div class="btn-group" style="margin-top:14px;">
+    <button type="submit" class="btn btn-primary">Guardar los marcados</button>
+    <a href="{{ url_for('control_gastos.gasto_from_image') }}" class="btn btn-secondary">Subir otra imagen</a>
+  </div>
+</form>
+{% endif %}
+{% endblock %}

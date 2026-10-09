@@ -31,6 +31,7 @@ from openpyxl.utils import get_column_letter
 from app.auth import validate_csrf
 from app.db import execute, query_all, query_one
 from app.helpers import parse_date, parse_float, today_str
+from app.integrations.ai_vision import AiVisionError, extract_expense_rows_from_image
 
 bp = Blueprint("control_gastos", __name__, url_prefix="/control-gastos")
 
@@ -309,6 +310,141 @@ def gasto_new():
             return redirect(url_for("control_gastos.gasto_new"))
         return redirect(url_for("control_gastos.index"))
     return render_template("control_gastos/gasto_form.html", **_gasto_form_context())
+
+
+# --- registrar gastos desde una foto o captura ---------------------------------
+
+MAX_IMAGES = 5
+
+
+def _default_rate(fecha):
+    """Tipo de cambio SUNAT (venta) de esa fecha, o None si no hay forma de
+    obtenerlo (se completa a mano en la pantalla de revisión)."""
+    try:
+        from app.routes.liquidaciones import _fetch_exchange_rate
+
+        return _fetch_exchange_rate(fecha) if fecha else None
+    except Exception:
+        return None
+
+
+def _is_duplicate(fecha, soles, usd):
+    if not fecha:
+        return False
+    for g_ in query_all("SELECT amount, foreign_amount FROM cg_gastos WHERE expense_date = ?", (fecha,)):
+        if soles is not None and abs((g_["amount"] or 0) - soles) <= 0.5:
+            return True
+        if usd is not None and g_["foreign_amount"] is not None and abs(g_["foreign_amount"] - usd) <= 0.01:
+            return True
+    return False
+
+
+def _review_row(item, source, default_company):
+    """Fila editable de la pantalla de revisión, a partir de lo que leyó la IA."""
+    fecha, monto = item["fecha"], item["monto"]
+    usd = rate = soles = None
+    if item["moneda"] == "USD" and monto is not None:
+        usd = monto
+        rate = _default_rate(fecha)
+        soles = _round(usd * rate) if rate else None
+    elif monto is not None:
+        soles = monto
+    complete = bool(fecha and item["proveedor"] and soles)
+    dup = _is_duplicate(fecha, soles, usd)
+    notes = f'Op. {item["referencia"]}' if item.get("referencia") else ""
+    return {
+        "fecha": fecha or "", "proveedor": item["proveedor"] or "", "medio": item["medio"] or "",
+        "company": default_company, "monto": soles if soles is not None else "", "usd": usd if usd is not None else "",
+        "rate": rate if rate is not None else "", "notes": notes, "source": source,
+        "include": complete and not dup, "duplicate": dup, "complete": complete,
+    }
+
+
+@bp.route("/gastos/desde-imagen", methods=["GET", "POST"])
+@control_gastos_required
+def gasto_from_image():
+    api_ready = bool(current_app.config.get("ANTHROPIC_API_KEY"))
+    ctx = dict(rows=None, errors=[], api_ready=api_ready, companies=_companies(), methods=PAY_METHODS, max_images=MAX_IMAGES)
+    if request.method == "GET":
+        return render_template("control_gastos/desde_imagen.html", **ctx)
+    if not validate_csrf():
+        abort(400)
+    files = [f for f in request.files.getlist("images") if f and f.filename][:MAX_IMAGES]
+    if not files:
+        flash("Sube al menos una foto o captura de pantalla.", "error")
+        return render_template("control_gastos/desde_imagen.html", **ctx)
+    default_company = _norm_company(request.form.get("company"))
+    rows, errors = [], []
+    for f in files:
+        raw = f.read()
+        if not raw:
+            errors.append(f"{f.filename}: llegó vacía.")
+            continue
+        try:
+            found = extract_expense_rows_from_image(raw, f.mimetype, current_app.config.get("ANTHROPIC_API_KEY", ""))
+        except AiVisionError as exc:
+            errors.append(f"{f.filename}: {exc}")
+            continue
+        if not found:
+            errors.append(f"{f.filename}: no encontré ningún pago en esta imagen.")
+        rows.extend(_review_row(item, f.filename, default_company) for item in found)
+    if not rows:
+        ctx["errors"] = errors
+        return render_template("control_gastos/desde_imagen.html", **ctx)
+    ctx.update(rows=rows, errors=errors)
+    return render_template("control_gastos/desde_imagen.html", **ctx)
+
+
+@bp.route("/gastos/desde-imagen/confirmar", methods=["POST"])
+@control_gastos_required
+def gasto_from_image_confirm():
+    """Crea los gastos que se dejaron marcados en la pantalla de revisión
+    (nada se guarda hasta pasar por acá: la IA puede leer mal un monto)."""
+    if not validate_csrf():
+        abort(400)
+    form = request.form
+    n = form.get("n", type=int) or 0
+    rows, valid, problems = [], [], []
+    for i in range(n):
+        pick = lambda key: (form.get(f"{key}_{i}") or "").strip()
+        row = {
+            "fecha": pick("fecha"), "proveedor": pick("proveedor"), "medio": pick("medio").lower(),
+            "company": _norm_company(pick("company")), "monto": pick("monto"), "usd": pick("usd"), "rate": pick("rate"),
+            "notes": pick("notes"), "source": pick("source"), "include": form.get(f"include_{i}") == "1",
+            "duplicate": form.get(f"dup_{i}") == "1", "complete": True,
+        }
+        rows.append(row)
+        if not row["include"]:
+            continue
+        soles, usd, rate, error = _fx_amount({"amount": row["monto"], "foreign_amount": row["usd"], "exchange_rate": row["rate"]})
+        fecha = parse_date(row["fecha"])
+        if not row["proveedor"] or not fecha or error:
+            problems.append(f"Fila {i + 1}: falta " + ("el proveedor" if not row["proveedor"] else "la fecha" if not fecha else "el monto en soles (o US$ con tipo de cambio)") + ".")
+            row["complete"] = False
+            continue
+        valid.append((fecha, row["medio"] if row["medio"] in PAY_METHODS else "", row["proveedor"], soles, usd, rate,
+                      row["company"], row["notes"]))
+    if problems:
+        for msg in problems:
+            flash(msg, "error")
+        return render_template(
+            "control_gastos/desde_imagen.html", rows=rows, errors=[], api_ready=True, companies=_companies(),
+            methods=PAY_METHODS, max_images=MAX_IMAGES,
+        )
+    if not valid:
+        flash("No marcaste ningún gasto para guardar.", "error")
+        return render_template(
+            "control_gastos/desde_imagen.html", rows=rows, errors=[], api_ready=True, companies=_companies(),
+            methods=PAY_METHODS, max_images=MAX_IMAGES,
+        )
+    for fecha, medio, proveedor, soles, usd, rate, company, notes in valid:
+        execute(
+            """INSERT INTO cg_gastos (expense_date, pay_method, supplier, amount, foreign_amount, exchange_rate, company, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (fecha, medio, proveedor, soles, usd, rate, company, notes),
+        )
+    flash(f"{len(valid)} gasto(s) registrado(s) desde la imagen. Falta enlazarlos con su abono.", "success")
+    return redirect(url_for("control_gastos.index", estado="sin_abono"))
 
 
 @bp.route("/gastos/<int:gasto_id>/editar", methods=["GET", "POST"])
