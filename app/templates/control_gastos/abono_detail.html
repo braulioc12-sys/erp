@@ -1,0 +1,98 @@
+{% extends 'base.html' %}
+{% block title %}Abono {{ abono.code }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Abono {{ abono.code }} <span class="badge badge-cg_{{ abono.state|lower }}" style="font-size:0.6em; vertical-align:middle;">{{ abono.state_label }}</span></h1>
+  <div class="page-actions">
+    <a href="{{ url_for('control_gastos.abono_edit', abono_id=abono.id) }}" class="btn btn-secondary">Editar</a>
+    <a href="{{ url_for('control_gastos.abonos') }}" class="btn btn-secondary">← Abonos</a>
+  </div>
+</div>
+
+<div class="stat-grid">
+  <div class="stat-card"><div class="stat-label">Monto del abono</div><div class="stat-value">{{ abono.amount|money }}</div><div class="stat-sub">{{ abono.abono_date or '' }} · {{ (abono.company or 'sin empresa')|upper }}{% if abono.description %} · {{ abono.description }}{% endif %}</div></div>
+  <div class="stat-card"><div class="stat-label">Gastos enlazados</div><div class="stat-value">{{ abono.linked|money }}</div><div class="stat-sub">{{ abono.n_gastos }} gasto(s)</div></div>
+  <div class="stat-card"><div class="stat-label">{{ 'Faltan por enlazar' if abono.diff > 0 else 'Gastos de más' if abono.diff < 0 else 'Diferencia' }}</div><div class="stat-value" style="color:{{ 'var(--success)' if abono.state == 'CUADRA' else 'var(--warning)' }};">{{ (abono.diff if abono.diff >= 0 else -abono.diff)|money }}</div>
+    {% if abono.n_gastos and abono.state != 'CUADRA' %}
+    <form method="post" action="{{ url_for('control_gastos.abono_adjust', abono_id=abono.id) }}" style="margin-top:6px;" onsubmit="return confirm('¿Cambiar el monto del abono a la suma de sus gastos?');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-secondary btn-sm" type="submit">Igualar monto a los gastos</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% if abono.notes %}<div class="notes-box">{{ abono.notes }}</div>{% endif %}
+
+<div class="panel">
+  <h2>Gastos que cubre este abono</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Fecha</th><th>Proveedor</th><th>Medio</th><th>Empresa</th><th class="text-right">Monto</th><th></th></tr></thead>
+    <tbody>
+      {% for r in linked %}
+      <tr>
+        <td>{{ r.expense_date }}</td><td>{{ r.supplier }}</td><td>{{ r.pay_method or '—' }}</td><td>{{ (r.company or '—')|upper }}</td>
+        <td class="text-right">{{ r.amount|money }}</td>
+        <td>
+          <form method="post" action="{{ url_for('control_gastos.gasto_unlink', gasto_id=r.id) }}" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="next" value="{{ url_for('control_gastos.abono_detail', abono_id=abono.id) }}">
+            <button class="btn btn-secondary btn-sm" type="submit">Quitar</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="table-empty">Todavía no hay gastos enlazados. Marca abajo los que cubre este abono.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+
+<form method="post" action="{{ url_for('control_gastos.abono_link', abono_id=abono.id) }}" class="panel">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <h2>Gastos sin abono {% if abono.company and not all_companies %}<span class="muted" style="font-size:0.7em;">(solo {{ abono.company|upper }})</span>{% endif %}</h2>
+  <p class="muted mt-0">
+    Marcados: <strong id="cg-count">0</strong> por <strong id="cg-sum">S/ 0.00</strong>
+    · faltan para cuadrar: <strong id="cg-rest" data-need="{{ abono.diff }}">{{ abono.diff|money }}</strong>.
+    {% if abono.company %}
+      {% if all_companies %}<a href="{{ url_for('control_gastos.abono_detail', abono_id=abono.id) }}">Ver solo {{ abono.company|upper }}</a>
+      {% else %}<a href="{{ url_for('control_gastos.abono_detail', abono_id=abono.id, todas=1) }}">Ver de todas las empresas</a>{% endif %}
+    {% endif %}
+  </p>
+  <div class="table-wrap"><table>
+    <thead><tr><th style="width:30px;"></th><th>Fecha</th><th>Proveedor</th><th>Medio</th><th>Empresa</th><th class="text-right">Monto</th></tr></thead>
+    <tbody>
+      {% for r in pending %}
+      <tr>
+        <td><input type="checkbox" name="gasto_ids" value="{{ r.id }}" class="cg-check" data-amount="{{ r.amount }}"></td>
+        <td>{{ r.expense_date }}</td><td>{{ r.supplier }}</td><td>{{ r.pay_method or '—' }}</td><td>{{ (r.company or '—')|upper }}</td>
+        <td class="text-right">{{ r.amount|money }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="table-empty">No hay gastos pendientes de abono.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  <div class="btn-group" style="margin-top:12px;"><button type="submit" class="btn btn-primary">Enlazar los marcados a {{ abono.code }}</button></div>
+</form>
+
+<form method="post" action="{{ url_for('control_gastos.abono_delete', abono_id=abono.id) }}" onsubmit="return confirm('¿Eliminar el abono {{ abono.code }}? Sus gastos quedarán sin abono.');">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button type="submit" class="btn btn-secondary btn-sm">Eliminar abono</button>
+</form>
+
+<script>
+(function () {
+  var checks = Array.prototype.slice.call(document.querySelectorAll('.cg-check'));
+  var count = document.getElementById('cg-count'), sum = document.getElementById('cg-sum'), rest = document.getElementById('cg-rest');
+  var need = parseFloat(rest.dataset.need) || 0;
+  function fmt(v) { return 'S/ ' + v.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
+  function refresh() {
+    var n = 0, t = 0;
+    checks.forEach(function (c) { if (c.checked) { n += 1; t += parseFloat(c.dataset.amount) || 0; } });
+    count.textContent = n; sum.textContent = fmt(t); rest.textContent = fmt(need - t);
+  }
+  checks.forEach(function (c) { c.addEventListener('change', refresh); });
+  refresh();
+})();
+</script>
+{% endblock %}

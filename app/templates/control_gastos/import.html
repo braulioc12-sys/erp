@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+{% block title %}Importar Excel — Control de gastos{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Importar tu Excel de deuda</h1></div>
+{% set tab = 'importar' %}{% include 'control_gastos/_tabs.html' %}
+
+{% if result %}
+<div class="panel" style="max-width:760px;">
+  <h2>Listo</h2>
+  <p>Se importaron <strong>{{ result.abonos }}</strong> abonos y <strong>{{ result.gastos }}</strong> gastos. <strong>{{ result.linked }}</strong> gastos quedaron enlazados a su abono y <strong>{{ result.unlinked }}</strong> están sin abono (los pendientes de tu Excel).</p>
+  {% if result.unknown %}
+  <p class="muted">Gastos cuyo N° de operación no existe como abono (se importaron sin enlazar, con el N° anotado en sus notas):
+    {% for op, n in result.unknown.items() %}<strong>{{ op }}</strong> ({{ n }}){% if not loop.last %}, {% endif %}{% endfor %}.</p>
+  {% endif %}
+  {% if result.warnings %}
+  <p class="muted">Avisos:</p>
+  <ul>{% for w in result.warnings %}<li>{{ w }}</li>{% endfor %}</ul>
+  {% endif %}
+  <div class="btn-group"><a class="btn btn-primary" href="{{ url_for('control_gastos.index') }}">Ver los gastos</a> <a class="btn btn-secondary" href="{{ url_for('control_gastos.abonos') }}">Ver los abonos</a></div>
+</div>
+{% endif %}
+
+<div class="panel" style="max-width:760px;">
+  <h2>Sube el archivo</h2>
+  <p class="muted mt-0">Lee las hojas <strong>"pagos AAAA"</strong> (N° op, documento, fecha, proveedor, monto, empresa) y <strong>"abonos AAAA"</strong> (N° op, fecha, monto, empresa, descripción) del año que indiques. Los montos con fórmula <em>dólares × tipo de cambio</em> se guardan con su monto en US$ y su tipo de cambio. El enlace de cada gasto con su abono sale de la columna N° op. Las demás hojas y las tablas sueltas a la derecha no se importan.</p>
+  <p class="muted">Ahora hay <strong>{{ existing.g }}</strong> gastos y <strong>{{ existing.a }}</strong> abonos cargados.</p>
+  <form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <label>Archivo Excel (.xlsx)<input type="file" name="file" accept=".xlsx" required></label>
+      <label>Año de las hojas<input type="number" name="anio" value="{{ year }}" min="2000" max="2100" style="max-width:110px;"></label>
+    </div>
+    {% if existing.g or existing.a %}
+    <label style="display:flex; gap:8px; align-items:center;"><input type="checkbox" name="reemplazar" value="1"> Borrar lo ya cargado y reemplazarlo por este archivo (se pierden los enlaces hechos a mano)</label>
+    {% endif %}
+    <div class="btn-group" style="margin-top:14px;"><button type="submit" class="btn btn-primary">Importar</button></div>
+  </form>
+</div>
+{% endblock %}

@@ -2428,3 +2428,41 @@ CREATE TABLE IF NOT EXISTS staff_loan_payments (
 );
 CREATE INDEX IF NOT EXISTS idx_staff_loan_payments_loan ON staff_loan_payments(loan_id);
 
+
+-- Control de gastos (9 oct, pedido de Braulio: un módulo SOLO para su
+-- usuario, basado en las hojas "pagos 2026" y "abonos 2026" de su Excel
+-- "deuda"). Un gasto es algo que él pagó (tarjeta, transferencia, yape...)
+-- por una empresa; un abono es lo que la empresa le devuelve. Un abono
+-- cubre uno o varios gastos (cg_gastos.abono_id): primero se registra el
+-- gasto, después se enlaza con el abono. La deuda es gastos - abonos.
+-- El acceso está restringido por correo (CONTROL_GASTOS_EMAILS en
+-- config.py), no por rol; ver app/routes/control_gastos.py. Nada de esto se
+-- registra en activity_log.
+-- Los montos son DOUBLE PRECISION (no REAL): en Postgres REAL es de 4 bytes y
+-- las sumas de cientos de miles de soles perderían centavos.
+CREATE TABLE IF NOT EXISTS cg_abonos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE,
+    abono_date TEXT,
+    amount DOUBLE PRECISION NOT NULL DEFAULT 0,
+    company TEXT,
+    description TEXT,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS cg_gastos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    expense_date TEXT NOT NULL,
+    pay_method TEXT,
+    supplier TEXT NOT NULL,
+    amount DOUBLE PRECISION NOT NULL,
+    foreign_amount DOUBLE PRECISION,
+    exchange_rate DOUBLE PRECISION,
+    company TEXT,
+    notes TEXT,
+    abono_id INTEGER REFERENCES cg_abonos(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_cg_gastos_abono ON cg_gastos(abono_id);
+CREATE INDEX IF NOT EXISTS idx_cg_gastos_date ON cg_gastos(expense_date);

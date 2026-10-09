@@ -237,6 +237,10 @@ td.truncate { display: table-cell; }
 .badge-liq_sin_aperturar { background: var(--text-muted-soft, #eee); color: var(--text-muted); }
 .badge-liq_pendiente { background: var(--warning-soft); color: var(--warning); }
 .badge-liq_cerrada { background: var(--success-soft); color: var(--success); }
+/* 9 oct: Control de gastos, estado de un abono. */
+.badge-cg_sin_enlazar { background: var(--text-muted-soft, #eee); color: var(--text-muted); }
+.badge-cg_cuadra { background: var(--success-soft); color: var(--success); }
+.badge-cg_faltan, .badge-cg_excede { background: var(--warning-soft); color: var(--warning); }
 /* Cotizaciones (1 sep) */
 .badge-borrador { background: var(--text-muted-soft, #eee); color: var(--text-muted); }
 .badge-enviada { background: var(--primary-soft); color: var(--primary-dark); }

@@ -57,6 +57,10 @@
       {% endif %}
       <a href="{{ url_for('clientes.list_view') }}" class="{{ 'active' if request.blueprint == 'clientes' }}">Clientes</a>
       <a href="{{ url_for('conductores.list_view') }}" class="{{ 'active' if request.blueprint == 'conductores' }}">Conductores</a>
+      {# 9 oct: Control de gastos, solo para el correo autorizado (CONTROL_GASTOS_EMAILS). #}
+      {% if can_control_gastos() %}
+      <a href="{{ url_for('control_gastos.index') }}" class="{{ 'active' if request.blueprint == 'control_gastos' }}">Control de gastos</a>
+      {% endif %}
       {% if can(current_user.roles, 'cotizaciones', 'view') %}
       <a href="{{ url_for('cotizaciones.list_view') }}" class="{{ 'active' if request.blueprint == 'cotizaciones' }}">Cotizaciones</a>
       {% endif %}

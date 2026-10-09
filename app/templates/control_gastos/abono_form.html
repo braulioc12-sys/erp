@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Editar abono' if abono and abono.id else 'Nuevo abono' }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ 'Editar abono' if abono and abono.id else 'Nuevo abono' }}</h1>
+  <div class="page-actions"><a href="{{ url_for('control_gastos.abono_detail', abono_id=abono.id) if abono and abono.id else url_for('control_gastos.abonos') }}" class="btn btn-secondary">← Volver</a></div>
+</div>
+<form class="form panel" method="post" style="max-width:720px;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="form-row">
+    <label>Código (N° de operación) *<input type="text" name="code" value="{{ abono.code or '' }}" required></label>
+    <label>Fecha *<input type="date" name="abono_date" value="{{ abono.abono_date or today }}" required></label>
+    <label>Monto S/ *<input type="number" step="0.01" min="0" name="amount" value="{{ abono.amount if abono.amount is not none else '' }}" required></label>
+  </div>
+  <div class="form-row">
+    <label>Empresa
+      <input type="text" name="company" list="cg-companies" value="{{ abono.company or '' }}" placeholder="harraso, brms...">
+      <datalist id="cg-companies">{% for c in companies %}<option value="{{ c }}">{% endfor %}</datalist>
+    </label>
+    <label>Descripción<input type="text" name="description" value="{{ abono.description or '' }}" placeholder="Ej. fesanro, salmu, varios"></label>
+  </div>
+  <label>Notas<textarea name="notes">{{ abono.notes or '' }}</textarea></label>
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Guardar</button>
+    <a href="{{ url_for('control_gastos.abonos') }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+{% endblock %}

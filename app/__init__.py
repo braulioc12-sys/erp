@@ -37,6 +37,7 @@ def create_app(config_object=Config):
         clientes,
         flota,
         conductores,
+        control_gastos,
         viajes,
         liquidaciones,
         rrhh,
@@ -56,6 +57,7 @@ def create_app(config_object=Config):
         legajo,
         vacaciones,
         planilla,
+        quinta,
         incidencias,
         descansos,
         actividad,
@@ -67,6 +69,7 @@ def create_app(config_object=Config):
     app.register_blueprint(clientes.bp)
     app.register_blueprint(flota.bp)
     app.register_blueprint(conductores.bp)
+    app.register_blueprint(control_gastos.bp)
     app.register_blueprint(viajes.bp)
     app.register_blueprint(liquidaciones.bp)
     # 10 sep: rrhh importa ISSUER_CHOICES de app.routes.viajes — se importa
@@ -88,6 +91,7 @@ def create_app(config_object=Config):
     app.register_blueprint(legajo.bp)
     app.register_blueprint(vacaciones.bp)
     app.register_blueprint(planilla.bp)
+    app.register_blueprint(quinta.bp)
     app.register_blueprint(incidencias.bp)
     app.register_blueprint(descansos.bp)
     app.register_blueprint(actividad.bp)
@@ -108,11 +112,15 @@ def create_app(config_object=Config):
     @app.context_processor
     def inject_globals():
         from app.auth import ROLE_LABELS, can, can_report, get_csrf_token
+        from app.routes.control_gastos import user_can_access as user_can_access_control_gastos
 
         return {
             "current_user": g.get("user"),
             "can": can,
             "can_report": can_report,  # 7 oct: permiso por reporte (Usuarios > Permisos específicos)
+            # 9 oct: Control de gastos es solo para los correos de CONTROL_GASTOS_EMAILS
+            # (ver app/routes/control_gastos.py); el menú lo usa para mostrar el link.
+            "can_control_gastos": user_can_access_control_gastos,
             # 3 sep, multi-rol: para mostrar los roles del usuario logueado
             # en el sidebar (base.html) sin tener que pasarlo desde cada
             # vista — ver también usuarios/list.html y form.html, que lo

@@ -5,6 +5,12 @@ BASE_DIR = Path(__file__).parent
 
 
 class Config:
+    # 9 oct, pedido de Braulio: el módulo "Control de gastos" es solo para su
+    # usuario (ni siquiera otros administradores lo ven). Correos de login con
+    # acceso, separados por coma; se puede cambiar con la variable de entorno
+    # CONTROL_GASTOS_EMAILS. Ver app/routes/control_gastos.py.
+    CONTROL_GASTOS_EMAILS = os.environ.get("CONTROL_GASTOS_EMAILS", "braulio.ch@harraso.com")
+
     SECRET_KEY = os.environ.get("SECRET_KEY", "cambia-esta-clave-en-produccion")
     DATABASE_PATH = os.environ.get(
         "DATABASE_PATH", str(BASE_DIR / "instance" / "erp.db")

@@ -1,0 +1,44 @@
+{% extends 'base.html' %}
+{% block title %}Abonos — Control de gastos{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Abonos</h1>
+  <div class="page-actions"><a href="{{ url_for('control_gastos.abono_new') }}" class="btn btn-primary">+ Nuevo abono</a></div>
+</div>
+{% set tab = 'abonos' %}{% include 'control_gastos/_tabs.html' %}
+<form class="filters" method="get">
+  <label>Buscar<input type="text" name="q" value="{{ q }}" placeholder="Código o descripción"></label>
+  <label>Empresa
+    <select name="empresa"><option value="">Todas</option>{% for c in companies %}<option value="{{ c }}" {{ 'selected' if company == c }}>{{ c|upper }}</option>{% endfor %}</select>
+  </label>
+  <label>Estado
+    <select name="estado"><option value="">Todos</option>{% for k, v in state_labels.items() %}<option value="{{ k }}" {{ 'selected' if estado == k }}>{{ v }}</option>{% endfor %}</select>
+  </label>
+  <label>Mes<input type="month" name="mes" value="{{ month if month|length == 7 else '' }}"></label>
+  <button class="btn btn-secondary" type="submit">Filtrar</button>
+  <a class="btn btn-secondary" href="{{ url_for('control_gastos.abonos') }}">Limpiar</a>
+</form>
+<div class="panel">
+  <p class="muted mt-0">{{ rows|length }} abono(s) · total <strong>{{ total|money }}</strong>.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Código</th><th>Fecha</th><th>Descripción</th><th>Empresa</th><th class="text-right">Monto</th><th class="text-right">Gastos enlazados</th><th class="text-right">Diferencia</th><th>Estado</th><th></th></tr></thead>
+    <tbody>
+      {% for a in rows %}
+      <tr>
+        <td><a href="{{ url_for('control_gastos.abono_detail', abono_id=a.id) }}">{{ a.code }}</a></td>
+        <td>{{ a.abono_date or '—' }}</td>
+        <td>{{ a.description or '—' }}</td>
+        <td>{{ (a.company or '—')|upper }}</td>
+        <td class="text-right">{{ a.amount|money }}</td>
+        <td class="text-right">{{ a.linked|money }} <span class="muted">({{ a.n_gastos }})</span></td>
+        <td class="text-right">{{ a.diff|money if a.n_gastos else '—' }}</td>
+        <td><span class="badge badge-cg_{{ a.state|lower }}">{{ a.state_label }}</span></td>
+        <td><a class="btn btn-secondary btn-sm" href="{{ url_for('control_gastos.abono_detail', abono_id=a.id) }}">Ver / enlazar</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="9" class="table-empty">No hay abonos con estos filtros.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endblock %}

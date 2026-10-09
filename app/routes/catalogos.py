@@ -657,6 +657,7 @@ _RESET_KEPT_TABLES = [
         "mechanics", "catalog_items", "app_settings", "company_bank_accounts",
     ]),
     ("Registro de Actividad (auditoría)", ["activity_log"]),
+    ("Control de gastos (personal de Braulio)", ["cg_gastos", "cg_abonos"]),
     # 29 sep, pedido de Braulio ("que no borre cotizaciones ni gps /
     # frotcom"): estos dos grupos vivían en _RESET_GROUPS (sí se borraban) --
     # se mueven acá para que el reseteo los deje intactos, igual que

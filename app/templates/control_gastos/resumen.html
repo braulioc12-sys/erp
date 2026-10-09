@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+{% block title %}Resumen — Control de gastos{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Resumen</h1></div>
+{% set tab = 'resumen' %}{% include 'control_gastos/_tabs.html' %}
+
+<div class="panel">
+  <h2>Deuda por empresa (todo el tiempo)</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Empresa</th><th class="text-right">Gastos</th><th class="text-right">Abonos</th><th class="text-right">Deuda (gastos − abonos)</th><th class="text-right">Gastos sin abono</th></tr></thead>
+    <tbody>
+      {% for t in by_company %}
+      <tr {{ 'style="font-weight:700;"'|safe if not t.company }}>
+        <td>{{ t.company|upper if t.company else 'TOTAL' }}</td>
+        <td class="text-right">{{ t.gastos|money }}</td><td class="text-right">{{ t.abonos|money }}</td>
+        <td class="text-right">{{ t.deuda|money }}</td>
+        <td class="text-right">{{ t.sin_abono|money }} <span class="muted">({{ t.n_sin_abono }})</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+
+<form class="filters" method="get">
+  <label>Año<select name="anio" onchange="this.form.submit()">{% for y in years %}<option value="{{ y }}" {{ 'selected' if y == year }}>{{ y }}</option>{% endfor %}</select></label>
+  <label>Empresa<select name="empresa" onchange="this.form.submit()"><option value="">Todas</option>{% for c in companies %}<option value="{{ c }}" {{ 'selected' if company == c }}>{{ c|upper }}</option>{% endfor %}</select></label>
+  <noscript><button class="btn btn-secondary" type="submit">Ver</button></noscript>
+</form>
+<div class="panel">
+  <h2>Por mes — {{ year }}{% if company %} · {{ company|upper }}{% endif %}</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Mes</th><th class="text-right">Gastos</th><th class="text-right">Abonos</th><th class="text-right">Diferencia (gastos − abonos)</th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r.name|capitalize }}</td>
+        <td class="text-right">{{ r.gastos|money if r.n_gastos else '—' }} {% if r.n_gastos %}<span class="muted">({{ r.n_gastos }})</span>{% endif %}</td>
+        <td class="text-right">{{ r.abonos|money if r.n_abonos else '—' }} {% if r.n_abonos %}<span class="muted">({{ r.n_abonos }})</span>{% endif %}</td>
+        <td class="text-right">{{ r.diff|money if (r.n_gastos or r.n_abonos) else '—' }}</td>
+      </tr>
+      {% endfor %}
+      <tr style="font-weight:700;"><td>Total {{ year }}</td><td class="text-right">{{ totals_year.gastos|money }}</td><td class="text-right">{{ totals_year.abonos|money }}</td><td class="text-right">{{ totals_year.diff|money }}</td></tr>
+    </tbody>
+  </table></div>
+</div>
+{% endblock %}

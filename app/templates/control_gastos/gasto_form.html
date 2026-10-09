@@ -1,0 +1,44 @@
+{% extends 'base.html' %}
+{% block title %}{{ 'Editar gasto' if gasto and gasto.id else 'Nuevo gasto' }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ 'Editar gasto' if gasto and gasto.id else 'Nuevo gasto' }}</h1>
+  <div class="page-actions"><a href="{{ request.args.get('next') or url_for('control_gastos.index') }}" class="btn btn-secondary">← Volver</a></div>
+</div>
+<form class="form panel" method="post" style="max-width:820px;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="next" value="{{ request.args.get('next') or '' }}">
+  <div class="form-row">
+    <label>Fecha *<input type="date" name="expense_date" value="{{ (gasto.expense_date if gasto else '') or today }}" required></label>
+    <label>Medio de pago
+      <select name="pay_method">
+        <option value="">—</option>
+        {% for m in methods %}<option value="{{ m }}" {{ 'selected' if gasto and gasto.pay_method == m }}>{{ m|capitalize }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Empresa
+      <input type="text" name="company" list="cg-companies" value="{{ gasto.company if gasto and gasto.company else '' }}" placeholder="harraso, brms...">
+      <datalist id="cg-companies">{% for c in companies %}<option value="{{ c }}">{% endfor %}</datalist>
+    </label>
+  </div>
+  <label>Proveedor / a quién se pagó *<input type="text" name="supplier" value="{{ gasto.supplier if gasto else '' }}" required></label>
+  <div class="form-row">
+    <label>Monto S/ *<input type="number" step="0.01" min="0" name="amount" id="cg-amount" value="{{ gasto.amount if gasto and gasto.amount else '' }}"></label>
+    <label>Monto en dólares (opcional)<input type="number" step="0.01" min="0" name="foreign_amount" id="cg-usd" value="{{ gasto.foreign_amount if gasto and gasto.foreign_amount else '' }}"></label>
+    <label>Tipo de cambio<input type="number" step="0.001" min="0" name="exchange_rate" id="cg-tc" value="{{ gasto.exchange_rate if gasto and gasto.exchange_rate else '' }}"></label>
+  </div>
+  <p class="muted" style="margin-top:-6px;">Si pagaste en dólares, escribe el monto en US$ y el tipo de cambio y deja el monto en soles vacío: se calcula solo.</p>
+  <label>Abono que lo cubre (opcional — también puedes enlazarlo después)
+    <select name="abono_id">
+      <option value="">Sin abono por ahora</option>
+      {% for a in abonos %}<option value="{{ a.id }}" {{ 'selected' if gasto and gasto.abono_id|string == a.id|string }}>{{ a.code }} · {{ a.abono_date or '' }} · {{ '%.2f'|format(a.amount) }} · {{ (a.company or '')|upper }} {{ a.description or '' }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Notas<textarea name="notes">{{ gasto.notes if gasto and gasto.notes else '' }}</textarea></label>
+  <div class="btn-group">
+    <button type="submit" class="btn btn-primary">Guardar</button>
+    {% if not (gasto and gasto.id) %}<button type="submit" name="seguir" value="1" class="btn btn-secondary">Guardar y registrar otro</button>{% endif %}
+    <a href="{{ request.args.get('next') or url_for('control_gastos.index') }}" class="btn btn-secondary">Cancelar</a>
+  </div>
+</form>
+{% endblock %}
