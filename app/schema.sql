@@ -476,6 +476,13 @@ CREATE TABLE IF NOT EXISTS maintenance_records (
     -- Suma de los minutos estimados de los trabajos seleccionados (ver
     -- maintenance_job_types / maintenance_record_jobs) al momento de guardar.
     estimated_minutes INTEGER,
+    -- 9 oct, pedido de Braulio: una orden TERMINADA (todos sus trabajos
+    -- terminados) queda bloqueada -- sin "Marcar pendiente", sin asignar ni
+    -- cambiar mecánicos, sin agregar trabajos -- hasta que se reabra desde
+    -- Editar. reopened_at guarda cuándo se reabrió (NULL = no reabierta); se
+    -- limpia sola cuando la orden vuelve a quedar terminada o con "Volver a
+    -- cerrar" (ver app/routes/mantenimiento.py, _is_locked()).
+    reopened_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -2302,6 +2309,31 @@ CREATE TABLE IF NOT EXISTS payroll_items (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_payroll_items_period ON payroll_items(period_id, staff_id);
+
+-- Renta de 5ta categoría: ingresos y retenciones YA ocurridos del año, por
+-- trabajador y por mes (9 oct, pedido de Braulio: "registrar por trabajador
+-- los ingresos que ha recibido meses anteriores a la implementación y cuánto se
+-- le retuvo, y también si hay gente que está en otras planillas"). source =
+-- PREVIO (meses de esta misma empresa antes de usar el sistema) u OTRO (otro
+-- empleador / otra planilla; employer_name y employer_ruc opcionales). La
+-- planilla suma estos montos de los meses ANTERIORES al que se calcula (ver
+-- app/payroll_calc.py, fifth_registered_totals()); un mes PREVIO que ya tiene
+-- boleta en el sistema no se suma dos veces.
+CREATE TABLE IF NOT EXISTS fifth_prior_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    staff_id INTEGER NOT NULL REFERENCES staff(id),
+    year INTEGER NOT NULL,
+    month INTEGER NOT NULL,
+    source TEXT NOT NULL DEFAULT 'PREVIO',
+    employer_name TEXT,
+    employer_ruc TEXT,
+    income REAL NOT NULL DEFAULT 0,
+    withheld REAL NOT NULL DEFAULT 0,
+    notes TEXT,
+    created_by INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_fifth_prior_staff_year ON fifth_prior_entries(staff_id, year);
 
 -- Boleta de cada persona en el periodo (resultado del cálculo).
 CREATE TABLE IF NOT EXISTS payroll_lines (

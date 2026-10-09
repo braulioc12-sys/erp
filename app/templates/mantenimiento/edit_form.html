@@ -18,6 +18,18 @@
 <form class="form panel" method="post">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
+  {% if locked %}
+  {# 9 oct, pedido de Braulio: una orden terminada está bloqueada; reabrirla es lo que vuelve a habilitar "Marcar pendiente" y asignar mecánicos. #}
+  <div class="panel" style="border-left:4px solid #b45309;">
+    <strong>Esta orden está terminada y bloqueada.</strong>
+    <label style="flex-direction:row; align-items:center; gap:8px; margin-top:8px;">
+      <input type="checkbox" name="reopen" value="1" style="width:auto;">
+      Reabrir la orden al guardar (permite marcar trabajos como pendientes y cambiar mecánicos)
+    </label>
+    <p class="muted" style="margin:6px 0 0;">Si no la reabres, solo se guardan los datos generales de abajo. Una orden reabierta se vuelve a cerrar sola cuando todos sus trabajos quedan terminados.</p>
+  </div>
+  {% endif %}
+
   <div class="form-row">
     <label>Unidad
       <input type="text" value="{{ record.vehicle_plate }}" disabled>

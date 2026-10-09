@@ -5,7 +5,7 @@ from flask import Blueprint, abort, flash, redirect, render_template, request, u
 from app.audit import get_creator_info, log_activity
 from app.auth import permission_required, validate_csrf
 from app.db import execute, get_db, get_setting, query_all, query_one
-from app.helpers import parse_date, parse_float, today_str
+from app.helpers import now_str, parse_date, parse_float, today_str
 from app.routes.inventarios import get_catalog_items
 from app.seed_data import DEFAULT_JOB_TYPES, MECHANIC_TYPES, labor_cost_setting_key
 # 30 sep, pedido de Braulio ("los reportes tienen que estar separados como
@@ -42,6 +42,30 @@ ORDER_STATUS_LABELS = {
     "EN_PROCESO": "En proceso",
     "TERMINADA": "Terminada",
 }
+
+
+def _is_locked(record_id):
+    """9 oct, pedido de Braulio ("cuando una orden ya está terminada, no debe
+    haber la opción de marcar pendiente y asignar mecánicos, a menos que se
+    haya puesto la opción de editar la orden y se haya vuelto a reabrir"):
+    una orden con todos sus trabajos TERMINADO está bloqueada -- no se puede
+    marcar un trabajo pendiente, asignar/cambiar mecánicos ni agregar
+    trabajos o materiales -- salvo que se la haya reabierto desde Editar
+    (maintenance_records.reopened_at). Se valida acá en el servidor y no solo
+    escondiendo los botones."""
+    record = query_one("SELECT reopened_at FROM maintenance_records WHERE id = ?", (record_id,))
+    if record is None or record["reopened_at"]:
+        return False
+    jobs = query_all("SELECT status FROM maintenance_record_jobs WHERE maintenance_record_id = ?", (record_id,))
+    return _order_status(jobs) == "TERMINADA"
+
+
+def _locked_redirect(record_id):
+    flash(
+        "La orden está terminada y bloqueada. Para modificarla, usa Editar y reábrela.",
+        "error",
+    )
+    return redirect(url_for("mantenimiento.detail", record_id=record_id))
 
 
 def _order_label(record_id):
@@ -478,6 +502,7 @@ def edit(record_id):
         if not validate_csrf():
             abort(400)
         maintenance_date = parse_date(request.form.get("maintenance_date")) or record["maintenance_date"]
+        was_locked = _is_locked(record_id)
         execute(
             """UPDATE maintenance_records SET maintenance_date = ?, cost = ?, description = ?, odometer_km = ?,
                next_due_date = ?, next_due_km = ? WHERE id = ?""",
@@ -496,9 +521,18 @@ def edit(record_id):
             entity_type="orden_mantenimiento", entity_id=record_id,
             entity_url=url_for("mantenimiento.detail", record_id=record_id),
         )
-        flash("Orden de mantenimiento actualizada.", "success")
+        if was_locked and request.form.get("reopen") == "1":
+            execute("UPDATE maintenance_records SET reopened_at = ? WHERE id = ?", (now_str(), record_id))
+            log_activity(
+                "mantenimiento", "ESTADO", f"{_order_label(record_id)}: orden reabierta",
+                entity_type="orden_mantenimiento", entity_id=record_id,
+                entity_url=url_for("mantenimiento.detail", record_id=record_id),
+            )
+            flash("Orden de mantenimiento actualizada y reabierta: ya puedes marcar trabajos pendientes y asignar mecánicos.", "success")
+        else:
+            flash("Orden de mantenimiento actualizada.", "success")
         return redirect(url_for("mantenimiento.detail", record_id=record_id))
-    return render_template("mantenimiento/edit_form.html", record=record)
+    return render_template("mantenimiento/edit_form.html", record=record, locked=_is_locked(record_id))
 
 
 # --- Detalle de una orden: marcar trabajos terminados/pendientes y asignar mecánico ---
@@ -550,9 +584,11 @@ def detail(record_id):
     # cuándo se creó, según activity_log (ver app/audit.py) -- None para
     # órdenes de antes de que existiera este registro.
     creator = get_creator_info("orden_mantenimiento", record_id)
+    order_status = _order_status(jobs)
+    locked = order_status == "TERMINADA" and not record["reopened_at"]
     return render_template(
-        "mantenimiento/detail.html", record=record, jobs=jobs, materials=materials, mechanics=mechanics,
-        order_status=_order_status(jobs), order_status_labels=ORDER_STATUS_LABELS,
+        "mantenimiento/detail.html", locked=locked, reopened=bool(record["reopened_at"]), record=record, jobs=jobs, materials=materials, mechanics=mechanics,
+        order_status=order_status, order_status_labels=ORDER_STATUS_LABELS,
         mechanic_types=MECHANIC_TYPES, available_job_types=available_job_types,
         available_materials=available_materials, labor_costs=labor_costs, materials_total=materials_total,
         crew_by_job=crew_by_job, labor_cost_by_job=labor_cost_by_job, readonly=readonly, creator=creator,
@@ -567,6 +603,8 @@ def job_crew_add(record_id):
     le suma "2 Junior") — sin reemplazar lo que ya tenía."""
     if not validate_csrf():
         abort(400)
+    if _is_locked(record_id):
+        return _locked_redirect(record_id)
     job_name = request.form.get("job_name", "")
     job = query_one(
         "SELECT * FROM maintenance_record_jobs WHERE maintenance_record_id = ? AND job_name = ?",
@@ -618,6 +656,8 @@ def job_crew_add(record_id):
 def job_crew_remove(record_id, crew_id):
     if not validate_csrf():
         abort(400)
+    if _is_locked(record_id):
+        return _locked_redirect(record_id)
     crew = query_one(
         "SELECT * FROM maintenance_record_job_crew WHERE id = ? AND maintenance_record_id = ?",
         (crew_id, record_id),
@@ -645,6 +685,8 @@ def add_more(record_id):
     reemplaza lo que ya había)."""
     if not validate_csrf():
         abort(400)
+    if _is_locked(record_id):
+        return _locked_redirect(record_id)
     record = query_one("SELECT * FROM maintenance_records WHERE id = ?", (record_id,))
     if record is None:
         abort(404)
@@ -688,6 +730,8 @@ def add_more(record_id):
 def job_set_mechanic_count(record_id):
     if not validate_csrf():
         abort(400)
+    if _is_locked(record_id):
+        return _locked_redirect(record_id)
     job_name = request.form.get("job_name", "")
     count = parse_float(request.form.get("mechanic_count"), 1) or 1
     count = max(1, int(count))
@@ -716,6 +760,8 @@ def job_set_mechanic_count(record_id):
 def job_set_status(record_id):
     if not validate_csrf():
         abort(400)
+    if _is_locked(record_id):
+        return _locked_redirect(record_id)
     job_name = request.form.get("job_name", "")
     job = query_one(
         "SELECT * FROM maintenance_record_jobs WHERE maintenance_record_id = ? AND job_name = ?",
@@ -739,6 +785,10 @@ def job_set_status(record_id):
         f'"{job_name}" marcado como {"terminado" if new_status == "TERMINADO" else "pendiente"}.',
         "success",
     )
+    # Si la orden estaba reabierta y con este trabajo vuelve a quedar
+    # terminada, se cierra (bloquea) sola otra vez.
+    if new_status == "TERMINADO" and _reclose_if_done(record_id):
+        flash("La orden quedó terminada y se cerró de nuevo.", "success")
     return redirect(url_for("mantenimiento.detail", record_id=record_id))
 
 
@@ -747,6 +797,8 @@ def job_set_status(record_id):
 def job_assign_mechanic(record_id):
     if not validate_csrf():
         abort(400)
+    if _is_locked(record_id):
+        return _locked_redirect(record_id)
     job_name = request.form.get("job_name", "")
     mechanic_id = request.form.get("mechanic_id", "").strip()
     job = query_one(
@@ -795,6 +847,8 @@ def job_set_mechanic_type(record_id):
     de mano de obra sugerido de ese trabajo."""
     if not validate_csrf():
         abort(400)
+    if _is_locked(record_id):
+        return _locked_redirect(record_id)
     job_name = request.form.get("job_name", "")
     mechanic_type = request.form.get("mechanic_type", "").strip()
     if mechanic_type not in MECHANIC_TYPES:
@@ -816,6 +870,44 @@ def job_set_mechanic_type(record_id):
         entity_url=url_for("mantenimiento.detail", record_id=record_id),
     )
     flash(f'Tipo de mecánico de "{job_name}" actualizado a {mechanic_type}.', "success")
+    return redirect(url_for("mantenimiento.detail", record_id=record_id))
+
+
+def _reclose_if_done(record_id):
+    """Si la orden está reabierta y todos sus trabajos ya están terminados,
+    limpia reopened_at (vuelve a quedar bloqueada). True si la cerró."""
+    record = query_one("SELECT reopened_at FROM maintenance_records WHERE id = ?", (record_id,))
+    if record is None or not record["reopened_at"]:
+        return False
+    jobs = query_all("SELECT status FROM maintenance_record_jobs WHERE maintenance_record_id = ?", (record_id,))
+    if _order_status(jobs) != "TERMINADA":
+        return False
+    execute("UPDATE maintenance_records SET reopened_at = NULL WHERE id = ?", (record_id,))
+    log_activity(
+        "mantenimiento", "ESTADO", f"{_order_label(record_id)}: orden cerrada de nuevo (todos los trabajos terminados)",
+        entity_type="orden_mantenimiento", entity_id=record_id,
+        entity_url=url_for("mantenimiento.detail", record_id=record_id),
+    )
+    return True
+
+
+@bp.route("/<int:record_id>/cerrar", methods=["POST"])
+@permission_required("mantenimiento", "edit")
+def close_again(record_id):
+    """"Volver a cerrar": bloquea de nuevo una orden reabierta cuyos trabajos
+    siguen todos terminados (si quedó alguno pendiente, primero hay que
+    terminarlo)."""
+    if not validate_csrf():
+        abort(400)
+    record = query_one("SELECT reopened_at FROM maintenance_records WHERE id = ?", (record_id,))
+    if record is None:
+        abort(404)
+    if not record["reopened_at"]:
+        return redirect(url_for("mantenimiento.detail", record_id=record_id))
+    if _reclose_if_done(record_id):
+        flash("Orden cerrada de nuevo.", "success")
+    else:
+        flash("Todavía hay trabajos pendientes: termínalos para poder cerrar la orden.", "error")
     return redirect(url_for("mantenimiento.detail", record_id=record_id))
 
 

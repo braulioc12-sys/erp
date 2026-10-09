@@ -2,6 +2,8 @@
 {% import 'partials/macros.html' as m %}
 {% block title %}Orden de mantenimiento{% endblock %}
 {% block content %}
+{# 9 oct, pedido de Braulio: una orden terminada queda bloqueada (sin marcar pendiente, asignar mecánicos ni agregar trabajos) hasta que se reabra desde Editar. can_work = puede modificar trabajos ahora mismo. #}
+{% set can_work = can(current_user.roles, 'mantenimiento', 'edit') and not readonly and not locked %}
 <div class="page-header">
   <h1>Orden de mantenimiento — {{ record.vehicle_plate }}{% if readonly %} <span class="muted" style="font-size:0.6em;">(solo lectura)</span>{% endif %}</h1>
   <div class="page-actions">
@@ -21,6 +23,22 @@
 </div>
 {% if readonly %}
 <p class="muted mt-0">Estás viendo esta orden desde "Historial y costos por unidad" — es solo para consulta, no se puede editar desde aquí.</p>
+{% endif %}
+{% if locked and not readonly %}
+<div class="panel" style="border-left:4px solid #0f9d58;">
+  <strong>🔒 Orden terminada.</strong> Sus trabajos y mecánicos no se pueden modificar.
+  {% if can(current_user.roles, 'mantenimiento', 'edit') %}Si hace falta corregir algo, usa <strong>Editar</strong> y reabre la orden.{% endif %}
+</div>
+{% elif reopened and not readonly %}
+<div class="panel" style="border-left:4px solid #b45309;">
+  <strong>🔓 Orden reabierta.</strong> Se vuelve a cerrar sola cuando todos sus trabajos queden terminados.
+  {% if order_status == 'TERMINADA' and can(current_user.roles, 'mantenimiento', 'edit') %}
+  <form method="post" action="{{ url_for('mantenimiento.close_again', record_id=record.id) }}" style="display:inline; margin-left:10px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-secondary btn-sm">Volver a cerrar la orden</button>
+  </form>
+  {% endif %}
+</div>
 {% endif %}
 
 <div class="panel">
@@ -81,7 +99,7 @@
   {% else %}
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Trabajo</th><th>Tiempo estimado</th><th>Estado</th><th>Cuadrilla</th><th class="text-right">Costo mano de obra</th><th>Mecánico asignado</th>{% if can(current_user.roles, 'mantenimiento', 'edit') and not readonly %}<th></th>{% endif %}</tr></thead>
+      <thead><tr><th>Trabajo</th><th>Tiempo estimado</th><th>Estado</th><th>Cuadrilla</th><th class="text-right">Costo mano de obra</th><th>Mecánico asignado</th>{% if can_work %}<th></th>{% endif %}</tr></thead>
       <tbody>
         {% for j in jobs %}
         <tr>
@@ -95,7 +113,7 @@
             {% for crew in crew_by_job.get(j.job_name, []) %}
             <div style="white-space:nowrap; margin-bottom:2px;">
               {{ crew.mechanic_count }} × {{ crew.mechanic_type }}{% if crew.mechanic_name %} — {{ crew.mechanic_name }}{% endif %}
-              {% if can(current_user.roles, 'mantenimiento', 'edit') and not readonly and crew.id %}
+              {% if can_work and crew.id %}
               <form method="post" action="{{ url_for('mantenimiento.job_crew_remove', record_id=record.id, crew_id=crew.id) }}" style="display:inline;" onsubmit="return confirm('¿Quitar esta combinación?');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn btn-secondary btn-sm" style="padding:0 6px;">✕</button>
@@ -105,7 +123,7 @@
             {% else %}
             <span class="muted">—</span>
             {% endfor %}
-            {% if can(current_user.roles, 'mantenimiento', 'edit') and not readonly %}
+            {% if can_work %}
             <details style="margin-top:4px;">
               <summary class="muted" style="cursor:pointer; font-size:0.85em;">+ Agregar otro tipo</summary>
               <form method="post" action="{{ url_for('mantenimiento.job_crew_add', record_id=record.id) }}" style="display:flex; gap:4px; align-items:center; margin-top:4px;">
@@ -128,7 +146,7 @@
           </td>
           <td class="text-right">{{ labor_cost_by_job.get(j.job_name, 0)|money }}</td>
           <td>{{ j.mechanic_name or '—' }}</td>
-          {% if can(current_user.roles, 'mantenimiento', 'edit') and not readonly %}
+          {% if can_work %}
           <td style="white-space:nowrap;">
             <form method="post" action="{{ url_for('mantenimiento.job_set_status', record_id=record.id) }}" style="display:inline;">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -156,7 +174,7 @@
     </table>
   </div>
   <p class="muted" style="margin-top:8px;">Un trabajo puede tener más de una combinación tipo+cantidad de mecánico a la vez (ej. 1 Senior + 2 Junior en el mismo cambio de aceite) — el costo de mano de obra de esa fila es la suma de todas.</p>
-  {% if not mechanics %}
+  {% if not mechanics and can_work %}
   <p class="muted" style="margin-top:12px;">Todavía no hay mecánicos activos en el catálogo. <a href="{{ url_for('mantenimiento.mechanics_list') }}">Agrega uno en Mecánicos</a> para poder asignarlo aquí.</p>
   {% endif %}
   {% endif %}
@@ -186,7 +204,7 @@
   {% endif %}
 </div>
 
-{% if can(current_user.roles, 'mantenimiento', 'edit') and not readonly and (available_job_types or available_materials) %}
+{% if can_work and (available_job_types or available_materials) %}
 <div class="panel">
   <h2>+ Agregar trabajos o materiales a esta orden</h2>
   <p class="muted mt-0">Para lo que aparece sobre la marcha durante el mantenimiento — se suma al costo y al tiempo estimado total de la orden, sin quitar lo que ya había.</p>
