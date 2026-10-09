@@ -158,6 +158,37 @@ def loan_installments(staff_id, period, exclude_period_id=None):
     return out
 
 
+def fifth_registered_totals(staff_id, year, month, period):
+    """(ingresos, retenido, n) de lo registrado a mano en el módulo "Quinta
+    categoría" (tabla fifth_prior_entries) para los meses ANTERIORES de ese
+    año: meses de antes de usar el sistema y/o ingresos de otro empleador. Un
+    mes de origen PREVIO que ya tiene boleta calculada en el sistema no se
+    cuenta (se contaría dos veces); los de otro empleador sí, siempre."""
+    rows = query_all(
+        "SELECT month, source, income, withheld FROM fifth_prior_entries WHERE staff_id = ? AND year = ? AND month < ?",
+        (staff_id, year, month),
+    )
+    if not rows:
+        return 0.0, 0.0, 0
+    in_system = {
+        int(r["period"][5:7])
+        for r in query_all(
+            """SELECT p.period FROM payroll_lines l JOIN payroll_periods p ON p.id = l.period_id
+               WHERE l.staff_id = ? AND p.period >= ? AND p.period < ?""",
+            (staff_id, f"{year}-01", period),
+        )
+    }
+    income = withheld = 0.0
+    n = 0
+    for r in rows:
+        if r["source"] == "PREVIO" and r["month"] in in_system:
+            continue
+        income += r["income"] or 0
+        withheld += r["withheld"] or 0
+        n += 1
+    return income, withheld, n
+
+
 def compute_line(staff, period, params, items, salary_fn, period_id=None):
     """Calcula la boleta de una persona para el periodo 'YYYY-MM'. `items` =
     filas de payroll_items de esa persona y periodo. Devuelve un dict con las
@@ -240,10 +271,11 @@ def compute_line(staff, period, params, items, salary_fn, period_id=None):
            WHERE l.staff_id = ? AND p.period >= ? AND p.period < ?""",
         (staff["id"], f"{year}-01", period),
     )
-    prior_income = sum(r["fifth_base_income"] or 0 for r in prior) + (staff["fifth_prior_income"] or 0)
-    prior_withheld = sum(r["fifth_deduction"] or 0 for r in prior) + (staff["fifth_prior_withheld"] or 0)
+    reg_income, reg_withheld, reg_count = fifth_registered_totals(staff["id"], year, month, period)
+    prior_income = sum(r["fifth_base_income"] or 0 for r in prior) + (staff["fifth_prior_income"] or 0) + reg_income
+    prior_withheld = sum(r["fifth_deduction"] or 0 for r in prior) + (staff["fifth_prior_withheld"] or 0) + reg_withheld
     estimated = False
-    if not prior and not (staff["fifth_prior_income"] or 0):
+    if not prior and not (staff["fifth_prior_income"] or 0) and not reg_count:
         hire = _d(staff["hire_date"]) if staff["hire_date"] else None
         start_m = 1 if not hire or hire.year < year else hire.month + (0 if hire.day == 1 else 1)
         before = max(month - max(start_m, 1), 0)
@@ -265,13 +297,14 @@ def compute_line(staff, period, params, items, salary_fn, period_id=None):
         fifth = max((annual_tax - prior_withheld) / FIFTH_DIVISOR[month], 0.0)
     fifth_detail = json.dumps({
         "month": month, "prior_income": r2(prior_income), "prior_withheld": r2(prior_withheld),
+        "registered_income": r2(reg_income), "registered_withheld": r2(reg_withheld),
         "this_month": r2(this_month_taxable), "future": r2(future), "annual_total": r2(annual_total),
         "uit": r2(uit), "deduction_uit": params["quinta_deduccion_uit"], "deduction": r2(params["quinta_deduccion_uit"] * uit),
         "net_taxable": r2(max(net_taxable, 0)), "annual_tax": r2(annual_tax), "divisor": FIFTH_DIVISOR[month],
         "estimated": estimated, "withholding": r2(fifth), "brackets": fifth_brackets_detail(net_taxable, uit),
     })
     if estimated and fifth > 0:
-        warnings.append("5ta: no había ingresos previos del año registrados; se estimaron con el sueldo actual (puedes corregirlo en el perfil).")
+        warnings.append("5ta: no había ingresos previos del año registrados; se estimaron con el sueldo actual (puedes registrarlos en RRHH → Quinta categoría).")
 
     # --- Préstamos / adelantos / deuda reconocida ---
     loan_d = adv_d = debt_d = 0.0

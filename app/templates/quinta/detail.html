@@ -1,0 +1,115 @@
+{% extends 'base.html' %}
+{% block title %}Quinta categoría — {{ staff.name }}{% endblock %}
+{% block content %}
+{% set can_edit = can(current_user.roles, 'pagos_personal', 'edit') %}
+<div class="page-header">
+  <h1>Quinta categoría {{ year }} — {{ staff.name }}</h1>
+  <div class="page-actions">
+    <a href="{{ url_for('planilla.profile', staff_id=staff.id) }}" class="btn btn-secondary">Perfil de planilla</a>
+    <a href="{{ url_for('quinta.index', anio=year) }}" class="btn btn-secondary">← Quinta categoría</a>
+  </div>
+</div>
+
+<form class="filters" method="get">
+  <label>Año
+    <select name="anio" onchange="this.form.submit()">
+      {% for y in years %}<option value="{{ y }}" {{ 'selected' if y == year }}>{{ y }}</option>{% endfor %}
+    </select>
+  </label>
+  <noscript><button class="btn btn-secondary" type="submit">Ver</button></noscript>
+</form>
+
+<div class="panel">
+  <div style="display:flex; gap:28px; flex-wrap:wrap;">
+    <div><div class="muted">Ingresos antes del sistema</div><strong style="font-size:1.2em;">S/ {{ '%.2f'|format(tot.previo_income) }}</strong></div>
+    <div><div class="muted">Retenido antes del sistema</div><strong style="font-size:1.2em;">S/ {{ '%.2f'|format(tot.previo_withheld) }}</strong></div>
+    <div><div class="muted">Ingresos en otras planillas</div><strong style="font-size:1.2em;">S/ {{ '%.2f'|format(tot.otro_income) }}</strong></div>
+    <div><div class="muted">Retenido en otras planillas</div><strong style="font-size:1.2em;">S/ {{ '%.2f'|format(tot.otro_withheld) }}</strong></div>
+    <div><div class="muted">Retenido por el sistema</div><strong style="font-size:1.2em;">S/ {{ '%.2f'|format(tot.system_withheld) }}</strong></div>
+  </div>
+  {% if staff.fifth_prior_income or staff.fifth_prior_withheld %}
+  <p class="muted" style="margin:12px 0 0;">Además, en su <a href="{{ url_for('planilla.profile', staff_id=staff.id) }}">perfil de planilla</a> hay un acumulado general de S/ {{ '%.2f'|format(staff.fifth_prior_income or 0) }} de ingresos y S/ {{ '%.2f'|format(staff.fifth_prior_withheld or 0) }} retenidos; se suma a lo registrado aquí. No lo repitas en los meses.</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>Meses anteriores al sistema (esta empresa)</h2>
+  <p class="muted mt-0">Lo que ganó cada mes (afecto a 5ta; incluye gratificaciones y bonos si los hubo) y la retención de 5ta de ese mes. Deja en blanco los meses sin dato. Cada mes cuenta para la retención de los meses <strong>posteriores</strong>. Los meses que ya tienen boleta en el sistema no se suman dos veces.</p>
+  <form method="post" action="{{ url_for('quinta.save_previo', staff_id=staff.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="anio" value="{{ year }}">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Mes</th><th>Ingresos afectos (S/)</th><th>Retención de 5ta (S/)</th><th>Nota</th></tr></thead>
+        <tbody>
+          {% for m in range(1, 13) %}
+          {% set e = previo.get(m) %}
+          {% set sysl = in_system.get(m) %}
+          <tr>
+            <td>{{ months[m-1]|capitalize }}</td>
+            <td><input type="number" step="0.01" min="0" name="income_{{ m }}" value="{{ '%g'|format(e.income) if e else '' }}" {% if not can_edit %}disabled{% endif %} style="max-width:160px;"></td>
+            <td><input type="number" step="0.01" min="0" name="withheld_{{ m }}" value="{{ '%g'|format(e.withheld) if e else '' }}" {% if not can_edit %}disabled{% endif %} style="max-width:160px;"></td>
+            <td class="muted">{% if sysl %}Ya tiene boleta en el sistema (ingreso S/ {{ '%.2f'|format(sysl.fifth_base_income) }}, retenido S/ {{ '%.2f'|format(sysl.fifth_deduction) }}){% if e %}: lo registrado aquí no se suma.{% endif %}{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if can_edit %}<div class="btn-group" style="margin-top:14px;"><button type="submit" class="btn btn-primary">Guardar meses</button></div>{% endif %}
+  </form>
+</div>
+
+<div class="panel">
+  <h2>Otros empleadores / otras planillas</h2>
+  <p class="muted mt-0">Si el trabajador también está (o estuvo) en otra planilla este año, registra lo que ganó y le retuvieron allá, mes por mes. La retención de este sistema lo considera para calcular el impuesto del año.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Mes</th><th>Empleador</th><th>RUC</th><th>Ingresos</th><th>Retenido</th><th>Nota</th><th></th></tr></thead>
+      <tbody>
+        {% for e in otros %}
+        <tr>
+          <td>{{ months[e.month-1]|capitalize }}</td>
+          <td>{{ e.employer_name or '—' }}</td>
+          <td>{{ e.employer_ruc or '—' }}</td>
+          <td>{{ '%.2f'|format(e.income) }}</td>
+          <td>{{ '%.2f'|format(e.withheld) }}</td>
+          <td class="wrap">{{ e.notes or '—' }}</td>
+          <td>
+            {% if can_edit %}
+            <form method="post" action="{{ url_for('quinta.delete_entry', entry_id=e.id) }}" onsubmit="return confirm('¿Eliminar este registro?');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-secondary btn-sm" type="submit">Eliminar</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="table-empty">Sin registros de otras planillas en {{ year }}.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if can_edit %}
+  <form method="post" action="{{ url_for('quinta.add_otro', staff_id=staff.id) }}" class="form" style="margin-top:16px; max-width:none;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="anio" value="{{ year }}">
+    <div class="form-row">
+      <label>Mes
+        <select name="month" required>
+          <option value="">— elige —</option>
+          {% for m in range(1, 13) %}<option value="{{ m }}">{{ months[m-1]|capitalize }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Empleador / planilla <input type="text" name="employer_name" required placeholder="Ej. Transportes ABC SAC"></label>
+      <label>RUC (opcional) <input type="text" name="employer_ruc" inputmode="numeric" maxlength="11"></label>
+    </div>
+    <div class="form-row">
+      <label>Ingresos afectos (S/) <input type="number" step="0.01" min="0" name="income"></label>
+      <label>Retención de 5ta (S/) <input type="number" step="0.01" min="0" name="withheld"></label>
+      <label>Nota (opcional) <input type="text" name="notes" placeholder="Ej. certificado de retenciones"></label>
+    </div>
+    <div class="btn-group"><button type="submit" class="btn btn-primary">Agregar</button></div>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

@@ -61,7 +61,7 @@
     </div>
 
     <h2>Renta de 5ta categoría</h2>
-    <p class="muted mt-0">Solo si empezaste a usar el sistema a mitad de año o la persona tuvo otro empleador este año: lo ganado y lo retenido antes, para que la proyección del impuesto sea correcta.</p>
+    <p class="muted mt-0">Solo si empezaste a usar el sistema a mitad de año o la persona tuvo otro empleador este año: lo ganado y lo retenido antes, para que la proyección del impuesto sea correcta. Para registrarlo <strong>mes por mes</strong> (y los ingresos de otras planillas) usa <a href="{{ url_for('quinta.detail', staff_id=staff.id) }}">RRHH → Quinta categoría</a>; esos montos se suman a estos dos campos.</p>
     <div class="form-row">
       <label>Ingresos acumulados del año antes del sistema (S/) <input type="number" step="0.01" min="0" name="fifth_prior_income" value="{{ '%g'|format(staff.fifth_prior_income or 0) }}" {% if not can_edit %}disabled{% endif %}></label>
       <label>Retenciones acumuladas antes del sistema (S/) <input type="number" step="0.01" min="0" name="fifth_prior_withheld" value="{{ '%g'|format(staff.fifth_prior_withheld or 0) }}" {% if not can_edit %}disabled{% endif %}></label>

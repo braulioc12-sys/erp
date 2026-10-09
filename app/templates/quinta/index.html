@@ -1,0 +1,63 @@
+{% extends 'base.html' %}
+{% block title %}Quinta categoría{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Quinta categoría — {{ year }}</h1>
+  <div class="page-actions">
+    {% if can(current_user.roles, 'pagos_personal', 'edit') %}
+    <a href="{{ url_for('quinta.import_entries') }}" class="btn btn-primary">⬆ Importar desde Excel</a>
+    {% endif %}
+    <a href="{{ url_for('pagos_personal.hub') }}" class="btn btn-secondary">← Volver a RRHH</a>
+  </div>
+</div>
+<p class="muted mt-0">Registra por trabajador lo que ya ganó y le retuvieron en meses anteriores al sistema, y los ingresos que recibe en otras planillas. La planilla suma estos montos para proyectar bien el impuesto del año y descontar lo ya retenido.</p>
+
+<form class="filters" method="get">
+  <label>Año
+    <select name="anio">
+      {% for y in years %}<option value="{{ y }}" {{ 'selected' if y == year }}>{{ y }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Buscar
+    <input type="text" name="q" value="{{ q }}" placeholder="Nombre o documento">
+  </label>
+  <label style="display:flex; flex-direction:row; gap:6px; align-items:center;">
+    <input type="checkbox" name="todos" value="1" {{ 'checked' if show_all }}> Incluir personal que no está en planilla
+  </label>
+  <button class="btn btn-secondary" type="submit">Filtrar</button>
+</form>
+
+<div class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th rowspan="2">Trabajador</th><th rowspan="2">Empresa</th>
+          <th colspan="2" style="text-align:center;">Antes del sistema</th>
+          <th colspan="2" style="text-align:center;">Otras planillas</th>
+          <th rowspan="2">Retenido en el sistema</th><th rowspan="2"></th>
+        </tr>
+        <tr><th>Ingresos</th><th>Retenido</th><th>Ingresos</th><th>Retenido</th></tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td><a href="{{ url_for('quinta.detail', staff_id=r.staff.id, anio=year) }}">{{ r.staff.name }}</a>
+            {% if r.staff.fifth_prior_income or r.staff.fifth_prior_withheld %}<span class="badge badge-pendiente" style="font-size:0.75em;" title="Tiene un acumulado general escrito en su perfil de planilla (S/ {{ '%.2f'|format(r.staff.fifth_prior_income or 0) }} de ingresos y S/ {{ '%.2f'|format(r.staff.fifth_prior_withheld or 0) }} retenidos); se suma a lo de aquí.">+ perfil</span>{% endif %}
+          </td>
+          <td>{{ r.staff.company or '—' }}</td>
+          <td>{{ '%.2f'|format(r.previo[0]) if r.previo[0] or r.previo[1] else '—' }}</td>
+          <td>{{ '%.2f'|format(r.previo[1]) if r.previo[0] or r.previo[1] else '—' }}</td>
+          <td>{{ '%.2f'|format(r.otro[0]) if r.otro[0] or r.otro[1] else '—' }}</td>
+          <td>{{ '%.2f'|format(r.otro[1]) if r.otro[0] or r.otro[1] else '—' }}</td>
+          <td>{{ '%.2f'|format(r.system_withheld) if r.system_withheld else '—' }}</td>
+          <td><a href="{{ url_for('quinta.detail', staff_id=r.staff.id, anio=year) }}" class="btn btn-secondary btn-sm">{{ 'Registrar / ver' if can(current_user.roles, 'pagos_personal', 'edit') else 'Ver' }}</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="table-empty">No hay personas en planilla. Marca a quién entra en planilla en <a href="{{ url_for('planilla.profiles') }}">Perfiles de planilla</a> o usa "Incluir personal que no está en planilla".</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
